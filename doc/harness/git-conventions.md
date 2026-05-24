@@ -34,16 +34,16 @@
 
 ### Scope 参考
 
-- `chat` — 聊天核心功能
 - `agent` — Agent接入层/适配器
+- `api` — 后端API
+- `auth` — 用户鉴权
+- `chat` — 聊天核心功能
+- `claude` — CLAUDE.md/开发规范
+- `daemon` — 本地守护进程
+- `db` — 数据库/数据模型
 - `orchestrator` — Orchestrator调度
 - `preview` — 产物预览
-- `auth` — 用户鉴权
-- `daemon` — 本地守护进程
-- `api` — 后端API
 - `ui` — 前端UI组件
-- `claude` — CLAUDE.md/开发规范
-- `db` — 数据库/数据模型
 
 ### 规则
 
