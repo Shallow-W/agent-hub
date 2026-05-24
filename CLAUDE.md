@@ -48,4 +48,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **提出新任务时**，在 `doc/TASKLIST.md` 添加索引行，在 `doc/task/` 下创建详情文件，遵循 `doc/harness/` 中的文件命名和格式规范
 3. **完成任务时**，将 TASKLIST.md 中对应状态改为 `[x]`
 4. **每次任务完成后，自行判断是否需要提交代码。有实质性改动则直接 commit，严格遵守 `doc/harness/git-conventions.md` 中的 commit 格式：`type(scope): 中文描述`。不要主动询问用户是否提交**
-5. **提交后自动 Review**：commit 后立即启动 2 个并行 sub-agent 对该 commit 进行 code review（一个侧重代码质量/逻辑缺陷，一个侧重安全性/规范合规），至少迭代 2 轮优化直到两个 reviewer 均无新问题（收敛），每轮修复后重新 commit
+5. **提交后自动 Review**：commit 后启动 2 个并行 sub-agent 对该 commit 进行 code review（一个侧重代码质量/逻辑缺陷，一个侧重安全性/规范合规）。最多迭代 3 轮，收敛（两个 reviewer 均无 critical/minor 问题）即提前停止。review 修复产生的 commit 不再触发 Rule 5（避免反馈循环）

@@ -42,6 +42,7 @@
 - `daemon` — 本地守护进程
 - `api` — 后端API
 - `ui` — 前端UI组件
+- `claude` — CLAUDE.md/开发规范
 - `db` — 数据库/数据模型
 
 ### 规则
