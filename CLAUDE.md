@@ -39,7 +39,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 开发规范
 
 - Git分支/提交规范：`doc/harness/git-conventions.md`
-- 前端React/TS + 后端Go编码规范：`doc/harness/coding-conventions.md`
+- 前端React/TS编码规范：`doc/harness/frontend-conventions.md`
+- 后端Go编码规范：`doc/harness/backend-conventions.md`
 - Monorepo目录结构与文件命名：`doc/harness/project-structure.md`
 
 ## 工作流

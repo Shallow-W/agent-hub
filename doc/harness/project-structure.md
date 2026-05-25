@@ -10,7 +10,8 @@ agent-hub/
 │   ├── AgentHub-_多Agent协作平台设计.pdf
 │   └── harness/           # 开发规范
 │       ├── git-conventions.md
-│       ├── coding-conventions.md
+│       ├── frontend-conventions.md
+│       ├── backend-conventions.md
 │       └── project-structure.md
 ├── frontend/              # React 前端
 │   ├── src/

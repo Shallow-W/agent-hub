@@ -1,73 +1,16 @@
-# 代码规范
+# 后端编码规范（Go）
 
 ## 通用规则
 
 - **注释语言**：中文（说明"为什么"，而非"做了什么"）
-- **命名语言**：英文（变量、函数、类、文件名）
-- **缩进**：前端2空格，后端Tab（Go标准）
+- **命名语言**：英文（变量、函数、包名、文件名）
+- **缩进**：Tab（Go标准）
 - **编码**：UTF-8
 - **换行**：LF（非CRLF），通过 `.editorconfig` 和 `.gitattributes` 保证
 
 ---
 
-## 前端规范（React + TypeScript）
-
-### 文件命名
-
-| 类型 | 命名格式 | 示例 |
-|------|----------|------|
-| 组件文件 | PascalCase | `ChatWindow.tsx` |
-| 工具函数 | camelCase | `formatMessage.ts` |
-| 类型定义 | PascalCase | `Message.ts` |
-| 样式文件 | 与组件同名 | `ChatWindow.module.css` |
-| 测试文件 | 组件名.test | `ChatWindow.test.tsx` |
-
-### 组件规范
-
-```tsx
-// 优先使用函数式组件 + Hooks
-const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId }) => {
-  // 1. Hooks（useState, useEffect, 自定义Hooks）
-  // 2. 事件处理函数
-  // 3. 渲染逻辑
-
-  return (
-    <div className={styles.container}>
-      {/* JSX */}
-    </div>
-  );
-};
-```
-
-- 组件用 `React.FC<Props>` 类型
-- Props 接口定义在组件文件内，命名 `{ComponentName}Props`
-- 单个组件文件不超过 300 行，超过则拆分子组件
-- 提取自定义 Hook 复用有状态逻辑
-
-### TypeScript 规范
-
-- 严格模式开启（`strict: true`）
-- 禁止使用 `any`，用 `unknown` 替代或定义具体类型
-- 接口（interface）优先，类型别名（type）用于联合类型/工具类型
-- 枚举使用 `const enum` 或字符串字面量联合类型
-
-### 状态管理
-
-- 组件内状态：`useState` / `useReducer`
-- 跨组件共享：通过 Context 或轻量状态库
-- 服务端状态（对话、消息）：通过 API 层获取和缓存
-
-### 样式方案
-
-- 使用 CSS Modules（`*.module.css`）
-- 类名使用 camelCase
-- 避免内联样式
-
----
-
-## 后端规范（Go）
-
-### 项目结构
+## 项目结构
 
 遵循 [Go Standard Project Layout](https://github.com/golang-standards/project-layout)：
 
@@ -87,7 +30,7 @@ backend/
 └── go.mod
 ```
 
-### 命名规范
+## 命名规范
 
 | 类型 | 规则 | 示例 |
 |------|------|------|
@@ -98,7 +41,7 @@ backend/
 | 常量 | PascalCase（导出）/ camelCase（未导出） | `MaxRetryCount` |
 | 错误变量 | `Err` 前缀 | `ErrAgentNotFound` |
 
-### 错误处理
+## 错误处理
 
 ```go
 // 使用 fmt.Errorf 包装上下文
@@ -119,7 +62,7 @@ func (h *Handler) handleError(c echo.Context, err error) {
 - 错误消息包含上下文（哪个操作失败）
 - 使用 `%w` 包装原始错误以保留堆栈
 
-### 接口定义
+## 接口定义
 
 ```go
 // 在使用方定义接口，不是在实现方
@@ -133,7 +76,7 @@ type ConversationService interface {
 - 接口保持小（1-3个方法）
 - 在消费方定义接口，不是在实现方
 
-### 日志规范
+## 日志规范
 
 ```go
 // 结构化日志
