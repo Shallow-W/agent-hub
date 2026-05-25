@@ -1,0 +1,65 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	"github.com/agent-hub/backend/internal/model"
+	"github.com/jmoiron/sqlx"
+)
+
+// UserRepo 用户数据访问
+type UserRepo struct {
+	db *sqlx.DB
+}
+
+// NewUserRepo 创建用户仓库
+func NewUserRepo(db *sqlx.DB) *UserRepo {
+	return &UserRepo{db: db}
+}
+
+// CreateUser 创建新用户，返回含 ID 的用户对象
+func (r *UserRepo) CreateUser(ctx context.Context, username, passwordHash string) (*model.User, error) {
+	var u model.User
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash, created_at`,
+		username, passwordHash,
+	).StructScan(&u)
+	if err != nil {
+		return nil, fmt.Errorf("insert user: %w", err)
+	}
+	return &u, nil
+}
+
+// GetUserByUsername 按用户名查找
+func (r *UserRepo) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
+	var u model.User
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, username, password_hash, created_at FROM users WHERE username = $1`,
+		username,
+	).StructScan(&u)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by username: %w", err)
+	}
+	return &u, nil
+}
+
+// GetUserByID 按 ID 查找
+func (r *UserRepo) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+	var u model.User
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, username, password_hash, created_at FROM users WHERE id = $1`,
+		id,
+	).StructScan(&u)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by id: %w", err)
+	}
+	return &u, nil
+}

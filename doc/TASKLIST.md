@@ -12,10 +12,10 @@
 
 | # | 任务 | 详情 | 依赖 | 状态 |
 |---|------|------|------|------|
-| M0 | 项目基础设施（脚手架 + 数据库 + API规范） | [doc/task/M0-基础设施.md](task/M0-基础设施.md) | 无 | [ ] |
-| M1 | 用户鉴权（注册/登录/JWT） | [doc/task/M1-用户鉴权.md](task/M1-用户鉴权.md) | M0 | [ ] |
-| M2 | WebSocket 通信基础设施 | [doc/task/M2-WebSocket通信.md](task/M2-WebSocket通信.md) | M0, M1 | [ ] |
-| M3 | IM 聊天核心（对话列表 + 聊天窗口 + 流式消息） | [doc/task/M3-IM聊天核心.md](task/M3-IM聊天核心.md) | M1, M2 | [ ] |
+| M0 | 项目基础设施（脚手架 + 数据库 + API规范） | [doc/task/M0-基础设施.md](task/M0-基础设施.md) | 无 | [x] |
+| M1 | 用户鉴权（注册/登录/JWT） | [doc/task/M1-用户鉴权.md](task/M1-用户鉴权.md) | M0 | [x] |
+| M2 | WebSocket 通信基础设施 | [doc/task/M2-WebSocket通信.md](task/M2-WebSocket通信.md) | M0, M1 | [x] |
+| M3 | IM 聊天核心（对话列表 + 聊天窗口 + 流式消息） | [doc/task/M3-IM聊天核心.md](task/M3-IM聊天核心.md) | M1, M2 | [x] |
 | M4 | 多 Agent 接入（守护进程 + 适配器 + CLI通信） | [doc/task/M4-多Agent接入.md](task/M4-多Agent接入.md) | M0, M2 | [ ] |
 | M5 | Orchestrator（意图拆解 + 并行调度 + 聚合） | [doc/task/M5-Orchestrator.md](task/M5-Orchestrator.md) | M4 | [ ] |
 | M6 | 单聊端到端跑通 | [doc/task/M6-单聊跑通.md](task/M6-单聊跑通.md) | M3, M4 | [ ] |
