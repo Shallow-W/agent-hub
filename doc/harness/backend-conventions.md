@@ -10,6 +10,23 @@
 
 ---
 
+## 技术选型
+
+| 层级 | 库 | 说明 |
+|------|----|------|
+| HTTP 框架 | `github.com/labstack/echo/v4` | 轻量高性能，内置参数绑定、错误处理 |
+| WebSocket | `nhooyr.io/websocket` | 原生支持 `context.Context`，API 简洁 |
+| 数据库驱动 | `github.com/jackc/pgx/v5` + `github.com/jmoiron/sqlx` | pgx 为 PostgreSQL 最佳驱动，sqlx 提供轻量映射 |
+| 数据库迁移 | `github.com/golang-migrate/migrate/v4` | 支持 CLI + Go API，迁移文件放 `backend/migrations/` |
+| 配置管理 | `github.com/knadh/koanf/v2` | 支持 yaml + 环境变量覆盖，比 viper 轻量 |
+| JWT | `github.com/golang-jwt/jwt/v5` | 用户鉴权 |
+| 参数校验 | `github.com/go-playground/validator/v10` | struct tag 声明式校验 |
+| 测试 | `github.com/stretchr/testify` | 断言 + mock |
+| 日志 | `log/slog` | Go 1.21+ 标准库 |
+| 数据库 | PostgreSQL | 适合关系型数据（用户、对话、消息），支持 JSONB 存储半结构化数据 |
+
+---
+
 ## 项目结构
 
 遵循 [Go Standard Project Layout](https://github.com/golang-standards/project-layout)：
