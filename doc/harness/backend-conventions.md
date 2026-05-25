@@ -23,7 +23,8 @@
 | 参数校验 | `github.com/go-playground/validator/v10` | struct tag 声明式校验 |
 | 测试 | `github.com/stretchr/testify` | 断言 + mock |
 | 日志 | `log/slog` | Go 1.21+ 标准库 |
-| 数据库 | PostgreSQL | 适合关系型数据（用户、对话、消息），支持 JSONB 存储半结构化数据 |
+| 数据库 | PostgreSQL | 关系型数据（用户、对话、消息），支持 JSONB 存储半结构化数据 |
+| 缓存/消息 | `github.com/redis/go-redis/v9` | WebSocket 连接映射、消息 pub/sub（多实例广播）、在线状态、接口限流 |
 
 ---
 
