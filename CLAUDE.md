@@ -42,6 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 前端React/TS编码规范：`doc/harness/frontend-conventions.md`
 - 后端Go编码规范：`doc/harness/backend-conventions.md`
 - Monorepo目录结构与文件命名：`doc/harness/project-structure.md`
+- 文档编写规范：`doc/harness/doc-conventions.md`
 
 ## 工作流
 
@@ -50,3 +51,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **完成任务时**，将 TASKLIST.md 中对应状态改为 `[x]`
 4. **每次任务完成后，自行判断是否需要提交代码。有实质性改动则直接 commit，严格遵守 `doc/harness/git-conventions.md` 中的 commit 格式：`type(scope): 中文描述`。不要主动询问用户是否提交**
 5. **提交后自动 Review**：commit 后启动 2 个并行 sub-agent 对该 commit 进行 code review（一个侧重代码质量/逻辑缺陷，一个侧重安全性/规范合规）。最多迭代 3 轮，收敛（两个 reviewer 均无 critical 问题）即提前停止。review 修复产生的 commit 不再触发 Rule 5（避免反馈循环）
+6. **Review 通过后更新文档**：检查本次任务是否涉及需要文档化的内容（新增结构体/接口、API 变更、架构调整等），如有则同步更新 `doc/` 下的设计文档、API 文档或数据模型文档，遵循 `doc/harness/doc-conventions.md` 中的文档编写规范
