@@ -17,7 +17,7 @@
 | HTTP 框架 | `github.com/gin-gonic/gin` | 社区生态最丰富，性能优异，中间件齐全 |
 | WebSocket | `nhooyr.io/websocket` | 原生支持 `context.Context`，API 简洁 |
 | 数据库驱动 | `github.com/jackc/pgx/v5` + `github.com/jmoiron/sqlx` | pgx 为 PostgreSQL 最佳驱动，sqlx 提供轻量映射 |
-| 数据库迁移 | `github.com/golang-migrate/migrate/v4` | 支持 CLI + Go API，迁移文件放 `backend/migrations/` |
+| 数据库迁移 | `github.com/golang-migrate/migrate/v4` | 支持 CLI + Go API，迁移文件放 `src/backend/migrations/` |
 | 配置管理 | `github.com/knadh/koanf/v2` | 支持 yaml + 环境变量覆盖，比 viper 轻量 |
 | JWT | `github.com/golang-jwt/jwt/v5` | 用户鉴权 |
 | 参数校验 | `github.com/go-playground/validator/v10` | struct tag 声明式校验 |
