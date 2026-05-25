@@ -47,7 +47,7 @@ AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，
 ## 快速导航
 | 你想做什么 | 去哪里看 |
 |-----------|---------|
-| 了解产品需求 | `doc/需求文档.md` |
+| 了解产品需求 | `doc/需求文档.md`，原始PDF：`doc/AgentHub-_多Agent协作平台设计.pdf` |
 | 了解系统架构和目录结构 | `doc/conventions/project-structure.md` |
 | 了解前端编码规范 | `doc/conventions/frontend-conventions.md` |
 | 了解后端编码规范 | `doc/conventions/backend-conventions.md` |

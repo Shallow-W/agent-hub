@@ -5,7 +5,7 @@
 规则 4——目标驱动。 明确定义成功标准（验收条件）。持续迭代直至验证通过。不要规定具体操作步骤，只需清晰描述"成功的最终形态"，交由模型自主探索与迭代。
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-项目信息与快速导航见 `AGENTS.md`。
+开始任何任务之前，先阅读 `AGENTS.md` 获取项目上下文、技术栈和编码规范。
 
 ## 工作流
 
