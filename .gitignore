@@ -24,6 +24,9 @@ pgdata/
 .env.local
 .env.*.local
 
+# === 配置文件（含敏感信息）===
+src/backend/config/config.yaml
+
 # === IDE / 编辑器 ===
 .idea/
 .vscode/
