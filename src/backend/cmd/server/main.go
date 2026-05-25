@@ -244,7 +244,13 @@ func runMigrations(db *sqlx.DB, logger *slog.Logger) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		if _, err := db.Exec(string(content)); err != nil {
+		// 只执行 ---- DOWN 之前的部分（UP migration）
+		sql := string(content)
+		if idx := strings.Index(sql, "---- DOWN"); idx != -1 {
+			sql = sql[:idx]
+		}
+
+		if _, err := db.Exec(sql); err != nil {
 			return fmt.Errorf("exec migration %s: %w", name, err)
 		}
 
