@@ -9,15 +9,41 @@
 
 ---
 
-## 文档分类
+## 文档分层
 
-| 类别 | 存放位置 | 用途 | 示例 |
-|------|----------|------|------|
-| 需求文档 | `doc/` | 产品需求、原始PDF | `需求文档.md` |
-| 任务文档 | `doc/task/` | 单个任务的详细描述与验收条件 | `M0-基础设施.md` |
-| 设计文档 | `doc/design/` | 架构设计、API 设计、数据模型 | `api-design.md`、`data-model.md` |
-| 开发规范 | `doc/harness/` | 编码/测试/文档等开发约定 | `frontend-conventions.md` |
-| 任务索引 | `doc/TASKLIST.md` | 全局任务列表与进度跟踪 | — |
+```
+doc/
+├── architecture/              # 稳定层（很少变）
+│   ├── overview.md            # 系统架构图 + 一段话描述
+│   ├── boundaries.md          # 模块边界和依赖规则
+│   └── data-flow.md           # 数据流转图
+│
+├── conventions/               # 规范层（偶尔更新）
+│   ├── README.md              # 规范总览（索引）
+│   ├── frontend-conventions.md
+│   ├── backend-conventions.md
+│   ├── git-conventions.md
+│   ├── doc-conventions.md
+│   └── project-structure.md
+│
+├── design/                    # 设计层（按功能组织）
+│   ├── feature-xxx.md         # Status: ✅ Implemented / 📋 Approved / 📝 Draft
+│   ├── api-*.md               # API 设计
+│   └── data-model.md          # 数据模型
+│
+├── plans/                     # 计划层（频繁变）
+│   ├── current-sprint.md      # 当前迭代
+│   └── backlog.md             # 待办
+│
+├── reference/                 # 参考层（自动生成）
+│   ├── api-spec.yaml
+│   └── error-codes.md
+│
+├── task/                      # 任务详情（与 TASKLIST.md 配合）
+├── 需求文档.md
+├── TASKLIST.md
+└── AgentHub-_多Agent协作平台设计.pdf
+```
 
 ---
 

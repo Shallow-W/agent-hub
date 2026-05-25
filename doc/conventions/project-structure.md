@@ -8,12 +8,18 @@ agent-hub/
 ├── doc/                   # 文档
 │   ├── 需求文档.md
 │   ├── AgentHub-_多Agent协作平台设计.pdf
-│   └── harness/           # 开发规范
-│       ├── git-conventions.md
-│       ├── frontend-conventions.md
-│       ├── backend-conventions.md
-│       ├── doc-conventions.md
-│       └── project-structure.md
+│   ├── TASKLIST.md              # 任务索引
+│   ├── architecture/            # 稳定层：系统架构
+│   ├── conventions/             # 规范层：开发约定
+│   │   ├── git-conventions.md
+│   │   ├── frontend-conventions.md
+│   │   ├── backend-conventions.md
+│   │   ├── doc-conventions.md
+│   │   └── project-structure.md
+│   ├── design/                  # 设计层：功能设计
+│   ├── plans/                   # 计划层：迭代/待办
+│   ├── reference/               # 参考层：API规范/错误码
+│   └── task/                    # 任务详情
 ├── src/                   # 源代码
 │   ├── frontend/              # React 前端
 │   │   ├── src/
@@ -143,8 +149,8 @@ agent-hub/
 - 适配器层将不同 Agent 输出统一为结构化数据
 
 ### doc/
-- 项目文档
-- `harness/` 放开发规范
+- 项目文档，按稳定度分层
+- `conventions/` 开发规范、`architecture/` 架构、`design/` 设计、`plans/` 计划、`reference/` 参考
 
 ### scripts/
 - 开发辅助脚本

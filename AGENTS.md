@@ -35,11 +35,11 @@ AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，
 | 你想做什么 | 去哪里看 |
 |-----------|---------|
 | 了解产品需求 | `doc/需求文档.md` |
-| 了解系统架构和目录结构 | `doc/harness/project-structure.md` |
-| 了解前端编码规范 | `doc/harness/frontend-conventions.md` |
-| 了解后端编码规范 | `doc/harness/backend-conventions.md` |
-| 了解 Git 分支和提交规范 | `doc/harness/git-conventions.md` |
-| 了解文档编写规范 | `doc/harness/doc-conventions.md` |
+| 了解系统架构和目录结构 | `doc/conventions/project-structure.md` |
+| 了解前端编码规范 | `doc/conventions/frontend-conventions.md` |
+| 了解后端编码规范 | `doc/conventions/backend-conventions.md` |
+| 了解 Git 分支和提交规范 | `doc/conventions/git-conventions.md` |
+| 了解文档编写规范 | `doc/conventions/doc-conventions.md` |
 | 了解当前任务进度 | `doc/TASKLIST.md` |
 | 了解 API 设计 | `doc/design/api-*.md` |
 | 了解数据模型 | `doc/design/data-model.md` |
