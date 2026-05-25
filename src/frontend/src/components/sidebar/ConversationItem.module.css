@@ -1,0 +1,82 @@
+.item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  position: relative;
+}
+
+.item:hover {
+  background-color: var(--color-bg);
+}
+
+.active {
+  background-color: #e6f4ff;
+}
+
+.active:hover {
+  background-color: #e6f4ff;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.pinIcon {
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.actions {
+  display: none;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.item:hover .actions {
+  display: flex;
+}
+
+.actionBtn {
+  padding: 2px 6px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-white);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.actionBtn:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.actionBtnDanger:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}

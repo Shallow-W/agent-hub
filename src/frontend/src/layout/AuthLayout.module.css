@@ -1,0 +1,31 @@
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+}
+
+.card {
+  width: 400px;
+  padding: 40px 32px;
+  background: var(--color-bg-white);
+  border-radius: var(--border-radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.logo {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.logo h1 {
+  font-size: 24px;
+  color: var(--color-primary);
+}
+
+.logo p {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}

@@ -1,0 +1,88 @@
+.bubble {
+  display: flex;
+  margin-bottom: 16px;
+}
+
+.bubbleUser {
+  justify-content: flex-end;
+}
+
+.bubbleAssistant {
+  justify-content: flex-start;
+}
+
+.inner {
+  max-width: 70%;
+  padding: 10px 14px;
+  border-radius: var(--border-radius);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.innerUser {
+  background-color: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: 2px;
+}
+
+.innerAssistant {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  border-bottom-left-radius: 2px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.agentName {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.timestamp {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.timestampUser {
+  text-align: right;
+}
+
+.timestampAssistant {
+  text-align: left;
+}
+
+.codeBlock {
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.streamingCursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background-color: var(--color-primary);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}

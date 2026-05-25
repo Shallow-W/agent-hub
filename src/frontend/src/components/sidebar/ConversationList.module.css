@@ -1,0 +1,19 @@
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

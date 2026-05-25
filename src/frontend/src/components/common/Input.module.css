@@ -1,0 +1,35 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 14px;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.input {
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.2s;
+  background-color: var(--color-bg-white);
+  color: var(--color-text);
+}
+
+.input:focus {
+  border-color: var(--color-primary);
+}
+
+.inputError {
+  border-color: var(--color-danger);
+}
+
+.errorMsg {
+  font-size: 12px;
+  color: var(--color-danger);
+}

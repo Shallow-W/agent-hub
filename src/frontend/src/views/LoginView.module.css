@@ -1,0 +1,18 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 13px;
+  text-align: center;
+}
+
+.footer {
+  text-align: center;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
