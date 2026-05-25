@@ -14,7 +14,7 @@
 
 | 层级 | 库 | 说明 |
 |------|----|------|
-| HTTP 框架 | `github.com/labstack/echo/v4` | 轻量高性能，内置参数绑定、错误处理 |
+| HTTP 框架 | `github.com/gin-gonic/gin` | 社区生态最丰富，性能优异，中间件齐全 |
 | WebSocket | `nhooyr.io/websocket` | 原生支持 `context.Context`，API 简洁 |
 | 数据库驱动 | `github.com/jackc/pgx/v5` + `github.com/jmoiron/sqlx` | pgx 为 PostgreSQL 最佳驱动，sqlx 提供轻量映射 |
 | 数据库迁移 | `github.com/golang-migrate/migrate/v4` | 支持 CLI + Go API，迁移文件放 `backend/migrations/` |
@@ -71,7 +71,7 @@ if err != nil {
 var ErrAgentNotFound = errors.New("agent not found")
 
 // 在handler层统一处理错误响应
-func (h *Handler) handleError(c echo.Context, err error) {
+func (h *Handler) handleError(c *gin.Context, err error) {
     // 统一错误响应格式
 }
 ```
@@ -97,7 +97,7 @@ type ConversationService interface {
 ## 并发与 Context
 
 - 所有跨函数调用传递 `context.Context` 作为第一个参数
-- Handler 层从请求创建 context（`c.Request().Context()`），Service/Repository 层接收但不创建
+- Handler 层从请求创建 context（`c.Request.Context()`），Service/Repository 层接收但不创建
 - 长生命周期任务（如 WebSocket 连接）使用独立 context，通过 `context.WithCancel` 控制
 
 ```go
