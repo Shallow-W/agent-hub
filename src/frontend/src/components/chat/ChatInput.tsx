@@ -1,6 +1,10 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
+import { Input, Button, Tooltip, Spin } from 'antd';
+import { SendOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import styles from './ChatInput.module.css';
+
+const { TextArea } = Input;
 
 interface ChatInputProps {
   conversationId: string;
@@ -8,7 +12,6 @@ interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const [value, setValue] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
 
@@ -16,10 +19,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     const trimmed = value.trim();
     if (!trimmed || isStreaming) return;
     setValue('');
-    // 重置高度
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
     try {
       await send(trimmed);
     } catch {
@@ -38,53 +37,38 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     [handleSubmit],
   );
 
-  // 自适应高度，上限150px
-  const handleInput = useCallback(() => {
-    const el = textareaRef.current;
-    if (el) {
-      el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
-    }
-  }, []);
-
   const charCount = value.length;
 
   return (
     <div className={styles.container}>
       {isStreaming && (
         <div className={styles.typingIndicator}>
-          Agent 正在输入
-          <span className={styles.typingDots}>
-            <span />
-            <span />
-            <span />
-          </span>
+          <Spin size="small" />
+          <span>Agent 正在输入</span>
         </div>
       )}
       <div className={styles.inputRow}>
-        <textarea
-          ref={textareaRef}
-          className={styles.textarea}
+        <TextArea
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          onInput={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-          rows={1}
+          autoSize={{ minRows: 1, maxRows: 5 }}
+          className={styles.textarea}
         />
-        <button
-          className={styles.sendBtn}
+        <Button
+          type="primary"
+          shape="default"
+          icon={<SendOutlined />}
           onClick={handleSubmit}
           disabled={!value.trim() || isStreaming}
-          aria-label="发送"
-        >
-          &#x27A4;
-        </button>
+          style={{ flexShrink: 0, height: 44, width: 44 }}
+        />
       </div>
       <div className={styles.toolbar}>
-        <button className={styles.attachBtn} aria-label="附件" title="附件">
-          &#x1F4CE;
-        </button>
+        <Tooltip title="附件">
+          <Button type="text" icon={<PaperClipOutlined />} size="small" />
+        </Tooltip>
         <span
           className={`${styles.charCount} ${charCount > 0 ? styles.charCountVisible : ''}`}
         >

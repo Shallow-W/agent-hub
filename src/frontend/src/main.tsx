@@ -1,6 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
 import App from './App';
+import theme from './theme/antd';
 import './styles/globals.css';
 
 const rootEl = document.getElementById('root');
@@ -10,6 +13,8 @@ if (!rootEl) {
 
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
-    <App />
+    <ConfigProvider theme={theme} locale={zhCN}>
+      <App />
+    </ConfigProvider>
   </React.StrictMode>,
 );

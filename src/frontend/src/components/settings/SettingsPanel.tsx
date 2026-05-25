@@ -1,25 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Avatar, Button, Menu } from 'antd';
+import {
+  MessageOutlined,
+  SettingOutlined,
+  InfoCircleOutlined,
+  UserAddOutlined,
+  LogoutOutlined,
+  TeamOutlined,
+} from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
 type WsStatus = 'connected' | 'connecting' | 'disconnected';
-
-interface NavItem {
-  icon: string;
-  label: string;
-  active?: boolean;
-}
 
 interface SettingsPanelProps {
   username: string;
   onLogout: () => void;
   wsStatus: WsStatus;
+  onNavChange: (key: string) => void;
 }
-
-const navItems: NavItem[] = [
-  { icon: '\u{1F4AC}', label: '对话', active: true },
-  { icon: '⚙️', label: '设置' },
-  { icon: 'ℹ️', label: '关于' },
-];
 
 const wsStatusText: Record<WsStatus, string> = {
   connected: '已连接',
@@ -27,18 +25,25 @@ const wsStatusText: Record<WsStatus, string> = {
   disconnected: '已断开',
 };
 
-const wsDotClassMap: Record<WsStatus, string> = {
-  connected: styles.wsConnected ?? '',
-  connecting: styles.wsConnecting ?? '',
-  disconnected: styles.wsDisconnected ?? '',
+const wsDotColor: Record<WsStatus, string> = {
+  connected: '#52c41a',
+  connecting: '#faad14',
+  disconnected: '#ff4d4f',
 };
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username,
   onLogout,
   wsStatus,
+  onNavChange,
 }) => {
+  const [selectedKey, setSelectedKey] = useState('chat');
   const initial = username ? username.charAt(0).toUpperCase() : '?';
+
+  const handleMenuClick = (info: { key: string }) => {
+    setSelectedKey(info.key);
+    onNavChange(info.key);
+  };
 
   return (
     <div className={styles.panel}>
@@ -50,38 +55,46 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {/* 用户信息 */}
       <div className={styles.profile}>
-        <div className={styles.avatar}>{initial}</div>
+        <Avatar
+          style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
+          size={34}
+        >
+          {initial}
+        </Avatar>
         <span className={styles.profileName}>{username}</span>
       </div>
 
-      {/* 导航列表 */}
-      <ul className={styles.nav}>
-        {navItems.map((item) => (
-          <li key={item.label}>
-            <button
-              className={`${styles.navItem} ${item.active ? styles.navItemActive : ''}`}
-              type="button"
-            >
-              <span className={styles.navIcon}>{item.icon}</span>
-              {item.label}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* 导航列表 - 使用 antd Menu */}
+      <Menu
+        mode="inline"
+        selectedKeys={[selectedKey]}
+        onClick={handleMenuClick}
+        style={{ border: 'none', flex: 1 }}
+        items={[
+          { key: 'chat', icon: <MessageOutlined />, label: '对话' },
+          { key: 'friends', icon: <UserAddOutlined />, label: '好友' },
+          { key: 'groups', icon: <TeamOutlined />, label: '群聊' },
+          { key: 'settings', icon: <SettingOutlined />, label: '设置' },
+          { key: 'about', icon: <InfoCircleOutlined />, label: '关于' },
+        ]}
+      />
 
       {/* 底部：连接状态 + 退出 */}
       <div className={styles.footer}>
         <div className={styles.wsStatus}>
-          <span className={`${styles.wsDot} ${wsDotClassMap[wsStatus]}`} />
+          <span
+            className={styles.wsDot}
+            style={{ backgroundColor: wsDotColor[wsStatus] }}
+          />
           {wsStatusText[wsStatus]}
         </div>
-        <button
-          className={styles.logoutBtn}
+        <Button
+          block
+          icon={<LogoutOutlined />}
           onClick={onLogout}
-          type="button"
         >
           退出登录
-        </button>
+        </Button>
       </div>
     </div>
   );

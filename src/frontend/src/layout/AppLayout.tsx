@@ -1,20 +1,88 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
+import { Button } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
+import FriendList from '@/components/friends/FriendList';
+import FriendRequest from '@/components/friends/FriendRequest';
+import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
-import Button from '@/components/common/Button';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
   const { create } = useConversation();
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
+  const [activeNav, setActiveNav] = useState('chat');
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
 
   const handleCreate = async () => {
     await create('single', `新对话`);
+  };
+
+  const handleGroupCreate = (name: string, memberIds: string[]) => {
+    // TODO: 调用后端创建群聊 API
+    console.log('创建群聊:', name, memberIds);
+    setGroupModalOpen(false);
+  };
+
+  /** 中间面板内容：根据左侧导航切换 */
+  const renderMiddlePanel = () => {
+    if (activeNav === 'friends') {
+      return (
+        <>
+          <div className={styles.convPanelHeader}>
+            <span className={styles.convPanelTitle}>好友</span>
+          </div>
+          <div style={{ padding: 12, overflow: 'auto', flex: 1 }}>
+            <FriendRequest />
+            <div style={{ marginTop: 16, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
+              <FriendList onStartChat={() => setActiveNav('chat')} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    if (activeNav === 'groups') {
+      return (
+        <>
+          <div className={styles.convPanelHeader}>
+            <span className={styles.convPanelTitle}>群聊</span>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setGroupModalOpen(true)}
+            >
+              新建群聊
+            </Button>
+          </div>
+          <div style={{ padding: 16, color: 'var(--color-text-secondary)' }}>
+            暂无群聊
+          </div>
+        </>
+      );
+    }
+
+    // 默认：对话列表
+    return (
+      <>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>对话</span>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleCreate}
+          >
+            新建对话
+          </Button>
+        </div>
+        <ConversationList />
+      </>
+    );
   };
 
   return (
@@ -25,24 +93,26 @@ const AppLayout: React.FC = () => {
           username={user?.username ?? ''}
           onLogout={handleLogout}
           wsStatus={status}
+          onNavChange={setActiveNav}
         />
       </div>
 
-      {/* 中间：对话列表 */}
+      {/* 中间：对话/好友/群聊列表 */}
       <div className={styles.convPanel}>
-        <div className={styles.convPanelHeader}>
-          <span className={styles.convPanelTitle}>对话</span>
-          <Button variant="primary" onClick={handleCreate}>
-            新建对话
-          </Button>
-        </div>
-        <ConversationList />
+        {renderMiddlePanel()}
       </div>
 
       {/* 右侧：聊天区域 */}
       <div className={styles.chatPanel}>
         <Outlet />
       </div>
+
+      {/* 群聊创建弹窗 */}
+      <GroupCreateModal
+        open={groupModalOpen}
+        onCancel={() => setGroupModalOpen(false)}
+        onOk={handleGroupCreate}
+      />
     </div>
   );
 };

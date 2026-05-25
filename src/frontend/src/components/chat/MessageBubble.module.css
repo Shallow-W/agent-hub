@@ -131,25 +131,6 @@
   color: #999;
 }
 
-.copyBtn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  color: #999;
-  transition: color 0.15s ease, background-color 0.15s ease;
-}
-
-.copyBtn:hover {
-  color: #ddd;
-  background-color: rgba(255, 255, 255, 0.08);
-}
-
 .codeBlock {
   background-color: #1e1e1e;
   color: #d4d4d4;

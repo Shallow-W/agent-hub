@@ -35,22 +35,6 @@
   background-color: #dbe8fa;
 }
 
-/* ── Avatar ── */
-
-.avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  flex-shrink: 0;
-  letter-spacing: 0.5px;
-}
-
 /* ── Content Area ── */
 
 .content {
@@ -78,14 +62,6 @@
   line-height: 1.4;
 }
 
-.pinBadge {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  flex-shrink: 0;
-}
-
 .subtitleRow {
   display: flex;
   align-items: center;
@@ -101,11 +77,10 @@
   opacity: 0.75;
 }
 
-/* ── Action Buttons ── */
+/* ── Action: 单个三点按钮 ── */
 
 .actions {
   display: flex;
-  gap: 2px;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
@@ -127,14 +102,12 @@
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .actionBtn:hover {
   background: var(--color-bg);
-}
-
-.actionBtnDanger:hover {
-  background: #fff1f0;
+  color: var(--color-text);
 }

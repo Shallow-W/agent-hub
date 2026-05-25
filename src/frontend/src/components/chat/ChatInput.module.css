@@ -13,40 +13,6 @@
   padding: 0 0 8px;
   font-size: 12px;
   color: var(--color-text-secondary);
-  animation: fadeIn 0.2s ease;
-}
-
-.typingDots {
-  display: inline-flex;
-  gap: 3px;
-}
-
-.typingDots span {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background-color: var(--color-text-secondary);
-  animation: dotPulse 1.2s ease-in-out infinite;
-}
-
-.typingDots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.typingDots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes dotPulse {
-  0%, 60%, 100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  30% {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 .inputRow {
@@ -57,60 +23,7 @@
 
 .textarea {
   flex: 1;
-  padding: 12px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  resize: none;
-  outline: none;
-  min-height: 44px;
-  max-height: 150px;
-  font-size: 14px;
-  line-height: 1.5;
-  background-color: var(--color-bg);
-  color: var(--color-text);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.1);
-  background-color: var(--color-bg-white);
-}
-
-.textarea::placeholder {
-  color: var(--color-text-secondary);
-  opacity: 0.7;
-}
-
-.sendBtn {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 18px;
-  flex-shrink: 0;
-  transition: background-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
-}
-
-.sendBtn:hover:not(:disabled) {
-  background-color: var(--color-primary-hover);
-  transform: scale(1.03);
-}
-
-.sendBtn:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.sendBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  background-color: var(--color-border);
+  border-radius: 12px !important;
 }
 
 .toolbar {
@@ -118,26 +31,6 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 4px 0;
-}
-
-.attachBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.attachBtn:hover {
-  background-color: var(--color-bg);
-  color: var(--color-text);
 }
 
 .charCount {
@@ -149,13 +42,4 @@
 
 .charCountVisible {
   opacity: 0.6;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }

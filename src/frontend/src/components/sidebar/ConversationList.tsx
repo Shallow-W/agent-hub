@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Input, Spin } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
@@ -11,7 +12,7 @@ export const ConversationList: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounced search: 300ms
+  // 防抖搜索：300ms
   useEffect(() => {
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
@@ -22,37 +23,25 @@ export const ConversationList: React.FC = () => {
     };
   }, [searchText]);
 
-  const handleSearchChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setSearchText(e.target.value);
-    },
-    [],
-  );
-
-  const handleClear = useCallback(() => {
-    setSearchText('');
-    setDebouncedSearch('');
-  }, []);
-
   const filtered = debouncedSearch
     ? conversations.filter((c) =>
         c.title.toLowerCase().includes(debouncedSearch.toLowerCase()),
       )
     : conversations;
 
-  // Loading state
+  // 加载状态
   if (loading && conversations.length === 0) {
     return (
       <div className={styles.list}>
         <div className={styles.loading}>
-          <div className={styles.pulseDot} />
+          <Spin size="small" />
           <span>加载中...</span>
         </div>
       </div>
     );
   }
 
-  // Empty state
+  // 空状态
   if (conversations.length === 0) {
     return (
       <div className={styles.list}>
@@ -66,30 +55,19 @@ export const ConversationList: React.FC = () => {
 
   return (
     <div className={styles.list}>
-      {/* Search Bar */}
+      {/* 搜索栏 - 使用 antd Input.Search */}
       <div className={styles.searchWrapper}>
-        <div className={styles.searchBox}>
-          <span className={styles.searchIcon}>&#128269;</span>
-          <input
-            className={styles.searchInput}
-            type="text"
-            placeholder="搜索对话..."
-            value={searchText}
-            onChange={handleSearchChange}
-          />
-          {searchText && (
-            <button
-              className={styles.clearBtn}
-              onClick={handleClear}
-              aria-label="清除搜索"
-            >
-              &times;
-            </button>
-          )}
-        </div>
+        <Input.Search
+          placeholder="搜索对话..."
+          allowClear
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onClear={() => setSearchText('')}
+          style={{ height: 34 }}
+        />
       </div>
 
-      {/* Conversation Items */}
+      {/* 对话列表 */}
       <div className={styles.items}>
         {filtered.length === 0 ? (
           <div className={styles.noResults}>未找到匹配的对话</div>
@@ -106,8 +84,6 @@ export const ConversationList: React.FC = () => {
           ))
         )}
       </div>
-
-      {/* Archived Section - 仅在有归档对话时显示 */}
     </div>
   );
 };

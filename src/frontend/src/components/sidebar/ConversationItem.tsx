@@ -1,4 +1,11 @@
 import React from 'react';
+import { Avatar, Dropdown, Badge } from 'antd';
+import type { MenuProps } from 'antd';
+import {
+  PushpinOutlined,
+  InboxOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
 
@@ -49,6 +56,38 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
   const avatarColor = getAvatarColor(conversation.title || '?');
 
+  const menuItems: MenuProps['items'] = [
+    {
+      key: 'pin',
+      icon: <PushpinOutlined />,
+      label: conversation.pinned ? '取消置顶' : '置顶',
+      onClick: (info) => {
+        info.domEvent.stopPropagation();
+        onTogglePin();
+      },
+    },
+    {
+      key: 'archive',
+      icon: <InboxOutlined />,
+      label: '归档',
+      onClick: (info) => {
+        info.domEvent.stopPropagation();
+        // TODO: 归档功能待实现
+      },
+    },
+    { type: 'divider' },
+    {
+      key: 'delete',
+      icon: <DeleteOutlined />,
+      label: '删除',
+      danger: true,
+      onClick: (info) => {
+        info.domEvent.stopPropagation();
+        onDelete();
+      },
+    },
+  ];
+
   return (
     <div
       className={`${styles.item} ${active ? styles.active : ''}`}
@@ -62,15 +101,19 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         }
       }}
     >
-      {/* Avatar */}
-      <div className={styles.avatar} style={{ background: avatarColor }}>
-        {firstChar}
-      </div>
+      {/* 头像 - 使用 antd Avatar */}
+      <Badge dot={conversation.pinned} color="#1677ff" offset={[-4, 30]}>
+        <Avatar
+          style={{ backgroundColor: avatarColor, flexShrink: 0 }}
+          size={36}
+        >
+          {firstChar}
+        </Avatar>
+      </Badge>
 
-      {/* Middle: title + subtitle */}
+      {/* 标题 + 时间 */}
       <div className={styles.content}>
         <div className={styles.titleRow}>
-          {conversation.pinned && <span className={styles.pinBadge} />}
           <span className={styles.title}>{conversation.title}</span>
         </div>
         <div className={styles.subtitleRow}>
@@ -80,38 +123,21 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         </div>
       </div>
 
-      {/* Actions on hover */}
+      {/* 悬停操作 - 使用 antd Dropdown */}
       <div className={styles.actions}>
-        <button
-          className={styles.actionBtn}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin();
-          }}
-          title={conversation.pinned ? '取消置顶' : '置顶'}
+        <Dropdown
+          menu={{ items: menuItems }}
+          trigger={['click']}
+          placement="bottomRight"
         >
-          {conversation.pinned ? '📌' : '📍'}
-        </button>
-        <button
-          className={styles.actionBtn}
-          onClick={(e) => {
-            e.stopPropagation();
-            // TODO: 归档功能待实现
-          }}
-          title="归档"
-        >
-          &#128230;
-        </button>
-        <button
-          className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          title="删除"
-        >
-          &#128465;
-        </button>
+          <button
+            className={styles.actionBtn}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="更多操作"
+          >
+            &#x22EF;
+          </button>
+        </Dropdown>
       </div>
     </div>
   );

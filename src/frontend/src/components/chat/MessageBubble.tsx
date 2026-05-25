@@ -1,6 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
+import { Avatar, Typography } from 'antd';
+import { RobotOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import styles from './MessageBubble.module.css';
+
+const { Paragraph, Text } = Typography;
 
 interface MessageBubbleProps {
   message: Message;
@@ -9,26 +13,19 @@ interface MessageBubbleProps {
 
 /** 简单分割：用 ``` 包裹的代码块渲染为带头部的暗色代码区域 */
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [code]);
-
   return (
     <div className={styles.codeBlockWrapper}>
       <div className={styles.codeHeader}>
         <span>{lang || 'Code'}</span>
-        <button className={styles.copyBtn} type="button" aria-label="复制代码" onClick={handleCopy}>
-          {copied ? '✓ 已复制' : '\u{1F4CB} 复制'}
-        </button>
       </div>
-      <pre className={styles.codeBlock}>
-        <code>{code}</code>
-      </pre>
+      <Paragraph
+        copyable={{ text: code, tooltips: ['复制', '已复制'] }}
+        style={{ margin: 0 }}
+      >
+        <pre className={styles.codeBlock}>
+          <code>{code}</code>
+        </pre>
+      </Paragraph>
     </div>
   );
 }
@@ -71,12 +68,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   return (
     <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
       {!isUser && (
-        <div className={styles.avatar} aria-hidden="true">A</div>
+        <Avatar
+          size={32}
+          icon={<RobotOutlined />}
+          style={{ backgroundColor: '#1677ff', flexShrink: 0, marginRight: 10, marginTop: 2 }}
+        />
       )}
       <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
         {!isUser && (
           <div className={styles.meta}>
-            <span className={styles.agentName}>Agent</span>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>Agent</Text>
           </div>
         )}
         <div
@@ -88,7 +89,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div
           className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
         >
-          {formatTimestamp(message.created_at)}
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {formatTimestamp(message.created_at)}
+          </Text>
         </div>
       </div>
     </div>
