@@ -1,31 +1,59 @@
-# 依赖
+# === 依赖 ===
 node_modules/
 vendor/
 
-# 构建产物
+# === 前端构建产物 ===
 dist/
 build/
 *.exe
 
-# 环境变量
+# === Go 构建产物 ===
+src/backend/bin/
+src/daemon/bin/
+*.o
+*.a
+*.test
+
+# === 环境变量 ===
 .env
 .env.local
+.env.*.local
 
-# IDE
+# === IDE / 编辑器 ===
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
 
-# 系统文件
+# === 系统文件 ===
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# 日志
+# === 日志 ===
 *.log
 
-# OMC 状态（本地运行时数据）
+# === 前端缓存 ===
+*.tsbuildinfo
+.vite/
+
+# === Go 调试文件 ===
+debug
+__debug_bin*
+
+# === 测试覆盖率 ===
+coverage/
+*.cover
+*.out
+coverage.html
+
+# === OMC 状态 ===
 .omc/
 
-# Claude Code 会话数据
+# === Trellis 本地状态 ===
+.trellis/state/
+
+# === Claude Code 会话数据 ===
 .claude/sessions/
 .claude/state/
