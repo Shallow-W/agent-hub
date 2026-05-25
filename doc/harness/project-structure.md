@@ -16,48 +16,52 @@ agent-hub/
 ├── src/                   # 源代码
 │   ├── frontend/              # React 前端
 │   │   ├── src/
-│   │   │   ├── components/    # UI组件
-│   │   │   │   ├── chat/      # 聊天相关组件
+│   │   │   ├── assets/        # 静态资源（图片、字体、图标）
+│   │   │   ├── components/    # 通用/可复用组件（按业务域组织）
+│   │   │   │   ├── common/    #   基础UI组件
+│   │   │   │   ├── chat/      #   聊天相关组件
 │   │   │   │   │   ├── ChatWindow.tsx
 │   │   │   │   │   ├── MessageList.tsx
 │   │   │   │   │   ├── MessageBubble.tsx
 │   │   │   │   │   └── ChatInput.tsx
-│   │   │   │   ├── sidebar/   # 侧边栏组件
+│   │   │   │   ├── sidebar/   #   侧边栏组件
 │   │   │   │   │   ├── ConversationList.tsx
 │   │   │   │   │   └── ConversationItem.tsx
-│   │   │   │   ├── agent/     # Agent管理组件
+│   │   │   │   ├── agent/     #   Agent管理组件
 │   │   │   │   │   ├── AgentList.tsx
 │   │   │   │   │   └── AgentCreator.tsx
-│   │   │   │   ├── preview/   # 产物预览组件
-│   │   │   │   │   ├── CodeCard.tsx
-│   │   │   │   │   ├── WebpageCard.tsx
-│   │   │   │   │   └── FileCard.tsx
-│   │   │   │   ├── layout/    # 布局组件
-│   │   │   │   │   ├── AuthLayout.tsx
-│   │   │   │   │   └── AppLayout.tsx
-│   │   │   │   └── common/    # 通用UI组件
-│   │   │   ├── pages/         # 页面级组件
-│   │   │   │   ├── LoginPage.tsx
-│   │   │   │   ├── RegisterPage.tsx
-│   │   │   │   ├── ChatPage.tsx
-│   │   │   │   ├── AgentsPage.tsx
-│   │   │   │   ├── AgentCreatePage.tsx
-│   │   │   │   └── SettingsPage.tsx
-│   │   │   ├── routes/        # 路由定义
+│   │   │   │   └── preview/   #   产物预览组件
+│   │   │   │       ├── CodeCard.tsx
+│   │   │   │       ├── WebpageCard.tsx
+│   │   │   │       └── FileCard.tsx
+│   │   │   ├── views/         # 页面组件（与路由1:1对应）
+│   │   │   │   ├── LoginView.tsx
+│   │   │   │   ├── RegisterView.tsx
+│   │   │   │   ├── ChatView.tsx
+│   │   │   │   ├── AgentsView.tsx
+│   │   │   │   ├── AgentCreateView.tsx
+│   │   │   │   └── SettingsView.tsx
+│   │   │   ├── layout/        # 布局组件
+│   │   │   │   ├── AuthLayout.tsx
+│   │   │   │   └── AppLayout.tsx
+│   │   │   ├── router/        # 路由配置
 │   │   │   │   └── index.tsx
+│   │   │   ├── store/         # 状态管理（Zustand）
+│   │   │   ├── api/           # API封装（REST + WebSocket）
+│   │   │   │   ├── conversation.ts
+│   │   │   │   ├── message.ts
+│   │   │   │   ├── agent.ts
+│   │   │   │   ├── auth.ts
+│   │   │   │   └── websocket.ts
 │   │   │   ├── hooks/         # 自定义Hooks
 │   │   │   │   ├── useWebSocket.ts
 │   │   │   │   ├── useConversation.ts
 │   │   │   │   └── useAuth.ts
-│   │   │   ├── services/      # API调用层
-│   │   │   │   ├── api.ts       # REST API封装
-│   │   │   │   └── websocket.ts # WebSocket连接管理
 │   │   │   ├── types/         # TypeScript类型定义
 │   │   │   │   ├── message.ts
 │   │   │   │   ├── conversation.ts
 │   │   │   │   ├── agent.ts
 │   │   │   │   └── artifact.ts
-│   │   │   ├── store/         # 状态管理
 │   │   │   ├── utils/         # 工具函数
 │   │   │   ├── styles/        # 全局样式
 │   │   │   ├── App.tsx
@@ -148,9 +152,10 @@ agent-hub/
 
 | 位置 | 规则 | 示例 |
 |------|------|------|
+| src/frontend/src/views/ | PascalCase.tsx (XxxView) | `ChatView.tsx` |
 | src/frontend/src/components/ | PascalCase.tsx | `ChatWindow.tsx` |
 | src/frontend/src/hooks/ | camelCase.ts (use前缀) | `useWebSocket.ts` |
-| src/frontend/src/services/ | camelCase.ts | `api.ts` |
+| src/frontend/src/api/ | camelCase.ts | `conversation.ts` |
 | src/frontend/src/types/ | camelCase.ts | `message.ts` |
 | src/backend/internal/*/ | 小写.go | `conversation.go` |
 | src/backend/migrations/ | 数字序号_描述.sql | `001_create_users.sql` |
