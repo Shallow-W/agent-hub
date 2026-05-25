@@ -43,6 +43,7 @@
 - `db` — 数据库/数据模型
 - `orchestrator` — Orchestrator调度
 - `preview` — 产物预览
+- `harness` — 开发规范/工程约定
 - `ui` — 前端UI组件
 
 ### 规则

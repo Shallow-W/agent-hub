@@ -12,6 +12,7 @@ agent-hub/
 │       ├── git-conventions.md
 │       ├── frontend-conventions.md
 │       ├── backend-conventions.md
+│       ├── doc-conventions.md
 │       └── project-structure.md
 ├── src/                   # 源代码
 │   ├── frontend/              # React 前端
