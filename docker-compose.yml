@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: agenthub-db
+    environment:
+      POSTGRES_USER: agenthub
+      POSTGRES_PASSWORD: agenthub
+      POSTGRES_DB: agenthub
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

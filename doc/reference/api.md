@@ -1,0 +1,301 @@
+# API 参考
+
+Base URL: `http://localhost:8080`
+
+认证方式：所有 `/api/*` 端点需在请求头携带 JWT Bearer Token：
+```
+Authorization: Bearer <token>
+```
+
+---
+
+## 鉴权
+
+### POST /api/auth/register
+
+注册新用户。
+
+**请求体**
+```json
+{
+  "username": "string (3-32字符)",
+  "password": "string (8-64字符)"
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "uuid",
+    "username": "alice",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 参数校验失败
+- `409 Conflict` — 用户名已存在
+
+---
+
+### POST /api/auth/login
+
+用户登录。
+
+**请求体**
+```json
+{
+  "username": "string",
+  "password": "string"
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "uuid",
+    "username": "alice",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+**错误响应**
+- `401 Unauthorized` — 用户名或密码错误
+
+---
+
+## 对话
+
+### GET /api/conversations
+
+获取当前用户的对话列表（按最后消息时间倒序）。
+
+**成功响应** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "type": "direct | group",
+    "title": "项目讨论",
+    "pinned": false,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T12:00:00Z",
+    "last_message": {
+      "id": "uuid",
+      "content": "最新消息内容",
+      "role": "user | assistant | system",
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  }
+]
+```
+
+---
+
+### POST /api/conversations
+
+创建新对话。
+
+**请求体**
+```json
+{
+  "type": "direct | group",
+  "title": "对话标题"
+}
+```
+
+**成功响应** `201 Created`
+```json
+{
+  "id": "uuid",
+  "type": "direct",
+  "title": "对话标题",
+  "pinned": false,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 参数校验失败
+
+---
+
+### DELETE /api/conversations/:id
+
+删除对话（软删除）。
+
+**成功响应** `204 No Content`
+
+**错误响应**
+- `404 Not Found` — 对话不存在或无权限
+
+---
+
+### PUT /api/conversations/:id/pin
+
+设置对话置顶状态。
+
+**请求体**
+```json
+{
+  "pinned": true
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "id": "uuid",
+  "pinned": true
+}
+```
+
+**错误响应**
+- `404 Not Found` — 对话不存在或无权限
+
+---
+
+## 消息
+
+### POST /api/conversations/:id/messages
+
+发送消息。
+
+**请求体**
+```json
+{
+  "content": "消息内容",
+  "role": "user"
+}
+```
+
+**成功响应** `201 Created`
+```json
+{
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "content": "消息内容",
+  "role": "user",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 参数校验失败
+- `404 Not Found` — 对话不存在或无权限
+
+---
+
+### GET /api/conversations/:id/messages
+
+获取消息历史（游标分页）。
+
+**查询参数**
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `before` | string | 游标：返回 ID 小于此值的消息 |
+| `limit` | int | 每页条数，默认 50，最大 100 |
+
+**成功响应** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "content": "消息内容",
+    "role": "user | assistant | system",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+**错误响应**
+- `404 Not Found` — 对话不存在或无权限
+
+---
+
+## WebSocket
+
+### WS /ws?token=jwt
+
+建立 WebSocket 连接，实时接收消息推送。
+
+**连接方式**：在 URL 中传递 JWT Token 进行认证。
+
+**服务端推送消息类型**
+
+`message.new` — 新消息
+```json
+{
+  "type": "message.new",
+  "data": {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "content": "消息内容",
+    "role": "assistant",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+`message.stream` — 流式消息片段（Agent 逐 token 输出）
+```json
+{
+  "type": "message.stream",
+  "data": {
+    "message_id": "uuid",
+    "conversation_id": "uuid",
+    "chunk": "部分内容",
+    "done": false
+  }
+}
+```
+
+`conversation.updated` — 对话信息变更
+```json
+{
+  "type": "conversation.updated",
+  "data": {
+    "id": "uuid",
+    "title": "新标题",
+    "pinned": true
+  }
+}
+```
+
+**客户端发送消息类型**
+
+`ping` — 心跳保活
+```json
+{ "type": "ping" }
+```
+
+---
+
+## 错误码
+
+所有错误响应遵循统一格式：
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "人类可读的错误描述"
+  }
+}
+```
+
+| HTTP 状态码 | 错误码 | 说明 |
+|-------------|--------|------|
+| 400 | VALIDATION_ERROR | 请求参数校验失败 |
+| 401 | UNAUTHORIZED | 未认证或 Token 无效 |
+| 403 | FORBIDDEN | 无权限访问该资源 |
+| 404 | NOT_FOUND | 资源不存在 |
+| 409 | CONFLICT | 资源冲突（如用户名重复） |
+| 500 | INTERNAL_ERROR | 服务端内部错误 |

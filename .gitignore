@@ -10,9 +10,14 @@ build/
 # === Go 构建产物 ===
 src/backend/bin/
 src/daemon/bin/
+bin/
 *.o
 *.a
 *.test
+*.exe
+
+# === Docker ===
+pgdata/
 
 # === 环境变量 ===
 .env
