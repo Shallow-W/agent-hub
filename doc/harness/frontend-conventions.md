@@ -117,3 +117,96 @@ import styles from './ChatWindow.module.css';
 | 路由 | React Router v6 | |
 | HTTP 客户端 | 原生 fetch | 封装在 services 层 |
 | 样式 | CSS Modules | |
+
+---
+
+## 路由设计
+
+```
+/login                  ← 登录/注册页（独立布局，无侧边栏）
+/register               ← 注册页
+
+/                       ← 主布局（侧边栏 + 内容区）
+├── /                   ← 重定向到 /chat
+├── /chat               ← 对话列表（侧边栏）+ 聊天窗口（内容区）
+├── /chat/:conversationId  ← 指定对话的聊天窗口
+├── /agents             ← Agent 管理列表
+├── /agents/new         ← 创建自建 Agent
+└── /settings           ← 个人设置
+```
+
+## 页面与布局
+
+### 布局结构
+
+项目有两种布局，通过 React Router 的 `<Outlet>` 嵌套：
+
+```
+AuthLayout（登录/注册）
+└── 全屏居中卡片，无导航
+
+AppLayout（主界面）
+├── Sidebar（左侧固定）
+│   ├── 用户头像 + 状态
+│   ├── 导航菜单（对话 / Agent / 设置）
+│   └── 对话搜索
+└── <Outlet />（右侧内容区）
+    ├── ChatPage        → ChatWindow
+    ├── AgentsPage      → AgentList
+    └── SettingsPage    → SettingsForm
+```
+
+### 页面与组件对应
+
+| 路由 | 页面组件 | 主要子组件 |
+|------|----------|-----------|
+| `/login` | `LoginPage` | `LoginForm` |
+| `/register` | `RegisterPage` | `RegisterForm` |
+| `/chat` | `ChatPage` | `ConversationList`（侧边栏）+ `EmptyState`（内容区） |
+| `/chat/:id` | `ChatPage` | `ConversationList`（侧边栏）+ `ChatWindow` |
+| `/agents` | `AgentsPage` | `AgentList`、`AgentCard` |
+| `/agents/new` | `AgentCreatePage` | `AgentCreator` |
+| `/settings` | `SettingsPage` | `SettingsForm` |
+
+### 组件目录组织
+
+```
+src/
+├── components/
+│   ├── common/            # 通用UI组件
+│   │   ├── Button.tsx
+│   │   ├── Input.tsx
+│   │   ├── Modal.tsx
+│   │   └── Avatar.tsx
+│   ├── chat/              # 聊天相关
+│   │   ├── ChatWindow.tsx
+│   │   ├── MessageList.tsx
+│   │   ├── MessageBubble.tsx
+│   │   ├── ChatInput.tsx
+│   │   └── StreamingMessage.tsx
+│   ├── sidebar/           # 侧边栏
+│   │   ├── Sidebar.tsx
+│   │   ├── ConversationList.tsx
+│   │   ├── ConversationItem.tsx
+│   │   └── NavMenu.tsx
+│   ├── agent/             # Agent管理
+│   │   ├── AgentCard.tsx
+│   │   ├── AgentList.tsx
+│   │   └── AgentCreator.tsx
+│   ├── preview/           # 产物预览卡片
+│   │   ├── CodeCard.tsx
+│   │   ├── WebpageCard.tsx
+│   │   └── FileCard.tsx
+│   └── layout/            # 布局组件
+│       ├── AuthLayout.tsx
+│       └── AppLayout.tsx
+├── pages/                 # 页面级组件（路由对应）
+│   ├── LoginPage.tsx
+│   ├── RegisterPage.tsx
+│   ├── ChatPage.tsx
+│   ├── AgentsPage.tsx
+│   ├── AgentCreatePage.tsx
+│   └── SettingsPage.tsx
+├── routes/
+│   └── index.tsx          # 路由定义（React Router 配置）
+```
