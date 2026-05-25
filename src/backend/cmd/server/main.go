@@ -71,6 +71,7 @@ func main() {
 	userRepo := repository.NewUserRepo(db)
 	convRepo := repository.NewConversationRepo(db)
 	msgRepo := repository.NewMessageRepo(db)
+	friendRepo := repository.NewFriendRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -78,11 +79,13 @@ func main() {
 	})
 	convSvc := service.NewConversationService(convRepo)
 	msgSvc := service.NewMessageService(msgRepo, convRepo)
+	friendSvc := service.NewFriendService(friendRepo)
 
 	hub := ws.NewHub(logger)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
+	friendHandler := handler.NewFriendHandler(friendSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
@@ -90,6 +93,8 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
+	router.Use(middleware.RequestLogger(logger))
+	router.Use(middleware.RateLimit(100, 200))
 
 	// 健康检查（无需鉴权）
 	router.GET("/health", func(c *gin.Context) {
@@ -114,6 +119,17 @@ func main() {
 
 		apiGroup.POST("/conversations/:id/messages", msgHandler.Send)
 		apiGroup.GET("/conversations/:id/messages", msgHandler.History)
+	}
+
+	// 好友路由（需要鉴权）
+	friendGroup := router.Group("/api/friends")
+	friendGroup.Use(authMiddleware)
+	{
+		friendGroup.POST("/request", friendHandler.SendRequest)
+		friendGroup.POST("/:id/accept", friendHandler.AcceptRequest)
+		friendGroup.POST("/:id/reject", friendHandler.RejectRequest)
+		friendGroup.GET("", friendHandler.ListFriends)
+		friendGroup.GET("/pending", friendHandler.ListPending)
 	}
 
 	// WebSocket 路由（通过 query 参数鉴权）
