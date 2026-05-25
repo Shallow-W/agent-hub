@@ -21,6 +21,12 @@ func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 
 // RegisterRequest 注册请求体
 type RegisterRequest struct {
+	Username string `json:"username" binding:"required,min=3,max=50"`
+	Password string `json:"password" binding:"required,min=6,max=64"`
+}
+
+// LoginRequest 登录请求体
+type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
@@ -35,7 +41,7 @@ type AuthResponse struct {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40001, "参数错误: "+err.Error())
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40001, "请求参数格式错误")
 		return
 	}
 
@@ -58,9 +64,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 // Login 用户登录
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req RegisterRequest
+	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40003, "参数错误: "+err.Error())
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40003, "请求参数格式错误")
 		return
 	}
 

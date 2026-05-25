@@ -95,7 +95,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
-	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger)
+	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)

@@ -4,7 +4,7 @@ import { WebSocketClient, type WsStatus } from '@/api/websocket';
 interface WsState {
   status: WsStatus;
   wsClient: WebSocketClient | null;
-  connect: (token: string) => void;
+  connect: (token: string) => WebSocketClient | null;
   disconnect: () => void;
 }
 
@@ -25,6 +25,7 @@ export const useWsStore = create<WsState>((set, get) => ({
     });
     client.connect(token);
     set({ wsClient: client, status: 'connecting' });
+    return client;
   },
 
   disconnect: () => {

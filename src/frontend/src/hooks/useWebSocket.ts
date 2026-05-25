@@ -17,9 +17,9 @@ export function useWebSocket() {
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
-    connect(token);
+    // 连接 WebSocket 并立即注册消息回调
+    const client = connect(token);
 
-    // 注册消息回调
     const handleMessage = (msg: StreamMessage) => {
       if (!msg.data) return;
       const { conversationId, messageId, content } = msg.data;
@@ -52,7 +52,7 @@ export function useWebSocket() {
       }
     };
 
-    wsClient?.onMessage(handleMessage);
+    client?.onMessage(handleMessage);
 
     return () => {
       disconnect();

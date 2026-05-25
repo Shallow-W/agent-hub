@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -56,6 +58,9 @@ func (r *ConversationRepo) GetByID(ctx context.Context, id string) (*model.Conve
 		id,
 	).StructScan(&c)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get conversation by id: %w", err)
 	}
 	return &c, nil

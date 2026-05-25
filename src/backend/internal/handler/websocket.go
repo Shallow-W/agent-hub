@@ -15,14 +15,15 @@ import (
 
 // WebSocketHandler WebSocket 连接处理器
 type WebSocketHandler struct {
-	authSvc *service.AuthService
-	hub     *ws.Hub
-	logger  *slog.Logger
+	authSvc        *service.AuthService
+	hub            *ws.Hub
+	logger         *slog.Logger
+	allowedOrigins []string
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, logger *slog.Logger) *WebSocketHandler {
-	return &WebSocketHandler{authSvc: authSvc, hub: hub, logger: logger}
+func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
+	return &WebSocketHandler{authSvc: authSvc, hub: hub, logger: logger, allowedOrigins: allowedOrigins}
 }
 
 // Handle 处理 WebSocket 升级请求
@@ -42,7 +43,7 @@ func (h *WebSocketHandler) Handle(c *gin.Context) {
 
 	// 升级为 WebSocket 连接
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
-		OriginPatterns: []string{"localhost:*"},
+		OriginPatterns: h.allowedOrigins,
 	})
 	if err != nil {
 		h.logger.Error("websocket accept failed", "error", err)
@@ -76,13 +77,15 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, conn *ws.Connection) {
 		}
 
 		// 解析消息并路由
-		var msg map[string]interface{}
+		var msg struct {
+			Type string `json:"type"`
+		}
 		if err := json.Unmarshal(data, &msg); err != nil {
 			h.logger.Warn("invalid ws message", "error", err)
 			continue
 		}
 
-		msgType, _ := msg["type"].(string)
+		msgType := msg.Type
 		h.logger.Debug("ws message received", "user_id", conn.UserID, "type", msgType)
 
 		// 当前阶段仅做消息路由预留，具体业务逻辑后续迭代
