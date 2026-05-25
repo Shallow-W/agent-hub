@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,28 +59,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 连接数据库
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
-	)
-
-	db, err := sqlx.Connect("pgx", dsn)
+	// 连接数据库，自动建库+自动迁移
+	db, err := initDatabase(cfg, logger)
 	if err != nil {
-		logger.Error("connect database failed", "error", err)
+		logger.Error("init database failed", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	if err := db.Ping(); err != nil {
-		logger.Error("database ping failed", "error", err)
-		os.Exit(1)
-	}
-	logger.Info("database connected")
 
 	// 依赖注入组装
 	userRepo := repository.NewUserRepo(db)
@@ -170,6 +158,101 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+// initDatabase 连接数据库，若不存在则自动创建并运行迁移
+func initDatabase(cfg *Config, logger *slog.Logger) (*sqlx.DB, error) {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
+		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
+	)
+
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		// 数据库不存在时自动创建
+		if strings.Contains(err.Error(), "does not exist") {
+			logger.Info("database not found, creating...", "dbname", cfg.Database.DBName)
+			if err := createDatabase(cfg); err != nil {
+				return nil, fmt.Errorf("create database: %w", err)
+			}
+			logger.Info("database created", "dbname", cfg.Database.DBName)
+			db, err = sqlx.Connect("pgx", dsn)
+			if err != nil {
+				return nil, fmt.Errorf("connect after create: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("connect database: %w", err)
+		}
+	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// 自动运行迁移
+	if err := runMigrations(db, logger); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	logger.Info("database connected and migrated")
+	return db, nil
+}
+
+// createDatabase 连接到默认 postgres 库并创建目标数据库
+func createDatabase(cfg *Config) error {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=postgres sslmode=%s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
+		cfg.Database.Password, cfg.Database.SSLMode,
+	)
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		return fmt.Errorf("connect to postgres: %w", err)
+	}
+	defer db.Close()
+
+	// 防止 SQL 注入：数据库名来自配置文件，不接受用户输入
+	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database.DBName))
+	return err
+}
+
+// runMigrations 从 migrations/ 目录读取 SQL 文件并执行（幂等）
+func runMigrations(db *sqlx.DB, logger *slog.Logger) error {
+	// 创建迁移追踪表
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version VARCHAR PRIMARY KEY,
+		applied_at TIMESTAMPTZ DEFAULT NOW()
+	)`)
+
+	files, err := filepath.Glob("migrations/*.sql")
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+	sort.Strings(files)
+
+	for _, path := range files {
+		name := filepath.Base(path)
+
+		// 检查是否已执行
+		var exists bool
+		err := db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", name)
+		if err != nil || exists {
+			continue
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("exec migration %s: %w", name, err)
+		}
+
+		_, _ = db.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", name)
+		logger.Info("migration applied", "file", name)
+	}
+
+	return nil
 }
 
 // loadConfig 从 YAML 文件加载配置
