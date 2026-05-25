@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import type { Message } from '@/types/message';
 import styles from './MessageBubble.module.css';
 
@@ -8,6 +8,31 @@ interface MessageBubbleProps {
 }
 
 /** 简单分割：用 ``` 包裹的代码块渲染为带头部的暗色代码区域 */
+function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [code]);
+
+  return (
+    <div className={styles.codeBlockWrapper}>
+      <div className={styles.codeHeader}>
+        <span>{lang || 'Code'}</span>
+        <button className={styles.copyBtn} type="button" aria-label="复制代码" onClick={handleCopy}>
+          {copied ? '✓ 已复制' : '\u{1F4CB} 复制'}
+        </button>
+      </div>
+      <pre className={styles.codeBlock}>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function renderContent(content: string): React.ReactNode {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
@@ -18,19 +43,7 @@ function renderContent(content: string): React.ReactNode {
       const langMatch = firstNewline >= 0 ? lines.slice(0, firstNewline).trim() : '';
       const code =
         firstNewline >= 0 ? lines.slice(firstNewline + 1) : lines;
-      return (
-        <div className={styles.codeBlockWrapper} key={i}>
-          <div className={styles.codeHeader}>
-            <span>{langMatch || 'Code'}</span>
-            <button className={styles.copyBtn} type="button" aria-label="复制代码">
-              &#x1F4CB; 复制
-            </button>
-          </div>
-          <pre className={styles.codeBlock}>
-            <code>{code}</code>
-          </pre>
-        </div>
-      );
+      return <CodeBlock key={i} code={code} lang={langMatch} />;
     }
     // 保留换行
     return part.split('\n').map((line, j, arr) => (

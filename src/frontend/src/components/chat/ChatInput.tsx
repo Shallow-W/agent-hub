@@ -1,6 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { useMessages } from '@/hooks/useMessages';
-import { useMessageStore } from '@/store/messageStore';
 import styles from './ChatInput.module.css';
 
 interface ChatInputProps {
@@ -10,11 +9,8 @@ interface ChatInputProps {
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { send } = useMessages(conversationId);
-  const streamingContent = useMessageStore(
-    (s) => s.streamingContent[conversationId] ?? '',
-  );
-  const isStreaming = streamingContent.length > 0;
+  const { send, streamingContent } = useMessages(conversationId);
+  const isStreaming = (streamingContent ?? '').length > 0;
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();

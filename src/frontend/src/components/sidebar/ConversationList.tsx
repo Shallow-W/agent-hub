@@ -9,7 +9,6 @@ export const ConversationList: React.FC = () => {
 
   const [searchText, setSearchText] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [archiveOpen, setArchiveOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounced search: 300ms
@@ -40,8 +39,6 @@ export const ConversationList: React.FC = () => {
         c.title.toLowerCase().includes(debouncedSearch.toLowerCase()),
       )
     : conversations;
-
-  const archivedCount = 0; // Placeholder until archive feature is implemented
 
   // Loading state
   if (loading && conversations.length === 0) {
@@ -110,22 +107,7 @@ export const ConversationList: React.FC = () => {
         )}
       </div>
 
-      {/* Archived Section */}
-      <div className={styles.archiveSeparator} />
-      <button
-        className={styles.archiveToggle}
-        onClick={() => setArchiveOpen((v) => !v)}
-      >
-        <span
-          className={`${styles.archiveChevron} ${
-            archiveOpen ? styles.archiveChevronOpen : ''
-          }`}
-        >
-          &#9654;
-        </span>
-        <span>已归档</span>
-        <span className={styles.archiveCount}>{archivedCount}</span>
-      </button>
+      {/* Archived Section - 仅在有归档对话时显示 */}
     </div>
   );
 };

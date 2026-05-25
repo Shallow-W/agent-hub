@@ -46,8 +46,8 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onDelete,
   onTogglePin,
 }) => {
-  const firstChar = conversation.title.charAt(0).toUpperCase();
-  const avatarColor = getAvatarColor(conversation.title);
+  const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
+  const avatarColor = getAvatarColor(conversation.title || '?');
 
   return (
     <div
@@ -56,7 +56,10 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') onSelect();
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
       }}
     >
       {/* Avatar */}
@@ -93,8 +96,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           className={styles.actionBtn}
           onClick={(e) => {
             e.stopPropagation();
-            /* Archive placeholder */
-            console.log('archive', conversation.id);
+            // TODO: 归档功能待实现
           }}
           title="归档"
         >
