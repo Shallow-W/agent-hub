@@ -8,7 +8,11 @@ const ChatView: React.FC = () => {
 
   if (!activeId) {
     return (
-      <div className={styles.empty}>选择或创建对话</div>
+      <div className={styles.empty}>
+        <span className={styles.icon} role="img" aria-label="chat">&#x1F916;</span>
+        <div className={styles.title}>欢迎使用 AgentHub</div>
+        <div className={styles.subtitle}>选择一个对话或创建新对话开始聊天</div>
+      </div>
     );
   }
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { ConversationList } from '@/components/sidebar/ConversationList';
+import SettingsPanel from '@/components/settings/SettingsPanel';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
@@ -16,30 +17,30 @@ const AppLayout: React.FC = () => {
     await create('single', `新对话`);
   };
 
-  const wsIndicator =
-    status === 'connected' ? '🟢' : status === 'connecting' ? '🟡' : '🔴';
-
   return (
     <div className={styles.container}>
-      <div className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>
-          <div>
-            <span className={styles.sidebarTitle}>对话</span>
-            <span title={`WebSocket: ${status}`}>{wsIndicator}</span>
-          </div>
+      {/* 左侧：设置面板 */}
+      <div className={styles.settingsPanel}>
+        <SettingsPanel
+          username={user?.username ?? ''}
+          onLogout={handleLogout}
+          wsStatus={status}
+        />
+      </div>
+
+      {/* 中间：对话列表 */}
+      <div className={styles.convPanel}>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>对话</span>
           <Button variant="primary" onClick={handleCreate}>
             新建对话
           </Button>
         </div>
         <ConversationList />
-        <div className={styles.userInfo}>
-          <span className={styles.username}>{user?.username}</span>
-          <Button variant="secondary" onClick={handleLogout}>
-            退出
-          </Button>
-        </div>
       </div>
-      <div className={styles.main}>
+
+      {/* 右侧：聊天区域 */}
+      <div className={styles.chatPanel}>
         <Outlet />
       </div>
     </div>

@@ -1,6 +1,7 @@
 .bubble {
   display: flex;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  position: relative;
 }
 
 .bubbleUser {
@@ -11,25 +12,70 @@
   justify-content: flex-start;
 }
 
-.inner {
+/* 同一角色连续消息间距缩小 */
+.bubble + .bubble {
+  margin-bottom: 4px;
+}
+
+/* 不同角色之间恢复大间距（通过 :not 选择器无法精确实现，由外层 20px 兜底） */
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-right: 10px;
+  margin-top: 2px;
+  user-select: none;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
   max-width: 70%;
+}
+
+.contentUser {
+  align-items: flex-end;
+}
+
+.contentAssistant {
+  align-items: flex-start;
+  max-width: 75%;
+}
+
+.inner {
   padding: 10px 14px;
-  border-radius: var(--border-radius);
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  transition: background-color 0.15s ease;
 }
 
 .innerUser {
   background-color: var(--color-primary);
   color: #fff;
-  border-bottom-right-radius: 2px;
+  border-radius: 16px 16px 4px 16px;
+  max-width: 100%;
 }
 
 .innerAssistant {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-white);
   color: var(--color-text);
-  border-bottom-left-radius: 2px;
+  border-radius: 16px 16px 16px 4px;
+  max-width: 100%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.innerAssistant:hover {
+  background-color: #fafafa;
 }
 
 .meta {
@@ -45,10 +91,14 @@
   font-weight: 500;
 }
 
+/* 时间戳：默认隐藏，hover 时显示 */
 .timestamp {
   font-size: 11px;
   color: var(--color-text-secondary);
   margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
 }
 
 .timestampUser {
@@ -59,30 +109,82 @@
   text-align: left;
 }
 
+.bubble:hover .timestamp {
+  opacity: 1;
+}
+
+/* 代码块：暗色主题 + 头部栏 + 复制按钮 */
+.codeBlockWrapper {
+  margin: 8px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.codeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background-color: #2d2d2d;
+  font-size: 12px;
+  color: #999;
+}
+
+.copyBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #999;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.copyBtn:hover {
+  color: #ddd;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
 .codeBlock {
   background-color: #1e1e1e;
   color: #d4d4d4;
-  padding: 12px;
-  border-radius: 4px;
+  padding: 12px 16px;
   overflow-x: auto;
-  margin: 8px 0;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  margin: 0;
+  font-family: 'SF Mono', 'Fira Code', 'Menlo', 'Monaco', monospace;
   font-size: 13px;
   line-height: 1.5;
 }
 
+.codeBlock code {
+  font-family: inherit;
+}
+
+/* 流式光标：脉冲发光 */
 .streamingCursor {
   display: inline-block;
   width: 2px;
-  height: 14px;
+  height: 16px;
   background-color: var(--color-primary);
   margin-left: 2px;
   vertical-align: text-bottom;
-  animation: blink 1s step-end infinite;
+  border-radius: 1px;
+  animation: cursorPulse 1s ease-in-out infinite;
+  box-shadow: 0 0 6px rgba(22, 119, 255, 0.4);
 }
 
-@keyframes blink {
+@keyframes cursorPulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(22, 119, 255, 0.4);
+  }
   50% {
-    opacity: 0;
+    opacity: 0.3;
+    box-shadow: 0 0 2px rgba(22, 119, 255, 0.15);
   }
 }

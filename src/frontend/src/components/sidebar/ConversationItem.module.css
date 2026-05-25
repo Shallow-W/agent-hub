@@ -1,82 +1,140 @@
 .item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color 0.15s ease;
   position: relative;
+  margin-bottom: 2px;
 }
 
 .item:hover {
   background-color: var(--color-bg);
 }
 
+/* ── Active State: left border accent + tint ── */
+
 .active {
-  background-color: #e6f4ff;
+  background-color: #e8f3ff;
+}
+
+.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-primary);
 }
 
 .active:hover {
-  background-color: #e6f4ff;
+  background-color: #dbe8fa;
 }
+
+/* ── Avatar ── */
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
+/* ── Content Area ── */
 
 .content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .titleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.pinBadge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.subtitleRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.title {
-  font-size: 14px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .time {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   flex-shrink: 0;
+  line-height: 1.3;
+  opacity: 0.75;
 }
 
-.pinIcon {
-  font-size: 12px;
-  margin-right: 4px;
-}
+/* ── Action Buttons ── */
 
 .actions {
-  display: none;
-  gap: 4px;
+  display: flex;
+  gap: 2px;
   flex-shrink: 0;
-  margin-left: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
 .item:hover .actions {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .actionBtn {
-  padding: 2px 6px;
-  font-size: 12px;
-  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
   border-radius: 4px;
-  background: var(--color-bg-white);
+  background: transparent;
   cursor: pointer;
-  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .actionBtn:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
+  background: var(--color-bg);
 }
 
 .actionBtnDanger:hover {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
+  background: #fff1f0;
 }

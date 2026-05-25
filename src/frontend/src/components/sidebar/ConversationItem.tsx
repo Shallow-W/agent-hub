@@ -10,6 +10,23 @@ interface ConversationItemProps {
   onTogglePin: () => void;
 }
 
+const AVATAR_COLORS: readonly string[] = [
+  '#1677ff',
+  '#52c41a',
+  '#faad14',
+  '#eb2f96',
+  '#722ed1',
+  '#13c2c2',
+];
+
+function getAvatarColor(title: string): string {
+  let hash = 0;
+  for (let i = 0; i < title.length; i++) {
+    hash = title.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+}
+
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -29,6 +46,9 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onDelete,
   onTogglePin,
 }) => {
+  const firstChar = conversation.title.charAt(0).toUpperCase();
+  const avatarColor = getAvatarColor(conversation.title);
+
   return (
     <div
       className={`${styles.item} ${active ? styles.active : ''}`}
@@ -39,19 +59,25 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         if (e.key === 'Enter') onSelect();
       }}
     >
+      {/* Avatar */}
+      <div className={styles.avatar} style={{ background: avatarColor }}>
+        {firstChar}
+      </div>
+
+      {/* Middle: title + subtitle */}
       <div className={styles.content}>
         <div className={styles.titleRow}>
-          <span className={styles.title}>
-            {conversation.pinned && (
-              <span className={styles.pinIcon}>📌</span>
-            )}
-            {conversation.title}
-          </span>
+          {conversation.pinned && <span className={styles.pinBadge} />}
+          <span className={styles.title}>{conversation.title}</span>
+        </div>
+        <div className={styles.subtitleRow}>
           <span className={styles.time}>
             {formatTime(conversation.updated_at)}
           </span>
         </div>
       </div>
+
+      {/* Actions on hover */}
       <div className={styles.actions}>
         <button
           className={styles.actionBtn}
@@ -59,8 +85,20 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
             e.stopPropagation();
             onTogglePin();
           }}
+          title={conversation.pinned ? '取消置顶' : '置顶'}
         >
-          {conversation.pinned ? '取消置顶' : '置顶'}
+          {conversation.pinned ? '📌' : '📍'}
+        </button>
+        <button
+          className={styles.actionBtn}
+          onClick={(e) => {
+            e.stopPropagation();
+            /* Archive placeholder */
+            console.log('archive', conversation.id);
+          }}
+          title="归档"
+        >
+          &#128230;
         </button>
         <button
           className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
@@ -68,8 +106,9 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
             e.stopPropagation();
             onDelete();
           }}
+          title="删除"
         >
-          删除
+          &#128465;
         </button>
       </div>
     </div>

@@ -9,7 +9,13 @@
   --color-border: #e8e8e8;
   --color-danger: #ff4d4f;
   --color-danger-hover: #ff7875;
-  --sidebar-width: 280px;
+  --sidebar-width: 300px;
+  --settings-width: 220px;
+  --convlist-width: 300px;
+  --color-bg-settings: #f8f9fa;
+  --color-bg-convlist: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --transition-fast: 0.15s ease;
   --border-radius: 8px;
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }

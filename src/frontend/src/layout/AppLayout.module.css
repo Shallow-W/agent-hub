@@ -4,9 +4,51 @@
   overflow: hidden;
 }
 
+.settingsPanel {
+  width: var(--settings-width);
+  background: var(--color-bg-settings);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+  z-index: 1;
+}
+
+.convPanel {
+  width: var(--convlist-width);
+  background: var(--color-bg-convlist);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.convPanelHeader {
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.convPanelTitle {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.chatPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--color-bg);
+}
+
+/* 保留旧类名以兼容其他组件可能的使用 */
 .sidebar {
-  width: var(--sidebar-width);
-  background-color: var(--color-bg-white);
+  width: var(--convlist-width);
+  background-color: var(--color-bg-convlist);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;

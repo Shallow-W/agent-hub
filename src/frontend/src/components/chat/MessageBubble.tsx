@@ -7,7 +7,7 @@ interface MessageBubbleProps {
   streaming?: boolean;
 }
 
-/** 简单分割：用 ``` 包裹的代码块渲染为 pre/code */
+/** 简单分割：用 ``` 包裹的代码块渲染为带头部的暗色代码区域 */
 function renderContent(content: string): React.ReactNode {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
@@ -15,12 +15,21 @@ function renderContent(content: string): React.ReactNode {
     if (part.startsWith('```') && part.endsWith('```')) {
       const lines = part.slice(3, -3);
       const firstNewline = lines.indexOf('\n');
+      const langMatch = firstNewline >= 0 ? lines.slice(0, firstNewline).trim() : '';
       const code =
         firstNewline >= 0 ? lines.slice(firstNewline + 1) : lines;
       return (
-        <pre className={styles.codeBlock} key={i}>
-          <code>{code}</code>
-        </pre>
+        <div className={styles.codeBlockWrapper} key={i}>
+          <div className={styles.codeHeader}>
+            <span>{langMatch || 'Code'}</span>
+            <button className={styles.copyBtn} type="button" aria-label="复制代码">
+              &#x1F4CB; 复制
+            </button>
+          </div>
+          <pre className={styles.codeBlock}>
+            <code>{code}</code>
+          </pre>
+        </div>
       );
     }
     // 保留换行
@@ -48,7 +57,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   return (
     <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
-      <div>
+      {!isUser && (
+        <div className={styles.avatar} aria-hidden="true">A</div>
+      )}
+      <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
         {!isUser && (
           <div className={styles.meta}>
             <span className={styles.agentName}>Agent</span>

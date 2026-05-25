@@ -23,6 +23,8 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
     }
   }, [messages, streamingContent]);
 
+  const isEmpty = messages.length === 0 && !streamingContent;
+
   return (
     <div className={styles.container} ref={containerRef}>
       {hasMore && (
@@ -36,21 +38,30 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
           </button>
         </div>
       )}
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
-      ))}
-      {streamingContent && (
-        <MessageBubble
-          message={{
-            id: 'streaming',
-            conversation_id: conversationId,
-            role: 'assistant',
-            content: streamingContent,
-            artifacts_json: null,
-            created_at: new Date().toISOString(),
-          }}
-          streaming
-        />
+      {isEmpty ? (
+        <div className={styles.empty}>
+          <span className={styles.emptyIcon} role="img" aria-label="chat">&#x1F4AC;</span>
+          <span className={styles.emptyText}>开始新对话</span>
+        </div>
+      ) : (
+        <>
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+          {streamingContent && (
+            <MessageBubble
+              message={{
+                id: 'streaming',
+                conversation_id: conversationId,
+                role: 'assistant',
+                content: streamingContent,
+                artifacts_json: null,
+                created_at: new Date().toISOString(),
+              }}
+              streaming
+            />
+          )}
+        </>
       )}
       <div ref={bottomRef} />
     </div>
