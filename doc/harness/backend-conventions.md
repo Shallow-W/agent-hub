@@ -76,6 +76,56 @@ type ConversationService interface {
 - 接口保持小（1-3个方法）
 - 在消费方定义接口，不是在实现方
 
+## 并发与 Context
+
+- 所有跨函数调用传递 `context.Context` 作为第一个参数
+- Handler 层从请求创建 context（`c.Request().Context()`），Service/Repository 层接收但不创建
+- 长生命周期任务（如 WebSocket 连接）使用独立 context，通过 `context.WithCancel` 控制
+
+```go
+// WebSocket 连接使用独立 context
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel() // 连接关闭时取消所有子操作
+```
+
+- 禁止在全局变量中存储请求级状态
+- goroutine 必须有明确的退出机制（context cancel 或 done channel）
+
+## 数据库规范
+
+### Repository 层
+
+```go
+type MessageRepository interface {
+    Create(ctx context.Context, msg *Message) error
+    ListByConversation(ctx context.Context, convID string, limit, offset int) ([]*Message, error)
+}
+```
+
+- Repository 只做数据读写，不包含业务逻辑
+- 查询方法接受 `ctx` 和筛选参数，返回领域模型
+- 批量操作使用事务，事务边界在 Service 层控制
+
+### 迁移脚本
+
+- 文件命名：`数字序号_描述.sql`（如 `001_create_users.sql`）
+- 序号连续递增，禁止复用已用序号
+- 迁移必须可回滚（提供 `DOWN` 部分）
+
+## 依赖注入
+
+- Handler 创建时注入 Service 接口，Service 创建时注入 Repository 接口
+- 在 `cmd/server/main.go` 中统一组装依赖链
+
+```go
+// main.go 中组装
+msgRepo := repository.NewMessageRepo(db)
+msgSvc := service.NewMessageService(msgRepo)
+msgHandler := handler.NewMessageHandler(msgSvc)
+```
+
+- 禁止使用 `init()` 函数或包级全局变量管理依赖
+
 ## 日志规范
 
 ```go
@@ -86,7 +136,7 @@ logger.Info("conversation created",
 )
 ```
 
-- 使用结构化日志（slog 或 zerolog）
+- 使用结构化日志（`log/slog`，Go 1.21+ 标准库）
 - 日志级别：Debug / Info / Warn / Error
 - Error 级别日志必须附带错误详情
 

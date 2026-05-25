@@ -55,8 +55,65 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId }) => {
 - 跨组件共享：通过 Context 或轻量状态库
 - 服务端状态（对话、消息）：通过 API 层获取和缓存
 
+## API 调用规范
+
+- 所有 REST 请求统一通过 `services/api.ts` 发出，组件内禁止直接调用 `fetch`/`axios`
+- API 函数返回类型化的 `Promise`，错误通过统一的错误类型抛出
+
+```ts
+// services/api.ts
+export async function getConversation(id: string): Promise<Conversation> {
+  const res = await fetch(`/api/conversations/${id}`);
+  if (!res.ok) throw new ApiError(res.status, await res.json());
+  return res.json();
+}
+```
+
+- 组件内通过 `try/catch` 或 Hook 包装处理错误，UI 层展示错误提示
+
+## WebSocket 使用规范
+
+- WebSocket 连接管理集中在 `services/websocket.ts`，对外暴露事件订阅接口
+- 组件通过自定义 Hook（如 `useWebSocket`）消费消息，不直接操作 WebSocket 实例
+
+```ts
+// 组件内使用方式
+const { messages, send, status } = useWebSocket(conversationId);
+```
+
+- 自动重连策略：断开后指数退避重连（1s → 2s → 4s → 最大 30s）
+- 流式消息（Agent 回复）通过 `message.streaming` 事件增量拼接，收到 `done: true` 后写入最终状态
+
+## 导入顺序
+
+```ts
+// 1. React / 第三方库
+import React, { useState } from 'react';
+import { useParams } from 'react-router-dom';
+
+// 2. 项目内部模块（使用 @/ 别名）
+import { getConversation } from '@/services/api';
+import { ChatMessage } from '@/types/message';
+
+// 3. 相对路径（同目录或子组件）
+import { MessageBubble } from './MessageBubble';
+
+// 4. 样式
+import styles from './ChatWindow.module.css';
+```
+
 ## 样式方案
 
 - 使用 CSS Modules（`*.module.css`）
 - 类名使用 camelCase
 - 避免内联样式
+
+## 技术选型
+
+| 类别 | 选型 | 备注 |
+|------|------|------|
+| 构建工具 | Vite | |
+| 状态管理 | Zustand | 轻量，适合中小规模 |
+| 路由 | React Router v6 | |
+| HTTP 客户端 | 原生 fetch | 封装在 services 层 |
+| 样式 | CSS Modules | |
