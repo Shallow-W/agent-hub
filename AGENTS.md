@@ -23,6 +23,19 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 ## 项目简介
 AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，用户通过类似飞书/微信的对话界面与多个 AI Agent（Claude Code、Codex、OpenCode 等）交互，支持单聊、群聊、任务分派和产物预览。
 
+## 核心概念
+
+- **IM聊天范式**：对话列表 + 单聊/群聊 + 富媒体消息，是整个平台的交互核心
+- **Orchestrator（协调器）**：群聊模式下理解用户意图，将任务拆解并分派给子Agent，聚合结果
+- **Agent适配器层**：统一抽象不同Agent平台的API差异（Claude Code、Codex、OpenCode等）
+- **自建Agent**：用户通过对话式创建，设定System Prompt + 工具集
+- **产物系统**：Agent回复中内联预览卡片（网页iframe、代码Diff、文件附件等）
+
+## 交付要求
+
+- 30%权重在AI协作能力（需沉淀Spec、Skill、Rules协作规范）
+- 需产出：产品设计文档 + 技术文档 + 可运行Demo + AI协作开发记录 + 3分钟Demo视频
+
 ## 技术栈
 | 层 | 技术 |
 |----|------|
