@@ -7,6 +7,7 @@ import {
   DeleteOutlined,
   UserOutlined,
   TeamOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
@@ -17,6 +18,7 @@ interface ConversationItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onInviteMembers?: () => void;
   lastMessage?: string;
   unreadCount?: number;
   online?: boolean;
@@ -70,6 +72,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onSelect,
   onDelete,
   onTogglePin,
+  onInviteMembers,
   lastMessage,
   unreadCount = 0,
   online = false,
@@ -88,6 +91,19 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         onTogglePin();
       },
     },
+    ...(isGroup && onInviteMembers
+      ? [
+          {
+            key: 'invite',
+            icon: <UserAddOutlined />,
+            label: '邀请成员',
+            onClick: (info: { domEvent: { stopPropagation: () => void } }) => {
+              info.domEvent.stopPropagation();
+              onInviteMembers();
+            },
+          },
+        ]
+      : []),
     {
       key: 'archive',
       icon: <InboxOutlined />,

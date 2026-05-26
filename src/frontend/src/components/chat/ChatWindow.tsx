@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Typography, Tooltip, Button, Dropdown, Badge } from 'antd';
 import { SearchOutlined, MoreOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -20,7 +20,8 @@ export const ChatWindow: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const activeConv = conversations.find((c) => c.id === activeId);
-  const [memberPanelOpen, setMemberPanelOpen] = useState(false);
+  const memberPanelOpen = useConversationStore((s) => s.memberPanelOpen);
+  const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
   const typingUsersMap = useWsStore((s) => s.typingUsers);

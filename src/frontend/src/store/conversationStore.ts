@@ -5,12 +5,14 @@ import * as convApi from '@/api/conversation';
 interface ConversationState {
   conversations: Conversation[];
   activeConversationId: string | null;
+  memberPanelOpen: boolean;
   loading: boolean;
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
   deleteConversation: (id: string) => Promise<void>;
   togglePin: (id: string, pinned: boolean) => Promise<void>;
   setActive: (id: string | null) => void;
+  setMemberPanelOpen: (open: boolean) => void;
 }
 
 /** 置顶优先，再按更新时间倒序 */
@@ -24,6 +26,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
 export const useConversationStore = create<ConversationState>((set) => ({
   conversations: [],
   activeConversationId: null,
+  memberPanelOpen: false,
   loading: false,
 
   fetchConversations: async () => {
@@ -69,6 +72,10 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   setActive: (id) => {
-    set({ activeConversationId: id });
+    set({ activeConversationId: id, memberPanelOpen: false });
+  },
+
+  setMemberPanelOpen: (open) => {
+    set({ memberPanelOpen: open });
   },
 }));

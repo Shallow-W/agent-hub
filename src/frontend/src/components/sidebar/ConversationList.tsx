@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Input, Skeleton, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
+import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
 import type { Message } from '@/types/message';
 import { ConversationItem } from './ConversationItem';
@@ -12,6 +13,7 @@ const EMPTY_MESSAGES: Message[] = [];
 export const ConversationList: React.FC = () => {
   const { conversations, activeId, loading, setActive, remove, togglePin } =
     useConversation();
+  const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
 
   const [searchText, setSearchText] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -91,6 +93,14 @@ export const ConversationList: React.FC = () => {
               onSelect={() => setActive(conv.id)}
               onDelete={() => remove(conv.id)}
               onTogglePin={() => togglePin(conv.id, !conv.pinned)}
+              onInviteMembers={
+                conv.type === 'group'
+                  ? () => {
+                      setActive(conv.id);
+                      setMemberPanelOpen(true);
+                    }
+                  : undefined
+              }
             />
           ))
         )}
@@ -106,7 +116,8 @@ const ConversationItemWrapper: React.FC<{
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
-}> = ({ conversation, active, onSelect, onDelete, onTogglePin }) => {
+  onInviteMembers?: () => void;
+}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onInviteMembers }) => {
   const messages = useMessageStore(
     (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
   );
@@ -124,6 +135,7 @@ const ConversationItemWrapper: React.FC<{
       onSelect={onSelect}
       onDelete={onDelete}
       onTogglePin={onTogglePin}
+      onInviteMembers={onInviteMembers}
       lastMessage={lastMessage}
       unreadCount={unreadCount}
     />
