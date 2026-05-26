@@ -27,10 +27,10 @@ export const ChatWindow: React.FC = () => {
 
   // Mark conversation as read when switching to it
   useEffect(() => {
-    if (!activeConv) return;
-    markAllRead(activeConv.id);
-    convApi.markConversationRead(activeConv.id).catch(() => {});
-  }, [activeConv, markAllRead]);
+    if (!activeId) return;
+    markAllRead(activeId);
+    convApi.markConversationRead(activeId).catch(() => {});
+  }, [activeId, markAllRead]);
 
   if (!activeConv) {
     return null;
