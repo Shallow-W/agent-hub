@@ -160,8 +160,16 @@ func (s *GroupService) LeaveGroup(ctx context.Context, conversationID, userID st
 	return nil
 }
 
-// GetGroupInfo 获取群信息+成员列表
-func (s *GroupService) GetGroupInfo(ctx context.Context, conversationID string) (*model.Conversation, []*model.ConversationMember, error) {
+// GetGroupInfo 获取群信息+成员列表（验证调用者是否为成员）
+func (s *GroupService) GetGroupInfo(ctx context.Context, conversationID, userID string) (*model.Conversation, []*model.ConversationMember, error) {
+	isMember, err := s.repo.IsMember(ctx, conversationID, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !isMember {
+		return nil, nil, ErrNotMember
+	}
+
 	conv, err := s.repo.GetConversationByID(ctx, conversationID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get conversation: %w", err)

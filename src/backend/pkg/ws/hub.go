@@ -469,21 +469,3 @@ type directMsgPayload struct {
 	Msg    WSMessage
 }
 
-// StartPing 保留向后兼容（实际调用 StartHeartbeat）
-func StartPing(ctx context.Context, client *Client, hub *Hub, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := client.Conn.Ping(ctx); err != nil {
-				hub.Unregister(client)
-				return
-			}
-			client.UpdateLastPong()
-		}
-	}
-}

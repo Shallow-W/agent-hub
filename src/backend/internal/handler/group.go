@@ -174,3 +174,28 @@ func (h *GroupHandler) LeaveGroup(c *gin.Context) {
 
 	middleware.SuccessResponse(c, nil)
 }
+
+// GetGroupInfo 获取群聊详情
+func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
+	conversationID := c.Param("id")
+	if conversationID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "缺少群聊 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	conv, members, err := h.svc.GetGroupInfo(c.Request.Context(), conversationID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50305, "获取群聊详情失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, gin.H{
+		"conversation": conv,
+		"members":      members,
+	})
+}

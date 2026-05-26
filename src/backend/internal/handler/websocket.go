@@ -82,24 +82,53 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 		client.LastActive = time.Now()
 
 		// 解析消息并路由
-		var msg struct {
-			Type string `json:"type"`
-		}
+		var msg ws.WSMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			h.logger.Warn("invalid ws message", "error", err)
 			continue
 		}
 
-		msgType := msg.Type
-		h.logger.Debug("ws message received", "user_id", client.UserID, "type", msgType)
+		h.logger.Debug("ws message received", "user_id", client.UserID, "type", msg.Type)
 
-		// 当前阶段仅做消息路由预留，具体业务逻辑后续迭代
-		switch msgType {
+		switch msg.Type {
+		case "join_room":
+			var payload struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			if raw, err := json.Marshal(msg.Data); err == nil {
+				_ = json.Unmarshal(raw, &payload)
+			}
+			if payload.ConversationID != "" {
+				h.hub.JoinRoom(payload.ConversationID, client)
+			}
+		case "leave_room":
+			var payload struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			if raw, err := json.Marshal(msg.Data); err == nil {
+				_ = json.Unmarshal(raw, &payload)
+			}
+			if payload.ConversationID != "" {
+				h.hub.LeaveRoom(payload.ConversationID, client)
+			}
+		case "chat":
+			var payload struct {
+				ConversationID string `json:"conversation_id"`
+				Content        string `json:"content"`
+			}
+			if raw, err := json.Marshal(msg.Data); err == nil {
+				_ = json.Unmarshal(raw, &payload)
+			}
+			if payload.ConversationID != "" {
+				h.hub.SendToRoom(payload.ConversationID, ws.WSMessage{
+					Type: ws.TypeMessageComplete,
+					Data: msg.Data,
+				})
+			}
 		default:
-			// 未识别的消息类型，原样广播回用户
 			h.hub.SendToUser(client.UserID, ws.WSMessage{
 				Type: ws.TypeError,
-				Data: map[string]string{"message": "未识别的消息类型: " + msgType},
+				Data: map[string]string{"message": "未识别的消息类型: " + msg.Type},
 			})
 		}
 	}
