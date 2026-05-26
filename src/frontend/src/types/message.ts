@@ -1,3 +1,5 @@
+import type { MessageAttachment } from './attachment';
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export interface Message {
@@ -7,6 +9,7 @@ export interface Message {
   content: string;
   artifacts_json: string | null;
   created_at: string;
+  attachments?: MessageAttachment[];
 }
 
 export type OptimisticStatus = 'sending' | 'failed';
@@ -35,5 +38,6 @@ export interface StreamMessage {
     code?: string;
     message?: string;
     userId?: string;
+    attachments?: MessageAttachment[];
   };
 }

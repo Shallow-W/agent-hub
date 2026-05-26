@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { getUnreadMessages } from '@/api/message';
 import type { OptimisticMessage } from '@/types/message';
+import type { AttachmentPayload } from '@/types/attachment';
 
 export function useMessages(conversationId: string | null) {
   // 使用精确 selector 避免订阅整个 store map（防止无关更新触发重渲染）
@@ -66,9 +67,9 @@ export function useMessages(conversationId: string | null) {
   }, [conversationId, hasMore, loading, messages, fetchMessages]);
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, attachments?: AttachmentPayload[]) => {
       if (!conversationId) return;
-      await sendMessage(conversationId, content);
+      await sendMessage(conversationId, content, attachments);
     },
     [conversationId, sendMessage],
   );

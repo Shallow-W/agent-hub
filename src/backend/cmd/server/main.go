@@ -133,13 +133,6 @@ func main() {
 	router.Use(middleware.RequestLogger(logger))
 	router.Use(middleware.RateLimit(100, 200))
 
-	// 静态文件服务（上传的文件）
-	uploadDir := cfg.Upload.Dir
-	if uploadDir == "" {
-		uploadDir = "./uploads"
-	}
-	router.Static("/uploads", uploadDir)
-
 	// 健康检查（无需鉴权）
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
@@ -157,6 +150,13 @@ func main() {
 	apiGroup := router.Group("/api")
 		apiGroup.Use(authMiddleware)
 	{
+		// 静态文件服务（上传的文件，需要鉴权）
+		uploadDir := cfg.Upload.Dir
+		if uploadDir == "" {
+			uploadDir = "./uploads"
+		}
+		apiGroup.Static("/uploads", uploadDir)
+
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
 

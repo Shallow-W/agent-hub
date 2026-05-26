@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxUploadSize = 50 << 20 // 50MB，与后端 MaxPDFMB 一致
+
 // UploadHandler 文件上传处理器
 type UploadHandler struct {
 	uploadSvc *service.UploadService
@@ -20,6 +22,9 @@ func NewUploadHandler(uploadSvc *service.UploadService) *UploadHandler {
 
 // Upload 处理文件上传
 func (h *UploadHandler) Upload(c *gin.Context) {
+	// 在解析 multipart 前限制请求体大小
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40030, "缺少上传文件")

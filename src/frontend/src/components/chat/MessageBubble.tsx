@@ -3,6 +3,7 @@ import { Avatar, Typography, Spin, Button } from 'antd';
 import { UserOutlined, ReloadOutlined, CloseOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import type { OptimisticStatus } from '@/types/message';
+import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
 
 const { Text } = Typography;
@@ -24,7 +25,6 @@ function renderMarkdown(text: string): string {
     codeBlocks.push(
       `<pre class="${styles.codeBlock}"><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`,
     );
-    // Wrap in a div if a language label is present
     if (lang) {
       codeBlocks[idx] =
         `<div class="${styles.codeBlockWrapper}"><div class="${styles.codeHeader}"><span>${escapeHtml(lang)}</span></div>${codeBlocks[idx]}</div>`;
@@ -50,7 +50,6 @@ function renderMarkdown(text: string): string {
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, href) => {
-    // 只允许 http/https/mailto 协议，防止 javascript: XSS
     const safeHref = /^https?:\/\//i.test(href) || /^mailto:/i.test(href) ? href : '#';
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   });
@@ -150,7 +149,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   : styles.innerAssistant
           }`}
         >
-          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
+          {message.attachments && message.attachments.length > 0 && (
+            <MessageAttachmentView attachments={message.attachments} />
+          )}
+          {message.content && (
+            <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
+          )}
           {streaming && <span className={styles.streamingCursor} />}
           {isOptimisticSending && (
             <Spin size="small" style={{ marginLeft: 8 }} />

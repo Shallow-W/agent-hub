@@ -1,11 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Input, Button, Tooltip, Spin } from 'antd';
+import { Input, Button, Tooltip, Spin, message } from 'antd';
 import { SendOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
+import { uploadFile } from '@/api/upload';
+import type { AttachmentPayload } from '@/types/attachment';
+import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
 import styles from './ChatInput.module.css';
 
 const { TextArea } = Input;
+
+const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 interface ChatInputProps {
   conversationId: string;
@@ -13,9 +19,11 @@ interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const [value, setValue] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -24,7 +32,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
 
   const sendTypingStart = useCallback(() => {
     const now = Date.now();
-    // Debounce: don't send more than once per 300ms
     if (now - lastTypingSentRef.current < 300) return;
     lastTypingSentRef.current = now;
     wsClient?.send(JSON.stringify({
@@ -43,7 +50,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     isTypingRef.current = false;
   }, [wsClient, conversationId]);
 
-  // Cleanup on unmount or conversation change
   useEffect(() => {
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -55,23 +61,64 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
     sendTypingStart();
-
-    // Reset stop timer: send typing_stop after 2s of inactivity
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
       sendTypingStop();
     }, 2000);
   }, [sendTypingStart, sendTypingStop]);
 
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newItems: PendingAttachment[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!;
+      if (f.size > MAX_FILE_SIZE) {
+        message.error(`${f.name} 超过 50MB 限制`);
+        continue;
+      }
+      newItems.push({ uid: `${Date.now()}_${i}`, file: f, status: 'uploading' });
+    }
+    setPendingFiles((prev) => [...prev, ...newItems]);
+
+    // Upload each file
+    newItems.forEach(async (item) => {
+      try {
+        const payload = await uploadFile(item.file);
+        setPendingFiles((prev) =>
+          prev.map((p) => (p.uid === item.uid ? { ...p, status: 'done', payload } : p)),
+        );
+      } catch {
+        setPendingFiles((prev) =>
+          prev.map((p) => (p.uid === item.uid ? { ...p, status: 'error', error: '上传失败' } : p)),
+        );
+      }
+    });
+
+    // Reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleRemoveFile = useCallback((uid: string) => {
+    setPendingFiles((prev) => prev.filter((p) => p.uid !== uid));
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed || isStreaming) return;
+    const attachments: AttachmentPayload[] = pendingFiles
+      .filter((p) => p.status === 'done' && p.payload)
+      .map((p) => p.payload!);
+
+    if (!trimmed && !attachments.length) return;
+    if (isStreaming) return;
+
     setValue('');
-    // Stop typing indicator on send
+    setPendingFiles([]);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
-    await send(trimmed);
-  }, [value, isStreaming, send, sendTypingStop]);
+    await send(trimmed, attachments.length ? attachments : undefined);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -84,6 +131,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   );
 
   const charCount = value.length;
+  const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
   return (
     <div className={styles.container}>
@@ -93,6 +141,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           <span>Agent 正在输入</span>
         </div>
       )}
+      <AttachmentPreview items={pendingFiles} onRemove={handleRemoveFile} />
       <div className={styles.inputRow}>
         <TextArea
           value={value}
@@ -107,14 +156,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           shape="default"
           icon={<SendOutlined />}
           onClick={handleSubmit}
-          disabled={!value.trim() || isStreaming}
+          disabled={!canSend}
           style={{ flexShrink: 0, height: 44, width: 44 }}
         />
       </div>
       <div className={styles.toolbar}>
         <Tooltip title="附件">
-          <Button type="text" icon={<PaperClipOutlined />} size="small" />
+          <Button
+            type="text"
+            icon={<PaperClipOutlined />}
+            size="small"
+            onClick={() => fileInputRef.current?.click()}
+          />
         </Tooltip>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_TYPES}
+          multiple
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
         <span
           className={`${styles.charCount} ${charCount > 0 ? styles.charCountVisible : ''}`}
         >

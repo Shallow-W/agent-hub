@@ -1,0 +1,75 @@
+.container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* ── Image ── */
+
+.imageLink {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 200px;
+  max-height: 200px;
+}
+
+.imageThumb {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.imageThumb:hover {
+  opacity: 0.85;
+}
+
+/* ── PDF ── */
+
+.pdfCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.15s ease;
+  max-width: 280px;
+}
+
+.pdfCard:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.pdfIcon {
+  font-size: 28px;
+  color: #cf1322;
+  flex-shrink: 0;
+}
+
+.pdfInfo {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pdfName {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pdfSize {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}

@@ -2,16 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/disintegration/imaging"
 
@@ -19,17 +20,25 @@ import (
 )
 
 const (
-	maxImageSize = 20 << 20 // 20MB
-	maxPDFSize   = 50 << 20 // 50MB
-	thumbMaxW    = 200
-	thumbMaxH    = 200
+	thumbMaxW = 200
+	thumbMaxH = 200
 )
 
-var allowedImageTypes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/gif":  true,
-	"image/webp": true,
+var allowedMIMETypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+	"application/pdf": true,
+}
+
+var allowedExtensions = map[string]bool{
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+	".gif":  true,
+	".webp": true,
+	".pdf":  true,
 }
 
 var (
@@ -81,26 +90,13 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, ErrUploadEmpty
 	}
 
-	mimeType := fileHeader.Header.Get("Content-Type")
-	if mimeType == "" {
-		// 从扩展名推断
-		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
-		mimeType = extToMime(ext)
-	}
+	// 文件名净化：只取 base name，防止路径穿越
+	safeName := filepath.Base(fileHeader.Filename)
 
-	isImage := allowedImageTypes[mimeType]
-	isPDF := mimeType == "application/pdf"
-	if !isImage && !isPDF {
+	// 扩展名白名单校验
+	ext := strings.ToLower(filepath.Ext(safeName))
+	if !allowedExtensions[ext] {
 		return nil, ErrUploadTypeInvalid
-	}
-
-	// 文件大小校验
-	maxSize := int64(s.cfg.MaxPDFMB) << 20
-	if isImage {
-		maxSize = int64(s.cfg.MaxImageMB) << 20
-	}
-	if fileHeader.Size > maxSize {
-		return nil, ErrUploadTooBig
 	}
 
 	// 确保目录存在
@@ -110,8 +106,11 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, fmt.Errorf("create originals dir: %w", err)
 	}
 
-	// 生成文件名
-	id, ext := generateFileID(fileHeader.Filename)
+	// 生成安全文件名（crypto/rand）
+	id, err := generateFileID()
+	if err != nil {
+		return nil, fmt.Errorf("generate file id: %w", err)
+	}
 	filePath := filepath.Join("originals", id+ext)
 	fullPath := filepath.Join(s.cfg.Dir, filePath)
 
@@ -129,20 +128,39 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
+		os.Remove(fullPath) // 写入失败时清理
 		return nil, fmt.Errorf("save file: %w", err)
+	}
+	dst.Close()
+
+	// 用实际文件内容检测 MIME 类型（不信任客户端）
+	mimeType, err := detectMIME(fullPath)
+	if err != nil || !allowedMIMETypes[mimeType] {
+		os.Remove(fullPath)
+		return nil, ErrUploadTypeInvalid
+	}
+
+	// 文件大小校验
+	maxSize := int64(s.cfg.MaxPDFMB) << 20
+	if isImageMIME(mimeType) {
+		maxSize = int64(s.cfg.MaxImageMB) << 20
+	}
+	if fileHeader.Size > maxSize {
+		os.Remove(fullPath)
+		return nil, ErrUploadTooBig
 	}
 
 	result := &UploadResult{
-		FileName: fileHeader.Filename,
+		FileName: safeName,
 		MimeType: mimeType,
 		FileSize: fileHeader.Size,
 		FilePath: filePath,
 	}
 
 	// 图片缩略图
-	if isImage {
-		thumbPath, w, h, err := s.generateImageThumbnail(fullPath, id, thumbDir)
-		if err == nil {
+	if isImageMIME(mimeType) {
+		thumbPath, w, h, thumbErr := s.generateImageThumbnail(fullPath, id, thumbDir)
+		if thumbErr == nil {
 			result.ThumbnailPath = thumbPath
 			result.Width = w
 			result.Height = h
@@ -190,30 +208,32 @@ func (r *UploadResult) ToMessageAttachment() model.MessageAttachment {
 	}
 }
 
-// generateFileID 生成唯一文件名
-var fileIDCounter uint64
-
-func generateFileID(filename string) (string, string) {
-	ext := strings.ToLower(filepath.Ext(filename))
-	n := atomic.AddUint64(&fileIDCounter, 1)
-	return fmt.Sprintf("%d_%d", time.Now().UnixMilli(), n), ext
+// generateFileID 用 crypto/rand 生成唯一文件名
+func generateFileID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
-func extToMime(ext string) string {
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".png":
-		return "image/png"
-	case ".gif":
-		return "image/gif"
-	case ".webp":
-		return "image/webp"
-	case ".pdf":
-		return "application/pdf"
-	default:
-		return ""
+// detectMIME 读取文件头部检测实际 MIME 类型
+func detectMIME(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
 	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return http.DetectContentType(buf[:n]), nil
+}
+
+func isImageMIME(mime string) bool {
+	return strings.HasPrefix(mime, "image/")
 }
 
 // ImageDimensions 从图片读取宽高（用于已上传但未生成缩略图的场景）

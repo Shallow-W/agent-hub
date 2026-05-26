@@ -1,14 +1,17 @@
 import { get, post } from './client';
 import type { Message, MessageRole } from '@/types/message';
+import type { AttachmentPayload } from '@/types/attachment';
 
 export async function sendMessage(
   conversationId: string,
   content: string,
   role: MessageRole,
+  attachments?: AttachmentPayload[],
 ): Promise<Message> {
   return post<Message>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
+    attachments: attachments ?? [],
   });
 }
 

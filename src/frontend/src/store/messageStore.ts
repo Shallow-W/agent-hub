@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Message } from '@/types/message';
 import type { OptimisticMessage } from '@/types/message';
+import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
 
 interface MessageState {
@@ -19,7 +20,7 @@ interface MessageState {
   readConversations: Record<string, boolean>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, attachments?: AttachmentPayload[]) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
     conversationId: string,
@@ -79,7 +80,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content) => {
+  sendMessage: async (conversationId, content, attachments?) => {
     const tempId = generateTempId();
     const optimistic: OptimisticMessage = {
       id: tempId,
@@ -104,7 +105,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, content, 'user');
+      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments);
       get().addMessage(conversationId, msg);
       // Remove optimistic message on success
       set((state) => {
