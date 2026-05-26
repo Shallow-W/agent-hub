@@ -17,13 +17,19 @@ import (
 type WebSocketHandler struct {
 	authSvc        *service.AuthService
 	hub            *ws.Hub
+	memberChecker  MemberChecker
 	logger         *slog.Logger
 	allowedOrigins []string
 }
 
+// MemberChecker 校验用户是否为会话成员
+type MemberChecker interface {
+	IsConversationMember(ctx context.Context, conversationID, userID string) (bool, error)
+}
+
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
-	return &WebSocketHandler{authSvc: authSvc, hub: hub, logger: logger, allowedOrigins: allowedOrigins}
+func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, mc MemberChecker, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
+	return &WebSocketHandler{authSvc: authSvc, hub: hub, memberChecker: mc, logger: logger, allowedOrigins: allowedOrigins}
 }
 
 // Handle 处理 WebSocket 升级请求
@@ -99,6 +105,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 				_ = json.Unmarshal(raw, &payload)
 			}
 			if payload.ConversationID != "" {
+				if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
+					h.hub.SendToUser(client.UserID, ws.WSMessage{
+						Type: ws.TypeError,
+						Data: map[string]string{"message": "无权加入该会话"},
+					})
+					continue
+				}
 				h.hub.JoinRoom(payload.ConversationID, client)
 			}
 		case "leave_room":
@@ -120,6 +133,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 				_ = json.Unmarshal(raw, &payload)
 			}
 			if payload.ConversationID != "" {
+				if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
+					h.hub.SendToUser(client.UserID, ws.WSMessage{
+						Type: ws.TypeError,
+						Data: map[string]string{"message": "无权向该会话发送消息"},
+					})
+					continue
+				}
 				h.hub.SendToRoom(payload.ConversationID, ws.WSMessage{
 					Type: ws.TypeMessageComplete,
 					Data: msg.Data,

@@ -132,6 +132,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addMessage: (conversationId, message) => {
     set((state) => {
       const existing = state.messages[conversationId] ?? [];
+      // 按 ID 去重，防止乐观消息与服务端推送重复
+      if (existing.some((m) => m.id === message.id)) {
+        return state;
+      }
       return {
         messages: {
           ...state.messages,
@@ -156,6 +160,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   completeStreaming: (conversationId, _messageId, fullMessage) => {
     set((state) => {
       const existing = state.messages[conversationId] ?? [];
+      // 按 ID 去重
+      if (existing.some((m) => m.id === fullMessage.id)) {
+        const next = { ...state.streamingContent };
+        delete next[conversationId];
+        return { streamingContent: next };
+      }
       const next = { ...state.streamingContent };
       delete next[conversationId];
       return {

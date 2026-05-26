@@ -38,6 +38,11 @@ func NewGroupService(repo GroupRepo) *GroupService {
 	return &GroupService{repo: repo}
 }
 
+// IsConversationMember 校验用户是否为会话成员（实现 MemberChecker 接口）
+func (s *GroupService) IsConversationMember(ctx context.Context, conversationID, userID string) (bool, error) {
+	return s.repo.IsMember(ctx, conversationID, userID)
+}
+
 // CreateGroup 创建群聊
 func (s *GroupService) CreateGroup(ctx context.Context, ownerID, name string, memberIDs []string) (*model.Conversation, error) {
 	if name == "" {

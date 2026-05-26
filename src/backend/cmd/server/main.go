@@ -88,7 +88,7 @@ func main() {
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
-	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger, cfg.CORS.AllowedOrigins)
+	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
