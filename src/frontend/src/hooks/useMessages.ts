@@ -1,19 +1,27 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
+import type { OptimisticMessage } from '@/types/message';
 
 export function useMessages(conversationId: string | null) {
   const allMessages = useMessageStore((s) => s.messages);
   const streamingContent = useMessageStore((s) => s.streamingContent);
   const hasMoreMap = useMessageStore((s) => s.hasMore);
   const loading = useMessageStore((s) => s.loading);
+  const optimisticMap = useMessageStore((s) => s.optimisticMessages);
   const fetchMessages = useMessageStore((s) => s.fetchMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
+  const retryOptimistic = useMessageStore((s) => s.retryOptimistic);
+  const removeOptimistic = useMessageStore((s) => s.removeOptimistic);
+  const markAllRead = useMessageStore((s) => s.markAllRead);
 
   const messages = conversationId ? (allMessages[conversationId] ?? []) : [];
   const streaming = conversationId
     ? (streamingContent[conversationId] ?? '')
     : '';
   const hasMore = conversationId ? (hasMoreMap[conversationId] !== false) : false;
+  const optimisticMessages: OptimisticMessage[] = conversationId
+    ? (optimisticMap[conversationId] ?? [])
+    : [];
 
   // 防止重复拉取
   const fetchedRef = useRef<Set<string>>(new Set());
@@ -24,6 +32,13 @@ export function useMessages(conversationId: string | null) {
     fetchedRef.current.add(conversationId);
     fetchMessages(conversationId);
   }, [conversationId, fetchMessages]);
+
+  // Mark all as read when entering a conversation
+  useEffect(() => {
+    if (conversationId) {
+      markAllRead(conversationId);
+    }
+  }, [conversationId, markAllRead]);
 
   const loadMore = useCallback(() => {
     if (!conversationId || !hasMore || loading) return;
@@ -41,6 +56,22 @@ export function useMessages(conversationId: string | null) {
     [conversationId, sendMessage],
   );
 
+  const retry = useCallback(
+    (tempId: string) => {
+      if (!conversationId) return;
+      retryOptimistic(conversationId, tempId);
+    },
+    [conversationId, retryOptimistic],
+  );
+
+  const removeOptimisticMsg = useCallback(
+    (tempId: string) => {
+      if (!conversationId) return;
+      removeOptimistic(conversationId, tempId);
+    },
+    [conversationId, removeOptimistic],
+  );
+
   return {
     messages,
     streamingContent: streaming,
@@ -48,5 +79,8 @@ export function useMessages(conversationId: string | null) {
     loadMore,
     send,
     hasMore,
+    optimisticMessages,
+    retry,
+    removeOptimistic: removeOptimisticMsg,
   };
 }

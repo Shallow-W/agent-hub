@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Button } from 'antd';
+import { Button, Alert } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
@@ -12,7 +12,8 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
-import { message } from 'antd';
+import { useMessageStore } from '@/store/messageStore';
+import { message as antMessage } from 'antd';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
@@ -23,6 +24,18 @@ const AppLayout: React.FC = () => {
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
 
+  // Update document.title with total unread count
+  const unreadCounts = useMessageStore((s) => s.unreadCounts);
+  const totalUnread = Object.values(unreadCounts).reduce((sum, c) => sum + c, 0);
+
+  useEffect(() => {
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) AgentHub`;
+    } else {
+      document.title = 'AgentHub';
+    }
+  }, [totalUnread]);
+
   const handleCreate = async () => {
     await create('single', `新对话`);
   };
@@ -30,11 +43,11 @@ const AppLayout: React.FC = () => {
   const handleGroupCreate = async (name: string, memberIds: string[]) => {
     try {
       await createGroup({ name, member_ids: memberIds });
-      message.success('群聊创建成功');
+      antMessage.success('群聊创建成功');
       setGroupModalOpen(false);
       await fetchConversations();
     } catch {
-      message.error('创建群聊失败');
+      antMessage.error('创建群聊失败');
     }
   };
 
@@ -96,6 +109,17 @@ const AppLayout: React.FC = () => {
 
   return (
     <div className={styles.container}>
+      {/* WebSocket disconnect alert */}
+      {status === 'disconnected' && (
+        <Alert
+          message="连接已断开，正在重连..."
+          type="warning"
+          showIcon
+          banner
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000 }}
+        />
+      )}
+
       {/* 左侧：设置面板 */}
       <div className={styles.settingsPanel}>
         <SettingsPanel

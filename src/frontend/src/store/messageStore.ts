@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Message } from '@/types/message';
+import type { OptimisticMessage } from '@/types/message';
 import * as msgApi from '@/api/message';
 
 interface MessageState {
@@ -10,6 +11,10 @@ interface MessageState {
   /** conversationId → 是否还有更早的消息可加载 */
   hasMore: Record<string, boolean>;
   loading: boolean;
+  /** conversationId → optimistic messages (pending send) */
+  optimisticMessages: Record<string, OptimisticMessage[]>;
+  /** conversationId → unread count */
+  unreadCounts: Record<string, number>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string) => Promise<void>;
@@ -24,15 +29,26 @@ interface MessageState {
     messageId: string,
     fullMessage: Message,
   ) => void;
+  retryOptimistic: (conversationId: string, tempId: string) => Promise<void>;
+  removeOptimistic: (conversationId: string, tempId: string) => void;
+  incrementUnread: (conversationId: string) => void;
+  markAllRead: (conversationId: string) => void;
 }
 
 const PAGE_SIZE = 50;
+
+let tempIdCounter = 0;
+function generateTempId(): string {
+  return `__temp_${Date.now()}_${++tempIdCounter}`;
+}
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
   streamingContent: {},
   hasMore: {},
   loading: false,
+  optimisticMessages: {},
+  unreadCounts: {},
 
   fetchMessages: async (conversationId, before) => {
     set({ loading: true });
@@ -60,8 +76,57 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: async (conversationId, content) => {
-    const msg = await msgApi.sendMessage(conversationId, content, 'user');
-    get().addMessage(conversationId, msg);
+    const tempId = generateTempId();
+    const optimistic: OptimisticMessage = {
+      id: tempId,
+      conversation_id: conversationId,
+      role: 'user',
+      content,
+      artifacts_json: null,
+      created_at: new Date().toISOString(),
+      optimistic: true,
+      optimisticStatus: 'sending',
+    };
+
+    // Add optimistic message immediately
+    set((state) => {
+      const existing = state.optimisticMessages[conversationId] ?? [];
+      return {
+        optimisticMessages: {
+          ...state.optimisticMessages,
+          [conversationId]: [...existing, optimistic],
+        },
+      };
+    });
+
+    try {
+      const msg = await msgApi.sendMessage(conversationId, content, 'user');
+      get().addMessage(conversationId, msg);
+      // Remove optimistic message on success
+      set((state) => {
+        const remaining = (state.optimisticMessages[conversationId] ?? [])
+          .filter((m) => m.id !== tempId);
+        return {
+          optimisticMessages: {
+            ...state.optimisticMessages,
+            [conversationId]: remaining,
+          },
+        };
+      });
+    } catch {
+      // Mark optimistic message as failed
+      set((state) => {
+        const updated = (state.optimisticMessages[conversationId] ?? []).map(
+          (m) => m.id === tempId ? { ...m, optimisticStatus: 'failed' as const } : m,
+        );
+        return {
+          optimisticMessages: {
+            ...state.optimisticMessages,
+            [conversationId]: updated,
+          },
+        };
+      });
+    }
   },
 
   addMessage: (conversationId, message) => {
@@ -101,5 +166,88 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         streamingContent: next,
       };
     });
+  },
+
+  retryOptimistic: async (conversationId, tempId) => {
+    const state = get();
+    const optMsg = (state.optimisticMessages[conversationId] ?? [])
+      .find((m) => m.id === tempId);
+    if (!optMsg) return;
+
+    // Mark as sending again
+    set((s) => {
+      const updated = (s.optimisticMessages[conversationId] ?? []).map(
+        (m) => m.id === tempId ? { ...m, optimisticStatus: 'sending' as const } : m,
+      );
+      return {
+        optimisticMessages: {
+          ...s.optimisticMessages,
+          [conversationId]: updated,
+        },
+      };
+    });
+
+    try {
+      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user');
+      get().addMessage(conversationId, msg);
+      // Remove on success
+      set((s) => {
+        const remaining = (s.optimisticMessages[conversationId] ?? [])
+          .filter((m) => m.id !== tempId);
+        return {
+          optimisticMessages: {
+            ...s.optimisticMessages,
+            [conversationId]: remaining,
+          },
+        };
+      });
+    } catch {
+      // Mark as failed again
+      set((s) => {
+        const updated = (s.optimisticMessages[conversationId] ?? []).map(
+          (m) => m.id === tempId ? { ...m, optimisticStatus: 'failed' as const } : m,
+        );
+        return {
+          optimisticMessages: {
+            ...s.optimisticMessages,
+            [conversationId]: updated,
+          },
+        };
+      });
+    }
+  },
+
+  removeOptimistic: (conversationId, tempId) => {
+    set((state) => {
+      const remaining = (state.optimisticMessages[conversationId] ?? [])
+        .filter((m) => m.id !== tempId);
+      return {
+        optimisticMessages: {
+          ...state.optimisticMessages,
+          [conversationId]: remaining,
+        },
+      };
+    });
+  },
+
+  incrementUnread: (conversationId) => {
+    set((state) => {
+      const current = state.unreadCounts[conversationId] ?? 0;
+      return {
+        unreadCounts: {
+          ...state.unreadCounts,
+          [conversationId]: current + 1,
+        },
+      };
+    });
+  },
+
+  markAllRead: (conversationId) => {
+    set((state) => ({
+      unreadCounts: {
+        ...state.unreadCounts,
+        [conversationId]: 0,
+      },
+    }));
   },
 }));

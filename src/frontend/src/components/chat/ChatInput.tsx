@@ -19,12 +19,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     const trimmed = value.trim();
     if (!trimmed || isStreaming) return;
     setValue('');
-    try {
-      await send(trimmed);
-    } catch {
-      // 发送失败时恢复输入内容
-      setValue(trimmed);
-    }
+    await send(trimmed);
   }, [value, isStreaming, send]);
 
   const handleKeyDown = useCallback(

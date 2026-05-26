@@ -25,10 +25,14 @@ export class ApiError extends Error {
   }
 }
 
+const MAX_RETRY = 1;
+const RETRY_DELAY_MS = 1000;
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  retryCount = 0,
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -48,6 +52,11 @@ async function request<T>(
   const json: ApiResponse<T> = await res.json();
 
   if (!res.ok || json.code !== 0) {
+    // Retry once on 5xx errors
+    if (res.status >= 500 && retryCount < MAX_RETRY) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      return request<T>(method, path, body, retryCount + 1);
+    }
     throw new ApiError(res.status, json.code, json.message);
   }
 

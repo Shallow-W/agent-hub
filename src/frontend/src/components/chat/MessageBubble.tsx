@@ -1,7 +1,8 @@
 import React from 'react';
-import { Avatar, Typography } from 'antd';
-import { UserOutlined } from '@ant-design/icons';
+import { Avatar, Typography, Spin, Button } from 'antd';
+import { UserOutlined, ReloadOutlined, CloseOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
+import type { OptimisticStatus } from '@/types/message';
 import styles from './MessageBubble.module.css';
 
 const { Paragraph, Text } = Typography;
@@ -11,6 +12,9 @@ interface MessageBubbleProps {
   streaming?: boolean;
   showAvatar?: boolean;
   isGrouped?: boolean;
+  optimisticStatus?: OptimisticStatus;
+  onRetry?: () => void;
+  onRemove?: () => void;
 }
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
@@ -73,9 +77,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   streaming = false,
   showAvatar = true,
   isGrouped = false,
+  optimisticStatus,
+  onRetry,
+  onRemove,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const isOptimisticSending = optimisticStatus === 'sending';
+  const isOptimisticFailed = optimisticStatus === 'failed';
 
   if (isSystem) {
     return (
@@ -108,11 +117,42 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
         <div
-          className={`${styles.inner} ${isUser ? styles.innerUser : styles.innerAssistant}`}
+          className={`${styles.inner} ${
+            isOptimisticFailed
+              ? styles.innerFailed
+              : isOptimisticSending
+                ? styles.innerSending
+                : isUser
+                  ? styles.innerUser
+                  : styles.innerAssistant
+          }`}
         >
           {renderContent(message.content)}
           {streaming && <span className={styles.streamingCursor} />}
+          {isOptimisticSending && (
+            <Spin size="small" style={{ marginLeft: 8 }} />
+          )}
         </div>
+        {isOptimisticFailed && (
+          <div className={styles.failedActions}>
+            <Button
+              type="link"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={onRetry}
+              style={{ color: '#ff4d4f', padding: 0, height: 'auto', fontSize: 12 }}
+            >
+              重试
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<CloseOutlined />}
+              onClick={onRemove}
+              style={{ color: '#999', padding: 0, height: 'auto', fontSize: 12 }}
+            />
+          </div>
+        )}
         {showAvatar && (
           <div
             className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}

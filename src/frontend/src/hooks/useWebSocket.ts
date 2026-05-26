@@ -1,8 +1,31 @@
 import { useEffect, useCallback } from 'react';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
+import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import type { StreamMessage } from '@/types/message';
+
+let audioCtx: AudioContext | null = null;
+
+function playNotificationBeep() {
+  try {
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+    }
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.value = 0.15;
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+    osc.stop(audioCtx.currentTime + 0.15);
+  } catch {
+    // AudioContext may not be available
+  }
+}
 
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
@@ -13,6 +36,7 @@ export function useWebSocket() {
   const wsClient = useWsStore((s) => s.wsClient);
   const updateStreaming = useMessageStore((s) => s.updateStreaming);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
+  const incrementUnread = useMessageStore((s) => s.incrementUnread);
 
   useEffect(() => {
     if (!isAuthenticated || !token) return;
@@ -25,6 +49,8 @@ export function useWebSocket() {
       const { conversationId, messageId, content } = msg.data;
 
       if (!conversationId) return;
+
+      const activeId = useConversationStore.getState().activeConversationId;
 
       switch (msg.type) {
         case 'message.streaming':
@@ -43,6 +69,11 @@ export function useWebSocket() {
               artifacts_json: null,
               created_at: new Date().toISOString(),
             });
+          }
+          // If this conversation is not currently active, increment unread and notify
+          if (conversationId !== activeId) {
+            incrementUnread(conversationId);
+            playNotificationBeep();
           }
           break;
         case 'error':

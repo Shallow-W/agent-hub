@@ -19,6 +19,7 @@ interface ConversationItemProps {
   onTogglePin: () => void;
   lastMessage?: string;
   unreadCount?: number;
+  online?: boolean;
 }
 
 const AVATAR_COLORS: readonly string[] = [
@@ -71,6 +72,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onTogglePin,
   lastMessage,
   unreadCount = 0,
+  online = false,
 }) => {
   const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
   const avatarColor = getAvatarColor(conversation.title || '?');
@@ -121,13 +123,20 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       }}
     >
       <Badge dot={conversation.pinned} color="#1677ff" offset={[-4, 30]}>
-        <Avatar
-          style={{ backgroundColor: avatarColor, flexShrink: 0 }}
-          size={36}
-          icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
-        >
-          {!isGroup ? firstChar : undefined}
-        </Avatar>
+        <div className={styles.avatarWrapper}>
+          <Avatar
+            style={{ backgroundColor: avatarColor, flexShrink: 0 }}
+            size={36}
+            icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
+          >
+            {!isGroup ? firstChar : undefined}
+          </Avatar>
+          {!isGroup && (
+            <span
+              className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
+            />
+          )}
+        </div>
       </Badge>
 
       <div className={styles.content}>

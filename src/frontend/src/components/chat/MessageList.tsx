@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Empty, Spin } from 'antd';
+import { Empty, Spin, Skeleton } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
@@ -17,8 +17,16 @@ function isGrouped(prev: Message, curr: Message): boolean {
 }
 
 export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
-  const { messages, streamingContent, loading, loadMore, hasMore } =
-    useMessages(conversationId);
+  const {
+    messages,
+    streamingContent,
+    loading,
+    loadMore,
+    hasMore,
+    optimisticMessages,
+    retry,
+    removeOptimistic: removeOpt,
+  } = useMessages(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -29,9 +37,37 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
     if (nearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, optimisticMessages]);
 
-  const isEmpty = messages.length === 0 && !streamingContent;
+  // Skeleton loading state
+  if (loading && messages.length === 0) {
+    return (
+      <div className={styles.container}>
+        <div style={{ padding: '16px 20px' }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 10,
+                marginBottom: 16,
+                flexDirection: i % 2 === 0 ? 'row' : 'row-reverse',
+              }}
+            >
+              <Skeleton.Avatar active size={32} />
+              <Skeleton
+                active
+                paragraph={{ rows: 1, width: i % 2 === 0 ? '60%' : '45%' }}
+                title={false}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const isEmpty = messages.length === 0 && !streamingContent && optimisticMessages.length === 0;
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -71,6 +107,17 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
               />
             );
           })}
+          {/* Optimistic messages */}
+          {optimisticMessages.map((optMsg) => (
+            <MessageBubble
+              key={optMsg.id}
+              message={optMsg}
+              showAvatar
+              optimisticStatus={optMsg.optimisticStatus}
+              onRetry={optMsg.optimisticStatus === 'failed' ? () => retry(optMsg.id) : undefined}
+              onRemove={optMsg.optimisticStatus === 'failed' ? () => removeOpt(optMsg.id) : undefined}
+            />
+          ))}
           {streamingContent && (
             <MessageBubble
               message={{

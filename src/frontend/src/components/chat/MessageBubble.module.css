@@ -168,3 +168,29 @@
     box-shadow: 0 0 2px rgba(22, 119, 255, 0.15);
   }
 }
+
+/* ── Optimistic message states ── */
+
+.innerSending {
+  background-color: #e6e6e6;
+  color: var(--color-text-secondary);
+  max-width: 100%;
+  opacity: 0.7;
+  display: flex;
+  align-items: center;
+}
+
+.innerFailed {
+  background-color: #fff2f0;
+  color: var(--color-danger);
+  max-width: 100%;
+  border: 1px solid #ffccc7;
+}
+
+.failedActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  justify-content: flex-end;
+}

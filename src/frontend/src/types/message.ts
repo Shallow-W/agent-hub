@@ -9,6 +9,15 @@ export interface Message {
   created_at: string;
 }
 
+export type OptimisticStatus = 'sending' | 'failed';
+
+export interface OptimisticMessage extends Message {
+  optimistic: true;
+  optimisticStatus: OptimisticStatus;
+}
+
+export type DisplayMessage = Message | OptimisticMessage;
+
 export interface StreamMessage {
   type: 'message.streaming' | 'message.complete' | 'agent.status' | 'error';
   data: {

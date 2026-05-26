@@ -140,6 +140,7 @@ func main() {
 	groupRoutes.Use(authMiddleware)
 	{
 		groupRoutes.POST("", groupHandler.CreateGroup)
+		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)
 		groupRoutes.POST("/:id/members", groupHandler.AddMember)
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
@@ -216,8 +217,9 @@ func initDatabase(cfg *Config, logger *slog.Logger) (*sqlx.DB, error) {
 	}
 
 	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	// 自动运行迁移
 	if err := runMigrations(db, logger); err != nil {

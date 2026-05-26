@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input, Spin, Empty } from 'antd';
+import { Input, Skeleton, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useMessageStore } from '@/store/messageStore';
 import { ConversationItem } from './ConversationItem';
@@ -32,9 +32,18 @@ export const ConversationList: React.FC = () => {
   if (loading && conversations.length === 0) {
     return (
       <div className={styles.list}>
-        <div className={styles.loading}>
-          <Spin size="small" />
-          <span>加载中...</span>
+        <div className={styles.searchWrapper}>
+          <Skeleton.Input active block style={{ height: 34 }} />
+        </div>
+        <div style={{ padding: '8px 12px' }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 0', alignItems: 'center' }}>
+              <Skeleton.Avatar active size={36} />
+              <div style={{ flex: 1 }}>
+                <Skeleton active paragraph={{ rows: 1, width: '60%' }} title={false} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -86,7 +95,7 @@ export const ConversationList: React.FC = () => {
   );
 };
 
-/** Wrapper that reads last message from message store */
+/** Wrapper that reads last message and unread count from message store */
 const ConversationItemWrapper: React.FC<{
   conversation: Parameters<typeof ConversationItem>[0]['conversation'];
   active: boolean;
@@ -96,6 +105,9 @@ const ConversationItemWrapper: React.FC<{
 }> = ({ conversation, active, onSelect, onDelete, onTogglePin }) => {
   const messages = useMessageStore(
     (s) => s.messages[conversation.id] ?? [],
+  );
+  const unreadCount = useMessageStore(
+    (s) => s.unreadCounts[conversation.id] ?? 0,
   );
 
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
@@ -109,6 +121,7 @@ const ConversationItemWrapper: React.FC<{
       onDelete={onDelete}
       onTogglePin={onTogglePin}
       lastMessage={lastMessage}
+      unreadCount={unreadCount}
     />
   );
 };
