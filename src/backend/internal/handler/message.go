@@ -106,7 +106,12 @@ func (h *MessageHandler) History(c *gin.Context) {
 		before = t
 	}
 
-	messages, err := h.svc.GetHistory(c.Request.Context(), convID, userID, before, limit)
+	var beforeArg interface{}
+	if !before.IsZero() {
+		beforeArg = before
+	}
+
+	messages, err := h.svc.GetHistory(c.Request.Context(), convID, userID, beforeArg, limit)
 	if err != nil {
 		if errors.Is(err, service.ErrMsgConvNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40421, err.Error())
@@ -117,6 +122,30 @@ func (h *MessageHandler) History(c *gin.Context) {
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50021, "查询消息历史失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, messages)
+}
+
+// Unread 获取离线/未读消息
+func (h *MessageHandler) Unread(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40025, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+
+	messages, err := h.svc.GetUnreadMessages(c.Request.Context(), convID, userID, limit)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40423, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50023, "获取未读消息失败")
 		return
 	}
 

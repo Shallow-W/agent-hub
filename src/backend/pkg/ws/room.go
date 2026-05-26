@@ -11,3 +11,10 @@ type roomMessage struct {
 	ConversationID string
 	Message        WSMessage
 }
+
+// persistedMsgPayload 持久化消息推送载体
+type persistedMsgPayload struct {
+	ConversationID string
+	MemberIDs      []string
+	Message        interface{}
+}

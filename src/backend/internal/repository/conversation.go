@@ -153,3 +153,16 @@ func (r *ConversationRepo) DeleteMember(ctx context.Context, conversationID, use
 	}
 	return nil
 }
+
+// ListMemberIDs 返回会话所有成员 ID
+func (r *ConversationRepo) ListMemberIDs(ctx context.Context, conversationID string) ([]string, error) {
+	var ids []string
+	err := r.db.SelectContext(ctx, &ids,
+		`SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
+		conversationID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list member ids: %w", err)
+	}
+	return ids, nil
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ type WebSocketHandler struct {
 	authSvc        *service.AuthService
 	hub            *ws.Hub
 	memberChecker  MemberChecker
+	msgSender      WSMessagSender
 	logger         *slog.Logger
 	allowedOrigins []string
 }
@@ -27,9 +29,14 @@ type MemberChecker interface {
 	IsConversationMember(ctx context.Context, conversationID, userID string) (bool, error)
 }
 
+// WSMessagSender WS 消息持久化接口
+type WSMessagSender interface {
+	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string) (*model.Message, error)
+}
+
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, mc MemberChecker, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
-	return &WebSocketHandler{authSvc: authSvc, hub: hub, memberChecker: mc, logger: logger, allowedOrigins: allowedOrigins}
+func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, mc MemberChecker, ms WSMessagSender, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
+	return &WebSocketHandler{authSvc: authSvc, hub: hub, memberChecker: mc, msgSender: ms, logger: logger, allowedOrigins: allowedOrigins}
 }
 
 // Handle 处理 WebSocket 升级请求
@@ -132,18 +139,19 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			if raw, err := json.Marshal(msg.Data); err == nil {
 				_ = json.Unmarshal(raw, &payload)
 			}
-			if payload.ConversationID != "" {
-				if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
-					h.hub.SendToUser(client.UserID, ws.WSMessage{
-						Type: ws.TypeError,
-						Data: map[string]string{"message": "无权向该会话发送消息"},
-					})
-					continue
-				}
-				h.hub.SendToRoom(payload.ConversationID, ws.WSMessage{
-					Type: ws.TypeMessageComplete,
-					Data: msg.Data,
+			if payload.ConversationID == "" || payload.Content == "" {
+				continue
+			}
+			if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
+				h.hub.SendToUser(client.UserID, ws.WSMessage{
+					Type: ws.TypeError,
+					Data: map[string]string{"message": "无权向该会话发送消息"},
 				})
+				continue
+			}
+			// 通过 Service 持久化（内部触发 Hub 推送 + Redis 缓存）
+			if h.msgSender != nil {
+				_, _ = h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "")
 			}
 		case "typing_start":
 			var payload struct {

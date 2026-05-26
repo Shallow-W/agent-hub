@@ -22,8 +22,13 @@ export interface StreamMessage {
   type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'error';
   data: {
     conversationId?: string;
+    conversation_id?: string;
     messageId?: string;
+    id?: string;
     content?: string;
+    role?: MessageRole;
+    artifacts_json?: string | null;
+    created_at?: string;
     done?: boolean;
     agentId?: string;
     status?: 'thinking' | 'running' | 'idle';

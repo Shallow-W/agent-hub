@@ -67,25 +67,63 @@ func (r *MessageRepo) MarkConversationRead(ctx context.Context, conversationID, 
 }
 
 // ListByConversation 分页查询对话消息，支持 before 游标
-func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID string, before time.Time, limit int) ([]model.Message, error) {
+func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error) {
 	var list []model.Message
 
-	// before 为零值时不加游标条件
-	query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
-		FROM messages WHERE conversation_id = $1 AND created_at < $2
-		ORDER BY created_at DESC LIMIT $3`
-	args := []interface{}{conversationID, before, limit}
-
-	if before.IsZero() {
-		query = `SELECT id, conversation_id, role, content, artifacts_json, created_at
+	switch v := before.(type) {
+	case time.Time:
+		if v.IsZero() {
+			query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
+				FROM messages WHERE conversation_id = $1
+				ORDER BY created_at DESC LIMIT $2`
+			err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+			if err != nil {
+				return nil, fmt.Errorf("list messages: %w", err)
+			}
+			return list, nil
+		}
+		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
+			FROM messages WHERE conversation_id = $1 AND created_at < $2
+			ORDER BY created_at DESC LIMIT $3`
+		err := r.db.SelectContext(ctx, &list, query, conversationID, v, limit)
+		if err != nil {
+			return nil, fmt.Errorf("list messages: %w", err)
+		}
+	default:
+		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
 			FROM messages WHERE conversation_id = $1
 			ORDER BY created_at DESC LIMIT $2`
-		args = []interface{}{conversationID, limit}
+		err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+		if err != nil {
+			return nil, fmt.Errorf("list messages: %w", err)
+		}
 	}
 
-	err := r.db.SelectContext(ctx, &list, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list messages: %w", err)
+	return list, nil
+}
+
+// GetMessagesAfter 查询指定时间之后的消息（用于离线消息拉取）
+func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error) {
+	var list []model.Message
+
+	switch v := afterTime.(type) {
+	case time.Time:
+		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
+			FROM messages WHERE conversation_id = $1 AND created_at > $2
+			ORDER BY created_at ASC LIMIT $3`
+		err := r.db.SelectContext(ctx, &list, query, conversationID, v, limit)
+		if err != nil {
+			return nil, fmt.Errorf("get messages after: %w", err)
+		}
+	default:
+		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
+			FROM messages WHERE conversation_id = $1
+			ORDER BY created_at DESC LIMIT $2`
+		err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+		if err != nil {
+			return nil, fmt.Errorf("get messages after: %w", err)
+		}
 	}
+
 	return list, nil
 }

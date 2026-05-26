@@ -30,13 +30,14 @@ type BusMessage struct {
 type BusMessageType int
 
 const (
-	BusRegister   BusMessageType = iota // 注册连接
-	BusUnregister                       // 注销连接
-	BusBroadcast                        // 全局广播
-	BusRoomMsg                          // 房间消息
-	BusDirectMsg                        // 私聊消息
-	BusJoinRoom                         // 加入房间
-	BusLeaveRoom                        // 离开房间
+	BusRegister      BusMessageType = iota // 注册连接
+	BusUnregister                          // 注销连接
+	BusBroadcast                           // 全局广播
+	BusRoomMsg                             // 房间消息
+	BusDirectMsg                           // 私聊消息
+	BusJoinRoom                            // 加入房间
+	BusLeaveRoom                           // 离开房间
+	BusPersistedMsg                        // 持久化消息推送（DB 已写入，需推送给会话成员）
 )
 
 // WSMessage WebSocket 消息格式
@@ -196,6 +197,8 @@ func (h *Hub) dispatch(msg BusMessage) {
 		h.handleLeaveRoom(msg)
 	case BusRoomMsg:
 		h.handleRoomMsg(msg)
+	case BusPersistedMsg:
+		h.handlePersistedMsg(msg)
 	}
 }
 
@@ -308,6 +311,32 @@ func (h *Hub) handleRoomMsg(msg BusMessage) {
 		if err := c.Send(payload.Message); err != nil {
 			h.logger.Warn("send to room failed", "conversation_id", payload.ConversationID, "user_id", c.UserID, "error", err)
 		}
+	}
+}
+
+// handlePersistedMsg 处理持久化消息推送：向会话房间内在线成员推送
+func (h *Hub) handlePersistedMsg(msg BusMessage) {
+	payload := msg.Payload.(*persistedMsgPayload)
+	wsMsg := WSMessage{Type: TypeMessageComplete, Data: payload.Message}
+
+	// 推送给房间内在线成员
+	h.roomMu.RLock()
+	members := h.rooms[payload.ConversationID]
+	toSend := make([]*Client, 0, len(members))
+	for c := range members {
+		toSend = append(toSend, c)
+	}
+	h.roomMu.RUnlock()
+
+	for _, c := range toSend {
+		if err := c.Send(wsMsg); err != nil {
+			h.logger.Warn("push persisted msg failed", "conversation_id", payload.ConversationID, "user_id", c.UserID, "error", err)
+		}
+	}
+
+	// 给所有会话成员推送（含不在线但在用户列表里的）
+	for _, uid := range payload.MemberIDs {
+		h.SendToUser(uid, wsMsg)
 	}
 }
 
@@ -437,6 +466,19 @@ func (h *Hub) SendToRoom(conversationID string, msg WSMessage) {
 		Type:   BusRoomMsg,
 		Target: conversationID,
 		Payload: &roomMessage{ConversationID: conversationID, Message: msg},
+	}
+}
+
+// PushToConversation 推送持久化消息给会话所有成员（在线房间推送 + 按用户推送）
+func (h *Hub) PushToConversation(conversationID string, memberIDs []string, message interface{}) {
+	h.bus <- BusMessage{
+		Type:   BusPersistedMsg,
+		Target: conversationID,
+		Payload: &persistedMsgPayload{
+			ConversationID: conversationID,
+			MemberIDs:      memberIDs,
+			Message:        message,
+		},
 	}
 }
 

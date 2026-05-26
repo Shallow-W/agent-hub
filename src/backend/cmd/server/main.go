@@ -17,6 +17,7 @@ import (
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
+	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
@@ -46,6 +47,11 @@ type Config struct {
 	CORS struct {
 		AllowedOrigins []string `koanf:"allowed_origins"`
 	} `koanf:"cors"`
+	Redis struct {
+		Host     string `koanf:"host"`
+		Port     int    `koanf:"port"`
+		Password string `koanf:"password"`
+	} `koanf:"redis"`
 }
 
 func main() {
@@ -82,13 +88,28 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 
+	// Redis 初始化
+	rdb, err := pkgredis.NewClient(pkgredis.Config{
+		Host:     cfg.Redis.Host,
+		Port:     cfg.Redis.Port,
+		Password: cfg.Redis.Password,
+	})
+	if err != nil {
+		logger.Warn("redis init failed, running without cache", "error", err)
+	} else {
+		logger.Info("redis connected")
+		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
+		msgSvc.SetCacher(redisMsgRepo)
+	}
+
 	hub := ws.NewHub(logger)
+	msgSvc.SetNotifier(hub)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
-	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, logger, cfg.CORS.AllowedOrigins)
+	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -127,6 +148,7 @@ func main() {
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
+				convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
 		}
 	}
 

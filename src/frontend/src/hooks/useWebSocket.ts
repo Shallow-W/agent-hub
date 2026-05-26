@@ -51,6 +51,8 @@ export function useWebSocket() {
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
   const currentUserId = useAuthStore((s) => s.user?.id);
 
+  const addMessage = useMessageStore((s) => s.addMessage);
+
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
@@ -59,49 +61,64 @@ export function useWebSocket() {
 
     const handleMessage = (msg: StreamMessage) => {
       if (!msg.data) return;
-      const { conversationId, messageId, content } = msg.data;
+      const { conversationId, conversation_id, messageId, content } = msg.data;
+      const convId = conversationId ?? conversation_id;
 
-      if (!conversationId) return;
+      if (!convId) return;
 
       const activeId = useConversationStore.getState().activeConversationId;
 
       switch (msg.type) {
         case 'message.streaming':
           if (messageId && content) {
-            updateStreaming(conversationId, messageId, content);
+            updateStreaming(convId, messageId, content);
           }
           break;
-        case 'message.complete':
-          if (messageId && content) {
-            // 流式结束，用完整内容生成最终消息
-            completeStreaming(conversationId, messageId, {
+        case 'message.complete': {
+          const msgId = msg.data.id ?? messageId;
+          const msgContent = msg.data.content;
+          if (!msgId || !msgContent) break;
+
+          // Full message push from Hub (has id + conversation_id)
+          if (msg.data.id && msg.data.conversation_id) {
+            addMessage(convId, {
+              id: msg.data.id,
+              conversation_id: msg.data.conversation_id,
+              role: msg.data.role ?? 'assistant',
+              content: msgContent,
+              artifacts_json: msg.data.artifacts_json ?? null,
+              created_at: msg.data.created_at ?? new Date().toISOString(),
+            });
+          } else if (messageId && content) {
+            // Streaming completion
+            completeStreaming(convId, messageId, {
               id: messageId,
-              conversation_id: conversationId,
+              conversation_id: convId,
               role: 'assistant',
               content,
               artifacts_json: null,
               created_at: new Date().toISOString(),
             });
           }
-          // If this conversation is not currently active, increment unread and notify
-          if (conversationId !== activeId) {
-            incrementUnread(conversationId);
+          if (convId !== activeId) {
+            incrementUnread(convId);
             playNotificationBeep();
           }
           break;
+        }
         case 'user.typing_start': {
           const userId = msg.data.userId;
           if (userId && userId !== currentUserId) {
-            useWsStore.getState().addTypingUser(conversationId, userId);
-            scheduleTypingRemove(conversationId, userId);
+            useWsStore.getState().addTypingUser(convId, userId);
+            scheduleTypingRemove(convId, userId);
           }
           break;
         }
         case 'user.typing_stop': {
           const userId = msg.data.userId;
           if (userId) {
-            useWsStore.getState().removeTypingUser(conversationId, userId);
-            const timerKey = `${conversationId}:${userId}`;
+            useWsStore.getState().removeTypingUser(convId, userId);
+            const timerKey = `${convId}:${userId}`;
             if (typingTimers[timerKey]) {
               clearTimeout(typingTimers[timerKey]);
               delete typingTimers[timerKey];

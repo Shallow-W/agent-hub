@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
+import { getUnreadMessages } from '@/api/message';
 import type { OptimisticMessage } from '@/types/message';
 
 export function useMessages(conversationId: string | null) {
@@ -35,6 +36,25 @@ export function useMessages(conversationId: string | null) {
     if (fetchedRef.current.has(conversationId)) return;
     fetchedRef.current.add(conversationId);
     fetchMessages(conversationId);
+
+    // 拉取离线/未读消息并合并
+    getUnreadMessages(conversationId, 100).then((unread) => {
+      if (unread && unread.length > 0) {
+        const store = useMessageStore.getState();
+        const existing = store.messages[conversationId] ?? [];
+        const existingIds = new Set(existing.map((m) => m.id));
+        const newMsgs = unread.filter((m) => !existingIds.has(m.id));
+        if (newMsgs.length > 0) {
+          // 按时间排序合并
+          const merged = [...existing, ...newMsgs].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          );
+          useMessageStore.setState((s) => ({
+            messages: { ...s.messages, [conversationId]: merged },
+          }));
+        }
+      }
+    }).catch(() => {});
   }, [conversationId, fetchMessages]);
 
   const loadMore = useCallback(() => {
