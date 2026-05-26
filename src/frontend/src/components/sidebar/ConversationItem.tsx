@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Dropdown, Badge } from 'antd';
+import { Avatar, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   PushpinOutlined,
@@ -125,9 +125,11 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
     },
   ];
 
+  const pinnedClass = conversation.pinned ? ` ${styles.pinned}` : '';
+
   return (
     <div
-      className={`${styles.item} ${active ? styles.active : ''}`}
+      className={`${styles.item}${pinnedClass} ${active ? styles.active : ''}`}
       onClick={onSelect}
       role="button"
       tabIndex={0}
@@ -138,22 +140,29 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         }
       }}
     >
-      <Badge dot={conversation.pinned} color="#1677ff" offset={[-4, 30]}>
-        <div className={styles.avatarWrapper}>
-          <Avatar
-            style={{ backgroundColor: avatarColor, flexShrink: 0 }}
-            size={36}
-            icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
-          >
-            {!isGroup ? firstChar : undefined}
-          </Avatar>
-          {!isGroup && (
-            <span
-              className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
-            />
-          )}
-        </div>
-      </Badge>
+      <div className={styles.avatarWrapper}>
+        <Avatar
+          style={{
+            backgroundColor: isGroup ? '#722ed1' : avatarColor,
+            flexShrink: 0,
+            borderRadius: isGroup ? 10 : 50,
+          }}
+          size={40}
+          icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
+        >
+          {!isGroup ? firstChar : undefined}
+        </Avatar>
+        {!isGroup && (
+          <span
+            className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
+          />
+        )}
+        {unreadCount > 0 && (
+          <span className={styles.unreadBadge}>
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </div>
 
       <div className={styles.content}>
         <div className={styles.titleRow}>
@@ -164,11 +173,8 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         </div>
         <div className={styles.subtitleRow}>
           <span className={styles.subtitle}>
-            {lastMessage ? truncate(lastMessage, 20) : ''}
+            {lastMessage ? truncate(lastMessage, 24) : ''}
           </span>
-          {unreadCount > 0 && (
-            <Badge count={unreadCount} size="small" style={{ flexShrink: 0 }} />
-          )}
         </div>
       </div>
 

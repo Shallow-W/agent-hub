@@ -9,12 +9,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  background: linear-gradient(180deg, rgba(22, 119, 255, 0.06) 0%, transparent 100%);
 }
 
 .brandIcon {
   width: 34px;
   height: 34px;
-  background: linear-gradient(135deg, #1677ff, #4096ff);
+  background: var(--gradient-brand);
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -23,7 +24,7 @@
   font-weight: 700;
   font-size: 15px;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.25);
+  box-shadow: 0 3px 8px rgba(22, 119, 255, 0.3);
 }
 
 .brandName {
@@ -40,6 +41,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .profileName {
@@ -54,6 +56,7 @@
 .footer {
   padding: 14px 16px;
   border-top: 1px solid var(--color-border-light);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .themeRow {

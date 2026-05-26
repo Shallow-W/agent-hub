@@ -5,7 +5,10 @@
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: linear-gradient(180deg, var(--color-bg) 0%, #f5f6f8 100%);
+  background-color: var(--color-bg-chat);
+  background-image:
+    radial-gradient(circle, rgba(0, 0, 0, 0.015) 1px, transparent 1px);
+  background-size: 28px 28px;
   animation: fadeIn 0.4s ease;
 }
 

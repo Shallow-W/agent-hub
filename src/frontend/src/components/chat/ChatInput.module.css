@@ -1,6 +1,8 @@
 .container {
-  padding: 14px 24px 14px;
-  background-color: var(--color-bg-white);
+  padding: 12px 24px 16px;
+  background-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--color-border-light);
   position: relative;
   z-index: 1;
@@ -24,7 +26,15 @@
 
 .textarea {
   flex: 1;
-  border-radius: 14px !important;
+  border-radius: 16px !important;
+  border: 1.5px solid var(--color-border) !important;
+  background: var(--color-bg-white) !important;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
+}
+
+.textarea:focus-within {
+  border-color: var(--color-primary) !important;
+  box-shadow: var(--shadow-input-focus) !important;
 }
 
 .toolbar {
@@ -32,6 +42,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 4px 0;
+  position: relative;
 }
 
 .charCount {
