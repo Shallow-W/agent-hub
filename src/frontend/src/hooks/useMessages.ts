@@ -12,7 +12,6 @@ export function useMessages(conversationId: string | null) {
   const sendMessage = useMessageStore((s) => s.sendMessage);
   const retryOptimistic = useMessageStore((s) => s.retryOptimistic);
   const removeOptimistic = useMessageStore((s) => s.removeOptimistic);
-  const markAllRead = useMessageStore((s) => s.markAllRead);
 
   const messages = conversationId ? (allMessages[conversationId] ?? []) : [];
   const streaming = conversationId
@@ -32,13 +31,6 @@ export function useMessages(conversationId: string | null) {
     fetchedRef.current.add(conversationId);
     fetchMessages(conversationId);
   }, [conversationId, fetchMessages]);
-
-  // Mark all as read when entering a conversation
-  useEffect(() => {
-    if (conversationId) {
-      markAllRead(conversationId);
-    }
-  }, [conversationId, markAllRead]);
 
   const loadMore = useCallback(() => {
     if (!conversationId || !hasMore || loading) return;

@@ -15,8 +15,8 @@ interface MessageState {
   optimisticMessages: Record<string, OptimisticMessage[]>;
   /** conversationId → unread count */
   unreadCounts: Record<string, number>;
-  /** Set of conversationIds that the current user considers "read" */
-  readConversations: Set<string>;
+  /** Track which conversations the current user considers "read" */
+  readConversations: Record<string, boolean>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string) => Promise<void>;
@@ -52,7 +52,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   loading: false,
   optimisticMessages: {},
   unreadCounts: {},
-  readConversations: new Set<string>(),
+  readConversations: {},
 
   fetchMessages: async (conversationId, before) => {
     set({ loading: true });
@@ -258,19 +258,23 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   markAllRead: (conversationId) => {
     set((state) => {
-      const next = new Set(state.readConversations);
-      next.add(conversationId);
+      if (state.readConversations[conversationId] && state.unreadCounts[conversationId] === 0) {
+        return state; // 已经是已读状态，跳过更新
+      }
       return {
         unreadCounts: {
           ...state.unreadCounts,
           [conversationId]: 0,
         },
-        readConversations: next,
+        readConversations: {
+          ...state.readConversations,
+          [conversationId]: true,
+        },
       };
     });
   },
 
   isConversationRead: (conversationId) => {
-    return get().readConversations.has(conversationId);
+    return !!get().readConversations[conversationId];
   },
 }));
