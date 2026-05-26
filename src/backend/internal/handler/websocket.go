@@ -143,13 +143,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			if payload.ConversationID == "" || payload.Content == "" {
 				continue
 			}
-				if len(payload.Content) > 10000 {
-					h.hub.SendToUser(client.UserID, ws.WSMessage{
-						Type: ws.TypeError,
-						Data: map[string]string{"message": "消息内容过长"},
-					})
-					continue
-				}
+			if len(payload.Content) > 10000 {
+				h.hub.SendToUser(client.UserID, ws.WSMessage{
+					Type: ws.TypeError,
+					Data: map[string]string{"message": "消息内容过长"},
+				})
+				continue
+			}
 			if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
 				h.hub.SendToUser(client.UserID, ws.WSMessage{
 					Type: ws.TypeError,

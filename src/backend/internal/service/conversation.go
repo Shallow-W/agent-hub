@@ -81,7 +81,7 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, userID, co
 	return s.repo.DeleteMember(ctx, convID, userID)
 }
 
-// TogglePin 切换对话置顶状态
+// TogglePin 切换对话置顶状态（需要 owner/admin 权限）
 func (s *ConversationService) TogglePin(ctx context.Context, userID, convID string) error {
 	conv, err := s.repo.GetByID(ctx, convID)
 	if err != nil {
@@ -90,11 +90,16 @@ func (s *ConversationService) TogglePin(ctx context.Context, userID, convID stri
 	if conv == nil {
 		return ErrConvNotFound
 	}
+	// 私聊会话 owner 可操作
+	if conv.Type == "single" && conv.UserID == userID {
+		return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)
+	}
+	// 群聊需要 owner/admin 权限
 	member, err := s.repo.GetMember(ctx, convID, userID)
 	if err != nil {
 		return fmt.Errorf("get member: %w", err)
 	}
-	if member == nil {
+	if member == nil || (member.Role != "owner" && member.Role != "admin") {
 		return ErrConvNoPerm
 	}
 	return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)
@@ -125,7 +130,7 @@ func (s *ConversationService) RenameConversation(ctx context.Context, userID, co
 	return s.repo.UpdateTitle(ctx, conversationID, title)
 }
 
-// ArchiveConversation 归档会话（软删除）
+// ArchiveConversation 归档会话（软删除，需要 owner/admin 权限）
 func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, conversationID string) error {
 	conv, err := s.repo.GetByID(ctx, conversationID)
 	if err != nil {
@@ -134,12 +139,16 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	// 验证是成员（任何成员都可以归档自己的视图）
+	// 私聊会话 owner 可操作
+	if conv.Type == "single" && conv.UserID == userID {
+		return s.repo.Archive(ctx, conversationID)
+	}
+	// 群聊需要 owner/admin 权限
 	member, err := s.repo.GetMember(ctx, conversationID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
 	}
-	if member == nil {
+	if member == nil || (member.Role != "owner" && member.Role != "admin") {
 		return ErrConvNotMember
 	}
 	return s.repo.Archive(ctx, conversationID)

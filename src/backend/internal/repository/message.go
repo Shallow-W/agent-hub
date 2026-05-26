@@ -118,7 +118,7 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 	default:
 		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
 			FROM messages WHERE conversation_id = $1
-			ORDER BY created_at DESC LIMIT $2`
+			ORDER BY created_at ASC LIMIT $2`
 		err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
 		if err != nil {
 			return nil, fmt.Errorf("get messages after: %w", err)

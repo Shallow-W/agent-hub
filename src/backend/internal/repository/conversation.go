@@ -40,9 +40,10 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
 		 FROM conversations c
-		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = $1
-		 WHERE (c.user_id = $1 OR cm.user_id = $1)
-		   AND c.archived_at IS NULL
+		 WHERE c.archived_at IS NULL
+		   AND (c.user_id = $1
+		        OR EXISTS (SELECT 1 FROM conversation_members cm
+		                   WHERE cm.conversation_id = c.id AND cm.user_id = $1))
 		 ORDER BY c.updated_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
