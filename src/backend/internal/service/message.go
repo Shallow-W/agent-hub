@@ -132,6 +132,11 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 		memberIDs = []string{senderID}
 	}
 
+	// 刷新对话排序时间戳（失败不阻塞推送）
+	if err := s.convRepo.UpdateTimestamp(ctx, conversationID); err != nil {
+		slog.Warn("update conversation timestamp failed", "conversation_id", conversationID, "error", err)
+	}
+
 	// 推送给所有会话成员
 	if s.notifier != nil {
 		s.notifier.PushToConversation(conversationID, memberIDs, msg)

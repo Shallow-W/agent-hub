@@ -90,7 +90,11 @@ func (s *ConversationService) TogglePin(ctx context.Context, userID, convID stri
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	if conv.UserID != userID {
+	member, err := s.repo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return fmt.Errorf("get member: %w", err)
+	}
+	if member == nil {
 		return ErrConvNoPerm
 	}
 	return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)

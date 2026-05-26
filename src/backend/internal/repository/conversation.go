@@ -34,13 +34,16 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	return &c, nil
 }
 
-// ListByUserID 分页查询用户的对话列表，排除已归档，按 updated_at 降序
+// ListByUserID 分页查询用户的对话列表（包括作为成员的群聊），排除已归档，按 updated_at 降序
 func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
-		 FROM conversations WHERE user_id = $1 AND archived_at IS NULL
-		 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`,
+		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
+		 FROM conversations c
+		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = $1
+		 WHERE (c.user_id = $1 OR cm.user_id = $1)
+		   AND c.archived_at IS NULL
+		 ORDER BY c.updated_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
 	if err != nil {
