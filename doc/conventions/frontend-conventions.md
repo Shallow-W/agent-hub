@@ -59,6 +59,60 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ conversationId }) => {
 - 跨组件共享：通过 Context 或轻量状态库
 - 服务端状态（对话、消息）：通过 API 层获取和缓存
 
+### Zustand 陷阱与规范
+
+**1. Selector 禁止内联创建引用类型**
+
+```ts
+// ❌ 错误：每次渲染 selector 返回新数组引用 → 无限重渲染
+const msgs = useMessageStore((s) => s.messages[convId] ?? []);
+
+// ✅ 正确：使用模块级常量
+const EMPTY_MESSAGES: Message[] = [];
+const msgs = useMessageStore((s) => s.messages[convId] ?? EMPTY_MESSAGES);
+```
+
+原因：Zustand 用 `Object.is` 比较 selector 返回值。`?? []` 每次创建新数组，引用不同 → 触发重渲染 → selector 再次返回新数组 → 无限循环。
+
+**2. 使用精确 selector，避免订阅整个 store**
+
+```ts
+// ❌ 错误：任何消息更新都触发该组件重渲染
+const messages = useMessageStore((s) => s.messages);
+
+// ✅ 正确：只订阅当前会话的消息
+const msgs = useMessageStore((s) => s.messages[conversationId] ?? undefined);
+```
+
+**3. useEffect 依赖项用原始类型，不用对象引用**
+
+```ts
+// ❌ 错误：activeConv 是对象引用，每次渲染可能变化 → effect 无限触发
+useEffect(() => { markAllRead(activeConv.id); }, [activeConv, markAllRead]);
+
+// ✅ 正确：使用 string 类型的 ID
+useEffect(() => { markAllRead(activeId); }, [activeId, markAllRead]);
+```
+
+**4. 同一操作只在一处调用**
+
+```ts
+// ❌ 错误：useMessages 和 ChatWindow 都调用 markAllRead
+// 两个 useEffect 同时触发，互相触发 store 更新
+
+// ✅ 正确：只在 ChatWindow 的 useEffect 中调用
+```
+
+**5. Zustand store 禁止使用 Set/Map**
+
+```ts
+// ❌ 错误：Set 每次更新创建新引用，且 Zustand 浅比较不兼容
+readConversations: new Set<string>();
+
+// ✅ 正确：使用 Record
+readConversations: {} as Record<string, boolean>,
+```
+
 ## API 调用规范
 
 - 所有 REST 请求统一通过 `api/` 模块发出，组件内禁止直接调用 `fetch`/`axios`

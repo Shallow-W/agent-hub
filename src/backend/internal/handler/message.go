@@ -53,6 +53,10 @@ func (h *MessageHandler) Send(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40320, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrMsgTooLong) {
+			middleware.ErrorResponse(c, http.StatusRequestEntityTooLarge, 40026, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50020, "发送消息失败")
 		return
 	}
