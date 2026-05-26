@@ -49,7 +49,11 @@ function renderMarkdown(text: string): string {
   // 4. Apply inline markdown rules
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, href) => {
+    // 只允许 http/https/mailto 协议，防止 javascript: XSS
+    const safeHref = /^https?:\/\//i.test(href) || /^mailto:/i.test(href) ? href : '#';
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  });
 
   // 5. Line breaks
   result = result.replace(/\n/g, '<br/>');

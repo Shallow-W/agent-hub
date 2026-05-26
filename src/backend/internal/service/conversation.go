@@ -130,8 +130,13 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	if conv.UserID != userID {
-		return ErrConvNoPerm
+	// 验证是成员（任何成员都可以归档自己的视图）
+	member, err := s.repo.GetMember(ctx, conversationID, userID)
+	if err != nil {
+		return fmt.Errorf("check member: %w", err)
+	}
+	if member == nil {
+		return ErrConvNotMember
 	}
 	return s.repo.Archive(ctx, conversationID)
 }

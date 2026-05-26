@@ -20,6 +20,7 @@ type MsgRepo interface {
 type ConvRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	UpdateTimestamp(ctx context.Context, id string) error
+		GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 }
 
 var (
@@ -73,7 +74,12 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 	if conv == nil {
 		return ErrMsgConvNotFound
 	}
-	if conv.UserID != userID {
+	// 验证是会话成员（不限制为创建者）
+	member, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return fmt.Errorf("check member: %w", err)
+	}
+	if member == nil {
 		return ErrMsgConvNoPerm
 	}
 	return s.msgRepo.MarkConversationRead(ctx, convID, userID)
