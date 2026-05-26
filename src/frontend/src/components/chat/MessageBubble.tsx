@@ -1,6 +1,6 @@
 import React from 'react';
-import { Avatar, Typography, Spin, Button } from 'antd';
-import { UserOutlined, ReloadOutlined, CloseOutlined } from '@ant-design/icons';
+import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
+import { UserOutlined, ReloadOutlined, CloseOutlined, MessageOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import type { OptimisticStatus } from '@/types/message';
 import { MessageAttachmentView } from './MessageAttachmentView';
@@ -74,6 +74,7 @@ interface MessageBubbleProps {
   onRemove?: () => void;
   isRead?: boolean;
   isOwn?: boolean;
+  onReply?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -102,6 +103,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRemove,
   isRead,
   isOwn,
+  onReply,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -132,6 +134,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </Avatar>
       )}
       {!isUser && !showAvatar && <div style={{ width: 42, flexShrink: 0 }} />}
+      {!isSystem && onReply && (
+        <Tooltip title="回复">
+          <Button
+            type="text"
+            size="small"
+            icon={<MessageOutlined />}
+            className={styles.replyBtn}
+            onClick={() => onReply(message)}
+            style={{ position: 'absolute', top: 0 }}
+          />
+        </Tooltip>
+      )}
       <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
         {!isUser && showAvatar && (
           <div className={styles.meta}>
@@ -149,6 +163,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   : styles.innerAssistant
           }`}
         >
+          {message.reply_to && (
+            <div className={styles.replyQuote}>
+              <span className={styles.replyQuoteSender}>
+                {message.reply_to.role === 'user' ? '你' : 'Agent'}
+              </span>
+              {message.reply_to.content}
+            </div>
+          )}
           {message.attachments && message.attachments.length > 0 && (
             <MessageAttachmentView attachments={message.attachments} />
           )}

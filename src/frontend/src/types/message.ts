@@ -10,6 +10,7 @@ export interface Message {
   artifacts_json: string | null;
   created_at: string;
   attachments?: MessageAttachment[];
+  reply_to?: Message | null;
 }
 
 export type OptimisticStatus = 'sending' | 'failed';

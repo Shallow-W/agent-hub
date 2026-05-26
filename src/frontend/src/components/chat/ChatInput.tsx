@@ -1,12 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Input, Button, Tooltip, Spin, message } from 'antd';
-import { SendOutlined, PaperClipOutlined } from '@ant-design/icons';
+import { SendOutlined, PaperClipOutlined, SmileOutlined, CloseOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
+import type { Message } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
+import { EmojiPicker } from './EmojiPicker';
 import styles from './ChatInput.module.css';
+import replyStyles from './EmojiPicker.module.css';
 
 const { TextArea } = Input;
 
@@ -15,11 +18,14 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 interface ChatInputProps {
   conversationId: string;
+  replyTo?: Message | null;
+  onCancelReply?: () => void;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, onCancelReply }) => {
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
@@ -133,12 +139,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const charCount = value.length;
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
+  const handleEmojiInsert = useCallback((emoji: string) => {
+    setValue((prev) => prev + emoji);
+    setEmojiPickerOpen(false);
+  }, []);
+
   return (
     <div className={styles.container}>
       {isStreaming && (
         <div className={styles.typingIndicator}>
           <Spin size="small" />
           <span>Agent 正在输入</span>
+        </div>
+      )}
+      {replyTo && (
+        <div className={replyStyles.replyBar}>
+          <div className={replyStyles.replyBarContent}>
+            <div className={replyStyles.replyBarLabel}>
+              回复 {replyTo.role === 'user' ? '自己' : 'Agent'}
+            </div>
+            <div className={replyStyles.replyBarText}>{replyTo.content}</div>
+          </div>
+          <Button
+            type="text"
+            size="small"
+            icon={<CloseOutlined />}
+            onClick={onCancelReply}
+          />
         </div>
       )}
       <AttachmentPreview items={pendingFiles} onRemove={handleRemoveFile} />
@@ -161,6 +188,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
         />
       </div>
       <div className={styles.toolbar}>
+        <Tooltip title="表情">
+          <Button
+            type="text"
+            icon={<SmileOutlined />}
+            size="small"
+            onClick={() => setEmojiPickerOpen((prev) => !prev)}
+          />
+        </Tooltip>
+        {emojiPickerOpen && (
+          <EmojiPicker
+            onSelect={handleEmojiInsert}
+            onClose={() => setEmojiPickerOpen(false)}
+          />
+        )}
         <Tooltip title="附件">
           <Button
             type="text"

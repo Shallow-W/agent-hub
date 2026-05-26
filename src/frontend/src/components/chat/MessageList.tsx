@@ -8,6 +8,7 @@ import styles from './MessageList.module.css';
 
 interface MessageListProps {
   conversationId: string;
+  onReply?: (message: Message) => void;
 }
 
 /** Check if two messages from the same role are within 5 minutes */
@@ -43,7 +44,7 @@ function formatDividerTime(dateStr: string): string {
   return `${month}-${day} ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
+export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply }) => {
   const {
     messages,
     streamingContent,
@@ -141,6 +142,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
                   isGrouped={grouped}
                   isRead={isRead}
                   isOwn={msg.role === 'user'}
+                  onReply={onReply}
                 />
               </React.Fragment>
             );

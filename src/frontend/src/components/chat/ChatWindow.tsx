@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Typography, Tooltip, Button, Dropdown, Badge } from 'antd';
 import { SearchOutlined, MoreOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -8,6 +8,7 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import * as convApi from '@/api/conversation';
+import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
@@ -25,12 +26,14 @@ export const ChatWindow: React.FC = () => {
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
   const typingUsersMap = useWsStore((s) => s.typingUsers);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
 
   // Mark conversation as read when switching to it
   useEffect(() => {
     if (!activeId) return;
     markAllRead(activeId);
     convApi.markConversationRead(activeId).catch(() => {});
+    setReplyTo(null);
   }, [activeId, markAllRead]);
 
   if (!activeConv) {
@@ -83,7 +86,7 @@ export const ChatWindow: React.FC = () => {
           </Dropdown>
         </div>
       </div>
-      <MessageList conversationId={activeConv.id} />
+      <MessageList conversationId={activeConv.id} onReply={setReplyTo} />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
           {otherTyping.length === 1
@@ -91,7 +94,11 @@ export const ChatWindow: React.FC = () => {
             : `${otherTyping.length} 人正在输入...`}
         </div>
       )}
-      <ChatInput conversationId={activeConv.id} />
+      <ChatInput
+        conversationId={activeConv.id}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+      />
       {isGroup && activeId && (
         <GroupMemberPanel
           open={memberPanelOpen}

@@ -17,7 +17,7 @@ import { message as antMessage } from 'antd';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
-  const { create } = useConversation();
+  const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
@@ -70,6 +70,7 @@ const AppLayout: React.FC = () => {
     }
 
     if (activeNav === 'groups') {
+      const groupConvs = conversations.filter((c) => c.type === 'group');
       return (
         <>
           <div className={styles.convPanelHeader}>
@@ -82,9 +83,70 @@ const AppLayout: React.FC = () => {
               新建群聊
             </Button>
           </div>
-          <div style={{ padding: 16, color: 'var(--color-text-secondary)' }}>
-            暂无群聊
-          </div>
+          {groupConvs.length === 0 ? (
+            <div style={{ padding: 16, color: 'var(--color-text-secondary)' }}>
+              暂无群聊
+            </div>
+          ) : (
+            <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+              {groupConvs.map((conv) => (
+                <div
+                  key={conv.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s ease',
+                  }}
+                  onClick={() => {
+                    useConversationStore.getState().setActive(conv.id);
+                    setActiveNav('chat');
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--color-bg-hover)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 8,
+                      background: 'linear-gradient(135deg, #1677ff, #4096ff)',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 16,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                      marginRight: 12,
+                    }}
+                  >
+                    {conv.title.charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: 'var(--color-text)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {conv.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                      创建于 {new Date(conv.created_at).toLocaleDateString('zh-CN')}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       );
     }
