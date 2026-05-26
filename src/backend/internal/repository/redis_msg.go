@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	// 离线消息队列 key: offline:{conversationID}
+	// 离线消息队列 key: offline:{userID}:{conversationID}
 	offlineKeyPrefix = "offline:"
 	// 热消息缓存 key: msgs:{conversationID}
 	msgCacheKeyPrefix = "msgs:"
@@ -61,7 +62,16 @@ func (r *RedisMsgRepo) EnqueueOffline(ctx context.Context, userID, conversationI
 	return nil
 }
 
-// DequeueOfflineAfter 拉取指定时间之后的离线消息并清空队列
+// dequeueOfflineScript 原子地读取并删除离线队列（Lua 脚本避免读删竞态）
+var dequeueOfflineScript = goredis.NewScript(`
+local results = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1], ARGV[2])
+if #results > 0 then
+	redis.call('DEL', KEYS[1])
+end
+return results
+`)
+
+// DequeueOfflineAfter 拉取指定时间之后的离线消息并清空队列（原子操作）
 func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error) {
 	key := offlineKey(userID, conversationID)
 	var min string
@@ -74,12 +84,9 @@ func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, userID, conversa
 		min = "-inf"
 	}
 
-	results, err := r.rdb.ZRangeByScore(ctx, key, &goredis.ZRangeBy{
-		Min: min,
-		Max: "+inf",
-	}).Result()
+	results, err := dequeueOfflineScript.Run(ctx, r.rdb, []string{key}, min, "+inf").StringSlice()
 	if err != nil {
-		return nil, fmt.Errorf("redis zrange offline: %w", err)
+		return nil, fmt.Errorf("redis dequeue offline: %w", err)
 	}
 
 	if len(results) == 0 {
@@ -90,13 +97,11 @@ func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, userID, conversa
 	for _, data := range results {
 		var m model.Message
 		if err := json.Unmarshal([]byte(data), &m); err != nil {
+			slog.Warn("unmarshal offline message failed", "conversation_id", conversationID, "error", err)
 			continue
 		}
 		msgs = append(msgs, m)
 	}
-
-	// 清空已读的离线消息
-	r.rdb.Del(ctx, key)
 
 	return msgs, nil
 }

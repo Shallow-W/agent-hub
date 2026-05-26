@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -124,6 +125,7 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 	// 获取会话成员列表
 	memberIDs, err := s.convRepo.ListMemberIDs(ctx, conversationID)
 	if err != nil {
+		slog.Warn("list members failed in postPersist", "conversation_id", conversationID, "error", err)
 		memberIDs = []string{senderID}
 	}
 	if len(memberIDs) == 0 {
@@ -137,7 +139,9 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 
 	// 缓存到 Redis
 	if s.cacher != nil {
-		_ = s.cacher.CacheMessage(ctx, conversationID, msg)
+		if err := s.cacher.CacheMessage(ctx, conversationID, msg); err != nil {
+			slog.Warn("cache message failed", "conversation_id", conversationID, "error", err)
+		}
 
 		// 为不在线的成员加入离线队列 + 递增未读计数
 		for _, uid := range memberIDs {
@@ -145,9 +149,13 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 				continue
 			}
 			if s.notifier != nil && !s.notifier.IsOnline(uid) {
-				_ = s.cacher.EnqueueOffline(ctx, uid, conversationID, msg)
+				if err := s.cacher.EnqueueOffline(ctx, uid, conversationID, msg); err != nil {
+					slog.Warn("enqueue offline failed", "user_id", uid, "conversation_id", conversationID, "error", err)
+				}
 			}
-			_ = s.cacher.IncrementUnread(ctx, uid, conversationID)
+			if err := s.cacher.IncrementUnread(ctx, uid, conversationID); err != nil {
+				slog.Warn("increment unread failed", "user_id", uid, "conversation_id", conversationID, "error", err)
+			}
 		}
 	}
 }
