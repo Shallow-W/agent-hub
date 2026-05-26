@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -12,7 +13,6 @@ import (
 type FriendRepo interface {
 	SendRequest(ctx context.Context, userID, friendID string) (*model.Friend, error)
 	AcceptRequest(ctx context.Context, userID, friendID string) error
-	CreateReverseFriendship(ctx context.Context, userID, friendID string) error
 	RejectRequest(ctx context.Context, userID, friendID string) error
 	ListFriends(ctx context.Context, userID string) ([]*model.Friend, error)
 	ListPendingRequests(ctx context.Context, userID string) ([]*model.Friend, error)
@@ -100,15 +100,14 @@ func (s *FriendService) AcceptFriendRequest(ctx context.Context, userID, request
 		return ErrFriendNotFound
 	}
 
-	// 接受申请
+	// 接受申请（事务内同时创建反向关系）
 	if err := s.repo.AcceptRequest(ctx, friend.UserID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFriendNotFound
+		}
 		return fmt.Errorf("accept request: %w", err)
 	}
 
-	// 创建反向好友关系
-	if err := s.repo.CreateReverseFriendship(ctx, userID, friend.UserID); err != nil {
-		return fmt.Errorf("create reverse friendship: %w", err)
-	}
 	return nil
 }
 
@@ -123,6 +122,9 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 	}
 
 	if err := s.repo.RejectRequest(ctx, friend.UserID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFriendNotFound
+		}
 		return fmt.Errorf("reject request: %w", err)
 	}
 	return nil

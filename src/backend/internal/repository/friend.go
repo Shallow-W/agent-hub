@@ -34,9 +34,15 @@ func (r *FriendRepo) SendRequest(ctx context.Context, userID, friendID string) (
 	return &f, nil
 }
 
-// AcceptRequest 接受好友申请，更新状态为 accepted
+// AcceptRequest 接受好友申请并创建反向关系（事务保证原子性）
 func (r *FriendRepo) AcceptRequest(ctx context.Context, userID, friendID string) error {
-	_, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
 		`UPDATE friends SET status = 'accepted', updated_at = NOW()
 		 WHERE user_id = $1 AND friend_id = $2 AND status = 'pending'`,
 		userID, friendID,
@@ -44,31 +50,36 @@ func (r *FriendRepo) AcceptRequest(ctx context.Context, userID, friendID string)
 	if err != nil {
 		return fmt.Errorf("accept friend request: %w", err)
 	}
-	return nil
-}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
 
-// CreateReverseFriendship 创建反向好友关系（接受时使用）
-func (r *FriendRepo) CreateReverseFriendship(ctx context.Context, userID, friendID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO friends (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
 		 ON CONFLICT (user_id, friend_id) DO NOTHING`,
-		userID, friendID,
+		friendID, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("create reverse friendship: %w", err)
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 // RejectRequest 拒绝好友申请
 func (r *FriendRepo) RejectRequest(ctx context.Context, userID, friendID string) error {
-	_, err := r.db.ExecContext(ctx,
+	res, err := r.db.ExecContext(ctx,
 		`UPDATE friends SET status = 'rejected', updated_at = NOW()
 		 WHERE user_id = $1 AND friend_id = $2 AND status = 'pending'`,
 		userID, friendID,
 	)
 	if err != nil {
 		return fmt.Errorf("reject friend request: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -141,11 +152,11 @@ func (r *FriendRepo) GetFriendshipByID(ctx context.Context, id string) (*model.F
 	return &f, nil
 }
 
-// GetUserByUsername 按用户名查找用户（好友模块复用）
+// GetUserByUsername 按用户名查找用户（好友模块复用，不查询密码）
 func (r *FriendRepo) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
 	var u model.User
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE username = $1`,
+		`SELECT id, username, created_at FROM users WHERE username = $1`,
 		username,
 	).StructScan(&u)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -157,11 +168,11 @@ func (r *FriendRepo) GetUserByUsername(ctx context.Context, username string) (*m
 	return &u, nil
 }
 
-// GetUserByID 按 ID 查找用户
+// GetUserByID 按 ID 查找用户（好友模块复用，不查询密码）
 func (r *FriendRepo) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	var u model.User
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE id = $1`,
+		`SELECT id, username, created_at FROM users WHERE id = $1`,
 		id,
 	).StructScan(&u)
 	if errors.Is(err, sql.ErrNoRows) {

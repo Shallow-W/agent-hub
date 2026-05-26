@@ -65,8 +65,8 @@ const FriendRequest: React.FC = () => {
               ]}
             >
               <List.Item.Meta
-                avatar={<Avatar size="small">{(req.from_username ?? '?').charAt(0).toUpperCase()}</Avatar>}
-                title={req.from_username ?? '未知用户'}
+                avatar={<Avatar size="small">{(req.friend_name ?? '?').charAt(0).toUpperCase()}</Avatar>}
+                title={req.friend_name ?? '未知用户'}
               />
             </List.Item>
           )}
