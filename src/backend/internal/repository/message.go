@@ -19,10 +19,16 @@ func NewMessageRepo(db *sqlx.DB) *MessageRepo {
 	return &MessageRepo{db: db}
 }
 
-// Create 创建新消息
+// Create 创建新消息并刷新对话时间戳（事务保证原子性）
 func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string) (*model.Message, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	var m model.Message
-	err := r.db.QueryRowxContext(ctx,
+	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO messages (conversation_id, role, content, artifacts_json)
 		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, conversation_id, role, content, artifacts_json, created_at`,
@@ -31,7 +37,33 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	if err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
 	}
+
+	// 同时更新对话 updated_at
+	_, err = tx.ExecContext(ctx,
+		`UPDATE conversations SET updated_at = NOW() WHERE id = $1`,
+		conversationID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update conversation timestamp: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
 	return &m, nil
+}
+
+// MarkConversationRead 更新会话成员的已读时间戳
+func (r *MessageRepo) MarkConversationRead(ctx context.Context, conversationID, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_members SET last_read_at = NOW()
+		 WHERE conversation_id = $1 AND user_id = $2`,
+		conversationID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark conversation read: %w", err)
+	}
+	return nil
 }
 
 // ListByConversation 分页查询对话消息，支持 before 游标

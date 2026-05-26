@@ -27,6 +27,18 @@ function playNotificationBeep() {
   }
 }
 
+/** Track auto-removal timers for typing users per conversation+user */
+const typingTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+function scheduleTypingRemove(conversationId: string, userId: string) {
+  const key = `${conversationId}:${userId}`;
+  if (typingTimers[key]) clearTimeout(typingTimers[key]);
+  typingTimers[key] = setTimeout(() => {
+    useWsStore.getState().removeTypingUser(conversationId, userId);
+    delete typingTimers[key];
+  }, 3000);
+}
+
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -37,6 +49,7 @@ export function useWebSocket() {
   const updateStreaming = useMessageStore((s) => s.updateStreaming);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   useEffect(() => {
     if (!isAuthenticated || !token) return;
@@ -76,6 +89,26 @@ export function useWebSocket() {
             playNotificationBeep();
           }
           break;
+        case 'user.typing_start': {
+          const userId = msg.data.userId;
+          if (userId && userId !== currentUserId) {
+            useWsStore.getState().addTypingUser(conversationId, userId);
+            scheduleTypingRemove(conversationId, userId);
+          }
+          break;
+        }
+        case 'user.typing_stop': {
+          const userId = msg.data.userId;
+          if (userId) {
+            useWsStore.getState().removeTypingUser(conversationId, userId);
+            const timerKey = `${conversationId}:${userId}`;
+            if (typingTimers[timerKey]) {
+              clearTimeout(typingTimers[timerKey]);
+              delete typingTimers[timerKey];
+            }
+          }
+          break;
+        }
         case 'error':
           // TODO: 全局错误提示
           console.error('WebSocket error:', msg.data.message);

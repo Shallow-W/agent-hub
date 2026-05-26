@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Typography, Tooltip, Button, Dropdown, Badge } from 'antd';
 import { SearchOutlined, MoreOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useAuthStore } from '@/store/authStore';
 import { useConversationStore } from '@/store/conversationStore';
+import { useWsStore } from '@/store/wsStore';
+import { useMessageStore } from '@/store/messageStore';
+import * as convApi from '@/api/conversation';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
@@ -18,12 +21,24 @@ export const ChatWindow: React.FC = () => {
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const activeConv = conversations.find((c) => c.id === activeId);
   const [memberPanelOpen, setMemberPanelOpen] = useState(false);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const markAllRead = useMessageStore((s) => s.markAllRead);
+  const typingUsersMap = useWsStore((s) => s.typingUsers);
+
+  // Mark conversation as read when switching to it
+  useEffect(() => {
+    if (!activeConv) return;
+    markAllRead(activeConv.id);
+    convApi.markConversationRead(activeConv.id).catch(() => {});
+  }, [activeConv, markAllRead]);
 
   if (!activeConv) {
     return null;
   }
 
   const isGroup = activeConv.type === 'group';
+  const typingUsers = typingUsersMap[activeConv.id] ?? [];
+  const otherTyping = typingUsers.filter((id) => id !== currentUserId);
 
   const menuItems: MenuProps['items'] = [
     {
@@ -68,6 +83,13 @@ export const ChatWindow: React.FC = () => {
         </div>
       </div>
       <MessageList conversationId={activeConv.id} />
+      {otherTyping.length > 0 && (
+        <div className={styles.typingIndicator}>
+          {otherTyping.length === 1
+            ? `${otherTyping[0]} 正在输入...`
+            : `${otherTyping.length} 人正在输入...`}
+        </div>
+      )}
       <ChatInput conversationId={activeConv.id} />
       {isGroup && activeId && (
         <GroupMemberPanel

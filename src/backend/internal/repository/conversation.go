@@ -25,7 +25,7 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, $2, $3)
-		 RETURNING id, user_id, type, title, pinned, created_at, updated_at`,
+		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at`,
 		userID, convType, title,
 	).StructScan(&c)
 	if err != nil {
@@ -34,12 +34,12 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	return &c, nil
 }
 
-// ListByUserID 分页查询用户的对话列表，按 updated_at 降序
+// ListByUserID 分页查询用户的对话列表，排除已归档，按 updated_at 降序
 func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, user_id, type, title, pinned, created_at, updated_at
-		 FROM conversations WHERE user_id = $1
+		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
+		 FROM conversations WHERE user_id = $1 AND archived_at IS NULL
 		 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
@@ -53,7 +53,7 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 func (r *ConversationRepo) GetByID(ctx context.Context, id string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, type, title, pinned, created_at, updated_at
+		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
 		 FROM conversations WHERE id = $1`,
 		id,
 	).StructScan(&c)
@@ -95,6 +95,61 @@ func (r *ConversationRepo) UpdateTimestamp(ctx context.Context, id string) error
 	)
 	if err != nil {
 		return fmt.Errorf("update timestamp: %w", err)
+	}
+	return nil
+}
+
+// UpdateTitle 更新对话标题
+func (r *ConversationRepo) UpdateTitle(ctx context.Context, id, title string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversations SET title = $1 WHERE id = $2`,
+		title, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update title: %w", err)
+	}
+	return nil
+}
+
+// Archive 设置 archived_at 为当前时间（软删除）
+func (r *ConversationRepo) Archive(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversations SET archived_at = NOW() WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("archive conversation: %w", err)
+	}
+	return nil
+}
+
+// GetMember 查询用户在某会话中的成员信息
+func (r *ConversationRepo) GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error) {
+	var m model.ConversationMember
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT cm.id, cm.conversation_id, cm.user_id, cm.role, cm.joined_at,
+		        u.username
+		 FROM conversation_members cm JOIN users u ON u.id = cm.user_id
+		 WHERE cm.conversation_id = $1 AND cm.user_id = $2`,
+		conversationID, userID,
+	).StructScan(&m)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get member: %w", err)
+	}
+	return &m, nil
+}
+
+// DeleteMember 删除用户在会话中的成员记录
+func (r *ConversationRepo) DeleteMember(ctx context.Context, conversationID, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2`,
+		conversationID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete member: %w", err)
 	}
 	return nil
 }

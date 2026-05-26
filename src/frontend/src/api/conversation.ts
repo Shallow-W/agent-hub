@@ -22,3 +22,7 @@ export async function togglePin(
 ): Promise<void> {
   return put<void>(`/api/conversations/${id}/pin`, { pinned });
 }
+
+export async function markConversationRead(id: string): Promise<void> {
+  return put<void>(`/api/conversations/${id}/read`);
+}

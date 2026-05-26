@@ -194,3 +194,8 @@
   margin-top: 4px;
   justify-content: flex-end;
 }
+
+.readStatus {
+  display: inline;
+  margin-left: 4px;
+}

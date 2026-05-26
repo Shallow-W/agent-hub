@@ -112,15 +112,22 @@ func main() {
 
 	// 需要鉴权的路由
 	authMiddleware := middleware.Auth(middleware.JWTConfig{Secret: cfg.JWT.Secret})
-	apiGroup := router.Group("/api").Use(authMiddleware)
+	apiGroup := router.Group("/api")
+		apiGroup.Use(authMiddleware)
 	{
-		apiGroup.POST("/conversations", convHandler.Create)
-		apiGroup.GET("/conversations", convHandler.List)
-		apiGroup.DELETE("/conversations/:id", convHandler.Delete)
-		apiGroup.PUT("/conversations/:id/pin", convHandler.TogglePin)
-
-		apiGroup.POST("/conversations/:id/messages", msgHandler.Send)
-		apiGroup.GET("/conversations/:id/messages", msgHandler.History)
+		// 会话路由（需要鉴权）
+		convRoutes := apiGroup.Group("/conversations")
+		{
+			convRoutes.POST("", convHandler.Create)
+			convRoutes.GET("", convHandler.List)
+			convRoutes.PUT("/:id", convHandler.RenameConversation)
+			convRoutes.DELETE("/:id", convHandler.Delete)
+			convRoutes.POST("/:id/archive", convHandler.ArchiveConversation)
+			convRoutes.POST("/:id/pin", convHandler.TogglePin)
+			convRoutes.POST("/:id/messages", msgHandler.Send)
+			convRoutes.GET("/:id/messages", msgHandler.History)
+			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
+		}
 	}
 
 	// 好友路由（需要鉴权）

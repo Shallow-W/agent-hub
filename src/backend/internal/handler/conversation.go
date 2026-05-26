@@ -26,9 +26,9 @@ type CreateRequest struct {
 	Title string `json:"title"`
 }
 
-// PinRequest 置顶请求体
-type PinRequest struct {
-	Pinned bool `json:"pinned"`
+// RenameRequest 重命名请求体
+type RenameRequest struct {
+	Title string `json:"title" binding:"required"`
 }
 
 // Create 创建新对话
@@ -65,7 +65,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	middleware.SuccessResponse(c, list)
 }
 
-// Delete 删除对话
+// Delete 删除对话（仅私聊，移除当前用户的成员记录）
 func (h *ConversationHandler) Delete(c *gin.Context) {
 	convID := c.Param("id")
 	if convID == "" {
@@ -84,6 +84,10 @@ func (h *ConversationHandler) Delete(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40310, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrConvNotGroup) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40014, "仅私聊会话可删除")
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50012, "删除对话失败")
 		return
 	}
@@ -99,14 +103,8 @@ func (h *ConversationHandler) TogglePin(c *gin.Context) {
 		return
 	}
 
-	var req PinRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40013, "参数错误: "+err.Error())
-		return
-	}
-
 	userID := middleware.GetUserID(c)
-	err := h.svc.TogglePin(c.Request.Context(), userID, convID, req.Pinned)
+	err := h.svc.TogglePin(c.Request.Context(), userID, convID)
 	if err != nil {
 		if errors.Is(err, service.ErrConvNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40411, err.Error())
@@ -117,6 +115,72 @@ func (h *ConversationHandler) TogglePin(c *gin.Context) {
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50013, "更新置顶状态失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}
+
+// RenameConversation 重命名会话（仅群聊，需 owner/admin 权限）
+func (h *ConversationHandler) RenameConversation(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40015, "缺少对话 ID")
+		return
+	}
+
+	var req RenameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40016, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.RenameConversation(c.Request.Context(), userID, convID, req.Title)
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40412, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40312, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNotGroup) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40017, "私聊会话不能重命名")
+			return
+		}
+		if errors.Is(err, service.ErrConvNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40313, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50014, "重命名对话失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}
+
+// ArchiveConversation 归档会话（软删除）
+func (h *ConversationHandler) ArchiveConversation(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40018, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.ArchiveConversation(c.Request.Context(), userID, convID)
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40413, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40314, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50015, "归档对话失败")
 		return
 	}
 

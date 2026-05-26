@@ -31,7 +31,7 @@ func (r *GroupRepo) CreateGroup(ctx context.Context, ownerID, name string, membe
 	var conv model.Conversation
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'group', $2)
-		 RETURNING id, user_id, type, title, pinned, created_at, updated_at`,
+		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at`,
 		ownerID, name,
 	).StructScan(&conv)
 	if err != nil {
@@ -145,7 +145,7 @@ func (r *GroupRepo) IsMember(ctx context.Context, conversationID, userID string)
 func (r *GroupRepo) GetConversationByID(ctx context.Context, id string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, type, title, pinned, created_at, updated_at
+		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
 		 FROM conversations WHERE id = $1`,
 		id,
 	).StructScan(&c)

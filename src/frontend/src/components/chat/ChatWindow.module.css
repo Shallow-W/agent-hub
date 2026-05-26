@@ -65,3 +65,10 @@
   background-color: var(--color-bg);
   color: var(--color-text);
 }
+
+.typingIndicator {
+  padding: 4px 20px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-white);
+}

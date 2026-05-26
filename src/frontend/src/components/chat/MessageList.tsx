@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
-import { Empty, Spin, Skeleton } from 'antd';
+import { Empty, Spin, Skeleton, Divider } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
+import { useMessageStore } from '@/store/messageStore';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
 import styles from './MessageList.module.css';
@@ -16,6 +17,32 @@ function isGrouped(prev: Message, curr: Message): boolean {
   return diff < 5 * 60 * 1000;
 }
 
+/** Check if two messages are more than 30 minutes apart */
+function needsTimeDivider(prev: Message, curr: Message): boolean {
+  const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
+  return diff >= 30 * 60 * 1000;
+}
+
+function formatDividerTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+
+  if (msgDate.getTime() === today.getTime()) {
+    return `今天 ${hh}:${mm}`;
+  }
+  if (msgDate.getTime() === yesterday.getTime()) {
+    return `昨天 ${hh}:${mm}`;
+  }
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day} ${hh}:${mm}`;
+}
+
 export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
   const {
     messages,
@@ -27,6 +54,8 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
     retry,
     removeOptimistic: removeOpt,
   } = useMessages(conversationId);
+  const isConversationRead = useMessageStore((s) => s.isConversationRead);
+  const isRead = isConversationRead(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -97,14 +126,23 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
           {messages.map((msg, idx) => {
             const prev = idx > 0 ? messages[idx - 1] : undefined;
             const grouped = prev ? isGrouped(prev, msg) : false;
+            const showDivider = prev ? needsTimeDivider(prev, msg) : false;
 
             return (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                showAvatar={!grouped}
-                isGrouped={grouped}
-              />
+              <React.Fragment key={msg.id}>
+                {showDivider && (
+                  <Divider plain style={{ margin: '8px 0', fontSize: 12, color: '#999' }}>
+                    {formatDividerTime(msg.created_at)}
+                  </Divider>
+                )}
+                <MessageBubble
+                  message={msg}
+                  showAvatar={!grouped}
+                  isGrouped={grouped}
+                  isRead={isRead}
+                  isOwn={msg.role === 'user'}
+                />
+              </React.Fragment>
             );
           })}
           {/* Optimistic messages */}

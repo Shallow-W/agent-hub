@@ -60,6 +60,31 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	middleware.CreatedResponse(c, msg)
 }
 
+// MarkAsRead 标记会话消息已读
+func (h *MessageHandler) MarkAsRead(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40024, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if err := h.svc.MarkAsRead(c.Request.Context(), userID, convID); err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40422, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40322, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50022, "标记已读失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}
+
 // History 获取消息历史
 func (h *MessageHandler) History(c *gin.Context) {
 	convID := c.Param("id")

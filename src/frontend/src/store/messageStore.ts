@@ -15,6 +15,8 @@ interface MessageState {
   optimisticMessages: Record<string, OptimisticMessage[]>;
   /** conversationId → unread count */
   unreadCounts: Record<string, number>;
+  /** Set of conversationIds that the current user considers "read" */
+  readConversations: Set<string>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string) => Promise<void>;
@@ -33,6 +35,7 @@ interface MessageState {
   removeOptimistic: (conversationId: string, tempId: string) => void;
   incrementUnread: (conversationId: string) => void;
   markAllRead: (conversationId: string) => void;
+  isConversationRead: (conversationId: string) => boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -49,6 +52,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   loading: false,
   optimisticMessages: {},
   unreadCounts: {},
+  readConversations: new Set<string>(),
 
   fetchMessages: async (conversationId, before) => {
     set({ loading: true });
@@ -253,11 +257,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   markAllRead: (conversationId) => {
-    set((state) => ({
-      unreadCounts: {
-        ...state.unreadCounts,
-        [conversationId]: 0,
-      },
-    }));
+    set((state) => {
+      const next = new Set(state.readConversations);
+      next.add(conversationId);
+      return {
+        unreadCounts: {
+          ...state.unreadCounts,
+          [conversationId]: 0,
+        },
+        readConversations: next,
+      };
+    });
+  },
+
+  isConversationRead: (conversationId) => {
+    return get().readConversations.has(conversationId);
   },
 }));

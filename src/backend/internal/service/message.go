@@ -13,6 +13,7 @@ import (
 type MsgRepo interface {
 	Create(ctx context.Context, conversationID, role, content, artifactsJSON string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before time.Time, limit int) ([]model.Message, error)
+	MarkConversationRead(ctx context.Context, conversationID, userID string) error
 }
 
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和更新时间戳）
@@ -60,12 +61,22 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 		return nil, fmt.Errorf("create message: %w", err)
 	}
 
-	// 刷新对话的 updated_at
-	if err := s.convRepo.UpdateTimestamp(ctx, convID); err != nil {
-		return nil, fmt.Errorf("update conversation timestamp: %w", err)
-	}
-
 	return msg, nil
+}
+
+// MarkAsRead 标记会话消息已读
+func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	if conv.UserID != userID {
+		return ErrMsgConvNoPerm
+	}
+	return s.msgRepo.MarkConversationRead(ctx, convID, userID)
 }
 
 // GetHistory 获取对话消息历史，支持 before 游标分页

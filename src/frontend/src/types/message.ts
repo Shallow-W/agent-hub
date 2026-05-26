@@ -19,7 +19,7 @@ export interface OptimisticMessage extends Message {
 export type DisplayMessage = Message | OptimisticMessage;
 
 export interface StreamMessage {
-  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'error';
+  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'error';
   data: {
     conversationId?: string;
     messageId?: string;
@@ -29,5 +29,6 @@ export interface StreamMessage {
     status?: 'thinking' | 'running' | 'idle';
     code?: string;
     message?: string;
+    userId?: string;
   };
 }

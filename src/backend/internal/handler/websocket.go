@@ -145,6 +145,44 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					Data: msg.Data,
 				})
 			}
+		case "typing_start":
+			var payload struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			if raw, err := json.Marshal(msg.Data); err == nil {
+				_ = json.Unmarshal(raw, &payload)
+			}
+			if payload.ConversationID != "" {
+				if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
+					continue
+				}
+				h.hub.SendToRoom(payload.ConversationID, ws.WSMessage{
+					Type: "user.typing",
+					Data: map[string]string{
+						"user_id":         client.UserID,
+						"conversation_id": payload.ConversationID,
+					},
+				})
+			}
+		case "typing_stop":
+			var payload struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			if raw, err := json.Marshal(msg.Data); err == nil {
+				_ = json.Unmarshal(raw, &payload)
+			}
+			if payload.ConversationID != "" {
+				if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
+					continue
+				}
+				h.hub.SendToRoom(payload.ConversationID, ws.WSMessage{
+					Type: "user.typing_stop",
+					Data: map[string]string{
+						"user_id":         client.UserID,
+						"conversation_id": payload.ConversationID,
+					},
+				})
+			}
 		default:
 			h.hub.SendToUser(client.UserID, ws.WSMessage{
 				Type: ws.TypeError,

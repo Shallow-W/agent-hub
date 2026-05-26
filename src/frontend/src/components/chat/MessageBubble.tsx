@@ -5,7 +5,61 @@ import type { Message } from '@/types/message';
 import type { OptimisticStatus } from '@/types/message';
 import styles from './MessageBubble.module.css';
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderMarkdown(text: string): string {
+  // 1. Extract code blocks and replace with placeholders
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(
+      `<pre class="${styles.codeBlock}"><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`,
+    );
+    // Wrap in a div if a language label is present
+    if (lang) {
+      codeBlocks[idx] =
+        `<div class="${styles.codeBlockWrapper}"><div class="${styles.codeHeader}"><span>${escapeHtml(lang)}</span></div>${codeBlocks[idx]}</div>`;
+    } else {
+      codeBlocks[idx] =
+        `<div class="${styles.codeBlockWrapper}">${codeBlocks[idx]}</div>`;
+    }
+    return `\x00CODEBLOCK${idx}\x00`;
+  });
+
+  // 2. Extract inline code and replace with placeholders
+  const inlineCodes: string[] = [];
+  result = result.replace(/`([^`]+)`/g, (_match, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code style="background:#e8e8e8;padding:1px 4px;border-radius:3px;font-size:13px;">${escapeHtml(code)}</code>`);
+    return `\x00INLINE${idx}\x00`;
+  });
+
+  // 3. Escape remaining HTML (outside code)
+  result = escapeHtml(result);
+
+  // 4. Apply inline markdown rules
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  // 5. Line breaks
+  result = result.replace(/\n/g, '<br/>');
+
+  // 6. Restore placeholders
+  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
+  result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
+
+  return result;
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -15,45 +69,8 @@ interface MessageBubbleProps {
   optimisticStatus?: OptimisticStatus;
   onRetry?: () => void;
   onRemove?: () => void;
-}
-
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
-  return (
-    <div className={styles.codeBlockWrapper}>
-      <div className={styles.codeHeader}>
-        <span>{lang || 'Code'}</span>
-      </div>
-      <Paragraph
-        copyable={{ text: code, tooltips: ['复制', '已复制'] }}
-        style={{ margin: 0 }}
-      >
-        <pre className={styles.codeBlock}>
-          <code>{code}</code>
-        </pre>
-      </Paragraph>
-    </div>
-  );
-}
-
-function renderContent(content: string): React.ReactNode {
-  const parts = content.split(/(```[\s\S]*?```)/g);
-
-  return parts.map((part, i) => {
-    if (part.startsWith('```') && part.endsWith('```')) {
-      const lines = part.slice(3, -3);
-      const firstNewline = lines.indexOf('\n');
-      const langMatch = firstNewline >= 0 ? lines.slice(0, firstNewline).trim() : '';
-      const code =
-        firstNewline >= 0 ? lines.slice(firstNewline + 1) : lines;
-      return <CodeBlock key={i} code={code} lang={langMatch} />;
-    }
-    return part.split('\n').map((line, j, arr) => (
-      <React.Fragment key={`${i}-${j}`}>
-        {line}
-        {j < arr.length - 1 && <br />}
-      </React.Fragment>
-    ));
-  });
+  isRead?: boolean;
+  isOwn?: boolean;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -80,6 +97,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   optimisticStatus,
   onRetry,
   onRemove,
+  isRead,
+  isOwn,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -127,7 +146,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   : styles.innerAssistant
           }`}
         >
-          {renderContent(message.content)}
+          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
           {streaming && <span className={styles.streamingCursor} />}
           {isOptimisticSending && (
             <Spin size="small" style={{ marginLeft: 8 }} />
@@ -153,15 +172,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             />
           </div>
         )}
-        {showAvatar && (
-          <div
-            className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
-          >
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {formatTimestamp(message.created_at)}
+        <div
+          className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
+        >
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {formatTimestamp(message.created_at)}
+          </Text>
+          {isOwn && isUser && (
+            <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+              {isRead ? '已读' : '未读'}
             </Text>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

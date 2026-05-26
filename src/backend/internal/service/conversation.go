@@ -16,11 +16,17 @@ type ConvRepo interface {
 	Delete(ctx context.Context, id string) error
 	UpdatePinned(ctx context.Context, id string, pinned bool) error
 	UpdateTimestamp(ctx context.Context, id string) error
+	UpdateTitle(ctx context.Context, id, title string) error
+	Archive(ctx context.Context, id string) error
+	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
+	DeleteMember(ctx context.Context, conversationID, userID string) error
 }
 
 var (
-	ErrConvNotFound = errors.New("对话不存在")
-	ErrConvNoPerm   = errors.New("无权操作此对话")
+	ErrConvNotFound   = errors.New("对话不存在")
+	ErrConvNoPerm     = errors.New("无权操作此对话")
+	ErrConvNotGroup   = errors.New("私聊会话不支持此操作")
+	ErrConvNotMember  = errors.New("不是该会话成员")
 )
 
 // ConversationService 对话业务逻辑
@@ -60,7 +66,7 @@ func (s *ConversationService) ListConversations(ctx context.Context, userID stri
 	return list, nil
 }
 
-// DeleteConversation 删除对话（需验证所属权）
+// DeleteConversation 删除当前用户在私聊会话中的成员记录
 func (s *ConversationService) DeleteConversation(ctx context.Context, userID, convID string) error {
 	conv, err := s.repo.GetByID(ctx, convID)
 	if err != nil {
@@ -69,14 +75,14 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, userID, co
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	if conv.UserID != userID {
-		return ErrConvNoPerm
+	if conv.Type != "single" {
+		return ErrConvNotGroup
 	}
-	return s.repo.Delete(ctx, convID)
+	return s.repo.DeleteMember(ctx, convID, userID)
 }
 
 // TogglePin 切换对话置顶状态
-func (s *ConversationService) TogglePin(ctx context.Context, userID, convID string, pinned bool) error {
+func (s *ConversationService) TogglePin(ctx context.Context, userID, convID string) error {
 	conv, err := s.repo.GetByID(ctx, convID)
 	if err != nil {
 		return fmt.Errorf("get conversation: %w", err)
@@ -87,5 +93,45 @@ func (s *ConversationService) TogglePin(ctx context.Context, userID, convID stri
 	if conv.UserID != userID {
 		return ErrConvNoPerm
 	}
-	return s.repo.UpdatePinned(ctx, convID, pinned)
+	return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)
+}
+
+// RenameConversation 重命名会话（仅 group 类型，操作者需为 owner/admin）
+func (s *ConversationService) RenameConversation(ctx context.Context, userID, conversationID, title string) error {
+	conv, err := s.repo.GetByID(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrConvNotFound
+	}
+	if conv.Type != "group" {
+		return ErrConvNotGroup
+	}
+	member, err := s.repo.GetMember(ctx, conversationID, userID)
+	if err != nil {
+		return fmt.Errorf("get member: %w", err)
+	}
+	if member == nil {
+		return ErrConvNotMember
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return ErrConvNoPerm
+	}
+	return s.repo.UpdateTitle(ctx, conversationID, title)
+}
+
+// ArchiveConversation 归档会话（软删除）
+func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, conversationID string) error {
+	conv, err := s.repo.GetByID(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrConvNotFound
+	}
+	if conv.UserID != userID {
+		return ErrConvNoPerm
+	}
+	return s.repo.Archive(ctx, conversationID)
 }
