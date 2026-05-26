@@ -68,13 +68,15 @@ type Client struct {
 // NewClient 创建 Client 实例（导出供 handler 调用）
 func NewClient(conn *websocket.Conn, userID string) *Client {
 	now := time.Now()
-	return &Client{
+	c := &Client{
 		Conn:        conn,
 		UserID:      userID,
 		ConnectedAt: now,
 		LastActive:  now,
 		sendCh:      make(chan []byte, writeBufSize),
 	}
+	c.lastPong.Store(now.UnixNano())
+	return c
 }
 
 // UpdateLastPong 原子更新最后 pong 时间

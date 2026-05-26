@@ -73,9 +73,12 @@ func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
 }
 
-// checkMembership 校验用户是否为会话成员
-func (s *MessageService) checkMembership(ctx context.Context, convID, userID string) error {
-	member, err := s.convRepo.GetMember(ctx, convID, userID)
+// checkMembership 校验用户是否为会话成员（含会话创建者）
+func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conversation, userID string) error {
+	if conv.UserID == userID {
+		return nil
+	}
+	member, err := s.convRepo.GetMember(ctx, conv.ID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
 	}
@@ -98,7 +101,7 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
-	if err := s.checkMembership(ctx, convID, userID); err != nil {
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return nil, err
 	}
 
@@ -169,7 +172,7 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 	if conv == nil {
 		return ErrMsgConvNotFound
 	}
-	if err := s.checkMembership(ctx, convID, userID); err != nil {
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return err
 	}
 
@@ -193,7 +196,7 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
-	if err := s.checkMembership(ctx, convID, userID); err != nil {
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return nil, err
 	}
 
@@ -228,7 +231,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
-	if err := s.checkMembership(ctx, convID, userID); err != nil {
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return nil, err
 	}
 
