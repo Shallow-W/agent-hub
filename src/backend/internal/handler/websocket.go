@@ -50,31 +50,36 @@ func (h *WebSocketHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	wsConn := &ws.Connection{Conn: conn, UserID: userID}
-	h.hub.Register(wsConn)
+	client := ws.NewClient(conn, userID)
+	h.hub.Register(client)
 
 	// 为连接创建独立 context，连接关闭时取消所有子操作
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// 启动写协程：从 sendCh 读取消息写入连接
+	go client.WritePump(ctx)
+
 	// 启动心跳检测
-	go ws.StartPing(ctx, wsConn, h.hub, 30*time.Second)
+	go ws.StartHeartbeat(ctx, client, h.hub)
 
 	// 消费循环，阻塞直到连接断开
-	h.readLoop(ctx, wsConn)
+	h.readLoop(ctx, client)
 }
 
 // readLoop 持续读取客户端消息
-func (h *WebSocketHandler) readLoop(ctx context.Context, conn *ws.Connection) {
-	defer h.hub.Unregister(conn)
+func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
+	defer h.hub.Unregister(client)
 
 	for {
-		_, data, err := conn.Conn.Read(ctx)
+		_, data, err := client.Conn.Read(ctx)
 		if err != nil {
 			// 正常关闭或 context 取消
-			h.logger.Debug("websocket read end", "user_id", conn.UserID, "error", err)
+			h.logger.Debug("websocket read end", "user_id", client.UserID, "error", err)
 			return
 		}
+
+		client.LastActive = time.Now()
 
 		// 解析消息并路由
 		var msg struct {
@@ -86,13 +91,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, conn *ws.Connection) {
 		}
 
 		msgType := msg.Type
-		h.logger.Debug("ws message received", "user_id", conn.UserID, "type", msgType)
+		h.logger.Debug("ws message received", "user_id", client.UserID, "type", msgType)
 
 		// 当前阶段仅做消息路由预留，具体业务逻辑后续迭代
 		switch msgType {
 		default:
 			// 未识别的消息类型，原样广播回用户
-			h.hub.SendToUser(conn.UserID, ws.WSMessage{
+			h.hub.SendToUser(client.UserID, ws.WSMessage{
 				Type: ws.TypeError,
 				Data: map[string]string{"message": "未识别的消息类型: " + msgType},
 			})

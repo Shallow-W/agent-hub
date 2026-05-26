@@ -20,6 +20,7 @@ type FriendRepo interface {
 	GetFriendshipByID(ctx context.Context, id string) (*model.Friend, error)
 	GetUserByUsername(ctx context.Context, username string) (*model.User, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
+	SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error)
 }
 
 var (
@@ -137,6 +138,25 @@ func (s *FriendService) ListFriends(ctx context.Context, userID string) ([]*mode
 		return nil, fmt.Errorf("list friends: %w", err)
 	}
 	return list, nil
+}
+
+// SearchUsers 搜索用户（排除自己，限制条数）
+func (s *FriendService) SearchUsers(ctx context.Context, userID, query string, limit int) ([]*model.User, error) {
+	if query == "" {
+		return nil, errors.New("搜索关键词不能为空")
+	}
+	list, err := s.repo.SearchUsers(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	// 排除自己
+	filtered := make([]*model.User, 0, len(list))
+	for _, u := range list {
+		if u.ID != userID {
+			filtered = append(filtered, u)
+		}
+	}
+	return filtered, nil
 }
 
 // ListPending 查询收到的好友申请

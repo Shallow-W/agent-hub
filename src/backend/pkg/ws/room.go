@@ -3,7 +3,7 @@ package ws
 // roomAction 房间操作请求
 type roomAction struct {
 	ConversationID string
-	Conn           *Connection
+	Conn           *Client
 }
 
 // roomMessage 房间广播消息

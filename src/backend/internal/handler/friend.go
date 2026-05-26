@@ -130,3 +130,21 @@ func (h *FriendHandler) ListPending(c *gin.Context) {
 
 	middleware.SuccessResponse(c, list)
 }
+
+// SearchUsers 搜索用户
+func (h *FriendHandler) SearchUsers(c *gin.Context) {
+	username := c.Query("username")
+	if username == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40210, "缺少搜索关键词")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	list, err := h.svc.SearchUsers(c.Request.Context(), userID, username, 20)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 40211, "搜索用户失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, list)
+}

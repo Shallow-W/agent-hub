@@ -80,12 +80,14 @@ func main() {
 	convSvc := service.NewConversationService(convRepo)
 	msgSvc := service.NewMessageService(msgRepo, convRepo)
 	friendSvc := service.NewFriendService(friendRepo)
+	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 
 	hub := ws.NewHub(logger)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
+	groupHandler := handler.NewGroupHandler(groupSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
@@ -130,6 +132,18 @@ func main() {
 		friendGroup.POST("/:id/reject", friendHandler.RejectRequest)
 		friendGroup.GET("", friendHandler.ListFriends)
 		friendGroup.GET("/pending", friendHandler.ListPending)
+		friendGroup.GET("/search", friendHandler.SearchUsers)
+	}
+
+	// 群聊路由（需要鉴权）
+	groupRoutes := router.Group("/api/groups")
+	groupRoutes.Use(authMiddleware)
+	{
+		groupRoutes.POST("", groupHandler.CreateGroup)
+		groupRoutes.POST("/:id/members", groupHandler.AddMember)
+		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
+		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
+		groupRoutes.POST("/:id/leave", groupHandler.LeaveGroup)
 	}
 
 	// WebSocket 路由（通过 query 参数鉴权）

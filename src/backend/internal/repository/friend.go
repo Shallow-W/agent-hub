@@ -168,6 +168,19 @@ func (r *FriendRepo) GetUserByUsername(ctx context.Context, username string) (*m
 	return &u, nil
 }
 
+// SearchUsers 按用户名前缀搜索用户
+func (r *FriendRepo) SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error) {
+	var list []*model.User
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT id, username, created_at FROM users WHERE username LIKE $1 LIMIT $2`,
+		query+"%", limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	return list, nil
+}
+
 // GetUserByID 按 ID 查找用户（好友模块复用，不查询密码）
 func (r *FriendRepo) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	var u model.User
