@@ -110,10 +110,19 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     if (selectedFriends.length === 0) return;
     setInviteLoading(true);
     try {
-      for (const friendId of selectedFriends) {
-        await addGroupMember(conversationId, { user_id: friendId, role: 'member' });
+      const results = await Promise.allSettled(
+        selectedFriends.map((friendId) =>
+          addGroupMember(conversationId, { user_id: friendId, role: 'member' }),
+        ),
+      );
+      const failed = results.filter((r) => r.status === 'rejected');
+      if (failed.length > 0) {
+        message.warning(
+          `${selectedFriends.length - failed.length} 人邀请成功，${failed.length} 人失败`,
+        );
+      } else {
+        message.success('已邀请成员');
       }
-      message.success('已邀请成员');
       setSelectedFriends([]);
       setInviteOpen(false);
       await fetchMembers();

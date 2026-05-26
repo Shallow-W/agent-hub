@@ -124,8 +124,16 @@ func (s *GroupService) RemoveMember(ctx context.Context, conversationID, operato
 	return nil
 }
 
-// ListMembers 列出群成员
-func (s *GroupService) ListMembers(ctx context.Context, conversationID string) ([]*model.ConversationMember, error) {
+// ListMembers 列出群成员（验证调用者是否为成员）
+func (s *GroupService) ListMembers(ctx context.Context, conversationID, userID string) ([]*model.ConversationMember, error) {
+	isMember, err := s.repo.IsMember(ctx, conversationID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if !isMember {
+		return nil, ErrNotMember
+	}
+
 	list, err := s.repo.ListMembers(ctx, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list members: %w", err)

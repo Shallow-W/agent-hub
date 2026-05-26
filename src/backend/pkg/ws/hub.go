@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -56,7 +57,7 @@ type Client struct {
 	Conn        *websocket.Conn
 	UserID      string
 	ConnectedAt time.Time
-	LastPong    time.Time
+	lastPong    atomic.Int64 // unix nanos，原子操作避免数据竞争
 	LastActive  time.Time
 
 	sendCh chan []byte // 独立写缓冲通道
@@ -70,10 +71,19 @@ func NewClient(conn *websocket.Conn, userID string) *Client {
 		Conn:        conn,
 		UserID:      userID,
 		ConnectedAt: now,
-		LastPong:    now,
 		LastActive:  now,
 		sendCh:      make(chan []byte, writeBufSize),
 	}
+}
+
+// UpdateLastPong 原子更新最后 pong 时间
+func (c *Client) UpdateLastPong() {
+	c.lastPong.Store(time.Now().UnixNano())
+}
+
+// LastPongTime 返回最后 pong 时间
+func (c *Client) LastPongTime() time.Time {
+	return time.Unix(0, c.lastPong.Load())
 }
 
 // enqueue 将消息入队写缓冲区；满时丢弃最旧消息（背压）
@@ -135,8 +145,9 @@ type Hub struct {
 	rooms  map[string]map[*Client]bool
 	roomMu sync.RWMutex
 
-	wg     sync.WaitGroup // 跟踪活跃连接数
-	logger *slog.Logger
+	wg           sync.WaitGroup // 跟踪活跃连接数
+	shutdownOnce sync.Once
+	logger       *slog.Logger
 }
 
 // NewHub 创建 Hub 实例
@@ -306,69 +317,63 @@ func (h *Hub) cleanStaleConnections() {
 	h.clients.Range(func(key, value interface{}) bool {
 		list := value.(*[]*Client)
 		for _, c := range *list {
-			if now.Sub(c.LastPong) > pongTimeout {
+			lastPong := time.Unix(0, c.lastPong.Load())
+			if now.Sub(lastPong) > pongTimeout {
 				h.logger.Warn("connection pong timeout, disconnecting", "user_id", c.UserID)
-				h.bus <- BusMessage{Type: BusUnregister, Payload: c}
+				select {
+				case h.bus <- BusMessage{Type: BusUnregister, Payload: c}:
+				default:
+					h.logger.Warn("bus full, dropping stale unregister", "user_id", c.UserID)
+				}
 			}
 		}
 		return true
 	})
 }
 
-// shutdown 优雅关闭：排空消息、关闭所有连接、清理房间
+// shutdown 优雅关闭：排空消息、关闭所有连接、清理房间（通过 sync.Once 保证只执行一次）
 func (h *Hub) shutdown() {
-	h.logger.Info("hub shutting down, draining messages")
+	h.shutdownOnce.Do(func() {
+		h.logger.Info("hub shutting down, draining messages")
 
-	// 排空待发消息（最多等待 2 秒）
-	drainTimer := time.NewTimer(2 * time.Second)
-	drainDone := false
-	for !drainDone {
-		select {
-		case msg := <-h.bus:
-			h.dispatch(msg)
-		case <-drainTimer.C:
-			drainDone = true
+		// 排空待发消息（最多等待 2 秒）
+		drainTimer := time.NewTimer(2 * time.Second)
+		drainDone := false
+		for !drainDone {
+			select {
+			case msg := <-h.bus:
+				h.dispatch(msg)
+			case <-drainTimer.C:
+				drainDone = true
+			}
 		}
-	}
 
-	// 关闭所有连接
-	h.clients.Range(func(key, value interface{}) bool {
-		list := value.(*[]*Client)
-		for _, c := range *list {
-			close(c.sendCh)
-			c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
-			h.wg.Done()
-		}
-		return true
+		// 关闭所有连接
+		h.clients.Range(func(key, value interface{}) bool {
+			list := value.(*[]*Client)
+			for _, c := range *list {
+				close(c.sendCh)
+				c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
+				h.wg.Done()
+			}
+			return true
+		})
+
+		// 等待所有连接 goroutine 结束
+		h.wg.Wait()
+
+		// 清理房间
+		h.roomMu.Lock()
+		h.rooms = make(map[string]map[*Client]bool)
+		h.roomMu.Unlock()
+
+		h.logger.Info("hub shutdown complete")
 	})
-
-	// 等待所有连接 goroutine 结束
-	h.wg.Wait()
-
-	// 清理房间
-	h.roomMu.Lock()
-	h.rooms = make(map[string]map[*Client]bool)
-	h.roomMu.Unlock()
-
-	h.logger.Info("hub shutdown complete")
 }
 
-// Shutdown 外部调用关闭 Hub
+// Shutdown 外部调用关闭 Hub（委托给内部 shutdown，sync.Once 保证幂等）
 func (h *Hub) Shutdown(ctx context.Context) {
-	h.logger.Info("hub shutdown requested")
-	// 通过发送关闭信号让 Run() 退出
-	// Run 的 ctx 取消后会调用 shutdown
-	// 此方法保留用于外部显式触发
-	h.clients.Range(func(key, value interface{}) bool {
-		list := value.(*[]*Client)
-		for _, c := range *list {
-			close(c.sendCh)
-			c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
-			h.wg.Done()
-		}
-		return true
-	})
-	h.wg.Wait()
+	h.shutdown()
 }
 
 // --- 公开 API ---
@@ -453,7 +458,7 @@ func StartHeartbeat(ctx context.Context, client *Client, hub *Hub) {
 				hub.Unregister(client)
 				return
 			}
-			client.LastPong = time.Now()
+			client.UpdateLastPong()
 		}
 	}
 }
@@ -478,7 +483,7 @@ func StartPing(ctx context.Context, client *Client, hub *Hub, interval time.Dura
 				hub.Unregister(client)
 				return
 			}
-			client.LastPong = time.Now()
+			client.UpdateLastPong()
 		}
 	}
 }

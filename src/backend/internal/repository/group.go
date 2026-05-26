@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -118,7 +120,10 @@ func (r *GroupRepo) GetMember(ctx context.Context, conversationID, userID string
 		conversationID, userID,
 	).StructScan(&m)
 	if err != nil {
-		return nil, nil // not found returns nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get member: %w", err)
 	}
 	return &m, nil
 }
@@ -145,7 +150,10 @@ func (r *GroupRepo) GetConversationByID(ctx context.Context, id string) (*model.
 		id,
 	).StructScan(&c)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get conversation by id: %w", err)
 	}
 	return &c, nil
 }
@@ -158,7 +166,10 @@ func (r *GroupRepo) GetUserByID(ctx context.Context, id string) (*model.User, er
 		id,
 	).StructScan(&u)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 	return &u, nil
 }
@@ -166,9 +177,10 @@ func (r *GroupRepo) GetUserByID(ctx context.Context, id string) (*model.User, er
 // SearchUsers 按用户名前缀搜索用户
 func (r *GroupRepo) SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error) {
 	var list []*model.User
+	escaped := escapeLike(query) + "%"
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, username, created_at FROM users WHERE username LIKE $1 LIMIT $2`,
-		query+"%", limit,
+		`SELECT id, username, created_at FROM users WHERE username LIKE $1 ESCAPE '\' LIMIT $2`,
+		escaped, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search users: %w", err)

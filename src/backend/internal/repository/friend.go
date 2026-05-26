@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/jmoiron/sqlx"
@@ -171,14 +172,23 @@ func (r *FriendRepo) GetUserByUsername(ctx context.Context, username string) (*m
 // SearchUsers 按用户名前缀搜索用户
 func (r *FriendRepo) SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error) {
 	var list []*model.User
+	escaped := escapeLike(query) + "%"
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, username, created_at FROM users WHERE username LIKE $1 LIMIT $2`,
-		query+"%", limit,
+		`SELECT id, username, created_at FROM users WHERE username LIKE $1 ESCAPE '\' LIMIT $2`,
+		escaped, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search users: %w", err)
 	}
 	return list, nil
+}
+
+// escapeLike 转义 SQL LIKE 通配符
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 // GetUserByID 按 ID 查找用户（好友模块复用，不查询密码）

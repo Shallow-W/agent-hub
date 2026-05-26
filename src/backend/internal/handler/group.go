@@ -21,8 +21,8 @@ func NewGroupHandler(svc *service.GroupService) *GroupHandler {
 
 // CreateGroupRequest 创建群聊请求体
 type CreateGroupRequest struct {
-	Name      string   `json:"name"`
-	MemberIDs []string `json:"member_ids"`
+	Name      string   `json:"name" binding:"required,min=1,max=50"`
+	MemberIDs []string `json:"member_ids" binding:"max=100"`
 }
 
 // AddMemberRequest 添加成员请求体
@@ -36,10 +36,6 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) {
 	var req CreateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "参数错误: "+err.Error())
-		return
-	}
-	if req.Name == "" {
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "群名不能为空")
 		return
 	}
 
@@ -72,6 +68,10 @@ func (h *GroupHandler) AddMember(c *gin.Context) {
 	}
 	if req.Role == "" {
 		req.Role = "member"
+	}
+	if req.Role != "member" && req.Role != "admin" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "无效的角色，只允许 member 或 admin")
+		return
 	}
 
 	userID := middleware.GetUserID(c)
@@ -135,8 +135,13 @@ func (h *GroupHandler) ListMembers(c *gin.Context) {
 		return
 	}
 
-	list, err := h.svc.ListMembers(c.Request.Context(), conversationID)
+	userID := middleware.GetUserID(c)
+	list, err := h.svc.ListMembers(c.Request.Context(), conversationID, userID)
 	if err != nil {
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50303, "查询成员列表失败")
 		return
 	}
