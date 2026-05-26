@@ -53,7 +53,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-          autoSize={{ minRows: 1, maxRows: 5 }}
+          autoSize={{ minRows: 1, maxRows: 4 }}
           className={styles.textarea}
         />
         <Button

@@ -1,6 +1,6 @@
 .bubble {
   display: flex;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   position: relative;
 }
 
@@ -12,12 +12,9 @@
   justify-content: flex-start;
 }
 
-/* 同一角色连续消息间距缩小 */
-.bubble + .bubble {
+.bubbleGrouped {
   margin-bottom: 4px;
 }
-
-/* 不同角色之间恢复大间距（通过 :not 选择器无法精确实现，由外层 20px 兜底） */
 
 .avatar {
   width: 32px;
@@ -56,26 +53,24 @@
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  border-radius: 12px;
   transition: background-color 0.15s ease;
 }
 
 .innerUser {
-  background-color: var(--color-primary);
+  background-color: #1677ff;
   color: #fff;
-  border-radius: 16px 16px 4px 16px;
   max-width: 100%;
 }
 
 .innerAssistant {
-  background-color: var(--color-bg-white);
+  background-color: #f0f0f0;
   color: var(--color-text);
-  border-radius: 16px 16px 16px 4px;
   max-width: 100%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .innerAssistant:hover {
-  background-color: #fafafa;
+  background-color: #e8e8e8;
 }
 
 .meta {
@@ -91,7 +86,6 @@
   font-weight: 500;
 }
 
-/* 时间戳：默认隐藏，hover 时显示 */
 .timestamp {
   font-size: 11px;
   color: var(--color-text-secondary);
@@ -113,7 +107,13 @@
   opacity: 1;
 }
 
-/* 代码块：暗色主题 + 头部栏 + 复制按钮 */
+.systemMessage {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  margin-bottom: 8px;
+}
+
 .codeBlockWrapper {
   margin: 8px 0;
   border-radius: 8px;
@@ -146,7 +146,6 @@
   font-family: inherit;
 }
 
-/* 流式光标：脉冲发光 */
 .streamingCursor {
   display: inline-block;
   width: 2px;

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Avatar, Button, Menu } from 'antd';
+import { Avatar, Button, Menu, Switch, Tooltip } from 'antd';
 import {
   MessageOutlined,
   SettingOutlined,
@@ -7,6 +7,7 @@ import {
   UserAddOutlined,
   LogoutOutlined,
   TeamOutlined,
+  BulbOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -38,6 +39,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onNavChange,
 }) => {
   const [selectedKey, setSelectedKey] = useState('chat');
+  const [darkMode, setDarkMode] = useState(false);
   const initial = username ? username.charAt(0).toUpperCase() : '?';
 
   const handleMenuClick = (info: { key: string }) => {
@@ -47,13 +49,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   return (
     <div className={styles.panel}>
-      {/* 品牌标识 */}
       <div className={styles.brand}>
         <div className={styles.brandIcon}>A</div>
         <span className={styles.brandName}>AgentHub</span>
       </div>
 
-      {/* 用户信息 */}
       <div className={styles.profile}>
         <Avatar
           style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
@@ -64,7 +64,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <span className={styles.profileName}>{username}</span>
       </div>
 
-      {/* 导航列表 - 使用 antd Menu */}
       <Menu
         mode="inline"
         selectedKeys={[selectedKey]}
@@ -79,8 +78,20 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ]}
       />
 
-      {/* 底部：连接状态 + 退出 */}
       <div className={styles.footer}>
+        <div className={styles.themeRow}>
+          <div className={styles.themeLabel}>
+            <BulbOutlined style={{ marginRight: 6 }} />
+            暗色主题
+          </div>
+          <Tooltip title={darkMode ? '切换亮色' : '切换暗色'}>
+            <Switch
+              size="small"
+              checked={darkMode}
+              onChange={setDarkMode}
+            />
+          </Tooltip>
+        </div>
         <div className={styles.wsStatus}>
           <span
             className={styles.wsDot}
@@ -90,6 +101,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         <Button
           block
+          danger
           icon={<LogoutOutlined />}
           onClick={onLogout}
         >

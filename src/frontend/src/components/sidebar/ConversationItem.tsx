@@ -5,6 +5,8 @@ import {
   PushpinOutlined,
   InboxOutlined,
   DeleteOutlined,
+  UserOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
@@ -15,6 +17,8 @@ interface ConversationItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  lastMessage?: string;
+  unreadCount?: number;
 }
 
 const AVATAR_COLORS: readonly string[] = [
@@ -37,13 +41,26 @@ function getAvatarColor(title: string): string {
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
 
-  if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  if (diffMin < 1440) return `${Math.floor(diffMin / 60)}小时前`;
-  return `${Math.floor(diffMin / 1440)}天前`;
+  if (msgDate.getTime() === today.getTime()) {
+    return `${hh}:${mm}`;
+  }
+  if (msgDate.getTime() === yesterday.getTime()) {
+    return '昨天';
+  }
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}-${day}`;
+}
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
 }
 
 export const ConversationItem: React.FC<ConversationItemProps> = ({
@@ -52,9 +69,12 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onSelect,
   onDelete,
   onTogglePin,
+  lastMessage,
+  unreadCount = 0,
 }) => {
   const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
   const avatarColor = getAvatarColor(conversation.title || '?');
+  const isGroup = conversation.type === 'group';
 
   const menuItems: MenuProps['items'] = [
     {
@@ -72,7 +92,6 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       label: '归档',
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        // TODO: 归档功能待实现
       },
     },
     { type: 'divider' },
@@ -101,29 +120,33 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         }
       }}
     >
-      {/* 头像 - 使用 antd Avatar */}
       <Badge dot={conversation.pinned} color="#1677ff" offset={[-4, 30]}>
         <Avatar
           style={{ backgroundColor: avatarColor, flexShrink: 0 }}
           size={36}
+          icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
         >
-          {firstChar}
+          {!isGroup ? firstChar : undefined}
         </Avatar>
       </Badge>
 
-      {/* 标题 + 时间 */}
       <div className={styles.content}>
         <div className={styles.titleRow}>
           <span className={styles.title}>{conversation.title}</span>
-        </div>
-        <div className={styles.subtitleRow}>
           <span className={styles.time}>
             {formatTime(conversation.updated_at)}
           </span>
         </div>
+        <div className={styles.subtitleRow}>
+          <span className={styles.subtitle}>
+            {lastMessage ? truncate(lastMessage, 20) : ''}
+          </span>
+          {unreadCount > 0 && (
+            <Badge count={unreadCount} size="small" style={{ flexShrink: 0 }} />
+          )}
+        </div>
       </div>
 
-      {/* 悬停操作 - 使用 antd Dropdown */}
       <div className={styles.actions}>
         <Dropdown
           menu={{ items: menuItems }}

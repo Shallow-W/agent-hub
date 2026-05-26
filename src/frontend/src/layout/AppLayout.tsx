@@ -7,13 +7,17 @@ import SettingsPanel from '@/components/settings/SettingsPanel';
 import FriendList from '@/components/friends/FriendList';
 import FriendRequest from '@/components/friends/FriendRequest';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
+import { createGroup } from '@/api/group';
+import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
+import { message } from 'antd';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
   const { create } = useConversation();
+  const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
   const [activeNav, setActiveNav] = useState('chat');
@@ -23,10 +27,15 @@ const AppLayout: React.FC = () => {
     await create('single', `新对话`);
   };
 
-  const handleGroupCreate = (name: string, memberIds: string[]) => {
-    // TODO: 调用后端创建群聊 API
-    console.log('创建群聊:', name, memberIds);
-    setGroupModalOpen(false);
+  const handleGroupCreate = async (name: string, memberIds: string[]) => {
+    try {
+      await createGroup({ name, member_ids: memberIds });
+      message.success('群聊创建成功');
+      setGroupModalOpen(false);
+      await fetchConversations();
+    } catch {
+      message.error('创建群聊失败');
+    }
   };
 
   /** 中间面板内容：根据左侧导航切换 */

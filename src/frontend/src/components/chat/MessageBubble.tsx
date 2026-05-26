@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Typography } from 'antd';
-import { RobotOutlined } from '@ant-design/icons';
+import { UserOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import styles from './MessageBubble.module.css';
 
@@ -9,9 +9,10 @@ const { Paragraph, Text } = Typography;
 interface MessageBubbleProps {
   message: Message;
   streaming?: boolean;
+  showAvatar?: boolean;
+  isGrouped?: boolean;
 }
 
-/** 简单分割：用 ``` 包裹的代码块渲染为带头部的暗色代码区域 */
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
   return (
     <div className={styles.codeBlockWrapper}>
@@ -42,7 +43,6 @@ function renderContent(content: string): React.ReactNode {
         firstNewline >= 0 ? lines.slice(firstNewline + 1) : lines;
       return <CodeBlock key={i} code={code} lang={langMatch} />;
     }
-    // 保留换行
     return part.split('\n').map((line, j, arr) => (
       <React.Fragment key={`${i}-${j}`}>
         {line}
@@ -54,28 +54,55 @@ function renderContent(content: string): React.ReactNode {
 
 function formatTimestamp(dateStr: string): string {
   const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
+
+  if (msgDate.getTime() === today.getTime()) {
+    return `${hh}:${mm}`;
+  }
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day} ${hh}:${mm}`;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
+  showAvatar = true,
+  isGrouped = false,
 }) => {
   const isUser = message.role === 'user';
+  const isSystem = message.role === 'system';
+
+  if (isSystem) {
+    return (
+      <div className={styles.systemMessage}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {message.content}
+        </Text>
+      </div>
+    );
+  }
 
   return (
-    <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
-      {!isUser && (
+    <div
+      className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
+    >
+      {!isUser && showAvatar && (
         <Avatar
           size={32}
-          icon={<RobotOutlined />}
+          icon={<UserOutlined />}
           style={{ backgroundColor: '#1677ff', flexShrink: 0, marginRight: 10, marginTop: 2 }}
-        />
+        >
+          {message.content?.charAt(0)?.toUpperCase() ?? ''}
+        </Avatar>
       )}
+      {!isUser && !showAvatar && <div style={{ width: 42, flexShrink: 0 }} />}
       <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
-        {!isUser && (
+        {!isUser && showAvatar && (
           <div className={styles.meta}>
             <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>Agent</Text>
           </div>
@@ -86,13 +113,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {renderContent(message.content)}
           {streaming && <span className={styles.streamingCursor} />}
         </div>
-        <div
-          className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
-        >
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {formatTimestamp(message.created_at)}
-          </Text>
-        </div>
+        {showAvatar && (
+          <div
+            className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
+          >
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {formatTimestamp(message.created_at)}
+            </Text>
+          </div>
+        )}
       </div>
     </div>
   );

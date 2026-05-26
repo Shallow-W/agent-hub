@@ -1,5 +1,6 @@
 import { get, post } from './client';
 import type { Friend, FriendRequest } from '@/types/friend';
+import type { User } from '@/types/auth';
 
 export const sendFriendRequest = (username: string) =>
   post<Friend>('/friends/request', { username });
@@ -15,3 +16,6 @@ export const listFriends = () =>
 
 export const listPendingRequests = () =>
   get<FriendRequest[]>('/friends/pending');
+
+export const searchUsers = (username: string) =>
+  get<User[]>(`/friends/search?username=${encodeURIComponent(username)}`);

@@ -58,3 +58,10 @@ button {
   font-family: inherit;
   font-size: inherit;
 }
+
+/* Global transition for clickable elements */
+a,
+button,
+[role="button"] {
+  transition: all 0.2s ease;
+}

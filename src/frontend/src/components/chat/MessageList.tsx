@@ -1,10 +1,19 @@
 import React, { useRef, useEffect } from 'react';
+import { Empty, Spin } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
 import { MessageBubble } from './MessageBubble';
+import type { Message } from '@/types/message';
 import styles from './MessageList.module.css';
 
 interface MessageListProps {
   conversationId: string;
+}
+
+/** Check if two messages from the same role are within 5 minutes */
+function isGrouped(prev: Message, curr: Message): boolean {
+  if (prev.role !== curr.role) return false;
+  const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
+  return diff < 5 * 60 * 1000;
 }
 
 export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
@@ -13,7 +22,6 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 有新消息时自动滚动到底部（除非用户主动向上滚动）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -29,25 +37,40 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId }) => {
     <div className={styles.container} ref={containerRef}>
       {hasMore && (
         <div className={styles.loadMore}>
-          <button
-            className={styles.loadMoreBtn}
-            onClick={loadMore}
-            disabled={loading}
-          >
-            {loading ? '加载中...' : '加载更多'}
-          </button>
+          {loading ? (
+            <Spin size="small" />
+          ) : (
+            <button
+              className={styles.loadMoreBtn}
+              onClick={loadMore}
+            >
+              加载更多
+            </button>
+          )}
         </div>
       )}
       {isEmpty ? (
         <div className={styles.empty}>
-          <span className={styles.emptyIcon} role="img" aria-label="chat">&#x1F4AC;</span>
-          <span className={styles.emptyText}>开始新对话</span>
+          <Empty
+            description="开始新对话"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         </div>
       ) : (
         <>
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
+          {messages.map((msg, idx) => {
+            const prev = idx > 0 ? messages[idx - 1] : undefined;
+            const grouped = prev ? isGrouped(prev, msg) : false;
+
+            return (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                showAvatar={!grouped}
+                isGrouped={grouped}
+              />
+            );
+          })}
           {streamingContent && (
             <MessageBubble
               message={{

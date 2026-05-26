@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input, Spin } from 'antd';
+import { Input, Spin, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
+import { useMessageStore } from '@/store/messageStore';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
 
@@ -12,7 +13,6 @@ export const ConversationList: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 防抖搜索：300ms
   useEffect(() => {
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
@@ -29,7 +29,6 @@ export const ConversationList: React.FC = () => {
       )
     : conversations;
 
-  // 加载状态
   if (loading && conversations.length === 0) {
     return (
       <div className={styles.list}>
@@ -41,13 +40,14 @@ export const ConversationList: React.FC = () => {
     );
   }
 
-  // 空状态
   if (conversations.length === 0) {
     return (
       <div className={styles.list}>
         <div className={styles.empty}>
-          <span className={styles.emptyIcon}>&#128172;</span>
-          <span>暂无对话，点击「新建对话」开始</span>
+          <Empty
+            description="暂无对话，点击「新建对话」开始"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         </div>
       </div>
     );
@@ -55,7 +55,6 @@ export const ConversationList: React.FC = () => {
 
   return (
     <div className={styles.list}>
-      {/* 搜索栏 - 使用 antd Input.Search */}
       <div className={styles.searchWrapper}>
         <Input.Search
           placeholder="搜索对话..."
@@ -67,13 +66,12 @@ export const ConversationList: React.FC = () => {
         />
       </div>
 
-      {/* 对话列表 */}
       <div className={styles.items}>
         {filtered.length === 0 ? (
           <div className={styles.noResults}>未找到匹配的对话</div>
         ) : (
           filtered.map((conv) => (
-            <ConversationItem
+            <ConversationItemWrapper
               key={conv.id}
               conversation={conv}
               active={conv.id === activeId}
@@ -85,5 +83,32 @@ export const ConversationList: React.FC = () => {
         )}
       </div>
     </div>
+  );
+};
+
+/** Wrapper that reads last message from message store */
+const ConversationItemWrapper: React.FC<{
+  conversation: Parameters<typeof ConversationItem>[0]['conversation'];
+  active: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onTogglePin: () => void;
+}> = ({ conversation, active, onSelect, onDelete, onTogglePin }) => {
+  const messages = useMessageStore(
+    (s) => s.messages[conversation.id] ?? [],
+  );
+
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const lastMessage = lastMsg?.content;
+
+  return (
+    <ConversationItem
+      conversation={conversation}
+      active={active}
+      onSelect={onSelect}
+      onDelete={onDelete}
+      onTogglePin={onTogglePin}
+      lastMessage={lastMessage}
+    />
   );
 };

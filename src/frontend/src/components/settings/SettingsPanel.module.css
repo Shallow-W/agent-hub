@@ -58,6 +58,20 @@
   border-top: 1px solid var(--color-border);
 }
 
+.themeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.themeLabel {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
 .wsStatus {
   display: flex;
   align-items: center;

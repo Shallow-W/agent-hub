@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Friend, FriendRequest } from '@/types/friend';
+import type { User } from '@/types/auth';
 import * as friendApi from '@/api/friend';
 
 interface FriendState {
@@ -7,12 +8,16 @@ interface FriendState {
   pendingRequests: FriendRequest[];
   loading: boolean;
   error: string | null;
+  searchResults: User[];
+  isSearching: boolean;
 
   fetchFriends: () => Promise<void>;
   fetchPending: () => Promise<void>;
   sendRequest: (username: string) => Promise<void>;
   acceptRequest: (id: string) => Promise<void>;
   rejectRequest: (id: string) => Promise<void>;
+  searchUsers: (username: string) => Promise<void>;
+  clearSearch: () => void;
 }
 
 export const useFriendStore = create<FriendState>((set) => ({
@@ -20,6 +25,8 @@ export const useFriendStore = create<FriendState>((set) => ({
   pendingRequests: [],
   loading: false,
   error: null,
+  searchResults: [],
+  isSearching: false,
 
   fetchFriends: async () => {
     set({ loading: true, error: null });
@@ -86,5 +93,21 @@ export const useFriendStore = create<FriendState>((set) => ({
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
     }
+  },
+
+  searchUsers: async (username: string) => {
+    set({ isSearching: true });
+    try {
+      const results = await friendApi.searchUsers(username);
+      set({ searchResults: results });
+    } catch {
+      set({ searchResults: [] });
+    } finally {
+      set({ isSearching: false });
+    }
+  },
+
+  clearSearch: () => {
+    set({ searchResults: [], isSearching: false });
   },
 }));

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Form, Input, Select } from 'antd';
+import { Modal, Form, Input, Checkbox, Empty } from 'antd';
 import { useFriendStore } from '@/store/friendStore';
 
 interface GroupCreateModalProps {
@@ -16,6 +16,7 @@ const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
   const { friends } = useFriendStore();
   const [form] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
 
   const handleOk = async () => {
     try {
@@ -29,12 +30,14 @@ const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
 
   const handleAfterClose = () => {
     form.resetFields();
+    setMemberSearch('');
   };
 
-  const friendOptions = friends.map((f) => ({
-    label: f.friend_name ?? '未知用户',
-    value: f.friend_id,
-  }));
+  const filteredFriends = memberSearch
+    ? friends.filter((f) =>
+        (f.friend_name ?? '').toLowerCase().includes(memberSearch.toLowerCase()),
+      )
+    : friends;
 
   return (
     <Modal
@@ -57,16 +60,32 @@ const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
           <Input placeholder="请输入群聊名称" maxLength={50} />
         </Form.Item>
         <Form.Item name="members" label="选择成员">
-          <Select
-            mode="multiple"
-            placeholder="搜索并选择好友"
-            options={friendOptions}
-            allowClear
-            showSearch
-            filterOption={(input, option) =>
-              (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
-            }
-          />
+          <>
+            <Input.Search
+              placeholder="搜索好友..."
+              allowClear
+              value={memberSearch}
+              onChange={(e) => setMemberSearch(e.target.value)}
+              onClear={() => setMemberSearch('')}
+              style={{ marginBottom: 8 }}
+            />
+            {filteredFriends.length === 0 ? (
+              <Empty
+                description="没有匹配的好友"
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            ) : (
+              <Checkbox.Group
+                style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 200, overflowY: 'auto' }}
+              >
+                {filteredFriends.map((f) => (
+                  <Checkbox key={f.friend_id} value={f.friend_id}>
+                    {f.friend_name ?? '未知用户'}
+                  </Checkbox>
+                ))}
+              </Checkbox.Group>
+            )}
+          </>
         </Form.Item>
       </Form>
     </Modal>
