@@ -2,6 +2,18 @@
   display: flex;
   margin-bottom: 16px;
   position: relative;
+  animation: bubbleIn 0.25s ease;
+}
+
+@keyframes bubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .bubbleUser {
@@ -16,11 +28,15 @@
   margin-bottom: 4px;
 }
 
+.bubbleGrouped {
+  animation: none;
+}
+
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background-color: var(--color-primary);
+  background: linear-gradient(135deg, #1677ff, #4096ff);
   color: #fff;
   display: flex;
   align-items: center;
@@ -31,6 +47,7 @@
   margin-right: 10px;
   margin-top: 2px;
   user-select: none;
+  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.2);
 }
 
 .content {
@@ -51,26 +68,28 @@
 .inner {
   padding: 10px 14px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   word-break: break-word;
   border-radius: 12px;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
 }
 
 .innerUser {
-  background-color: #1677ff;
+  background: linear-gradient(135deg, #1677ff 0%, #3d8bfd 100%);
   color: #fff;
   max-width: 100%;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.2);
 }
 
 .innerAssistant {
-  background-color: #f0f0f0;
+  background-color: var(--color-bg-white);
   color: var(--color-text);
   max-width: 100%;
+  box-shadow: var(--shadow-card);
 }
 
 .innerAssistant:hover {
-  background-color: #e8e8e8;
+  background-color: var(--color-bg-white);
 }
 
 .meta {
@@ -88,10 +107,10 @@
 
 .timestamp {
   font-size: 11px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   margin-top: 4px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--transition-fast);
   pointer-events: none;
 }
 
@@ -169,10 +188,8 @@
   }
 }
 
-/* ── Optimistic message states ── */
-
 .innerSending {
-  background-color: #e6e6e6;
+  background-color: #f0f0f0;
   color: var(--color-text-secondary);
   max-width: 100%;
   opacity: 0.7;

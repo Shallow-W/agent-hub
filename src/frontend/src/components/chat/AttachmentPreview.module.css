@@ -2,21 +2,27 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .item {
   position: relative;
   width: 80px;
   height: 80px;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: #fafafa;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-white);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.item:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
 }
 
 .thumb {
@@ -43,17 +49,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
   z-index: 1;
 }
 
 .overlayError {
-  background: rgba(255, 240, 240, 0.75);
+  background: rgba(255, 240, 240, 0.8);
 }
 
 .errorText {
   font-size: 11px;
-  color: #ff4d4f;
+  color: var(--color-danger);
+  font-weight: 500;
 }
 
 .removeBtn {
@@ -63,16 +71,16 @@
   background: none;
   border: none;
   cursor: pointer;
-  color: rgba(0, 0, 0, 0.45);
+  color: rgba(0, 0, 0, 0.35);
   font-size: 16px;
   padding: 0;
   line-height: 1;
   z-index: 2;
-  transition: color 0.15s;
+  transition: color var(--transition-fast);
 }
 
 .removeBtn:hover {
-  color: #ff4d4f;
+  color: var(--color-danger);
 }
 
 .fileName {
@@ -82,8 +90,8 @@
   right: 0;
   font-size: 9px;
   color: #fff;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

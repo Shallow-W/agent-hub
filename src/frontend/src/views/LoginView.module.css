@@ -1,18 +1,35 @@
 .form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 22px;
 }
 
 .error {
   color: var(--color-danger);
   font-size: 13px;
   text-align: center;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #fff2f0, #fff1f0);
+  border-radius: 10px;
+  border: 1px solid #ffccc7;
+  font-weight: 500;
 }
 
 .footer {
   text-align: center;
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
+}
+
+.footer a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.footer a:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
 }

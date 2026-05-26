@@ -5,21 +5,22 @@
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background-color: var(--color-bg);
+  background: linear-gradient(180deg, var(--color-bg) 0%, #f5f6f8 100%);
   animation: fadeIn 0.4s ease;
 }
 
 .icon {
-  font-size: 56px;
-  opacity: 0.5;
+  font-size: 64px;
+  opacity: 0.4;
   line-height: 1;
   user-select: none;
 }
 
 .title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   color: var(--color-text);
+  letter-spacing: -0.3px;
 }
 
 .subtitle {

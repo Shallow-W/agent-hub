@@ -1,4 +1,5 @@
 import React from 'react';
+import { RobotOutlined } from '@ant-design/icons';
 import styles from './AuthLayout.module.css';
 
 interface AuthLayoutProps {
@@ -10,6 +11,9 @@ const AuthLayout: React.FC<AuthLayoutProps> = ({ children }) => {
     <div className={styles.container}>
       <div className={styles.card}>
         <div className={styles.logo}>
+          <div className={styles.logoIcon}>
+            <RobotOutlined />
+          </div>
           <h1>AgentHub</h1>
           <p>多 Agent 协作平台</p>
         </div>

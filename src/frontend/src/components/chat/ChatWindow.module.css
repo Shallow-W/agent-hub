@@ -9,10 +9,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
-  padding: 0 20px;
+  height: 60px;
+  padding: 0 24px;
   background-color: var(--color-bg-white);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--color-border-light);
   position: relative;
   z-index: 1;
 }
@@ -50,25 +50,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border: none;
   background: transparent;
   border-radius: 8px;
   cursor: pointer;
   font-size: 16px;
   color: var(--color-text-secondary);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .headerBtn:hover {
-  background-color: var(--color-bg);
-  color: var(--color-text);
+  background-color: var(--color-primary-bg);
+  color: var(--color-primary);
 }
 
 .typingIndicator {
-  padding: 4px 20px;
+  padding: 4px 24px;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-primary);
   background-color: var(--color-bg-white);
+  font-weight: 500;
 }
