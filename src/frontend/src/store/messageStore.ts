@@ -64,8 +64,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         PAGE_SIZE,
       );
       set((state) => {
-        const existing = state.messages[conversationId] ?? [];
-        // 历史消息拼在前面（按时间升序排列）
+        // before 有值表示翻页加载更多，拼在前面；否则是首次加载，覆盖旧数据
+        const existing = before ? (state.messages[conversationId] ?? []) : [];
         const merged = [...list, ...existing];
         return {
           messages: { ...state.messages, [conversationId]: merged },

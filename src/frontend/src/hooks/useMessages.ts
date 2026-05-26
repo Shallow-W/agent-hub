@@ -5,7 +5,6 @@ import type { OptimisticMessage } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
 export function useMessages(conversationId: string | null) {
-  // 使用精确 selector 避免订阅整个 store map（防止无关更新触发重渲染）
   const conversationMessages = useMessageStore(
     (s) => (conversationId ? s.messages[conversationId] : undefined),
   );
@@ -26,32 +25,34 @@ export function useMessages(conversationId: string | null) {
 
   const messages = conversationMessages ?? [];
   const streamingContent = streaming ?? '';
-  const hasMore = hasMoreEntry !== false;
+  const hasMore = hasMoreEntry === true;
   const optimisticMessages: OptimisticMessage[] = optimisticEntry ?? [];
 
-  // 防止重复拉取
-  const fetchedRef = useRef<Set<string>>(new Set());
+  // 追踪当前活跃的 conversationId，用于 stale check
+  const activeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!conversationId) return;
-    if (fetchedRef.current.has(conversationId)) return;
-    fetchedRef.current.add(conversationId);
-    fetchMessages(conversationId);
+    activeIdRef.current = conversationId;
+    const currentId = conversationId;
+
+    fetchMessages(currentId);
 
     // 拉取离线/未读消息并合并
-    getUnreadMessages(conversationId, 100).then((unread) => {
+    getUnreadMessages(currentId, 100).then((unread) => {
+      // stale check：如果用户已切换到其他对话，丢弃结果
+      if (activeIdRef.current !== currentId) return;
       if (unread && unread.length > 0) {
         const store = useMessageStore.getState();
-        const existing = store.messages[conversationId] ?? [];
+        const existing = store.messages[currentId] ?? [];
         const existingIds = new Set(existing.map((m) => m.id));
         const newMsgs = unread.filter((m) => !existingIds.has(m.id));
         if (newMsgs.length > 0) {
-          // 按时间排序合并
           const merged = [...existing, ...newMsgs].sort(
             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
           );
           useMessageStore.setState((s) => ({
-            messages: { ...s.messages, [conversationId]: merged },
+            messages: { ...s.messages, [currentId]: merged },
           }));
         }
       }
