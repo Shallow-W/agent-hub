@@ -60,6 +60,14 @@ coverage.html
 # === OMC 状态 ===
 .omc/
 
+# === 截图工具 ===
+screenshots/
+src/frontend/screenshot.mjs
+
+# === 根目录误生成的 package 文件 ===
+/package.json
+/package-lock.json
+
 # === Trellis 本地状态 ===
 .trellis/state/
 
