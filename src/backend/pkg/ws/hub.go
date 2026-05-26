@@ -314,29 +314,23 @@ func (h *Hub) handleRoomMsg(msg BusMessage) {
 	}
 }
 
-// handlePersistedMsg 处理持久化消息推送：向会话房间内在线成员推送
+// handlePersistedMsg 处理持久化消息推送：向所有会话成员推送
 func (h *Hub) handlePersistedMsg(msg BusMessage) {
 	payload := msg.Payload.(*persistedMsgPayload)
 	wsMsg := WSMessage{Type: TypeMessageComplete, Data: payload.Message}
 
-	// 推送给房间内在线成员
-	h.roomMu.RLock()
-	members := h.rooms[payload.ConversationID]
-	toSend := make([]*Client, 0, len(members))
-	for c := range members {
-		toSend = append(toSend, c)
-	}
-	h.roomMu.RUnlock()
-
-	for _, c := range toSend {
-		if err := c.Send(wsMsg); err != nil {
-			h.logger.Warn("push persisted msg failed", "conversation_id", payload.ConversationID, "user_id", c.UserID, "error", err)
-		}
-	}
-
-	// 给所有会话成员推送（含不在线但在用户列表里的）
+	// 统一通过 SendToUser 推送，避免房间+用户列表双重推送
 	for _, uid := range payload.MemberIDs {
-		h.SendToUser(uid, wsMsg)
+		val, ok := h.clients.Load(uid)
+		if !ok {
+			continue
+		}
+		list := val.(*[]*Client)
+		for _, c := range *list {
+			if err := c.Send(wsMsg); err != nil {
+				h.logger.Warn("push persisted msg failed", "conversation_id", payload.ConversationID, "user_id", uid, "error", err)
+			}
+		}
 	}
 }
 

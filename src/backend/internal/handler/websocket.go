@@ -19,7 +19,7 @@ type WebSocketHandler struct {
 	authSvc        *service.AuthService
 	hub            *ws.Hub
 	memberChecker  MemberChecker
-	msgSender      WSMessagSender
+	msgSender      WSMessageSender
 	logger         *slog.Logger
 	allowedOrigins []string
 }
@@ -29,13 +29,13 @@ type MemberChecker interface {
 	IsConversationMember(ctx context.Context, conversationID, userID string) (bool, error)
 }
 
-// WSMessagSender WS 消息持久化接口
-type WSMessagSender interface {
+// WSMessageSender WS 消息持久化接口
+type WSMessageSender interface {
 	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string) (*model.Message, error)
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, mc MemberChecker, ms WSMessagSender, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
+func NewWebSocketHandler(authSvc *service.AuthService, hub *ws.Hub, mc MemberChecker, ms WSMessageSender, logger *slog.Logger, allowedOrigins []string) *WebSocketHandler {
 	return &WebSocketHandler{authSvc: authSvc, hub: hub, memberChecker: mc, msgSender: ms, logger: logger, allowedOrigins: allowedOrigins}
 }
 
@@ -64,6 +64,7 @@ func (h *WebSocketHandler) Handle(c *gin.Context) {
 	}
 
 	client := ws.NewClient(conn, userID)
+	conn.SetReadLimit(1 << 17) // 128KB max WS frame
 	h.hub.Register(client)
 
 	// 为连接创建独立 context，连接关闭时取消所有子操作
@@ -142,6 +143,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			if payload.ConversationID == "" || payload.Content == "" {
 				continue
 			}
+				if len(payload.Content) > 10000 {
+					h.hub.SendToUser(client.UserID, ws.WSMessage{
+						Type: ws.TypeError,
+						Data: map[string]string{"message": "消息内容过长"},
+					})
+					continue
+				}
 			if ok, _ := h.memberChecker.IsConversationMember(ctx, payload.ConversationID, client.UserID); !ok {
 				h.hub.SendToUser(client.UserID, ws.WSMessage{
 					Type: ws.TypeError,
@@ -194,7 +202,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 		default:
 			h.hub.SendToUser(client.UserID, ws.WSMessage{
 				Type: ws.TypeError,
-				Data: map[string]string{"message": "未识别的消息类型: " + msg.Type},
+				Data: map[string]string{"message": "未识别的消息类型"},
 			})
 		}
 	}

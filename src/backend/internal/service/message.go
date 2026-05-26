@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 )
+
+const maxMessageLen = 10000 // 10KB
 
 // MessageNotifier 消息推送接口（由 Hub 实现）
 type MessageNotifier interface {
@@ -21,6 +24,7 @@ type MessageCacher interface {
 	GetCachedMessages(ctx context.Context, conversationID string, limit int) ([]model.Message, error)
 	DequeueOfflineAfter(ctx context.Context, conversationID string, after interface{}) ([]model.Message, error)
 	ClearUnread(ctx context.Context, userID, conversationID string) error
+	IncrementUnread(ctx context.Context, userID, conversationID string) error
 }
 
 // MsgRepo 消息服务所需的仓库接口
@@ -42,6 +46,7 @@ type ConvRepoForMsg interface {
 var (
 	ErrMsgConvNotFound = errors.New("对话不存在")
 	ErrMsgConvNoPerm   = errors.New("无权操作此对话")
+	ErrMsgTooLong      = errors.New("消息内容过长")
 )
 
 // MessageService 消息业务逻辑
@@ -67,8 +72,24 @@ func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
 }
 
+// checkMembership 校验用户是否为会话成员
+func (s *MessageService) checkMembership(ctx context.Context, convID, userID string) error {
+	member, err := s.convRepo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return fmt.Errorf("check member: %w", err)
+	}
+	if member == nil {
+		return ErrMsgConvNoPerm
+	}
+	return nil
+}
+
 // SendMessage 发送消息：持久化 → 推送 → 缓存
 func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string) (*model.Message, error) {
+	if len(content) > maxMessageLen {
+		return nil, ErrMsgTooLong
+	}
+
 	conv, err := s.convRepo.GetByID(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation: %w", err)
@@ -76,8 +97,8 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
-	if conv.UserID != userID {
-		return nil, ErrMsgConvNoPerm
+	if err := s.checkMembership(ctx, convID, userID); err != nil {
+		return nil, err
 	}
 
 	if role == "" {
@@ -97,7 +118,8 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 
 // postPersist 持久化后的推送和缓存操作
 func (s *MessageService) postPersist(conversationID, senderID string, msg *model.Message) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// 获取会话成员列表
 	memberIDs, err := s.convRepo.ListMemberIDs(ctx, conversationID)
@@ -117,12 +139,15 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 	if s.cacher != nil {
 		_ = s.cacher.CacheMessage(ctx, conversationID, msg)
 
-		// 为不在线的成员加入离线队列
+		// 为不在线的成员加入离线队列 + 递增未读计数
 		for _, uid := range memberIDs {
-			if uid != senderID && !s.notifier.IsOnline(uid) {
-				_ = s.cacher.EnqueueOffline(ctx, conversationID, msg)
-				break // 每条消息只需入队一次（按会话维度）
+			if uid == senderID {
+				continue
 			}
+			if s.notifier != nil && !s.notifier.IsOnline(uid) {
+				_ = s.cacher.EnqueueOffline(ctx, conversationID, msg)
+			}
+			_ = s.cacher.IncrementUnread(ctx, uid, conversationID)
 		}
 	}
 }
@@ -136,19 +161,14 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 	if conv == nil {
 		return ErrMsgConvNotFound
 	}
-	member, err := s.convRepo.GetMember(ctx, convID, userID)
-	if err != nil {
-		return fmt.Errorf("check member: %w", err)
-	}
-	if member == nil {
-		return ErrMsgConvNoPerm
+	if err := s.checkMembership(ctx, convID, userID); err != nil {
+		return err
 	}
 
 	if err := s.msgRepo.MarkConversationRead(ctx, convID, userID); err != nil {
 		return err
 	}
 
-	// 清除 Redis 未读计数
 	if s.cacher != nil {
 		_ = s.cacher.ClearUnread(ctx, userID, convID)
 	}
@@ -165,8 +185,8 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
-	if conv.UserID != userID {
-		return nil, ErrMsgConvNoPerm
+	if err := s.checkMembership(ctx, convID, userID); err != nil {
+		return nil, err
 	}
 
 	if limit <= 0 {
@@ -176,8 +196,8 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 		limit = 100
 	}
 
-	// 先查 Redis 缓存
-	if s.cacher != nil {
+	// 仅在无游标时使用缓存（缓存是最新N条，不含历史分页）
+	if s.cacher != nil && before == nil {
 		cached, err := s.cacher.GetCachedMessages(ctx, convID, limit)
 		if err == nil && len(cached) > 0 {
 			return cached, nil
@@ -200,6 +220,9 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if conv == nil {
 		return nil, ErrMsgConvNotFound
 	}
+	if err := s.checkMembership(ctx, convID, userID); err != nil {
+		return nil, err
+	}
 
 	if limit <= 0 {
 		limit = 100
@@ -208,7 +231,6 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		limit = 200
 	}
 
-	// 先查 Redis 离线队列
 	if s.cacher != nil {
 		offline, err := s.cacher.DequeueOfflineAfter(ctx, convID, "-inf")
 		if err == nil && len(offline) > 0 {
@@ -216,7 +238,6 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		}
 	}
 
-	// fallback: 查 DB（最新 limit 条）
 	messages, err := s.msgRepo.GetMessagesAfter(ctx, convID, nil, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
