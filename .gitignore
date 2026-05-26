@@ -9,6 +9,7 @@ build/
 
 # === Go 构建产物 ===
 src/backend/bin/
+src/backend/server
 src/daemon/bin/
 bin/
 *.o
