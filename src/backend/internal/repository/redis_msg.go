@@ -37,17 +37,17 @@ func NewRedisMsgRepo(rdb *goredis.Client) *RedisMsgRepo {
 
 // --- 离线消息队列（Sorted Set，score=timestamp） ---
 
-func offlineKey(conversationID string) string {
-	return offlineKeyPrefix + conversationID
+func offlineKey(userID, conversationID string) string {
+	return offlineKeyPrefix + userID + ":" + conversationID
 }
 
-// EnqueueOffline 将消息加入会话的离线队列
-func (r *RedisMsgRepo) EnqueueOffline(ctx context.Context, conversationID string, msg *model.Message) error {
+// EnqueueOffline 将消息加入用户在该会话的离线队列
+func (r *RedisMsgRepo) EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
 	}
-	key := offlineKey(conversationID)
+	key := offlineKey(userID, conversationID)
 	member := goredis.Z{
 		Score:  float64(msg.CreatedAt.UnixNano()),
 		Member: data,
@@ -62,8 +62,8 @@ func (r *RedisMsgRepo) EnqueueOffline(ctx context.Context, conversationID string
 }
 
 // DequeueOfflineAfter 拉取指定时间之后的离线消息并清空队列
-func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, conversationID string, after interface{}) ([]model.Message, error) {
-	key := offlineKey(conversationID)
+func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error) {
+	key := offlineKey(userID, conversationID)
 	var min string
 	switch v := after.(type) {
 	case time.Time:

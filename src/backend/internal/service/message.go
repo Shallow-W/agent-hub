@@ -20,9 +20,9 @@ type MessageNotifier interface {
 // MessageCacher 消息缓存接口（由 Redis repo 实现）
 type MessageCacher interface {
 	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
-	EnqueueOffline(ctx context.Context, conversationID string, msg *model.Message) error
+	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
 	GetCachedMessages(ctx context.Context, conversationID string, limit int) ([]model.Message, error)
-	DequeueOfflineAfter(ctx context.Context, conversationID string, after interface{}) ([]model.Message, error)
+	DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error)
 	ClearUnread(ctx context.Context, userID, conversationID string) error
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
 }
@@ -145,7 +145,7 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 				continue
 			}
 			if s.notifier != nil && !s.notifier.IsOnline(uid) {
-				_ = s.cacher.EnqueueOffline(ctx, conversationID, msg)
+				_ = s.cacher.EnqueueOffline(ctx, uid, conversationID, msg)
 			}
 			_ = s.cacher.IncrementUnread(ctx, uid, conversationID)
 		}
@@ -232,7 +232,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	}
 
 	if s.cacher != nil {
-		offline, err := s.cacher.DequeueOfflineAfter(ctx, convID, "-inf")
+		offline, err := s.cacher.DequeueOfflineAfter(ctx, userID, convID, "-inf")
 		if err == nil && len(offline) > 0 {
 			return offline, nil
 		}
