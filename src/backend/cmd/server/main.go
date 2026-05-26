@@ -52,6 +52,11 @@ type Config struct {
 		Port     int    `koanf:"port"`
 		Password string `koanf:"password"`
 	} `koanf:"redis"`
+	Upload struct {
+		Dir        string `koanf:"dir"`
+		MaxImageMB int    `koanf:"max_image_mb"`
+		MaxPDFMB   int    `koanf:"max_pdf_mb"`
+	} `koanf:"upload"`
 }
 
 func main() {
@@ -76,7 +81,8 @@ func main() {
 	// 依赖注入组装
 	userRepo := repository.NewUserRepo(db)
 	convRepo := repository.NewConversationRepo(db)
-	msgRepo := repository.NewMessageRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	msgRepo := repository.NewMessageRepo(db, attachmentRepo)
 	friendRepo := repository.NewFriendRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
@@ -87,6 +93,13 @@ func main() {
 	msgSvc := service.NewMessageService(msgRepo, convRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
+
+	// 文件上传服务
+	uploadSvc := service.NewUploadService(service.UploadConfig{
+		Dir:        cfg.Upload.Dir,
+		MaxImageMB: cfg.Upload.MaxImageMB,
+		MaxPDFMB:   cfg.Upload.MaxPDFMB,
+	})
 
 	// Redis 初始化
 	rdb, err := pkgredis.NewClient(pkgredis.Config{
@@ -109,6 +122,7 @@ func main() {
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
+	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
@@ -118,6 +132,13 @@ func main() {
 	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 	router.Use(middleware.RequestLogger(logger))
 	router.Use(middleware.RateLimit(100, 200))
+
+	// 静态文件服务（上传的文件）
+	uploadDir := cfg.Upload.Dir
+	if uploadDir == "" {
+		uploadDir = "./uploads"
+	}
+	router.Static("/uploads", uploadDir)
 
 	// 健康检查（无需鉴权）
 	router.GET("/health", func(c *gin.Context) {
@@ -136,6 +157,9 @@ func main() {
 	apiGroup := router.Group("/api")
 		apiGroup.Use(authMiddleware)
 	{
+		// 文件上传
+		apiGroup.POST("/upload", uploadHandler.Upload)
+
 		// 会话路由（需要鉴权）
 		convRoutes := apiGroup.Group("/conversations")
 		{

@@ -11,16 +11,17 @@ import (
 
 // MessageRepo 消息数据访问
 type MessageRepo struct {
-	db *sqlx.DB
+	db            *sqlx.DB
+	attachmentRepo *AttachmentRepo
 }
 
 // NewMessageRepo 创建消息仓库
-func NewMessageRepo(db *sqlx.DB) *MessageRepo {
-	return &MessageRepo{db: db}
+func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo) *MessageRepo {
+	return &MessageRepo{db: db, attachmentRepo: attachmentRepo}
 }
 
-// Create 创建新消息并刷新对话时间戳（事务保证原子性）
-func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string) (*model.Message, error) {
+// Create 创建新消息并刷新对话时间戳（事务保证原子性，附件在同一事务内写入）
+func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -45,6 +46,14 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update conversation timestamp: %w", err)
+	}
+
+	// 写入附件
+	if r.attachmentRepo != nil && len(attachments) > 0 {
+		if err := r.attachmentRepo.CreateAttachments(ctx, tx, m.ID, attachments); err != nil {
+			return nil, fmt.Errorf("create attachments: %w", err)
+		}
+		m.Attachments = attachments
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -80,7 +89,7 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 			if err != nil {
 				return nil, fmt.Errorf("list messages: %w", err)
 			}
-			return list, nil
+			return r.fillAttachments(ctx, list)
 		}
 		query := `SELECT id, conversation_id, role, content, artifacts_json, created_at
 			FROM messages WHERE conversation_id = $1 AND created_at < $2
@@ -99,7 +108,26 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 		}
 	}
 
-	return list, nil
+	return r.fillAttachments(ctx, list)
+}
+
+// fillAttachments 批量填充消息的附件字段
+func (r *MessageRepo) fillAttachments(ctx context.Context, messages []model.Message) ([]model.Message, error) {
+	if r.attachmentRepo == nil || len(messages) == 0 {
+		return messages, nil
+	}
+	ids := make([]string, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	attMap, err := r.attachmentRepo.ListByMessageIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("fill attachments: %w", err)
+	}
+	for i := range messages {
+		messages[i].Attachments = attMap[messages[i].ID]
+	}
+	return messages, nil
 }
 
 // GetMessagesAfter 查询指定时间之后的消息（用于离线消息拉取）
@@ -125,5 +153,5 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 		}
 	}
 
-	return list, nil
+	return r.fillAttachments(ctx, list)
 }

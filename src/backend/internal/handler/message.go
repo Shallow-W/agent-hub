@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/middleware"
+	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -23,9 +24,10 @@ func NewMessageHandler(svc *service.MessageService) *MessageHandler {
 
 // SendMessageRequest 发送消息请求体
 type SendMessageRequest struct {
-	Role          string `json:"role"`
-	Content       string `json:"content" binding:"required"`
-	ArtifactsJSON string `json:"artifacts_json"`
+	Role          string                    `json:"role"`
+	Content       string                    `json:"content" binding:"required"`
+	ArtifactsJSON string                    `json:"artifacts_json"`
+	Attachments   []model.MessageAttachment `json:"attachments"`
 }
 
 // Send 发送消息
@@ -43,7 +45,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	msg, err := h.svc.SendMessage(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON)
+	msg, err := h.svc.SendMessage(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments)
 	if err != nil {
 		if errors.Is(err, service.ErrMsgConvNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40420, err.Error())

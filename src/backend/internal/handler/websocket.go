@@ -31,7 +31,7 @@ type MemberChecker interface {
 
 // WSMessageSender WS 消息持久化接口
 type WSMessageSender interface {
-	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string) (*model.Message, error)
+	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error)
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
@@ -159,7 +159,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			}
 			// 通过 Service 持久化（内部触发 Hub 推送 + Redis 缓存）
 			if h.msgSender != nil {
-				_, _ = h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "")
+				_, _ = h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "", nil)
 			}
 		case "typing_start":
 			var payload struct {

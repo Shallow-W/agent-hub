@@ -30,7 +30,7 @@ type MessageCacher interface {
 
 // MsgRepo 消息服务所需的仓库接口
 type MsgRepo interface {
-	Create(ctx context.Context, conversationID, role, content, artifactsJSON string) (*model.Message, error)
+	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
 	MarkConversationRead(ctx context.Context, conversationID, userID string) error
 	GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error)
@@ -86,7 +86,7 @@ func (s *MessageService) checkMembership(ctx context.Context, convID, userID str
 }
 
 // SendMessage 发送消息：持久化 → 推送 → 缓存
-func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string) (*model.Message, error) {
+func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error) {
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
@@ -106,7 +106,7 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 		role = "user"
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON)
+	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
