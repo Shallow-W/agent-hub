@@ -17,6 +17,8 @@ const (
 	TypeMessageComplete  = "message.complete"
 	TypeAgentStatus      = "agent.status"
 	TypeError            = "error"
+	TypeUserOnline       = "user.online"
+	TypeUserOffline      = "user.offline"
 )
 
 // BusMessage 消息总线统一消息结构
@@ -206,12 +208,38 @@ func (h *Hub) dispatch(msg BusMessage) {
 
 // --- 处理逻辑（分离关注点） ---
 
+// broadcastOnlineStatus 广播用户上/下线状态给所有连接
+func (h *Hub) broadcastOnlineStatus(userID string, msgType string) {
+	wsMsg := WSMessage{
+		Type: msgType,
+		Data: map[string]string{"user_id": userID},
+	}
+	h.clients.Range(func(key, value interface{}) bool {
+		list := value.(*[]*Client)
+		for _, c := range *list {
+			if err := c.Send(wsMsg); err != nil {
+				h.logger.Warn("online status broadcast failed", "target_user_id", key, "error", err)
+			}
+		}
+		return true
+	})
+}
+
 func (h *Hub) handleRegister(msg BusMessage) {
 	client := msg.Payload.(*Client)
-	val, _ := h.clients.LoadOrStore(client.UserID, &[]*Client{})
+	isFirst := false
+	val, loaded := h.clients.LoadOrStore(client.UserID, &[]*Client{})
+	if !loaded {
+		isFirst = true
+	}
 	list := val.(*[]*Client)
 	*list = append(*list, client)
 	h.logger.Info("websocket connected", "user_id", client.UserID)
+
+	// 首次上线时广播上线状态
+	if isFirst {
+		h.broadcastOnlineStatus(client.UserID, TypeUserOnline)
+	}
 }
 
 func (h *Hub) handleUnregister(msg BusMessage) {
@@ -227,8 +255,11 @@ func (h *Hub) handleUnregister(msg BusMessage) {
 			break
 		}
 	}
+
+	// 所有连接断开时广播离线状态
 	if len(*list) == 0 {
 		h.clients.Delete(client.UserID)
+		h.broadcastOnlineStatus(client.UserID, TypeUserOffline)
 	}
 
 	// 清理该连接所在的所有房间
@@ -436,6 +467,11 @@ func (h *Hub) IsOnline(userID string) bool {
 	}
 	list := val.(*[]*Client)
 	return len(*list) > 0
+}
+
+// IsUserOnline 检查用户是否在线（IsOnline 的别名，供外部调用）
+func (h *Hub) IsUserOnline(userID string) bool {
+	return h.IsOnline(userID)
 }
 
 // JoinRoom 将连接加入指定会话房间

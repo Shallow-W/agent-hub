@@ -12,6 +12,8 @@ import (
 
 const maxMessageLen = 10000 // 10KB
 
+const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
+
 // MessageNotifier 消息推送接口（由 Hub 实现）
 type MessageNotifier interface {
 	PushToConversation(conversationID string, memberIDs []string, message interface{})
@@ -30,10 +32,13 @@ type MessageCacher interface {
 
 // MsgRepo 消息服务所需的仓库接口
 type MsgRepo interface {
-	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error)
+	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
 	MarkConversationRead(ctx context.Context, conversationID, userID string) error
 	GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error)
+	GetByID(ctx context.Context, id string) (*model.Message, error)
+	GetMessageSender(ctx context.Context, messageID string) (string, error)
+	SoftDelete(ctx context.Context, messageID string) error
 }
 
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
@@ -48,6 +53,10 @@ var (
 	ErrMsgConvNotFound = errors.New("对话不存在")
 	ErrMsgConvNoPerm   = errors.New("无权操作此对话")
 	ErrMsgTooLong      = errors.New("消息内容过长")
+	ErrMsgNotFound     = errors.New("消息不存在")
+	ErrMsgNotSender    = errors.New("只能撤回自己的消息")
+	ErrMsgRecallExpired = errors.New("消息已超过2分钟，无法撤回")
+	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
 )
 
 // MessageService 消息业务逻辑
@@ -90,6 +99,11 @@ func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conver
 
 // SendMessage 发送消息：持久化 → 推送 → 缓存
 func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error) {
+	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil)
+}
+
+// SendMessageWithReply 发送消息（支持回复引用）
+func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error) {
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
@@ -109,7 +123,7 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 		role = "user"
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments)
+	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
@@ -261,5 +275,51 @@ func (s *MessageService) ClearUnread(ctx context.Context, userID, convID string)
 	if s.cacher != nil {
 		return s.cacher.ClearUnread(ctx, userID, convID)
 	}
+	return nil
+}
+
+// RecallMessage 撤回消息（软删除）
+func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return err
+	}
+
+	// 查询消息
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		return ErrMsgNotFound
+	}
+
+	// 检查是否已删除
+	if msg.DeletedAt != nil {
+		return ErrMsgAlreadyDeleted
+	}
+
+	// 检查是否为消息发送者
+	senderID, err := s.msgRepo.GetMessageSender(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("get message sender: %w", err)
+	}
+	if senderID != userID {
+		return ErrMsgNotSender
+	}
+
+	// 检查时间限制
+	if time.Since(msg.CreatedAt) > recallTimeLimit {
+		return ErrMsgRecallExpired
+	}
+
+	// 软删除
+	if err := s.msgRepo.SoftDelete(ctx, messageID); err != nil {
+		return fmt.Errorf("recall message: %w", err)
+	}
+
 	return nil
 }

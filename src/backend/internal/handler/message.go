@@ -28,6 +28,7 @@ type SendMessageRequest struct {
 	Content       string                    `json:"content" binding:"required"`
 	ArtifactsJSON string                    `json:"artifacts_json"`
 	Attachments   []model.MessageAttachment `json:"attachments"`
+	ReplyTo       *string                   `json:"reply_to"`
 }
 
 // Send 发送消息
@@ -45,7 +46,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	msg, err := h.svc.SendMessage(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments)
+	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo)
 	if err != nil {
 		if errors.Is(err, service.ErrMsgConvNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40420, err.Error())
@@ -156,4 +157,47 @@ func (h *MessageHandler) Unread(c *gin.Context) {
 	}
 
 	middleware.SuccessResponse(c, messages)
+}
+
+// Recall 撤回消息
+func (h *MessageHandler) Recall(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40027, "缺少对话 ID 或消息 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.RecallMessage(c.Request.Context(), convID, messageID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40424, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40323, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40425, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgNotSender) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40324, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgRecallExpired) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40325, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgAlreadyDeleted) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40028, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50024, "撤回消息失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
 }

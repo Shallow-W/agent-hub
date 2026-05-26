@@ -122,6 +122,7 @@ func main() {
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
+	userHandler := handler.NewUserHandler(friendSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 
@@ -178,6 +179,7 @@ func main() {
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
 				convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
+			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 	}
 
@@ -203,6 +205,13 @@ func main() {
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
 		groupRoutes.POST("/:id/leave", groupHandler.LeaveGroup)
+	}
+
+	// 用户路由（需要鉴权）
+	userGroup := router.Group("/api/users")
+	userGroup.Use(authMiddleware)
+	{
+		userGroup.GET("/search", userHandler.Search)
 	}
 
 	// WebSocket 路由（通过 query 参数鉴权）
