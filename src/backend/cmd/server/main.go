@@ -155,7 +155,12 @@ func main() {
 		if uploadDir == "" {
 			uploadDir = "./uploads"
 		}
-		apiGroup.Static("/uploads", uploadDir)
+		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
+			filePath := c.Param("filepath")
+			c.Header("Content-Disposition", "inline")
+			c.Header("X-Content-Type-Options", "nosniff")
+			c.File(filepath.Join(uploadDir, filepath.Clean(filePath)))
+		})
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)

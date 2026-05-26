@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AttachmentPayload } from '@/types/attachment';
 import { isImageAttachment, formatFileSize } from '@/types/attachment';
 import { CloseCircleFilled, FilePdfOutlined } from '@ant-design/icons';
@@ -51,9 +51,17 @@ export const AttachmentPreview: React.FC<Props> = ({ items, onRemove }) => {
 };
 
 const PreviewContent: React.FC<{ item: PendingAttachment }> = ({ item }) => {
-  if (isImageAttachment(item.file.type)) {
-    const url = URL.createObjectURL(item.file);
-    return <img src={url} alt={item.file.name} className={styles.thumb} onLoad={() => URL.revokeObjectURL(url)} />;
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isImageAttachment(item.file.type)) return;
+    const blobUrl = URL.createObjectURL(item.file);
+    setUrl(blobUrl);
+    return () => URL.revokeObjectURL(blobUrl);
+  }, [item.file]);
+
+  if (isImageAttachment(item.file.type) && url) {
+    return <img src={url} alt={item.file.name} className={styles.thumb} />;
   }
 
   return (

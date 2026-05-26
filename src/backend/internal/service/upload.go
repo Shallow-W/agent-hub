@@ -125,13 +125,16 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 	if err != nil {
 		return nil, fmt.Errorf("create file: %w", err)
 	}
-	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		os.Remove(fullPath) // 写入失败时清理
+		dst.Close()
+		os.Remove(fullPath)
 		return nil, fmt.Errorf("save file: %w", err)
 	}
-	dst.Close()
+	if err := dst.Close(); err != nil {
+		os.Remove(fullPath)
+		return nil, fmt.Errorf("close file: %w", err)
+	}
 
 	// 用实际文件内容检测 MIME 类型（不信任客户端）
 	mimeType, err := detectMIME(fullPath)
@@ -140,12 +143,17 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, ErrUploadTypeInvalid
 	}
 
-	// 文件大小校验
+	// 用实际磁盘大小校验（不信任 fileHeader.Size）
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		os.Remove(fullPath)
+		return nil, fmt.Errorf("stat file: %w", err)
+	}
 	maxSize := int64(s.cfg.MaxPDFMB) << 20
 	if isImageMIME(mimeType) {
 		maxSize = int64(s.cfg.MaxImageMB) << 20
 	}
-	if fileHeader.Size > maxSize {
+	if fi.Size() > maxSize {
 		os.Remove(fullPath)
 		return nil, ErrUploadTooBig
 	}
