@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Input, Skeleton, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useMessageStore } from '@/store/messageStore';
+import type { Message } from '@/types/message';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
+
+// 稳定空数组引用，避免 Zustand selector 每次返回新 [] 导致无限重渲染
+const EMPTY_MESSAGES: Message[] = [];
 
 export const ConversationList: React.FC = () => {
   const { conversations, activeId, loading, setActive, remove, togglePin } =
@@ -104,7 +108,7 @@ const ConversationItemWrapper: React.FC<{
   onTogglePin: () => void;
 }> = ({ conversation, active, onSelect, onDelete, onTogglePin }) => {
   const messages = useMessageStore(
-    (s) => s.messages[conversation.id] ?? [],
+    (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
   );
   const unreadCount = useMessageStore(
     (s) => s.unreadCounts[conversation.id] ?? 0,
