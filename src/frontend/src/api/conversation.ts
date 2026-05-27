@@ -22,11 +22,8 @@ export async function deleteConversation(id: string): Promise<void> {
   return del<void>(`/api/conversations/${id}`);
 }
 
-export async function togglePin(
-  id: string,
-  pinned: boolean,
-): Promise<void> {
-  return put<void>(`/api/conversations/${id}/pin`, { pinned });
+export async function togglePin(id: string): Promise<void> {
+  return post<void>(`/api/conversations/${id}/pin`);
 }
 
 export async function archiveConversation(id: string): Promise<void> {

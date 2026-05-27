@@ -59,7 +59,7 @@ export const ConversationList: React.FC = () => {
               active={conv.id === activeId}
               onSelect={() => setActive(conv.id)}
               onDelete={() => remove(conv.id)}
-              onTogglePin={() => togglePin(conv.id, !conv.pinned)}
+              onTogglePin={() => togglePin(conv.id)}
               onArchive={async () => {
                 await convApi.archiveConversation(conv.id);
                 remove(conv.id);

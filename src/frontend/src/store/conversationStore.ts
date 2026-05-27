@@ -10,7 +10,7 @@ interface ConversationState {
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
   deleteConversation: (id: string) => Promise<void>;
-  togglePin: (id: string, pinned: boolean) => Promise<void>;
+  togglePin: (id: string) => Promise<void>;
   setActive: (id: string | null) => void;
   setMemberPanelOpen: (open: boolean) => void;
 }
@@ -60,12 +60,12 @@ export const useConversationStore = create<ConversationState>((set) => ({
     });
   },
 
-  togglePin: async (id, pinned) => {
-    await convApi.togglePin(id, pinned);
+  togglePin: async (id) => {
+    await convApi.togglePin(id);
     set((state) => ({
       conversations: sortConversations(
         state.conversations.map((c) =>
-          c.id === id ? { ...c, pinned } : c,
+          c.id === id ? { ...c, pinned: !c.pinned } : c,
         ),
       ),
     }));
