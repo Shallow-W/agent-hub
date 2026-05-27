@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -65,6 +66,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, userID, co
 	// 群聊需将创建者加入成员表
 	if convType == "group" {
 		if err := s.repo.AddMember(ctx, conv.ID, userID, "owner"); err != nil {
+			_ = s.repo.Delete(ctx, conv.ID)
 			return nil, fmt.Errorf("add creator as member: %w", err)
 		}
 	}
@@ -163,6 +165,9 @@ func (s *ConversationService) TogglePin(ctx context.Context, userID, convID stri
 
 // RenameConversation 重命名会话（仅 group 类型，操作者需为 owner/admin）
 func (s *ConversationService) RenameConversation(ctx context.Context, userID, conversationID, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("%w: 标题不能为纯空格", ErrConvNotGroup)
+	}
 	conv, err := s.repo.GetByID(ctx, conversationID)
 	if err != nil {
 		return fmt.Errorf("get conversation: %w", err)

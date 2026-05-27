@@ -258,10 +258,11 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 		return nil, fmt.Errorf("insert conversation: %w", err)
 	}
 
-	// 插入双方为成员
+	// 插入双方为成员，使用 UPSERT 保证幂等
 	for _, uid := range []string{userID, friendID} {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
+			`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')
+			 ON CONFLICT (conversation_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
 			c.ID, uid,
 		)
 		if err != nil {
