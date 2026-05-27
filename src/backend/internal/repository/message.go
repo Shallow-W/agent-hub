@@ -104,7 +104,7 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 		if v.IsZero() {
 			err := r.db.SelectContext(ctx, &list,
 				`SELECT `+messageCols+` FROM `+messageFrom+
-					` WHERE m.conversation_id = $1 ORDER BY m.created_at DESC LIMIT $2`,
+					` WHERE m.conversation_id = $1 AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT $2`,
 				conversationID, limit,
 			)
 			if err != nil {
@@ -114,7 +114,7 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 		}
 		err := r.db.SelectContext(ctx, &list,
 			`SELECT `+messageCols+` FROM `+messageFrom+
-				` WHERE m.conversation_id = $1 AND m.created_at < $2 ORDER BY m.created_at DESC LIMIT $3`,
+				` WHERE m.conversation_id = $1 AND m.deleted_at IS NULL AND m.created_at < $2 ORDER BY m.created_at DESC LIMIT $3`,
 			conversationID, v, limit,
 		)
 		if err != nil {
@@ -123,7 +123,7 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 	default:
 		err := r.db.SelectContext(ctx, &list,
 			`SELECT `+messageCols+` FROM `+messageFrom+
-				` WHERE m.conversation_id = $1 ORDER BY m.created_at DESC LIMIT $2`,
+				` WHERE m.conversation_id = $1 AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT $2`,
 			conversationID, limit,
 		)
 		if err != nil {
@@ -142,7 +142,7 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 	case time.Time:
 		err := r.db.SelectContext(ctx, &list,
 			`SELECT `+messageCols+` FROM `+messageFrom+
-				` WHERE m.conversation_id = $1 AND m.created_at > $2 ORDER BY m.created_at ASC LIMIT $3`,
+				` WHERE m.conversation_id = $1 AND m.deleted_at IS NULL AND m.created_at > $2 ORDER BY m.created_at ASC LIMIT $3`,
 			conversationID, v, limit,
 		)
 		if err != nil {
@@ -151,7 +151,7 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 	default:
 		err := r.db.SelectContext(ctx, &list,
 			`SELECT `+messageCols+` FROM `+messageFrom+
-				` WHERE m.conversation_id = $1 ORDER BY m.created_at ASC LIMIT $2`,
+				` WHERE m.conversation_id = $1 AND m.deleted_at IS NULL ORDER BY m.created_at ASC LIMIT $2`,
 			conversationID, limit,
 		)
 		if err != nil {

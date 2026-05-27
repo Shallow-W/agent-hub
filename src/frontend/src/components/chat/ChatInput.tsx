@@ -155,7 +155,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             <div className={replyStyles.replyBarLabel}>
               回复 {replyTo.username || (replyTo.role === 'user' ? '用户' : '助手')}
             </div>
-            <div className={replyStyles.replyBarText}>{replyTo.content}</div>
+            <div className={replyStyles.replyBarText}>{replyTo.content.length > 50 ? replyTo.content.slice(0, 50) + '...' : replyTo.content}</div>
           </div>
           <Button
             type="text"

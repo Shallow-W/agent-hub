@@ -342,7 +342,7 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 		return fmt.Errorf("recall message: %w", err)
 	}
 
-	// 撤回成功后异步推送通知给其他成员
+	// 撤回成功后异步推送通知给其他成员（排除发送者）
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -353,8 +353,16 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 			return
 		}
 
-		if s.notifier != nil {
-			s.notifier.PushCustomEvent(convID, memberIDs, "message.recall", map[string]interface{}{
+		// 过滤掉撤回者本人（本地已做乐观更新）
+		filtered := make([]string, 0, len(memberIDs))
+		for _, uid := range memberIDs {
+			if uid != userID {
+				filtered = append(filtered, uid)
+			}
+		}
+
+		if s.notifier != nil && len(filtered) > 0 {
+			s.notifier.PushCustomEvent(convID, filtered, "message.recall", map[string]interface{}{
 				"message_id":      messageID,
 				"conversation_id": convID,
 			})

@@ -41,6 +41,7 @@ const (
 	BusJoinRoom                            // 加入房间
 	BusLeaveRoom                           // 离开房间
 	BusPersistedMsg                        // 持久化消息推送（DB 已写入，需推送给会话成员）
+	BusCustomEvent                         // 自定义事件推送
 )
 
 // WSMessage WebSocket 消息格式
@@ -204,6 +205,8 @@ func (h *Hub) dispatch(msg BusMessage) {
 		h.handleRoomMsg(msg)
 	case BusPersistedMsg:
 		h.handlePersistedMsg(msg)
+	case BusCustomEvent:
+		h.handleCustomEvent(msg)
 	}
 }
 
@@ -544,20 +547,43 @@ type directMsgPayload struct {
 	Msg    WSMessage
 }
 
-// PushCustomEvent 向会话成员推送自定义事件（eventType + data 构造 WSMessage）
-func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventType string, data interface{}) {
-	msg := WSMessage{Type: eventType, Data: data}
-	for _, uid := range memberIDs {
+// customEventPayload 自定义事件载体
+type customEventPayload struct {
+	ConversationID string
+	MemberIDs      []string
+	EventType      string
+	Data           interface{}
+}
+
+// handleCustomEvent 处理自定义事件推送（在 bus 事件循环中执行，线程安全）
+func (h *Hub) handleCustomEvent(msg BusMessage) {
+	payload := msg.Payload.(*customEventPayload)
+	wsMsg := WSMessage{Type: payload.EventType, Data: payload.Data}
+	for _, uid := range payload.MemberIDs {
 		val, ok := h.clients.Load(uid)
 		if !ok {
 			continue
 		}
 		list := val.(*[]*Client)
 		for _, c := range *list {
-			if err := c.Send(msg); err != nil {
-				h.logger.Warn("push custom event failed", "conversation_id", conversationID, "user_id", uid, "error", err)
+			if err := c.Send(wsMsg); err != nil {
+				h.logger.Warn("push custom event failed", "conversation_id", payload.ConversationID, "user_id", uid, "error", err)
 			}
 		}
+	}
+}
+
+// PushCustomEvent 向会话成员推送自定义事件（通过 bus 保证线程安全）
+func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventType string, data interface{}) {
+	h.bus <- BusMessage{
+		Type:   BusCustomEvent,
+		Target: conversationID,
+		Payload: &customEventPayload{
+			ConversationID: conversationID,
+			MemberIDs:      memberIDs,
+			EventType:      eventType,
+			Data:           data,
+		},
 	}
 }
 

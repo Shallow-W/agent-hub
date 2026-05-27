@@ -136,3 +136,12 @@
   white-space: nowrap;
   margin-left: 8px;
 }
+
+.highlightFlash {
+  animation: highlightFade 2s ease-out forwards;
+}
+
+@keyframes highlightFade {
+  0% { background-color: rgba(22, 163, 101, 0.2); }
+  100% { background-color: transparent; }
+}

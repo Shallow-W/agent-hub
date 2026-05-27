@@ -142,13 +142,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       set((state) => {
         const list = (state.messages[conversationId] ?? []).map((m) =>
           m.id === messageId
-            ? { ...m, content: '你撤回了一条消息', role: 'system' as const, attachments: undefined }
+            ? { ...m, content: '你撤回了一条消息', role: 'system' as const, attachments: undefined, reply_to: null, reply_to_message: null }
             : m
         );
         return { messages: { ...state.messages, [conversationId]: list } };
       });
     } catch {
-      // 失败时不移除消息，保留原内容
+      const { message } = await import('antd');
+      message.error('撤回失败，请重试');
     }
   },
 
@@ -301,7 +302,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set((state) => {
       const list = (state.messages[conversationId] ?? []).map((m) =>
         m.id === messageId
-          ? { ...m, content: '一条消息被撤回', role: 'system' as const, attachments: undefined }
+          ? { ...m, content: '一条消息被撤回', role: 'system' as const, attachments: undefined, reply_to: null, reply_to_message: null }
           : m
       );
       return { messages: { ...state.messages, [conversationId]: list } };

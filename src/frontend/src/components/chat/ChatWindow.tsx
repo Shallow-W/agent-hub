@@ -188,15 +188,16 @@ export const ChatWindow: React.FC = () => {
                   className={styles.searchResultItem}
                   onClick={() => {
                     toggleSearch();
-                    setTimeout(() => {
-                      const el = document.querySelector(`[data-message-id="${msg.id}"]`);
-                      if (el instanceof HTMLElement) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        el.style.backgroundColor = 'rgba(22, 163, 101, 0.15)';
-                        el.style.transition = 'background-color 2s ease-out';
-                        setTimeout(() => { el.style.backgroundColor = ''; }, 50);
-                      }
-                    }, 100);
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => {
+                        const el = document.querySelector(`[data-message-id="${msg.id}"]`);
+                        if (el instanceof HTMLElement) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          el.classList.add(styles.highlightFlash!);
+                          el.addEventListener('animationend', () => el.classList.remove(styles.highlightFlash!), { once: true });
+                        }
+                      });
+                    });
                   }}
                   style={{ cursor: 'pointer' }}
                 >

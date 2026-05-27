@@ -197,7 +197,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.reply_to_message && !message.reply_to_message.deleted_at && (
             <div className={styles.replyQuote}>
               <span className={styles.replyQuoteSender}>
-                {message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : 'Agent'}
+                {message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手'}
               </span>
               {message.reply_to_message.content.length > 50
                 ? message.reply_to_message.content.slice(0, 50) + '...'
