@@ -60,7 +60,7 @@
 | B23 | reply_to_message 字段始终为 null | P2 | [x] |
 | B24 | 对话列表缺少 members_count | P2 | [x] |
 | B25 | 私聊对话缺少 peer_id | P2 | [x] |
-| B26 | 私聊 user_id 始终是创建者 ID | P2 | [ ] |
+| B26 | 私聊 user_id 始终是创建者 ID | P2 | [x] |
 | B27 | 消息内容和群名未转义 HTML/JS | P2 | [x] |
 | B28 | 好友请求发给不存在用户返回 500 | P3 | [x] |
 | B29 | 消息历史 limit 负数未处理 | P3 | [x] |
@@ -105,7 +105,7 @@
 | UI-03 | 展开输入框按钮无功能 | P1 | [ ] |
 | UI-04 | 搜索结果高亮效果不可见 | P1 | [x] |
 | UI-05 | 无对话级别 URL，刷新丢状态 | P2 | [ ] |
-| UI-06 | 页面刷新后恢复到空状态 | P2 | [ ] |
+| UI-06 | 页面刷新后恢复到空状态 | P2 | [x] |
 | UI-07 | 多处硬编码颜色不跟随主题 | P2 | [ ] |
 | UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [ ] |
 | UI-09 | 多处内联 style 无法被暗色主题覆盖 | P2 | [ ] |
@@ -176,13 +176,13 @@
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
 | RT-01 | Conversation 类型缺 archived_at 字段 | P2 | [ ] |
-| RT-02 | createGroup 返回字段名不匹配(id vs conversation_id) | P1 | [ ] |
-| RT-03 | accept/reject 好友请求后端返回 null，前端类型错误 | P2 | [ ] |
+| RT-02 | createGroup 返回字段名不匹配(id vs conversation_id) | P1 | [x] |
+| RT-03 | accept/reject 好友请求后端返回 null，前端类型错误 | P2 | [x] |
 | RT-04 | 缺少 ErrorBoundary——渲染错误全页白屏 | P1 | [x] |
 | RT-05 | 网络错误无全局 toast 通知 | P2 | [x] |
 | RT-06 | WS error 类型消息只 console.error 无用户提示 | P2 | [x] |
 | RT-07 | MessageList 缺少虚拟滚动，长对话卡顿 | P2 | [ ] |
-| RT-08 | renderMarkdown 每次渲染重计算无 memoize | P2 | [ ] |
+| RT-08 | renderMarkdown 每次渲染重计算无 memoize | P2 | [x] |
 | RT-09 | 缺少 404 路由兜底 | P2 | [x] |
 | RT-10 | 前端未使用分页参数，对话超20条不可见 | P1 | [x] |
 
