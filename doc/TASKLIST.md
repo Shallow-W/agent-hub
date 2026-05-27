@@ -153,6 +153,10 @@
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [ ] |
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
+| CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
+| CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [ ] |
+| CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [ ] |
+| CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [ ] |
 
 ---
 
@@ -168,6 +172,8 @@
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [ ] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
 | BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [ ] |
+| BUILD-09 | ChatInput 跨组件导入 EmojiPicker.module.css | P3 | [ ] |
+| BUILD-10 | package.json 含冗余 playwright 依赖 | P3 | [ ] |
 
 ---
 
