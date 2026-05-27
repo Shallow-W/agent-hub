@@ -6,10 +6,10 @@ export const sendFriendRequest = (username: string) =>
   post<Friend>('/api/friends/request', { username });
 
 export const acceptFriendRequest = (id: string) =>
-  post<Friend>(`/api/friends/${id}/accept`, {});
+  post<void>(`/api/friends/${id}/accept`, {});
 
 export const rejectFriendRequest = (id: string) =>
-  post<Friend>(`/api/friends/${id}/reject`, {});
+  post<void>(`/api/friends/${id}/reject`, {});
 
 export const listFriends = () =>
   get<Friend[]>('/api/friends');

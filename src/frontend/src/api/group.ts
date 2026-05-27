@@ -1,8 +1,9 @@
 import { post, get, del } from './client';
+import type { Conversation } from '@/types/conversation';
 import type { GroupMember } from '@/types/group';
 
 export const createGroup = (data: { name: string; member_ids: string[] }) =>
-  post<{ conversation_id: string }>('/api/groups', data);
+  post<Conversation>('/api/groups', data);
 
 export const addGroupMember = (groupId: string, data: { user_id: string; role: string }) =>
   post<void>(`/api/groups/${groupId}/members`, data);
