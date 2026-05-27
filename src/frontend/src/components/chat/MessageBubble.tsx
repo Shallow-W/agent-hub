@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
 import {
   CheckCircleOutlined,
   CloseOutlined,
+  DownOutlined,
   MessageOutlined,
   ReloadOutlined,
+  UpOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import type { Message } from '@/types/message';
@@ -78,7 +80,6 @@ interface MessageBubbleProps {
   optimisticStatus?: OptimisticStatus;
   onRetry?: () => void;
   onRemove?: () => void;
-  isRead?: boolean;
   isOwn?: boolean;
   onReply?: (message: Message) => void;
 }
@@ -107,15 +108,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   optimisticStatus,
   onRetry,
   onRemove,
-  isRead,
   isOwn,
   onReply,
 }) => {
+  const [expanded, setExpanded] = useState(false);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
   const actorName = isUser ? '我' : 'Agent产品经理';
+  const contentLength = message.content?.length ?? 0;
+  const lineCount = message.content?.split('\n').length ?? 0;
+  const shouldCollapse = contentLength > 360 || lineCount > 7;
+  const collapsed = shouldCollapse && !expanded;
 
   if (isSystem) {
     return (
@@ -172,7 +177,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
         <div
-          className={`${styles.inner} ${
+          className={`${styles.inner} ${collapsed ? styles.innerCollapsed : ''} ${
             isOptimisticFailed
               ? styles.innerFailed
               : isOptimisticSending
@@ -194,13 +199,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <MessageAttachmentView attachments={message.attachments} />
           )}
           {message.content && (
-            <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
+            <div
+              className={styles.markdownBody}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+            />
           )}
+          {collapsed && <div className={styles.fadeMask} />}
           {streaming && <span className={styles.streamingCursor} />}
           {isOptimisticSending && (
             <Spin size="small" className={styles.sendingSpin} />
           )}
         </div>
+        {shouldCollapse && (
+          <button
+            className={styles.expandToggle}
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? (
+              <>
+                收起内容
+                <UpOutlined />
+              </>
+            ) : (
+              <>
+                展示更多
+                <DownOutlined />
+              </>
+            )}
+          </button>
+        )}
         {isOptimisticFailed && (
           <div className={styles.failedActions}>
             <Button
@@ -221,13 +249,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             />
           </div>
         )}
-        <div className={styles.timestamp}>
-          {isOwn && isUser && (
-            <Text type="secondary" className={styles.readText}>
-              {isRead ? '已读' : '未读'}
-            </Text>
-          )}
-        </div>
+        {isOwn && isUser && <div className={styles.timestamp} />}
       </div>
     </div>
   );

@@ -1,7 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Empty, Spin, Skeleton, Divider } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
-import { useMessageStore } from '@/store/messageStore';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
 import styles from './MessageList.module.css';
@@ -55,8 +54,6 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
     retry,
     removeOptimistic: removeOpt,
   } = useMessages(conversationId);
-  const isConversationRead = useMessageStore((s) => s.isConversationRead);
-  const isRead = isConversationRead(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -140,7 +137,6 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   message={msg}
                   showAvatar={!grouped}
                   isGrouped={grouped}
-                  isRead={isRead}
                   isOwn={msg.role === 'user'}
                   onReply={onReply}
                 />
