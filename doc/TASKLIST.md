@@ -89,7 +89,7 @@
 | SEC-03 | 群名纯空格通过 binding 校验 | P2 | [x] |
 | SEC-04 | 上传文件名 XSS 字符未净化 | P3 | [ ] |
 | SEC-05 | limit 参数无上界/无正数校验 | P3 | [x] |
-| SEC-06 | 用户搜索接口缺少独立限流 | P3 | [ ] |
+| SEC-06 | 用户搜索接口缺少独立限流 | P3 | [x] |
 | SEC-07 | WebSocket JWT 通过 query string 传入被日志明文记录 | P2 | [ ] |
 | SEC-08 | SendFriendRequest 的 friend_id 未校验 UUID 格式 | P2 | [ ] |
 | SEC-09 | CreateGroup 的 member_ids 未逐个校验 UUID 格式 | P2 | [ ] |
