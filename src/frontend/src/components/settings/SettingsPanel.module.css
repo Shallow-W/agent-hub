@@ -70,12 +70,12 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   padding: 0 4px;
 }
 
 .navItem {
-  min-height: 40px;
+  min-height: 36px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -112,7 +112,7 @@
 }
 
 .collapsed .navItem {
-  min-height: 48px;
+  min-height: 43px;
   flex-direction: column;
   justify-content: center;
   gap: 3px;
