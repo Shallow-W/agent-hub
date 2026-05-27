@@ -37,6 +37,7 @@ export const ChatWindow: React.FC = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Mark conversation as read when switching to it
   useEffect(() => {
@@ -46,12 +47,14 @@ export const ChatWindow: React.FC = () => {
     setReplyTo(null);
     setSearchOpen(false);
     setSearchResults([]);
+    setHasSearched(false);
   }, [activeId, markAllRead]);
 
   const toggleSearch = useCallback(() => {
     setSearchOpen((prev) => {
       if (prev) {
         setSearchResults([]);
+        setHasSearched(false);
       }
       return !prev;
     });
@@ -65,8 +68,10 @@ export const ChatWindow: React.FC = () => {
       try {
         const results = await searchMessages(activeConv.id, keyword);
         setSearchResults(results);
+        setHasSearched(true);
       } catch {
         setSearchResults([]);
+        setHasSearched(true);
       } finally {
         setSearchLoading(false);
       }
@@ -181,7 +186,18 @@ export const ChatWindow: React.FC = () => {
               renderItem={(msg) => (
                 <List.Item
                   className={styles.searchResultItem}
-                  onClick={() => toggleSearch()}
+                  onClick={() => {
+                    toggleSearch();
+                    setTimeout(() => {
+                      const el = document.querySelector(`[data-message-id="${msg.id}"]`);
+                      if (el instanceof HTMLElement) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.style.backgroundColor = 'rgba(22, 163, 101, 0.15)';
+                        el.style.transition = 'background-color 2s ease-out';
+                        setTimeout(() => { el.style.backgroundColor = ''; }, 50);
+                      }
+                    }, 100);
+                  }}
                   style={{ cursor: 'pointer' }}
                 >
                   <List.Item.Meta
@@ -202,6 +218,11 @@ export const ChatWindow: React.FC = () => {
                 </List.Item>
               )}
             />
+          )}
+          {hasSearched && searchResults.length === 0 && !searchLoading && (
+            <div style={{ padding: '16px', textAlign: 'center', color: '#999', fontSize: 13 }}>
+              未找到相关消息
+            </div>
           )}
         </div>
       )}

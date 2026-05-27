@@ -17,6 +17,7 @@ const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 // MessageNotifier 消息推送接口（由 Hub 实现）
 type MessageNotifier interface {
 	PushToConversation(conversationID string, memberIDs []string, message interface{})
+	PushCustomEvent(conversationID string, memberIDs []string, eventType string, data interface{})
 	IsOnline(userID string) bool
 }
 
@@ -340,6 +341,25 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	if err := s.msgRepo.SoftDelete(ctx, messageID); err != nil {
 		return fmt.Errorf("recall message: %w", err)
 	}
+
+	// 撤回成功后异步推送通知给其他成员
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		memberIDs, err := s.convRepo.ListMemberIDs(bgCtx, convID)
+		if err != nil {
+			slog.Warn("list members for recall push failed", "conversation_id", convID, "error", err)
+			return
+		}
+
+		if s.notifier != nil {
+			s.notifier.PushCustomEvent(convID, memberIDs, "message.recall", map[string]interface{}{
+				"message_id":      messageID,
+				"conversation_id": convID,
+			})
+		}
+	}()
 
 	return nil
 }

@@ -153,7 +153,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         <div className={replyStyles.replyBar}>
           <div className={replyStyles.replyBarContent}>
             <div className={replyStyles.replyBarLabel}>
-              回复 {replyTo.role === 'user' ? '自己' : 'Agent'}
+              回复 {replyTo.username || (replyTo.role === 'user' ? '用户' : '助手')}
             </div>
             <div className={replyStyles.replyBarText}>{replyTo.content}</div>
           </div>

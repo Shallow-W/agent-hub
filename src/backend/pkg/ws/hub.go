@@ -19,6 +19,7 @@ const (
 	TypeError            = "error"
 	TypeUserOnline       = "user.online"
 	TypeUserOffline      = "user.offline"
+	TypeMessageRecall    = "message.recall"
 )
 
 // BusMessage 消息总线统一消息结构
@@ -541,5 +542,22 @@ func StartHeartbeat(ctx context.Context, client *Client, hub *Hub) {
 type directMsgPayload struct {
 	UserID string
 	Msg    WSMessage
+}
+
+// PushCustomEvent 向会话成员推送自定义事件（eventType + data 构造 WSMessage）
+func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventType string, data interface{}) {
+	msg := WSMessage{Type: eventType, Data: data}
+	for _, uid := range memberIDs {
+		val, ok := h.clients.Load(uid)
+		if !ok {
+			continue
+		}
+		list := val.(*[]*Client)
+		for _, c := range *list {
+			if err := c.Send(msg); err != nil {
+				h.logger.Warn("push custom event failed", "conversation_id", conversationID, "user_id", uid, "error", err)
+			}
+		}
+	}
 }
 

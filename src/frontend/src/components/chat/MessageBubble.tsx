@@ -140,6 +140,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   return (
     <div
       className={`${styles.bubble} ${isOwn ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
+      data-message-id={message.id}
     >
       {showAvatar && (
         <Avatar
@@ -198,7 +199,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <span className={styles.replyQuoteSender}>
                 {message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : 'Agent'}
               </span>
-              {message.reply_to_message.content}
+              {message.reply_to_message.content.length > 50
+                ? message.reply_to_message.content.slice(0, 50) + '...'
+                : message.reply_to_message.content}
             </div>
           )}
           {message.attachments && message.attachments.length > 0 && (

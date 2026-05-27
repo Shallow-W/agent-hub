@@ -129,6 +129,14 @@ export function useWebSocket() {
           }
           break;
         }
+        case 'message.recall': {
+          const recallConvId = msg.data.conversation_id ?? msg.data.conversationId;
+          const recallMsgId = msg.data.message_id ?? msg.data.messageId;
+          if (recallConvId && recallMsgId) {
+            useMessageStore.getState().handleRecallPush(recallConvId, recallMsgId);
+          }
+          break;
+        }
         case 'error':
           // TODO: 全局错误提示
           console.error('WebSocket error:', msg.data.message);

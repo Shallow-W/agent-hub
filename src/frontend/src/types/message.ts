@@ -34,11 +34,12 @@ export interface OptimisticMessage extends Message {
 export type DisplayMessage = Message | OptimisticMessage;
 
 export interface StreamMessage {
-  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'error';
+  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'message.recall' | 'error';
   data: {
     conversationId?: string;
     conversation_id?: string;
     messageId?: string;
+    message_id?: string;
     id?: string;
     content?: string;
     role?: MessageRole;

@@ -38,6 +38,7 @@ interface MessageState {
   incrementUnread: (conversationId: string) => void;
   markAllRead: (conversationId: string) => void;
   isConversationRead: (conversationId: string) => boolean;
+  handleRecallPush: (conversationId: string, messageId: string) => void;
 }
 
 const PAGE_SIZE = 50;
@@ -294,5 +295,16 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   isConversationRead: (conversationId) => {
     return !!get().readConversations[conversationId];
+  },
+
+  handleRecallPush: (conversationId, messageId) => {
+    set((state) => {
+      const list = (state.messages[conversationId] ?? []).map((m) =>
+        m.id === messageId
+          ? { ...m, content: '一条消息被撤回', role: 'system' as const, attachments: undefined }
+          : m
+      );
+      return { messages: { ...state.messages, [conversationId]: list } };
+    });
   },
 }));
