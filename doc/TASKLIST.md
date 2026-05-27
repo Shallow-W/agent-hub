@@ -36,37 +36,45 @@
 | # | Bug | 严重度 | 状态 |
 |---|-----|--------|------|
 | B01 | 消息撤回无权限校验——任何人可撤回别人的消息 | P0 | [x] |
-| B02 | 已读标记不生效——markAsRead 后仍返回已读消息 | P0 | [ ] |
-| B03 | 创建私聊给非好友返回 500 | P1 | [ ] |
-| B04 | 创建私聊给自己返回 500 | P1 | [ ] |
+| B02 | 已读标记不生效——markAsRead 后仍返回已读消息 | P0 | [x] |
+| B03 | 创建私聊给非好友返回 500 | P1 | [x] |
+| B04 | 创建私聊给自己返回 500 | P1 | [x] |
 | B05 | reply_to 不存在的消息返回 500 | P1 | [x] |
 | B06 | 附件数据未正确保存 | P2 | [ ] |
-| B07 | conversations 端点创建的群聊无成员记录 | P2 | [ ] |
+| B07 | conversations 端点创建的群聊无成员记录 | P2 | [x] |
 | B08 | 消息无长度限制 | P3 | [x] |
-| B09 | 用户搜索返回自己 | P3 | [ ] |
-| B10 | togglePin API 方法不匹配(PUT vs POST) | P0 | [ ] |
+| B09 | 用户搜索返回自己 | P3 | [x] |
+| B10 | togglePin API 方法不匹配(PUT vs POST) | P0 | [x] |
 | B11 | API 返回 data:null 导致前端崩溃 | P0 | [x] |
 | B12 | 回复功能 UI 存在但数据未发送 | P1 | [x] |
 | B13 | 消息撤回前端完全缺失 | P1 | [x] |
-| B14 | JWT 过期后会话永久损坏 | P1 | [ ] |
+| B14 | JWT 过期后会话永久损坏 | P1 | [x] |
 | B15 | typingUsers 显示 UUID 而非用户名 | P1 | [x] |
-| B16 | retryOptimistic 丢弃附件 | P2 | [ ] |
-| B17 | deleteConversation 无错误处理 | P2 | [ ] |
-| B18 | fetchMessages 竞态条件 | P2 | [ ] |
-| B19 | ProtectedRoute 不响应式 | P3 | [ ] |
+| B16 | retryOptimistic 丢弃附件 | P2 | [x] |
+| B17 | deleteConversation 无错误处理 | P2 | [x] |
+| B18 | fetchMessages 竞态条件 | P2 | [x] |
+| B19 | ProtectedRoute 不响应式 | P3 | [x] |
 | B20 | 重复 token 管理 | P3 | [ ] |
-| B21 | 无效 UUID 路径参数返回 500 | P1 | [ ] |
+| B21 | 无效 UUID 路径参数返回 500 | P1 | [x] |
 | B22 | 消息撤回后 Redis 缓存未失效 | P1 | [x] |
 | B23 | reply_to_message 字段始终为 null | P2 | [x] |
 | B24 | 对话列表缺少 members_count | P2 | [x] |
-| B25 | 私聊对话缺少 peer_id | P2 | [ ] |
+| B25 | 私聊对话缺少 peer_id | P2 | [x] |
 | B26 | 私聊 user_id 始终是创建者 ID | P2 | [ ] |
-| B27 | 消息内容和群名未转义 HTML/JS | P2 | [ ] |
-| B28 | 好友请求发给不存在用户返回 500 | P3 | [ ] |
-| B29 | 消息历史 limit 负数未处理 | P3 | [ ] |
-| B30 | 不存在的群聊 UUID 返回 403 非 404 | P3 | [ ] |
+| B27 | 消息内容和群名未转义 HTML/JS | P2 | [x] |
+| B28 | 好友请求发给不存在用户返回 500 | P3 | [x] |
+| B29 | 消息历史 limit 负数未处理 | P3 | [x] |
+| B30 | 不存在的群聊 UUID 返回 403 非 404 | P3 | [x] |
 | B31 | leave_room 后仍通过成员推送收到消息 | P3 | [ ] |
 | B32 | 群成员数量硬编码为 9 | P1 | [x] |
+| B33 | WebSocket 发消息静默丢弃 DB 持久化错误 | P1 | [ ] |
+| B34 | 负 offset 值直接传 SQL 无校验 | P2 | [ ] |
+| B35 | conversation 服务创建群聊非原子(补偿删除可失败) | P1 | [ ] |
+| B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [ ] |
+| B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [ ] |
+| B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [ ] |
+| B39 | 归档对话错误触发 delete API(双重请求) | P1 | [ ] |
+| B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 
@@ -76,12 +84,15 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| SEC-01 | 用户名缺少白名单校验(XSS/特殊字符) | P1 | [ ] |
-| SEC-02 | 消息 content 纯空格被接受 | P2 | [ ] |
-| SEC-03 | 群名纯空格通过 binding 校验 | P2 | [ ] |
+| SEC-01 | 用户名缺少白名单校验(XSS/特殊字符) | P1 | [x] |
+| SEC-02 | 消息 content 纯空格被接受 | P2 | [x] |
+| SEC-03 | 群名纯空格通过 binding 校验 | P2 | [x] |
 | SEC-04 | 上传文件名 XSS 字符未净化 | P3 | [ ] |
-| SEC-05 | limit 参数无上界/无正数校验 | P3 | [ ] |
+| SEC-05 | limit 参数无上界/无正数校验 | P3 | [x] |
 | SEC-06 | 用户搜索接口缺少独立限流 | P3 | [ ] |
+| SEC-07 | WebSocket JWT 通过 query string 传入被日志明文记录 | P2 | [ ] |
+| SEC-08 | SendFriendRequest 的 friend_id 未校验 UUID 格式 | P2 | [ ] |
+| SEC-09 | CreateGroup 的 member_ids 未逐个校验 UUID 格式 | P2 | [ ] |
 
 ---
 
@@ -89,8 +100,8 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| UI-01 | WebSocket 主动断开后仍自动重连 | P0 | [ ] |
-| UI-02 | 已登录用户访问 /login 不跳转 | P1 | [ ] |
+| UI-01 | WebSocket 主动断开后仍自动重连 | P0 | [x] |
+| UI-02 | 已登录用户访问 /login 不跳转 | P1 | [x] |
 | UI-03 | 展开输入框按钮无功能 | P1 | [ ] |
 | UI-04 | 搜索结果高亮效果不可见 | P1 | [x] |
 | UI-05 | 无对话级别 URL，刷新丢状态 | P2 | [ ] |
@@ -98,7 +109,7 @@
 | UI-07 | 多处硬编码颜色不跟随主题 | P2 | [ ] |
 | UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [ ] |
 | UI-09 | 多处内联 style 无法被暗色主题覆盖 | P2 | [ ] |
-| UI-10 | WebSocket 重连无 jitter 惊群风险 | P2 | [ ] |
+| UI-10 | WebSocket 重连无 jitter 惊群风险 | P2 | [x] |
 | UI-11 | 断线期间发送队列不持久化 | P2 | [ ] |
 | UI-12 | 无键盘 focus-visible 样式 | P3 | [ ] |
 | UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [ ] |
@@ -114,7 +125,7 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| CODE-01 | rate limiter goroutine 永不退出(泄漏) | P0 | [ ] |
+| CODE-01 | rate limiter goroutine 永不退出(泄漏) | P0 | [x] |
 | CODE-02 | Hub.clients 值 (*[]*Client) 并发竞争 | P1 | [ ] |
 | CODE-03 | WebSocket 连接 ctx 未绑定 hub 生命周期 | P1 | [ ] |
 | CODE-04 | Hub bus channel 发送可无限阻塞 handler | P1 | [ ] |
@@ -136,6 +147,12 @@
 | CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [ ] |
 | CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [ ] |
 | CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [ ] |
+| CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [ ] |
+| CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [ ] |
+| CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [ ] |
+| CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [ ] |
+| CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
+| CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
 
 ---
 
@@ -151,6 +168,63 @@
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [ ] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
 | BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [ ] |
+
+---
+
+## 前端运行时问题
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| RT-01 | Conversation 类型缺 archived_at 字段 | P2 | [ ] |
+| RT-02 | createGroup 返回字段名不匹配(id vs conversation_id) | P1 | [ ] |
+| RT-03 | accept/reject 好友请求后端返回 null，前端类型错误 | P2 | [ ] |
+| RT-04 | 缺少 ErrorBoundary——渲染错误全页白屏 | P1 | [x] |
+| RT-05 | 网络错误无全局 toast 通知 | P2 | [x] |
+| RT-06 | WS error 类型消息只 console.error 无用户提示 | P2 | [x] |
+| RT-07 | MessageList 缺少虚拟滚动，长对话卡顿 | P2 | [ ] |
+| RT-08 | renderMarkdown 每次渲染重计算无 memoize | P2 | [ ] |
+| RT-09 | 缺少 404 路由兜底 | P2 | [x] |
+| RT-10 | 前端未使用分页参数，对话超20条不可见 | P1 | [x] |
+
+---
+
+## 部署就绪度
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| DEPLOY-01 | 无 CI/CD 配置 | P1 | [ ] |
+| DEPLOY-02 | 无 Dockerfile | P1 | [ ] |
+| DEPLOY-03 | 无 README.md | P1 | [ ] |
+| DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [ ] |
+| DEPLOY-05 | docker-compose 缺 Redis 服务 | P2 | [ ] |
+| DEPLOY-06 | config.example 与实际 config 不同步 | P2 | [ ] |
+| DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [ ] |
+| DEPLOY-08 | 无 metrics/Prometheus 端点 | P2 | [ ] |
+| DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [ ] |
+| DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [ ] |
+| DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [ ] |
+| DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [ ] |
+| DEPLOY-13 | 健康检查不验证 DB/Redis 连接状态 | P3 | [ ] |
+
+---
+
+## 数据库 Schema
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| DB-01 | messages.sender_id 可空，部分消息无发送者 | P2 | [ ] |
+| DB-02 | 迁移 006 创建重复索引(002/004/005 已创建) | P3 | [ ] |
+| DB-03 | conversation_members.last_read_at 无索引 | P2 | [ ] |
+| DB-04 | 迁移 012 sender_id backfill 仅覆盖 user 角色 | P2 | [ ] |
+| DB-05 | ListByUserID 热查询缺 archived_at 索引 | P2 | [ ] |
+| DB-06 | conversations.type 无 CHECK 约束 | P2 | [ ] |
+| DB-07 | friends.status 无 CHECK 约束 | P2 | [ ] |
+| DB-08 | CASCADE 删除用户时销毁群聊(应 SET NULL) | P1 | [ ] |
+| DB-09 | 可空 DB 列映射为非指针 Go 类型(StructScan 崩溃) | P1 | [ ] |
+| DB-10 | ANY($1)+[]string 在 sqlx 下可能运行时失败 | P2 | [ ] |
+| DB-11 | GroupRepo.AddMember 缺 ON CONFLICT 幂等保护 | P2 | [ ] |
+| DB-12 | 仓库方法重复且行为不一致(AddMember/GetUserByID) | P3 | [ ] |
+| DB-13 | user.go 用 err==sql.ErrNoRows 而非 errors.Is | P3 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 
@@ -198,6 +272,42 @@
 | MISS-024 | 语言设置(i18n) | 纯前端 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
+
+---
+
+## 文档准确性
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| DOC-01 | API 文档覆盖率仅 26%(31端点仅8个有文档) | P1 | [ ] |
+| DOC-02 | 错误响应格式文档与代码不一致(嵌套vs扁平) | P1 | [ ] |
+| DOC-03 | WebSocket 消息类型命名文档与代码不匹配 | P1 | [ ] |
+| DOC-04 | Conversation type 文档 "direct" vs 代码 "single" | P2 | [ ] |
+| DOC-05 | username 校验规则三处冲突(min=2 vs 3) | P2 | [ ] |
+| DOC-06 | ErrGroupNotFound 可能未定义 | P2 | [ ] |
+| DOC-07 | ConversationMember.JoinedAt 类型 string 应为 time.Time | P2 | [ ] |
+| DOC-08 | ConversationMember 缺少 last_read_at 字段 | P2 | [ ] |
+| DOC-09 | service/message.go 超 300 行限制(402行) | P3 | [ ] |
+| DOC-10 | Commit message 格式违反 50 字符限制 | P3 | [ ] |
+
+---
+
+## 前端性能
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| PERF-01 | messages store 无限增长，永不清理 | P1 | [ ] |
+| PERF-02 | AppLayout 订阅整个 unreadCounts 对象 | P1 | [ ] |
+| PERF-03 | ChatWindow 订阅全部 typingUsers | P1 | [ ] |
+| PERF-04 | MessageBubble 未使用 React.memo | P2 | [ ] |
+| PERF-05 | smooth scroll 在流式消息时引起抖动 | P2 | [ ] |
+| PERF-06 | 对话切换重复 API 请求 | P2 | [ ] |
+| PERF-07 | transition:all 导致布局抖动 | P2 | [ ] |
+| PERF-08 | renderMarkdown 无缓存(useMemo) | P2 | [ ] |
+| PERF-09 | conversationStore 订阅粒度过粗 | P3 | [ ] |
+| PERF-10 | friendStore 订阅全量 friends 数组 | P3 | [ ] |
+| PERF-11 | 未使用 React.lazy 懒加载 | P3 | [ ] |
+| PERF-12 | WebSocket 消息处理未做 batching | P3 | [ ] |
 
 ---
 
