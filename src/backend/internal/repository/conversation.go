@@ -43,7 +43,7 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
 		        COALESCE(peer_u.username, creator_u.username, '') AS peer_name,
 		        COALESCE(latest_msg.content, '') AS last_message,
-			        (1 + COALESCE((SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id), 0)) AS member_count
+			        COALESCE((SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id), 0) AS member_count
 		 FROM conversations c
 		 LEFT JOIN conversation_members peer_cm ON c.type = 'single'
 		     AND peer_cm.conversation_id = c.id AND peer_cm.user_id != $1

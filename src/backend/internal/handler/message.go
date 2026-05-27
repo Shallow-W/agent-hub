@@ -63,7 +63,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrMsgReplyNotFound) || errors.Is(err, service.ErrMsgReplyWrongConv) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40027, err.Error())
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40031, err.Error())
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50020, "发送消息失败")

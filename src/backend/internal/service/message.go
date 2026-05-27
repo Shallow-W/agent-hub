@@ -134,6 +134,9 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		if err != nil || refMsg == nil {
 			return nil, ErrMsgReplyNotFound
 		}
+		if refMsg.DeletedAt != nil {
+			return nil, ErrMsgReplyNotFound
+		}
 		if refMsg.ConversationID != convID {
 			return nil, ErrMsgReplyWrongConv
 		}
@@ -358,7 +361,9 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 
 	// 清除该会话的 Redis 缓存，避免撤回后仍返回旧内容
 	if s.cacher != nil {
-		_ = s.cacher.InvalidateCache(ctx, convID)
+		if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
+			slog.Warn("invalidate cache after recall failed", "conversation_id", convID, "error", err)
+		}
 	}
 
 	// 撤回成功后异步推送通知给其他成员（排除发送者）
