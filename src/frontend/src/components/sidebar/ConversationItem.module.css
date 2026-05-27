@@ -16,8 +16,8 @@
 }
 
 .active {
-  background-color: #e5f1ff;
-  border-color: rgba(36, 119, 243, 0.08);
+  background-color: rgba(22, 163, 101, 0.11);
+  border-color: rgba(22, 163, 101, 0.14);
 }
 
 .active::before {
@@ -28,12 +28,12 @@
   bottom: 6px;
   width: 2px;
   border-radius: 0 3px 3px 0;
-  background: #2477f3;
-  box-shadow: 0 0 8px rgba(36, 119, 243, 0.25);
+  background: var(--color-primary);
+  box-shadow: 0 0 8px rgba(22, 163, 101, 0.22);
 }
 
 .active:hover {
-  background-color: #dce8fa;
+  background-color: rgba(22, 163, 101, 0.14);
 }
 
 .content {

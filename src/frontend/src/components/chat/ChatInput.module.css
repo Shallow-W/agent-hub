@@ -22,19 +22,22 @@
   align-items: center;
   max-width: none;
   margin: 0 auto;
+  padding: 3px;
+  border: 1px solid #d9dee5;
+  border-radius: 7px;
+  background: #f8fafb;
 }
 
 .textarea {
   flex: 1;
   border-radius: 3px !important;
-  border: 1px solid #d9dee5 !important;
-  background: var(--color-bg-white) !important;
+  border: none !important;
+  background: transparent !important;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
 }
 
 .textarea:focus-within {
-  border-color: var(--color-primary) !important;
-  box-shadow: var(--shadow-input-focus) !important;
+  box-shadow: none !important;
 }
 
 .attachBtn,
@@ -42,7 +45,7 @@
 .sendBtn {
   flex-shrink: 0;
   width: 32px;
-  height: 32px;
+  height: 30px;
   border-radius: 4px;
 }
 

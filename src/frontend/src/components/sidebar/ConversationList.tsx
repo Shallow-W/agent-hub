@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Input, Skeleton, Empty } from 'antd';
+import React from 'react';
+import { Skeleton, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
@@ -15,33 +15,9 @@ export const ConversationList: React.FC = () => {
     useConversation();
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
 
-  const [searchText, setSearchText] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      setDebouncedSearch(searchText);
-    }, 300);
-    return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-    };
-  }, [searchText]);
-
-  const filtered = debouncedSearch
-    ? conversations.filter((c) => {
-        const name = c.type === 'single' ? (c.peer_name || c.title) : c.title;
-        return name.toLowerCase().includes(debouncedSearch.toLowerCase());
-      })
-    : conversations;
-
   if (loading && conversations.length === 0) {
     return (
       <div className={styles.list}>
-        <div className={styles.searchWrapper}>
-          <Skeleton.Input active block style={{ height: 34 }} />
-        </div>
         <div style={{ padding: '8px 12px' }}>
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 0', alignItems: 'center' }}>
@@ -71,22 +47,11 @@ export const ConversationList: React.FC = () => {
 
   return (
     <div className={styles.list}>
-      <div className={styles.searchWrapper}>
-        <Input.Search
-          placeholder="搜索对话..."
-          allowClear
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          onClear={() => setSearchText('')}
-          style={{ height: 34 }}
-        />
-      </div>
-
       <div className={styles.items}>
-        {filtered.length === 0 ? (
+        {conversations.length === 0 ? (
           <div className={styles.noResults}>未找到匹配的对话</div>
         ) : (
-          filtered.map((conv) => (
+          conversations.map((conv) => (
             <ConversationItemWrapper
               key={conv.id}
               conversation={conv}
