@@ -55,6 +55,7 @@ const (
 	pingInterval       = 30 * time.Second
 	pongTimeout        = 60 * time.Second
 	cleanupInterval    = 15 * time.Second
+	maxConnsPerUser   = 5 // per-user max WS connections
 )
 
 // Client 封装单个 WebSocket 连接及其元数据
@@ -258,6 +259,14 @@ func (h *Hub) handleRegister(msg BusMessage) {
 		isFirst = true
 	}
 	list := val.(*[]*Client)
+	if len(*list) >= maxConnsPerUser {
+		h.logger.Warn("max connections per user reached, closing",
+			"user_id", client.UserID, "current", len(*list), "max", maxConnsPerUser)
+		close(client.sendCh)
+		client.Conn.Close(websocket.StatusPolicyViolation, "too many connections")
+		h.wg.Done()
+		return
+	}
 	*list = append(*list, client)
 	h.logger.Info("websocket connected", "user_id", client.UserID)
 

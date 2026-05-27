@@ -69,10 +69,10 @@
 | B32 | 群成员数量硬编码为 9 | P1 | [x] |
 | B33 | WebSocket 发消息静默丢弃 DB 持久化错误 | P1 | [x] |
 | B34 | 负 offset 值直接传 SQL 无校验 | P2 | [x] |
-| B35 | conversation 服务创建群聊非原子(补偿删除可失败) | P1 | [ ] |
-| B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [ ] |
-| B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [ ] |
-| B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [ ] |
+| B35 | conversation 服务创建群聊非原子(补偿删除可失败) | P1 | [-] |
+| B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [x] |
+| B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [x] |
+| B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [x] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
@@ -127,27 +127,27 @@
 |---|------|--------|------|
 | CODE-01 | rate limiter goroutine 永不退出(泄漏) | P0 | [x] |
 | CODE-02 | Hub.clients 值 (*[]*Client) 并发竞争 | P1 | [x] |
-| CODE-03 | WebSocket 连接 ctx 未绑定 hub 生命周期 | P1 | [ ] |
-| CODE-04 | Hub bus channel 发送可无限阻塞 handler | P1 | [ ] |
-| CODE-05 | config.yaml 缺 upload 和 redis.db 字段 | P1 | [ ] |
+| CODE-03 | WebSocket 连接 ctx 未绑定 hub 生命周期 | P1 | [-] |
+| CODE-04 | Hub bus channel 发送可无限阻塞 handler | P1 | [-] |
+| CODE-05 | config.yaml 缺 upload 和 redis.db 字段 | P1 | [x] |
 | CODE-06 | Client.LastActive 无同步并发读写 | P1 | [x] |
 | CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [ ] |
 | CODE-08 | 多语句迁移无事务包裹 | P2 | [ ] |
 | CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [ ] |
 | CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [ ] |
 | CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
-| CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [ ] |
+| CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [-] |
 | CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [x] |
 | CODE-14 | postPersist 异步推送无重试/死信队列 | P2 | [ ] |
-| CODE-15 | config.example 缺 upload 和 redis.db 字段 | P2 | [ ] |
+| CODE-15 | config.example 缺 upload 和 redis.db 字段 | P2 | [x] |
 | CODE-16 | 无单用户 WebSocket 连接数限制(DoS风险) | P2 | [ ] |
-| CODE-17 | Hub Register/Unregister 异步竞态 | P2 | [ ] |
+| CODE-17 | Hub Register/Unregister 异步竞态 | P2 | [-] |
 | CODE-18 | Client.enqueue 背压时可能阻塞 dispatch | P3 | [ ] |
 | CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [ ] |
 | CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [x] |
 | CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [ ] |
 | CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [x] |
-| CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [ ] |
+| CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [-] |
 | CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [ ] |
 | CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [ ] |
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [ ] |
@@ -323,10 +323,10 @@
 |---|------|--------|------|
 | FE-01 | useWebSocket 中 currentUserId 闭包过期导致 typing 判断错误 | P1 | [x] |
 | FE-02 | archive handler 错误调用 deleteConversation(归档变删除) | P1 | [x] |
-| FE-03 | upload.ts 绕过共享 request()函数，缺 retry/错误标准化 | P2 | [ ] |
+| FE-03 | upload.ts 绕过共享 request()函数，缺 retry/错误标准化 | P2 | [x] |
 | FE-04 | conversationStore.togglePin/createConversation 无错误处理 | P2 | [x] |
-| FE-05 | retryOptimistic 中 attachments 类型强转隐藏类型不匹配 | P2 | [ ] |
-| FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [ ] |
+| FE-05 | retryOptimistic 中 attachments 类型强转隐藏类型不匹配 | P2 | [x] |
+| FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [x] |
 | FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
 | FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [ ] |
 | FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [ ] |
