@@ -5,6 +5,7 @@ import {
   LinkOutlined,
   SendOutlined,
   UpOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
@@ -27,6 +28,7 @@ interface ChatInputProps {
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, onCancelReply }) => {
+  const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const { send, streamingContent } = useMessages(conversationId);
@@ -188,14 +190,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder="发送至当前对话"
-          autoSize={{ minRows: 1, maxRows: 4 }}
+          autoSize={{ minRows: expanded ? 8 : 1, maxRows: expanded ? 20 : 4 }}
           className={styles.textarea}
         />
-        <Tooltip title="展开输入框">
+        <Tooltip title={expanded ? '收起输入框' : '展开输入框'}>
           <Button
             type="text"
-            icon={<UpOutlined />}
+            icon={expanded ? <DownOutlined /> : <UpOutlined />}
             className={styles.expandBtn}
+            onClick={() => setExpanded(!expanded)}
           />
         </Tooltip>
         <Button
