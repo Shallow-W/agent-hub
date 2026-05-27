@@ -2,7 +2,7 @@ import { get, post, put, del } from './client';
 import type { Conversation, ConversationType } from '@/types/conversation';
 
 export async function getConversations(): Promise<Conversation[]> {
-  return get<Conversation[]>('/api/conversations');
+  return get<Conversation[]>('/api/conversations?limit=100');
 }
 
 export async function createConversation(
