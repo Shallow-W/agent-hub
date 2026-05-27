@@ -337,6 +337,9 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	// 查询消息
 	msg, err := s.msgRepo.GetByID(ctx, messageID)
 	if err != nil {
+		return fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
 		return ErrMsgNotFound
 	}
 

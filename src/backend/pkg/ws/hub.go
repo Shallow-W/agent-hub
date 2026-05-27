@@ -64,7 +64,7 @@ type Client struct {
 	Username    string
 	ConnectedAt time.Time
 	lastPong    atomic.Int64 // unix nanos，原子操作避免数据竞争
-	LastActive  time.Time
+	lastActive  atomic.Int64 // unix timestamp，原子操作避免数据竞争
 
 	sendCh chan []byte // 独立写缓冲通道
 	mu     sync.Mutex  // 保护 Conn 的写操作（close 时排空用）
@@ -77,16 +77,26 @@ func NewClient(conn *websocket.Conn, userID string) *Client {
 		Conn:        conn,
 		UserID:      userID,
 		ConnectedAt: now,
-		LastActive:  now,
 		sendCh:      make(chan []byte, writeBufSize),
 	}
 	c.lastPong.Store(now.UnixNano())
+	c.lastActive.Store(now.Unix())
 	return c
 }
 
 // SetUsername 设置用户名（导出供 handler 在连接建立后调用）
 func (c *Client) SetUsername(name string) {
 	c.Username = name
+}
+
+// UpdateLastActive 原子更新最后活跃时间
+func (c *Client) UpdateLastActive() {
+	c.lastActive.Store(time.Now().Unix())
+}
+
+// LastActiveTime 返回最后活跃时间
+func (c *Client) LastActiveTime() time.Time {
+	return time.Unix(c.lastActive.Load(), 0)
 }
 
 // UpdateLastPong 原子更新最后 pong 时间

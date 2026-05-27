@@ -33,7 +33,8 @@
 }
 
 .card {
-  width: 420px;
+  width: 90vw;
+  max-width: 420px;
   padding: 48px 44px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px);
@@ -93,4 +94,21 @@
   font-size: 15px;
   letter-spacing: 1px;
   font-weight: 400;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 32px 20px;
+    border-radius: 16px;
+  }
+
+  .logo h1 {
+    font-size: 26px;
+  }
+
+  .logoIcon {
+    width: 48px;
+    height: 48px;
+    font-size: 24px;
+  }
 }

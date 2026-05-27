@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
@@ -96,7 +95,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			return
 		}
 
-		client.LastActive = time.Now()
+		client.UpdateLastActive()
 
 		// 解析消息并路由
 		var msg ws.WSMessage
