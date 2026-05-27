@@ -195,7 +195,7 @@ func main() {
 		friendGroup.POST("/:id/reject", middleware.ValidateUUIDParam("id"), friendHandler.RejectRequest)
 		friendGroup.GET("", friendHandler.ListFriends)
 		friendGroup.GET("/pending", friendHandler.ListPending)
-		friendGroup.GET("/search", friendHandler.SearchUsers)
+		friendGroup.GET("/search", middleware.RateLimit(10, 20), friendHandler.SearchUsers)
 	}
 
 	// 群聊路由（需要鉴权）
@@ -214,7 +214,7 @@ func main() {
 	userGroup := router.Group("/api/users")
 	userGroup.Use(authMiddleware)
 	{
-		userGroup.GET("/search", userHandler.Search)
+		userGroup.GET("/search", middleware.RateLimit(10, 20), userHandler.Search)
 	}
 
 	// WebSocket 路由（通过 query 参数鉴权）
@@ -253,7 +253,7 @@ func main() {
 	defer shutdownCancel()
 
 	cancel() // 停止 Hub
-		middleware.StopRateLimiter()
+		middleware.StopRateLimiters()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown failed", "error", err)
