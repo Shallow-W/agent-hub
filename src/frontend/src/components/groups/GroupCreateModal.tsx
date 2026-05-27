@@ -13,7 +13,7 @@ const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
   onCancel,
   onOk,
 }) => {
-  const { friends } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends) ?? [];
   const [form] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
