@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Tooltip, Button, Dropdown, Badge } from 'antd';
-import { SearchOutlined, MoreOutlined, SettingOutlined } from '@ant-design/icons';
+import { Avatar, Tooltip, Button, Dropdown } from 'antd';
+import {
+  FolderOpenOutlined,
+  MoreOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  StopOutlined,
+  UserAddOutlined,
+} from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useAuthStore } from '@/store/authStore';
@@ -39,6 +46,10 @@ export const ChatWindow: React.FC = () => {
   }
 
   const isGroup = activeConv.type === 'group';
+  const displayName = isGroup
+    ? activeConv.title
+    : (activeConv.peer_name || activeConv.title);
+  const avatarText = displayName.charAt(0).toUpperCase();
   const typingUsers = typingUsersMap[activeConv.id] ?? [];
   const otherTyping = typingUsers.filter((id) => id !== currentUserId);
 
@@ -64,14 +75,41 @@ export const ChatWindow: React.FC = () => {
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
+          <Avatar className={styles.conversationAvatar} size={26}>
+            {avatarText}
+          </Avatar>
           <h1 className={styles.title}>
-            {activeConv.title}
+            {displayName}
           </h1>
-          <Badge status="success" className={styles.statusBadge} />
+          {isGroup && <span className={styles.memberCount}>9</span>}
         </div>
         <div className={styles.headerActions}>
+          <Tooltip title="文件">
+            <Button type="text" icon={<FolderOpenOutlined />} size="small" />
+          </Tooltip>
+          {isGroup && (
+            <Tooltip title="邀请成员">
+              <Button
+                type="text"
+                icon={<UserAddOutlined />}
+                size="small"
+                onClick={() => setMemberPanelOpen(true)}
+              />
+            </Tooltip>
+          )}
           <Tooltip title="搜索消息">
             <Button type="text" icon={<SearchOutlined />} size="small" />
+          </Tooltip>
+          <Tooltip title="停止任务">
+            <Button type="text" icon={<StopOutlined />} size="small" />
+          </Tooltip>
+          <Tooltip title={isGroup ? '群聊设置' : '对话设置'}>
+            <Button
+              type="text"
+              icon={<SettingOutlined />}
+              size="small"
+              onClick={() => isGroup && setMemberPanelOpen(true)}
+            />
           </Tooltip>
           <Dropdown
             menu={{ items: menuItems }}

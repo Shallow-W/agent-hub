@@ -66,15 +66,21 @@
   background: rgba(255, 255, 255, 0.68);
 }
 
+.convPanelTools {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
 .convPanelTitle {
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
 }
 
-.convPanelHeader :global(.ant-btn) {
-  width: 30px;
-  height: 30px;
+.convPanelTools :global(.ant-btn) {
+  width: 22px;
+  height: 24px;
   padding: 0;
   border-radius: 50%;
   font-weight: 600;
@@ -84,13 +90,9 @@
   box-shadow: none;
 }
 
-.convPanelHeader :global(.ant-btn:hover) {
+.convPanelTools :global(.ant-btn:hover) {
   background: rgba(22, 163, 101, 0.08) !important;
   color: var(--color-primary) !important;
-}
-
-.convPanelHeader :global(.ant-btn > span:not(.anticon)) {
-  display: none;
 }
 
 .chatPanel {

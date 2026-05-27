@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Button, Alert, Avatar } from 'antd';
-import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  LeftOutlined,
+  RightOutlined,
+  ReloadOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import FriendList from '@/components/friends/FriendList';
@@ -89,11 +95,20 @@ const AppLayout: React.FC = () => {
 
   /** 中间面板内容：根据左侧导航切换 */
   const renderMiddlePanel = () => {
+    const renderPanelTools = (onAdd: () => void) => (
+      <div className={styles.convPanelTools}>
+        <Button type="text" icon={<UploadOutlined />} aria-label="上传" />
+        <Button type="text" icon={<PlusOutlined />} aria-label="添加" onClick={onAdd} />
+        <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchConversations()} />
+      </div>
+    );
+
     if (activeNav === 'friends') {
       return (
         <>
           <div className={styles.convPanelHeader}>
-            <span className={styles.convPanelTitle}>好友</span>
+            <span className={styles.convPanelTitle}>消息</span>
+            {renderPanelTools(handleCreate)}
           </div>
           <div className={styles.middleScroll}>
             <FriendRequest />
@@ -110,14 +125,8 @@ const AppLayout: React.FC = () => {
       return (
         <>
           <div className={styles.convPanelHeader}>
-            <span className={styles.convPanelTitle}>群聊</span>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setGroupModalOpen(true)}
-            >
-              新建群聊
-            </Button>
+            <span className={styles.convPanelTitle}>消息</span>
+            {renderPanelTools(() => setGroupModalOpen(true))}
           </div>
           {groupConvs.length === 0 ? (
             <div className={styles.emptyState}>
@@ -157,14 +166,8 @@ const AppLayout: React.FC = () => {
     return (
       <>
         <div className={styles.convPanelHeader}>
-          <span className={styles.convPanelTitle}>对话</span>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleCreate}
-          >
-            新建对话
-          </Button>
+          <span className={styles.convPanelTitle}>消息</span>
+          {renderPanelTools(handleCreate)}
         </div>
         <ConversationList />
       </>

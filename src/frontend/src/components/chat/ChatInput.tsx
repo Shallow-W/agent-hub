@@ -1,13 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Input, Button, Tooltip, Spin, message } from 'antd';
-import { SendOutlined, PaperClipOutlined, SmileOutlined, CloseOutlined } from '@ant-design/icons';
+import {
+  CloseOutlined,
+  LinkOutlined,
+  SendOutlined,
+  UpOutlined,
+} from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
-import { EmojiPicker } from './EmojiPicker';
 import styles from './ChatInput.module.css';
 import replyStyles from './EmojiPicker.module.css';
 
@@ -25,7 +29,6 @@ interface ChatInputProps {
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, onCancelReply }) => {
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
@@ -136,13 +139,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     [handleSubmit],
   );
 
-  const charCount = value.length;
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
-
-  const handleEmojiInsert = useCallback((emoji: string) => {
-    setValue((prev) => prev + emoji);
-    setEmojiPickerOpen(false);
-  }, []);
 
   return (
     <div className={styles.container}>
@@ -170,43 +167,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
       )}
       <AttachmentPreview items={pendingFiles} onRemove={handleRemoveFile} />
       <div className={styles.inputRow}>
-        <TextArea
-          value={value}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-          autoSize={{ minRows: 1, maxRows: 4 }}
-          className={styles.textarea}
-        />
-        <Button
-          type="primary"
-          shape="default"
-          icon={<SendOutlined />}
-          onClick={handleSubmit}
-          disabled={!canSend}
-          className={styles.sendBtn}
-        />
-      </div>
-      <div className={styles.toolbar}>
-        <Tooltip title="表情">
+        <Tooltip title="添加附件">
           <Button
             type="text"
-            icon={<SmileOutlined />}
-            size="small"
-            onClick={() => setEmojiPickerOpen((prev) => !prev)}
-          />
-        </Tooltip>
-        {emojiPickerOpen && (
-          <EmojiPicker
-            onSelect={handleEmojiInsert}
-            onClose={() => setEmojiPickerOpen(false)}
-          />
-        )}
-        <Tooltip title="附件">
-          <Button
-            type="text"
-            icon={<PaperClipOutlined />}
-            size="small"
+            icon={<LinkOutlined />}
+            className={styles.attachBtn}
             onClick={() => fileInputRef.current?.click()}
           />
         </Tooltip>
@@ -218,11 +183,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           onChange={handleFileSelect}
           className={styles.fileInput}
         />
-        <span
-          className={`${styles.charCount} ${charCount > 0 ? styles.charCountVisible : ''}`}
-        >
-          {charCount}
-        </span>
+        <TextArea
+          value={value}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          placeholder="发送至当前对话"
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          className={styles.textarea}
+        />
+        <Tooltip title="展开输入框">
+          <Button
+            type="text"
+            icon={<UpOutlined />}
+            className={styles.expandBtn}
+          />
+        </Tooltip>
+        <Button
+          type="primary"
+          shape="default"
+          icon={<SendOutlined />}
+          onClick={handleSubmit}
+          disabled={!canSend}
+          className={styles.sendBtn}
+        />
       </div>
     </div>
   );

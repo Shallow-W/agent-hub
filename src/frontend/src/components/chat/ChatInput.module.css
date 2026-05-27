@@ -18,7 +18,7 @@
 
 .inputRow {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   max-width: none;
   margin: 0 auto;
@@ -37,32 +37,18 @@
   box-shadow: var(--shadow-input-focus) !important;
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 4px 0;
-  position: relative;
-  max-width: none;
-  margin: 0 auto;
-}
-
-.charCount {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.charCountVisible {
-  opacity: 0.6;
-}
-
+.attachBtn,
+.expandBtn,
 .sendBtn {
   flex-shrink: 0;
-  width: 34px;
+  width: 32px;
   height: 32px;
   border-radius: 4px;
+}
+
+.attachBtn,
+.expandBtn {
+  color: var(--color-text-secondary);
 }
 
 .fileInput {

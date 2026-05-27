@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { Avatar, Menu, Switch, Tooltip } from 'antd';
+import { Avatar, Tooltip } from 'antd';
 import {
-  MessageOutlined,
-  SettingOutlined,
-  InfoCircleOutlined,
-  UserAddOutlined,
-  LogoutOutlined,
-  TeamOutlined,
+  AppstoreOutlined,
+  BgColorsOutlined,
   BulbOutlined,
+  CodeOutlined,
+  DatabaseOutlined,
+  MessageOutlined,
+  LogoutOutlined,
+  PlusOutlined,
+  RobotOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -33,6 +36,14 @@ const wsDotColor: Record<WsStatus, string> = {
   disconnected: styles.disconnected ?? '',
 };
 
+const navItems = [
+  { key: 'chat', label: '消息', icon: <MessageOutlined /> },
+  { key: 'models', label: '模型', icon: <RobotOutlined /> },
+  { key: 'skills', label: '技能', icon: <CodeOutlined /> },
+  { key: 'workspace', label: '任务', icon: <AppstoreOutlined /> },
+  { key: 'knowledge', label: '知识', icon: <DatabaseOutlined /> },
+];
+
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username,
   onLogout,
@@ -41,12 +52,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   collapsed,
 }) => {
   const [selectedKey, setSelectedKey] = useState('chat');
-  const [darkMode, setDarkMode] = useState(false);
   const initial = username ? username.charAt(0).toUpperCase() : '?';
 
-  const handleMenuClick = (info: { key: string }) => {
-    setSelectedKey(info.key);
-    onNavChange(info.key);
+  const handleNavClick = (key: string) => {
+    setSelectedKey(key);
+    onNavChange(key);
   };
 
   return (
@@ -56,43 +66,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <span className={styles.brandName}>AgentHub</span>
       </div>
 
-      <div className={styles.profile}>
-        <Avatar
-          className={styles.profileAvatar}
-          size={34}
-        >
-          {initial}
-        </Avatar>
-        <span className={styles.profileName}>{username}</span>
+      <div className={styles.quickCreate}>
+        <Tooltip title="新建">
+          <button className={styles.createBtn} type="button">
+            <PlusOutlined />
+          </button>
+        </Tooltip>
       </div>
 
-      <Menu
-        mode="inline"
-        inlineCollapsed={collapsed}
-        selectedKeys={[selectedKey]}
-        onClick={handleMenuClick}
-        className={styles.navMenu}
-        items={[
-          { key: 'chat', icon: <MessageOutlined />, label: '对话' },
-          { key: 'friends', icon: <UserAddOutlined />, label: '好友' },
-          { key: 'groups', icon: <TeamOutlined />, label: '群聊' },
-          { key: 'settings', icon: <SettingOutlined />, label: '设置' },
-          { key: 'about', icon: <InfoCircleOutlined />, label: '关于' },
-        ]}
-      />
+      <nav className={styles.navMenu} aria-label="主导航">
+        {navItems.map((item) => (
+          <Tooltip key={item.key} title={collapsed ? item.label : ''} placement="right">
+            <button
+              className={`${styles.navItem} ${selectedKey === item.key ? styles.navItemActive : ''}`}
+              type="button"
+              onClick={() => handleNavClick(item.key)}
+            >
+              <span className={styles.navIcon}>{item.icon}</span>
+              <span className={styles.navLabel}>{item.label}</span>
+            </button>
+          </Tooltip>
+        ))}
+      </nav>
 
       <div className={styles.footer}>
-        <div className={`${styles.themeRow} ${collapsed ? styles.themeRowCollapsed : ''}`}>
-          <div className={styles.themeLabel}>
-            <BulbOutlined className={styles.themeIcon} />
-            <span className={styles.themeLabelText}>暗色主题</span>
-          </div>
-          <Switch
-            size="small"
-            checked={darkMode}
-            onChange={setDarkMode}
-          />
-        </div>
         <div className={styles.wsStatus}>
           <Tooltip title={collapsed ? wsStatusText[wsStatus] : ''}>
             <span
@@ -101,10 +98,31 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </Tooltip>
           <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>
         </div>
-        <Tooltip title={collapsed ? '退出登录' : ''}>
-          <button className={styles.logoutBtn} onClick={onLogout}>
-            <LogoutOutlined className={styles.logoutIcon} />
-            <span className={styles.logoutText}>退出登录</span>
+        <Tooltip title={username || '个人头像'} placement="right">
+          <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
+        </Tooltip>
+        <Tooltip title="调色板" placement="right">
+          <button className={styles.footerIconBtn} type="button">
+            <BgColorsOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="主题" placement="right">
+          <button className={styles.footerIconBtn} type="button">
+            <BulbOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="设置" placement="right">
+          <button
+            className={styles.footerIconBtn}
+            type="button"
+            onClick={() => handleNavClick('settings')}
+          >
+            <SettingOutlined />
+          </button>
+        </Tooltip>
+        <Tooltip title="退出登录" placement="right">
+          <button className={styles.footerIconBtn} type="button" onClick={onLogout}>
+            <LogoutOutlined />
           </button>
         </Tooltip>
       </div>
