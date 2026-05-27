@@ -11,7 +11,8 @@ interface MessageState {
   streamingContent: Record<string, string>;
   /** conversationId → 是否还有更早的消息可加载 */
   hasMore: Record<string, boolean>;
-  loading: boolean;
+  /** conversationId → 是否正在加载 */
+  loading: Record<string, boolean>;
   /** conversationId → optimistic messages (pending send) */
   optimisticMessages: Record<string, OptimisticMessage[]>;
   /** conversationId → unread count */
@@ -52,13 +53,13 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
   streamingContent: {},
   hasMore: {},
-  loading: false,
+  loading: {},
   optimisticMessages: {},
   unreadCounts: {},
   readConversations: {},
 
   fetchMessages: async (conversationId, before) => {
-    set({ loading: true });
+    set((s) => ({ loading: { ...s.loading, [conversationId]: true } }));
     try {
       const list = await msgApi.getMessages(
         conversationId,
@@ -75,10 +76,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             ...state.hasMore,
             [conversationId]: list.length >= PAGE_SIZE,
           },
+          loading: { ...state.loading, [conversationId]: false },
         };
       });
-    } finally {
-      set({ loading: false });
+    } catch {
+      set((s) => ({ loading: { ...s.loading, [conversationId]: false } }));
     }
   },
 

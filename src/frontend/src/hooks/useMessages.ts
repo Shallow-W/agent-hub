@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
-import { getUnreadMessages, markAsRead } from '@/api/message';
+import { getUnreadMessages } from '@/api/message';
+import { markConversationRead } from '@/api/conversation';
 import type { OptimisticMessage } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
@@ -14,7 +15,7 @@ export function useMessages(conversationId: string | null) {
   const hasMoreEntry = useMessageStore(
     (s) => (conversationId ? s.hasMore[conversationId] : undefined),
   );
-  const loading = useMessageStore((s) => s.loading);
+  const loadingEntry = useMessageStore((s) => (conversationId ? s.loading[conversationId] : undefined));
   const optimisticEntry = useMessageStore(
     (s) => (conversationId ? s.optimisticMessages[conversationId] : undefined),
   );
@@ -39,7 +40,7 @@ export function useMessages(conversationId: string | null) {
     fetchMessages(currentId);
 
     // 标记已读
-    markAsRead(currentId).catch(() => {});
+    markConversationRead(currentId).catch(() => {});
 
     // 拉取离线/未读消息并合并
     getUnreadMessages(currentId, 100).then((unread) => {
@@ -63,12 +64,12 @@ export function useMessages(conversationId: string | null) {
   }, [conversationId, fetchMessages]);
 
   const loadMore = useCallback(() => {
-    if (!conversationId || !hasMore || loading) return;
+    if (!conversationId || !hasMore || loadingEntry) return;
     const oldest = messages[0];
     if (oldest) {
       fetchMessages(conversationId, oldest.created_at);
     }
-  }, [conversationId, hasMore, loading, messages, fetchMessages]);
+  }, [conversationId, hasMore, loadingEntry, messages, fetchMessages]);
 
   const send = useCallback(
     async (content: string, attachments?: AttachmentPayload[], replyTo?: string) => {
@@ -97,7 +98,7 @@ export function useMessages(conversationId: string | null) {
   return {
     messages,
     streamingContent,
-    loading,
+    loading: !!loadingEntry,
     loadMore,
     send,
     hasMore,

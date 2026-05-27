@@ -14,32 +14,49 @@ type visitor struct {
 	lastSeen time.Time
 }
 
+var rateLimiters struct {
+	mu       sync.Mutex
+	visitors map[string]*visitor
+	done     chan struct{}
+	once     sync.Once
+}
+
 // RateLimit 基于 IP 的令牌桶限流中间件
 func RateLimit(rps float64, burst int) gin.HandlerFunc {
-	var mu sync.Mutex
-	visitors := make(map[string]*visitor)
+	rateLimiters.mu.Lock()
+	defer rateLimiters.mu.Unlock()
 
-	// 每分钟清理超过 3 分钟未活跃的条目
-	go func() {
-		for {
-			time.Sleep(time.Minute)
-			mu.Lock()
-			for ip, v := range visitors {
-				if time.Since(v.lastSeen) > 3*time.Minute {
-					delete(visitors, ip)
+	if rateLimiters.visitors == nil {
+		rateLimiters.visitors = make(map[string]*visitor)
+		rateLimiters.done = make(chan struct{})
+
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-rateLimiters.done:
+					return
+				case <-ticker.C:
+					rateLimiters.mu.Lock()
+					for ip, v := range rateLimiters.visitors {
+						if time.Since(v.lastSeen) > 3*time.Minute {
+							delete(rateLimiters.visitors, ip)
+						}
+					}
+					rateLimiters.mu.Unlock()
 				}
 			}
-			mu.Unlock()
-		}
-	}()
+		}()
+	}
 
 	getLimiter := func(ip string) *rate.Limiter {
-		mu.Lock()
-		defer mu.Unlock()
-		v, ok := visitors[ip]
+		rateLimiters.mu.Lock()
+		defer rateLimiters.mu.Unlock()
+		v, ok := rateLimiters.visitors[ip]
 		if !ok {
 			v = &visitor{limiter: rate.NewLimiter(rate.Limit(rps), burst)}
-			visitors[ip] = v
+			rateLimiters.visitors[ip] = v
 		}
 		v.lastSeen = time.Now()
 		return v.limiter
@@ -55,4 +72,13 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// StopRateLimiter 停止限流器后台清理协程（shutdown 时调用）
+func StopRateLimiter() {
+	rateLimiters.once.Do(func() {
+		if rateLimiters.done != nil {
+			close(rateLimiters.done)
+		}
+	})
 }
