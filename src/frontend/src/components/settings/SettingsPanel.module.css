@@ -4,38 +4,11 @@
   height: 100%;
   width: var(--settings-width);
   transition: width 0.2s ease;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .collapsed {
   width: 64px;
-}
-
-/* 折叠/展开切换按钮 */
-.toggleBtn {
-  position: absolute;
-  top: 28px;
-  right: -13px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-white);
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 20;
-  font-size: 11px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
-}
-
-.toggleBtn:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-  box-shadow: var(--shadow-md);
 }
 
 .brand {
@@ -125,13 +98,8 @@
   padding: 14px 16px;
   border-top: 1px solid var(--color-border-light);
   background: rgba(255, 255, 255, 0.3);
-}
-
-.collapsed .footer {
-  padding: 14px 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
 
 .themeRow {
@@ -139,6 +107,16 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  overflow: hidden;
+  max-height: 30px;
+  opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.15s ease, margin-bottom 0.2s ease;
+}
+
+.themeRowCollapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
 }
 
 .themeLabel {
@@ -146,6 +124,26 @@
   align-items: center;
   font-size: 13px;
   color: var(--color-text-secondary);
+  overflow: hidden;
+}
+
+.themeIcon {
+  margin-right: 6px;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.themeLabelText {
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 80px;
+  opacity: 1;
+  transition: max-width 0.2s ease, opacity 0.15s ease;
+}
+
+.themeRowCollapsed .themeLabelText {
+  max-width: 0;
+  opacity: 0;
 }
 
 .wsStatus {
@@ -158,6 +156,18 @@
   margin-bottom: 12px;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.wsStatusText {
+  overflow: hidden;
+  max-width: 60px;
+  opacity: 1;
+  transition: max-width 0.2s ease, opacity 0.15s ease;
+}
+
+.collapsed .wsStatusText {
+  max-width: 0;
+  opacity: 0;
 }
 
 .wsDot {
@@ -191,10 +201,31 @@
   border-color: var(--color-danger-hover);
 }
 
+.logoutIcon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.logoutText {
+  overflow: hidden;
+  max-width: 80px;
+  opacity: 1;
+  transition: max-width 0.2s ease, opacity 0.15s ease;
+}
+
+.collapsed .logoutText {
+  max-width: 0;
+  opacity: 0;
+}
+
+.collapsed .footer {
+  padding: 14px 0;
+  align-items: center;
+}
+
 .collapsed .logoutBtn {
   width: 32px;
   padding: 0;
-  margin: 0 auto;
 }
 
 /* Prevent Ant Design inlineCollapsed icon jump */

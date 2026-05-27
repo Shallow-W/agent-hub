@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Button, Alert } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import FriendList from '@/components/friends/FriendList';
@@ -194,9 +194,18 @@ const AppLayout: React.FC = () => {
           wsStatus={status}
           onNavChange={setActiveNav}
           collapsed={settingsCollapsed}
-          onToggle={() => setSettingsCollapsed((c) => !c)}
         />
       </div>
+
+      {/* 折叠/展开切换按钮 - 放在 settingsPanel 外部，避免 overflow 问题 */}
+      <button
+        className={styles.toggleBtn}
+        onClick={() => setSettingsCollapsed((c) => !c)}
+        aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
+        style={{ left: settingsCollapsed ? 64 - 13 : 220 - 13 }}
+      >
+        {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
+      </button>
 
       {/* 中间：对话/好友/群聊列表 */}
       <div className={styles.convPanel}>

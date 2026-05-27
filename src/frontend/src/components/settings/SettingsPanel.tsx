@@ -8,8 +8,6 @@ import {
   LogoutOutlined,
   TeamOutlined,
   BulbOutlined,
-  LeftOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -21,7 +19,6 @@ interface SettingsPanelProps {
   wsStatus: WsStatus;
   onNavChange: (key: string) => void;
   collapsed: boolean;
-  onToggle: () => void;
 }
 
 const wsStatusText: Record<WsStatus, string> = {
@@ -42,7 +39,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   wsStatus,
   onNavChange,
   collapsed,
-  onToggle,
 }) => {
   const [selectedKey, setSelectedKey] = useState('chat');
   const [darkMode, setDarkMode] = useState(false);
@@ -55,15 +51,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   return (
     <div className={`${styles.panel} ${collapsed ? styles.collapsed : ''}`}>
-      {/* 折叠/展开切换按钮 */}
-      <button
-        className={styles.toggleBtn}
-        onClick={onToggle}
-        aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
-      >
-        {collapsed ? <RightOutlined /> : <LeftOutlined />}
-      </button>
-
       <div className={styles.brand}>
         <div className={styles.brandIcon}>A</div>
         <span className={styles.brandName}>AgentHub</span>
@@ -95,34 +82,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       />
 
       <div className={styles.footer}>
-        {!collapsed && (
-          <div className={styles.themeRow}>
-            <div className={styles.themeLabel}>
-              <BulbOutlined style={{ marginRight: 6 }} />
-              暗色主题
-            </div>
-            <Tooltip title={darkMode ? '切换亮色' : '切换暗色'}>
-              <Switch
-                size="small"
-                checked={darkMode}
-                onChange={setDarkMode}
-              />
-            </Tooltip>
+        <div className={`${styles.themeRow} ${collapsed ? styles.themeRowCollapsed : ''}`}>
+          <div className={styles.themeLabel}>
+            <BulbOutlined className={styles.themeIcon} />
+            <span className={styles.themeLabelText}>暗色主题</span>
           </div>
-        )}
+          <Switch
+            size="small"
+            checked={darkMode}
+            onChange={setDarkMode}
+          />
+        </div>
         <div className={styles.wsStatus}>
-          <Tooltip title={wsStatusText[wsStatus]}>
+          <Tooltip title={collapsed ? wsStatusText[wsStatus] : ''}>
             <span
               className={styles.wsDot}
               style={{ backgroundColor: wsDotColor[wsStatus] }}
             />
           </Tooltip>
-          {!collapsed && wsStatusText[wsStatus]}
+          <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>
         </div>
         <Tooltip title={collapsed ? '退出登录' : ''}>
           <button className={styles.logoutBtn} onClick={onLogout}>
-            <LogoutOutlined />
-            {!collapsed && <span>退出登录</span>}
+            <LogoutOutlined className={styles.logoutIcon} />
+            <span className={styles.logoutText}>退出登录</span>
           </button>
         </Tooltip>
       </div>

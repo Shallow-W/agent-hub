@@ -3,6 +3,7 @@
   align-items: stretch;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 .settingsPanel {
@@ -13,10 +14,28 @@
   flex-shrink: 0;
   z-index: 10;
   box-shadow: 1px 0 0 rgba(0, 0, 0, 0.03);
-  position: relative;
   transition: width 0.2s ease;
-  overflow: visible;
+  overflow: hidden;
   height: 100%;
+}
+
+.toggleBtn {
+  position: absolute;
+  top: 28px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-white);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  font-size: 11px;
+  box-shadow: var(--shadow-sm);
+  transition: left 0.2s ease;
 }
 
 .convPanel {
