@@ -41,12 +41,18 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   createConversation: async (type, title) => {
-    const conv = await convApi.createConversation(type, title);
-    set((state) => ({
-      conversations: sortConversations([...state.conversations, conv]),
-      activeConversationId: conv.id,
-    }));
-    return conv;
+    try {
+      const conv = await convApi.createConversation(type, title);
+      set((state) => ({
+        conversations: sortConversations([...state.conversations, conv]),
+        activeConversationId: conv.id,
+      }));
+      return conv;
+    } catch {
+      const { message } = await import('antd');
+      message.error('创建对话失败');
+      throw new Error('创建对话失败');
+    }
   },
 
   archiveConversationLocal: (id) => {
@@ -78,14 +84,19 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   togglePin: async (id) => {
-    await convApi.togglePin(id);
-    set((state) => ({
-      conversations: sortConversations(
-        state.conversations.map((c) =>
-          c.id === id ? { ...c, pinned: !c.pinned } : c,
+    try {
+      await convApi.togglePin(id);
+      set((state) => ({
+        conversations: sortConversations(
+          state.conversations.map((c) =>
+            c.id === id ? { ...c, pinned: !c.pinned } : c,
+          ),
         ),
-      ),
-    }));
+      }));
+    } catch {
+      const { message } = await import('antd');
+      message.error('置顶操作失败');
+    }
   },
 
   setActive: (id) => {
