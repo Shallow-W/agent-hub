@@ -90,8 +90,15 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, ErrUploadEmpty
 	}
 
-	// 文件名净化：只取 base name，防止路径穿越
+	// 文件名净化：只取 base name，防止路径穿越；去除 HTML 特殊字符防止 XSS
 	safeName := filepath.Base(fileHeader.Filename)
+	safeName = strings.Map(func(r rune) rune {
+		switch r {
+		case '<', '>', '&', '"', '\'', '{', '}', '|', ';':
+			return '-'
+		}
+		return r
+	}, safeName)
 
 	// 扩展名白名单校验
 	ext := strings.ToLower(filepath.Ext(safeName))
