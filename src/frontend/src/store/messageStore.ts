@@ -224,7 +224,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user');
+      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.attachments as AttachmentPayload[] | undefined);
       get().addMessage(conversationId, msg);
       // Remove on success
       set((s) => {

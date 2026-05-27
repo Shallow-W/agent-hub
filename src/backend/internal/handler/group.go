@@ -81,6 +81,10 @@ func (h *GroupHandler) AddMember(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40301, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrGroupNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			return
+		}
 		if errors.Is(err, service.ErrNotMember) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
 			return
