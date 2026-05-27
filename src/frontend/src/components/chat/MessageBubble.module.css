@@ -165,6 +165,10 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 74%);
 }
 
+.innerUser .fadeMask {
+  background: linear-gradient(180deg, rgba(29, 143, 90, 0), #1d8f5a 74%);
+}
+
 .innerAssistant strong,
 .innerUser strong {
   font-weight: 700;

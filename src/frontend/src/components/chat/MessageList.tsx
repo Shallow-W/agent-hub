@@ -13,9 +13,13 @@ interface MessageListProps {
 
 /** Check if two messages from the same sender are within 5 minutes */
 function isGrouped(prev: Message, curr: Message): boolean {
-  if (prev.sender_id !== curr.sender_id) return false;
-  // 回退：无 sender_id 时按 role 分组
-  if (!prev.sender_id && !curr.sender_id && prev.role !== curr.role) return false;
+  // 两者都有 sender_id 时严格比较
+  if (prev.sender_id && curr.sender_id) {
+    if (prev.sender_id !== curr.sender_id) return false;
+  } else if (prev.role !== curr.role) {
+    // 回退：无 sender_id 时按 role 分组，不同 role 不合并
+    return false;
+  }
   const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
   return diff < 5 * 60 * 1000;
 }

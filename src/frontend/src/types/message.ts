@@ -2,6 +2,14 @@ import type { MessageAttachment } from './attachment';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+export interface ReplyToPreview {
+  id: string;
+  content: string;
+  sender_id?: string;
+  username?: string;
+  deleted_at?: string | null;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -12,7 +20,8 @@ export interface Message {
   sender_id?: string;
   username?: string;
   attachments?: MessageAttachment[];
-  reply_to?: Message | null;
+  reply_to?: string | null;
+  reply_to_message?: ReplyToPreview | null;
 }
 
 export type OptimisticStatus = 'sending' | 'failed';

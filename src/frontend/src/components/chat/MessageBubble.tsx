@@ -116,7 +116,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
-  const displayName = isOwn ? '我' : (message.username || message.content?.charAt(0)?.toUpperCase() || '未知');
+  const displayName = isOwn ? '我' : (message.username || (message.role === 'user' ? '用户' : '助手'));
   const avatarLetter = isOwn ? '我' : (message.username?.charAt(0)?.toUpperCase() || '?');
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
@@ -178,12 +178,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   : styles.innerAssistant
           }`}
         >
-          {message.reply_to && (
+          {message.reply_to_message && !message.reply_to_message.deleted_at && (
             <div className={styles.replyQuote}>
               <span className={styles.replyQuoteSender}>
-                {message.reply_to.sender_id ? message.reply_to.username || '用户' : (message.reply_to.role === 'user' ? '你' : 'Agent')}
+                {message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : 'Agent'}
               </span>
-              {'content' in message.reply_to ? message.reply_to.content : ''}
+              {message.reply_to_message.content}
             </div>
           )}
           {message.attachments && message.attachments.length > 0 && (

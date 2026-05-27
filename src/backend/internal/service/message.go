@@ -123,8 +123,11 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		role = "user"
 	}
 
-	senderIDPtr := &userID
-	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo, senderIDPtr)
+	var senderID *string
+	if role == "user" {
+		senderID = &userID
+	}
+	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo, senderID)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
