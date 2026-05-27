@@ -214,6 +214,21 @@ func (r *MessageRepo) GetMessageSender(ctx context.Context, messageID string) (s
 	return "", nil
 }
 
+// SearchByContent 按关键词搜索对话消息（大小写不敏感）
+func (r *MessageRepo) SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error) {
+	var list []model.Message
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT `+messageCols+` FROM `+messageFrom+
+			` WHERE m.conversation_id = $1 AND m.content ILIKE '%' || $2 || '%' AND m.deleted_at IS NULL`+
+			` ORDER BY m.created_at DESC LIMIT $3`,
+		conversationID, keyword, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	return r.fillAttachmentsAndReply(ctx, list)
+}
+
 // SoftDelete 软删除消息（撤回）
 func (r *MessageRepo) SoftDelete(ctx context.Context, messageID string) error {
 	_, err := r.db.ExecContext(ctx,

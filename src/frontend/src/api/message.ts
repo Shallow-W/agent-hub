@@ -1,4 +1,4 @@
-import { get, post } from './client';
+import { get, post, del } from './client';
 import type { Message, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
@@ -7,11 +7,13 @@ export async function sendMessage(
   content: string,
   role: MessageRole,
   attachments?: AttachmentPayload[],
+  replyToId?: string,
 ): Promise<Message> {
   return post<Message>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
     attachments: attachments ?? [],
+    ...(replyToId ? { reply_to: replyToId } : {}),
   });
 }
 
@@ -27,6 +29,13 @@ export async function getMessages(
   const qs = params.toString();
   const path = `/api/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`;
   return get<Message[]>(path);
+}
+
+export async function recallMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  return del<void>(`/api/conversations/${conversationId}/messages/${messageId}`);
 }
 
 export async function getUnreadMessages(

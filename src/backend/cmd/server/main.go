@@ -178,6 +178,7 @@ func main() {
 			convRoutes.POST("/:id/pin", convHandler.TogglePin)
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)
+			convRoutes.GET("/:id/messages/search", msgHandler.Search)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
 				convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)

@@ -38,6 +38,7 @@ type MsgRepo interface {
 	GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error)
 	GetByID(ctx context.Context, id string) (*model.Message, error)
 	GetMessageSender(ctx context.Context, messageID string) (string, error)
+	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 }
 
@@ -272,6 +273,11 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
 	return messages, nil
+}
+
+// SearchMessages 搜索对话消息
+func (s *MessageService) SearchMessages(ctx context.Context, conversationID, keyword string) ([]model.Message, error) {
+	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
 }
 
 // ClearUnread 清除未读计数

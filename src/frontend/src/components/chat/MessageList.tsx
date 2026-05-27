@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Empty, Spin, Skeleton, Divider } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
 import { useAuthStore } from '@/store/authStore';
+import { useMessageStore } from '@/store/messageStore';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
 import styles from './MessageList.module.css';
@@ -64,6 +65,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const recall = useMessageStore((s) => s.recall);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -148,6 +150,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   isGrouped={grouped}
                   isOwn={isOwn}
                   onReply={onReply}
+                  onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                 />
               </React.Fragment>
             );

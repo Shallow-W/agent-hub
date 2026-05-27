@@ -18,6 +18,7 @@ interface ConversationItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onArchive: () => void;
   onInviteMembers?: () => void;
   lastMessage?: string;
   unreadCount?: number;
@@ -72,6 +73,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onSelect,
   onDelete,
   onTogglePin,
+  onArchive,
   onInviteMembers,
   lastMessage,
   unreadCount = 0,
@@ -114,6 +116,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       label: '归档',
       onClick: (info) => {
         info.domEvent.stopPropagation();
+        onArchive();
       },
     },
     { type: 'divider' },

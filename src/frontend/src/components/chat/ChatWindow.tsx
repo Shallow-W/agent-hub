@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Avatar, Tooltip, Button, Dropdown } from 'antd';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Avatar, Tooltip, Button, Dropdown, Input, List } from 'antd';
 import {
   FolderOpenOutlined,
   MoreOutlined,
@@ -7,6 +7,7 @@ import {
   SettingOutlined,
   StopOutlined,
   UserAddOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -19,6 +20,7 @@ import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
+import { searchMessages } from '@/api/search';
 import styles from './ChatWindow.module.css';
 
 export const ChatWindow: React.FC = () => {
@@ -32,6 +34,9 @@ export const ChatWindow: React.FC = () => {
   const markAllRead = useMessageStore((s) => s.markAllRead);
   const typingUsersMap = useWsStore((s) => s.typingUsers);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Mark conversation as read when switching to it
   useEffect(() => {
@@ -40,6 +45,32 @@ export const ChatWindow: React.FC = () => {
     convApi.markConversationRead(activeId).catch(() => {});
     setReplyTo(null);
   }, [activeId, markAllRead]);
+
+  const toggleSearch = useCallback(() => {
+    setSearchOpen((prev) => {
+      if (prev) {
+        setSearchResults([]);
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleSearch = useCallback(
+    async (value: string) => {
+      const keyword = value.trim();
+      if (!keyword || !activeConv) return;
+      setSearchLoading(true);
+      try {
+        const results = await searchMessages(activeConv.id, keyword);
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    },
+    [activeConv],
+  );
 
   if (!activeConv) {
     return null;
@@ -58,6 +89,7 @@ export const ChatWindow: React.FC = () => {
       key: 'search',
       icon: <SearchOutlined />,
       label: '搜索消息',
+      onClick: () => toggleSearch(),
     },
     ...(isGroup
       ? [
@@ -98,7 +130,7 @@ export const ChatWindow: React.FC = () => {
             </Tooltip>
           )}
           <Tooltip title="搜索消息">
-            <Button type="text" icon={<SearchOutlined />} size="small" />
+            <Button type="text" icon={<SearchOutlined />} size="small" onClick={toggleSearch} />
           </Tooltip>
           <Tooltip title="停止任务">
             <Button type="text" icon={<StopOutlined />} size="small" />
@@ -122,6 +154,55 @@ export const ChatWindow: React.FC = () => {
           </Dropdown>
         </div>
       </div>
+      {searchOpen && (
+        <div className={styles.searchPanel}>
+          <div className={styles.searchBar}>
+            <Input.Search
+              placeholder="搜索消息"
+              allowClear
+              enterButton
+              loading={searchLoading}
+              onSearch={handleSearch}
+              style={{ flex: 1 }}
+            />
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              size="small"
+              onClick={toggleSearch}
+            />
+          </div>
+          {searchResults.length > 0 && (
+            <List
+              className={styles.searchResults}
+              dataSource={searchResults}
+              renderItem={(msg) => (
+                <List.Item
+                  className={styles.searchResultItem}
+                  onClick={() => toggleSearch()}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <List.Item.Meta
+                    title={
+                      <span className={styles.searchResultSender}>
+                        {msg.username || msg.role}
+                      </span>
+                    }
+                    description={
+                      <span className={styles.searchResultContent}>
+                        {msg.content.length > 100 ? msg.content.slice(0, 100) + '...' : msg.content}
+                      </span>
+                    }
+                  />
+                  <span className={styles.searchResultTime}>
+                    {new Date(msg.created_at).toLocaleString()}
+                  </span>
+                </List.Item>
+              )}
+            />
+          )}
+        </div>
+      )}
       <MessageList conversationId={activeConv.id} onReply={setReplyTo} />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>

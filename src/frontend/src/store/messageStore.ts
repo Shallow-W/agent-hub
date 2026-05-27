@@ -20,7 +20,8 @@ interface MessageState {
   readConversations: Record<string, boolean>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string, attachments?: AttachmentPayload[]) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, attachments?: AttachmentPayload[], replyTo?: string) => Promise<void>;
+  recall: (conversationId: string, messageId: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
     conversationId: string,
@@ -80,7 +81,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content, attachments?) => {
+  sendMessage: async (conversationId, content, attachments?, replyTo?) => {
     const tempId = generateTempId();
     const optimistic: OptimisticMessage = {
       id: tempId,
@@ -105,7 +106,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments);
+      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo);
       get().addMessage(conversationId, msg);
       // Remove optimistic message on success
       set((state) => {
@@ -132,6 +133,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         };
       });
     }
+  },
+
+  recall: async (conversationId, messageId) => {
+    await msgApi.recallMessage(conversationId, messageId);
+    set((state) => {
+      const list = (state.messages[conversationId] ?? [])
+        .filter((m) => m.id !== messageId);
+      return {
+        messages: { ...state.messages, [conversationId]: list },
+      };
+    });
   },
 
   addMessage: (conversationId, message) => {

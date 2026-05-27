@@ -5,6 +5,7 @@ import {
   DownOutlined,
   MessageOutlined,
   ReloadOutlined,
+  RollbackOutlined,
   UpOutlined,
 } from '@ant-design/icons';
 import type { Message } from '@/types/message';
@@ -83,6 +84,7 @@ interface MessageBubbleProps {
   onRemove?: () => void;
   isOwn?: boolean;
   onReply?: (message: Message) => void;
+  onRecall?: (messageId: string) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -111,6 +113,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRemove,
   isOwn = false,
   onReply,
+  onRecall,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -122,6 +125,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
+  const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 2 * 60 * 1000;
 
   if (isSystem) {
     return (
@@ -155,6 +159,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             icon={<MessageOutlined />}
             className={styles.replyBtn}
             onClick={() => onReply(message)}
+          />
+        </Tooltip>
+      )}
+      {canRecall && (
+        <Tooltip title="撤回">
+          <Button
+            type="text"
+            size="small"
+            icon={<RollbackOutlined />}
+            className={styles.replyBtn}
+            onClick={() => onRecall!(message.id)}
           />
         </Tooltip>
       )}

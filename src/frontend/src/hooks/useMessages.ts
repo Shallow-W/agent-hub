@@ -68,9 +68,9 @@ export function useMessages(conversationId: string | null) {
   }, [conversationId, hasMore, loading, messages, fetchMessages]);
 
   const send = useCallback(
-    async (content: string, attachments?: AttachmentPayload[]) => {
+    async (content: string, attachments?: AttachmentPayload[], replyTo?: string) => {
       if (!conversationId) return;
-      await sendMessage(conversationId, content, attachments);
+      await sendMessage(conversationId, content, attachments, replyTo);
     },
     [conversationId, sendMessage],
   );

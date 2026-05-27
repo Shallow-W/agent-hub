@@ -161,6 +161,30 @@ func (h *MessageHandler) Unread(c *gin.Context) {
 	middleware.SuccessResponse(c, messages)
 }
 
+// Search 搜索对话消息
+func (h *MessageHandler) Search(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40029, "缺少对话 ID")
+		return
+	}
+	keyword := c.Query("keyword")
+	if keyword == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40030, "keyword required")
+		return
+	}
+
+	msgs, err := h.svc.SearchMessages(c.Request.Context(), convID, keyword)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50025, "搜索消息失败")
+		return
+	}
+	if msgs == nil {
+		msgs = []model.Message{}
+	}
+	middleware.SuccessResponse(c, msgs)
+}
+
 // Recall 撤回消息
 func (h *MessageHandler) Recall(c *gin.Context) {
 	convID := c.Param("id")

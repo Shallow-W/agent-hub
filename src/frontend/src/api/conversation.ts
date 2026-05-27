@@ -29,6 +29,10 @@ export async function togglePin(
   return put<void>(`/api/conversations/${id}/pin`, { pinned });
 }
 
+export async function archiveConversation(id: string): Promise<void> {
+  return post<void>(`/api/conversations/${id}/archive`);
+}
+
 export async function markConversationRead(id: string): Promise<void> {
   return put<void>(`/api/conversations/${id}/read`);
 }

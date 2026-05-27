@@ -3,6 +3,7 @@ import { Skeleton, Empty } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
+import * as convApi from '@/api/conversation';
 import type { Message } from '@/types/message';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
@@ -59,6 +60,10 @@ export const ConversationList: React.FC = () => {
               onSelect={() => setActive(conv.id)}
               onDelete={() => remove(conv.id)}
               onTogglePin={() => togglePin(conv.id, !conv.pinned)}
+              onArchive={async () => {
+                await convApi.archiveConversation(conv.id);
+                remove(conv.id);
+              }}
               onInviteMembers={
                 conv.type === 'group'
                   ? () => {
@@ -82,8 +87,9 @@ const ConversationItemWrapper: React.FC<{
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onArchive: () => void;
   onInviteMembers?: () => void;
-}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onInviteMembers }) => {
+}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onArchive, onInviteMembers }) => {
   const messages = useMessageStore(
     (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
   );
@@ -102,6 +108,7 @@ const ConversationItemWrapper: React.FC<{
       onSelect={onSelect}
       onDelete={onDelete}
       onTogglePin={onTogglePin}
+      onArchive={onArchive}
       onInviteMembers={onInviteMembers}
       lastMessage={lastMessage}
       unreadCount={unreadCount}
