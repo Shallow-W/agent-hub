@@ -1,4 +1,4 @@
-import { get, post, del } from './client';
+import { get, post, put, del } from './client';
 import type { Message, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
@@ -36,6 +36,10 @@ export async function recallMessage(
   messageId: string,
 ): Promise<void> {
   return del<void>(`/api/conversations/${conversationId}/messages/${messageId}`);
+}
+
+export async function markAsRead(conversationId: string): Promise<void> {
+  return put<void>(`/api/conversations/${conversationId}/read`);
 }
 
 export async function getUnreadMessages(

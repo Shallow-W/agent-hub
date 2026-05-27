@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
-import { getUnreadMessages } from '@/api/message';
+import { getUnreadMessages, markAsRead } from '@/api/message';
 import type { OptimisticMessage } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
@@ -37,6 +37,9 @@ export function useMessages(conversationId: string | null) {
     const currentId = conversationId;
 
     fetchMessages(currentId);
+
+    // 标记已读
+    markAsRead(currentId).catch(() => {});
 
     // 拉取离线/未读消息并合并
     getUnreadMessages(currentId, 100).then((unread) => {

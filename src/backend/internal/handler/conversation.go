@@ -69,6 +69,10 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	conv, err := h.svc.CreateConversation(c.Request.Context(), userID, req.Type, req.Title)
 	if err != nil {
+		if errors.Is(err, service.ErrConvInvalidTitle) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40044, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50010, "创建对话失败")
 		return
 	}
