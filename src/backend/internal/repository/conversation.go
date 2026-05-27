@@ -177,7 +177,7 @@ func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
 		 FROM conversations c
-		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id
+		 INNER JOIN conversation_members cm ON cm.conversation_id = c.id
 		 WHERE c.type = 'single' AND c.archived_at IS NULL
 		   AND (
 		     (c.user_id = $1 AND cm.user_id = $2)
@@ -204,6 +204,20 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 	}
 	defer tx.Rollback()
 
+	// 事务内重新检查：防止并发请求重复创建
+	var exists bool
+	tx.QueryRowxContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM conversations c
+		 INNER JOIN conversation_members cm ON cm.conversation_id = c.id
+		 WHERE c.type = 'single' AND c.archived_at IS NULL
+		   AND ((c.user_id = $1 AND cm.user_id = $2) OR (c.user_id = $2 AND cm.user_id = $1)))`,
+		userID, friendID,
+	).Scan(&exists)
+	if exists {
+		tx.Rollback()
+		return r.FindPrivateChat(ctx, userID, friendID)
+	}
+
 	var c model.Conversation
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'single', $2)
@@ -214,12 +228,15 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 		return nil, fmt.Errorf("insert conversation: %w", err)
 	}
 
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
-		c.ID, friendID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("add friend as member: %w", err)
+	// 插入双方为成员
+	for _, uid := range []string{userID, friendID} {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
+			c.ID, uid,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("add member: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -33,7 +33,7 @@ type RenameRequest struct {
 
 // PrivateChatRequest 私聊请求体
 type PrivateChatRequest struct {
-	FriendID string `json:"friend_id" binding:"required"`
+	FriendID string `json:"friend_id" binding:"required,uuid"`
 }
 
 // GetOrCreatePrivate 查找或创建与指定好友的私聊会话

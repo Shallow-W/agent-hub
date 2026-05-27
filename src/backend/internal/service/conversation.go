@@ -8,6 +8,11 @@ import (
 	"github.com/agent-hub/backend/internal/model"
 )
 
+// ConvFriendRepo 好友关系查询接口（仅好友校验所需方法）
+type ConvFriendRepo interface {
+	GetFriendship(ctx context.Context, userID, friendID string) (*model.Friend, error)
+}
+
 // ConversationService 对话服务所需的仓库接口
 type ConvRepo interface {
 	Create(ctx context.Context, userID, convType, title string) (*model.Conversation, error)
@@ -33,12 +38,13 @@ var (
 
 // ConversationService 对话业务逻辑
 type ConversationService struct {
-	repo ConvRepo
+	repo      ConvRepo
+	friendRepo ConvFriendRepo
 }
 
 // NewConversationService 创建对话服务
-func NewConversationService(repo ConvRepo) *ConversationService {
-	return &ConversationService{repo: repo}
+func NewConversationService(repo ConvRepo, friendRepo ConvFriendRepo) *ConversationService {
+	return &ConversationService{repo: repo, friendRepo: friendRepo}
 }
 
 // CreateConversation 创建对话
@@ -55,6 +61,25 @@ func (s *ConversationService) CreateConversation(ctx context.Context, userID, co
 
 // GetOrCreatePrivateChat 查找或创建两个用户之间的私聊会话
 func (s *ConversationService) GetOrCreatePrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
+	if userID == friendID {
+		return nil, errors.New("不能与自己创建私聊")
+	}
+
+	// 校验好友关系（双向检查）
+	friendship, err := s.friendRepo.GetFriendship(ctx, userID, friendID)
+	if err != nil {
+		return nil, fmt.Errorf("check friendship: %w", err)
+	}
+	if friendship == nil || friendship.Status != "accepted" {
+		friendship2, err2 := s.friendRepo.GetFriendship(ctx, friendID, userID)
+		if err2 != nil {
+			return nil, fmt.Errorf("check friendship reverse: %w", err2)
+		}
+		if friendship2 == nil || friendship2.Status != "accepted" {
+			return nil, errors.New("双方不是好友，无法创建私聊")
+		}
+	}
+
 	// 先尝试查找已有的私聊
 	conv, err := s.repo.FindPrivateChat(ctx, userID, friendID)
 	if err != nil {

@@ -89,7 +89,7 @@ func main() {
 		JWTSecret:      cfg.JWT.Secret,
 		JWTExpiryHours: cfg.JWT.ExpiryHours,
 	})
-	convSvc := service.NewConversationService(convRepo)
+	convSvc := service.NewConversationService(convRepo, friendRepo)
 	msgSvc := service.NewMessageService(msgRepo, convRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
