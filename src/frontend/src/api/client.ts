@@ -52,6 +52,12 @@ async function request<T>(
   const json: ApiResponse<T> = await res.json();
 
   if (!res.ok || json.code !== 0) {
+    // 401 → token 过期，清除并跳转登录
+    if (res.status === 401) {
+      clearToken();
+      window.location.href = '/login';
+      throw new ApiError(res.status, json.code, json.message);
+    }
     // Retry once on 5xx errors
     if (res.status >= 500 && retryCount < MAX_RETRY) {
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
