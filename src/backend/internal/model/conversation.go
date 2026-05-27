@@ -12,4 +12,8 @@ type Conversation struct {
 	ArchivedAt *time.Time `json:"archived_at,omitempty" db:"archived_at"`
 	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at" db:"updated_at"`
+
+	// 计算字段，非 DB 列
+	PeerName    string `json:"peer_name,omitempty" db:"peer_name"`
+	LastMessage string `json:"last_message,omitempty" db:"last_message"`
 }

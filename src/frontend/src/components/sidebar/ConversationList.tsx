@@ -30,9 +30,10 @@ export const ConversationList: React.FC = () => {
   }, [searchText]);
 
   const filtered = debouncedSearch
-    ? conversations.filter((c) =>
-        c.title.toLowerCase().includes(debouncedSearch.toLowerCase()),
-      )
+    ? conversations.filter((c) => {
+        const name = c.type === 'single' ? (c.peer_name || c.title) : c.title;
+        return name.toLowerCase().includes(debouncedSearch.toLowerCase());
+      })
     : conversations;
 
   if (loading && conversations.length === 0) {
@@ -126,7 +127,8 @@ const ConversationItemWrapper: React.FC<{
   );
 
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
-  const lastMessage = lastMsg?.content;
+  // 优先使用 API 返回的 last_message，实时更新时回退到本地 store
+  const lastMessage = conversation.last_message || lastMsg?.content;
 
   return (
     <ConversationItem

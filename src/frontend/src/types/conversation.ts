@@ -8,4 +8,6 @@ export interface Conversation {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+  peer_name?: string;
+  last_message?: string;
 }

@@ -25,7 +25,8 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, $2, $3)
-		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at`,
+		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
+		 NULL::text AS peer_name, NULL::text AS last_message`,
 		userID, convType, title,
 	).StructScan(&c)
 	if err != nil {
@@ -35,11 +36,23 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 }
 
 // ListByUserID 分页查询用户的对话列表（包括作为成员的群聊），排除已归档，按 updated_at 降序
+// 同时返回私聊对方用户名（peer_name）和最近一条消息内容（last_message）
 func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
+		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		        COALESCE(peer_u.username, creator_u.username, '') AS peer_name,
+		        COALESCE(latest_msg.content, '') AS last_message
 		 FROM conversations c
+		 LEFT JOIN conversation_members peer_cm ON c.type = 'single'
+		     AND peer_cm.conversation_id = c.id AND peer_cm.user_id != $1
+		 LEFT JOIN users peer_u ON peer_u.id = peer_cm.user_id
+		 LEFT JOIN users creator_u ON c.type = 'single' AND creator_u.id = c.user_id AND c.user_id != $1
+		 LEFT JOIN LATERAL (
+		     SELECT content FROM messages
+		     WHERE conversation_id = c.id AND deleted_at IS NULL
+		     ORDER BY created_at DESC LIMIT 1
+		 ) latest_msg ON true
 		 WHERE c.archived_at IS NULL
 		   AND (c.user_id = $1
 		        OR EXISTS (SELECT 1 FROM conversation_members cm
@@ -57,7 +70,8 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 func (r *ConversationRepo) GetByID(ctx context.Context, id string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
+		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at,
+		 NULL::text AS peer_name, NULL::text AS last_message
 		 FROM conversations WHERE id = $1`,
 		id,
 	).StructScan(&c)
@@ -175,7 +189,8 @@ func (r *ConversationRepo) ListMemberIDs(ctx context.Context, conversationID str
 func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
+		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		 NULL::text AS peer_name, NULL::text AS last_message
 		 FROM conversations c
 		 INNER JOIN conversation_members cm ON cm.conversation_id = c.id
 		 WHERE c.type = 'single' AND c.archived_at IS NULL
@@ -221,7 +236,8 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 	var c model.Conversation
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'single', $2)
-		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at`,
+		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
+		 NULL::text AS peer_name, NULL::text AS last_message`,
 		userID, title,
 	).StructScan(&c)
 	if err != nil {

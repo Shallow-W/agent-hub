@@ -77,9 +77,13 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   unreadCount = 0,
   online = false,
 }) => {
-  const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
-  const avatarColor = getAvatarColor(conversation.title || '?');
   const isGroup = conversation.type === 'group';
+  // 显示名称：私聊用对方用户名，群聊用标题
+  const displayName = isGroup
+    ? conversation.title
+    : (conversation.peer_name || conversation.title);
+  const firstChar = displayName ? displayName.charAt(0).toUpperCase() : '?';
+  const avatarColor = getAvatarColor(displayName || '?');
 
   const menuItems: MenuProps['items'] = [
     {
@@ -166,7 +170,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
 
       <div className={styles.content}>
         <div className={styles.titleRow}>
-          <span className={styles.title}>{conversation.title}</span>
+          <span className={styles.title}>{displayName}</span>
           <span className={styles.time}>
             {formatTime(conversation.updated_at)}
           </span>
