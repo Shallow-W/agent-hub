@@ -1,9 +1,7 @@
 .container {
-  padding: 12px 24px 16px;
-  background-color: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid var(--color-border-light);
+  padding: 12px 24px 14px;
+  background-color: #fff;
+  border-top: 1px solid var(--color-border);
   position: relative;
   z-index: 1;
 }
@@ -22,12 +20,14 @@
   display: flex;
   gap: 10px;
   align-items: flex-end;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
 .textarea {
   flex: 1;
-  border-radius: 16px !important;
-  border: 1.5px solid var(--color-border) !important;
+  border-radius: 14px !important;
+  border: 1px solid #d9dee5 !important;
   background: var(--color-bg-white) !important;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
 }
@@ -43,6 +43,8 @@
   justify-content: space-between;
   padding: 8px 4px 0;
   position: relative;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
 .charCount {
@@ -54,4 +56,15 @@
 
 .charCountVisible {
   opacity: 0.6;
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.fileInput {
+  display: none;
 }

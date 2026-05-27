@@ -2,34 +2,30 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  width: var(--settings-width);
+  width: 184px;
   transition: width 0.2s ease;
   overflow: hidden;
 }
 
 .collapsed {
-  width: 64px;
+  width: 52px;
 }
 
 .brand {
-  padding: 24px 12px 20px;
+  padding: 16px 8px 12px;
   display: flex;
   align-items: center;
   gap: 0;
-  background: linear-gradient(180deg, rgba(22, 119, 255, 0.06) 0%, transparent 100%);
+  background: #fff;
   position: relative;
   overflow: hidden;
 }
 
-.collapsed .brand {
-  padding: 24px 12px 20px;
-}
-
 .brandIcon {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   background: var(--gradient-brand);
-  border-radius: 10px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -37,12 +33,12 @@
   font-weight: 700;
   font-size: 15px;
   flex-shrink: 0;
-  margin-left: 4px;
-  box-shadow: 0 3px 8px rgba(22, 119, 255, 0.3);
+  margin-left: 2px;
+  box-shadow: 0 3px 9px rgba(22, 163, 101, 0.2);
 }
 
 .brandName {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
   letter-spacing: -0.3px;
@@ -61,18 +57,20 @@
 }
 
 .profile {
-  padding: 14px 12px;
+  padding: 10px 8px 12px;
   border-top: 1px solid var(--color-border-light);
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   gap: 0;
-  background: rgba(255, 255, 255, 0.5);
+  background: #fff;
   overflow: hidden;
 }
 
-.collapsed .profile {
-  padding: 14px 12px;
+.profileAvatar {
+  flex-shrink: 0;
+  background: #2477f3 !important;
+  box-shadow: 0 3px 9px rgba(36, 119, 243, 0.18);
 }
 
 .profileName {
@@ -95,9 +93,9 @@
 }
 
 .footer {
-  padding: 14px 16px;
-  border-top: 1px solid var(--color-border-light);
-  background: rgba(255, 255, 255, 0.3);
+  padding: 12px;
+  border-top: 1px solid var(--color-border);
+  background: #fff;
   display: flex;
   flex-direction: column;
 }
@@ -177,20 +175,32 @@
   flex-shrink: 0;
 }
 
+.connected {
+  background: #52c41a;
+}
+
+.connecting {
+  background: #faad14;
+}
+
+.disconnected {
+  background: #ff4d4f;
+}
+
 .logoutBtn {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 15px;
+  padding: 4px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--border-radius-sm);
   background: var(--color-bg-white);
   color: var(--color-danger);
   cursor: pointer;
   font-size: 14px;
-  height: 32px;
+  height: 30px;
   transition: all 0.2s ease;
   white-space: nowrap;
   overflow: hidden;
@@ -219,26 +229,42 @@
 }
 
 .collapsed .footer {
-  padding: 14px 0;
+  padding: 12px 0;
   align-items: stretch;
   overflow: hidden;
 }
 
 .collapsed .wsStatus {
   justify-content: flex-start;
-  padding-left: 18px;
+  padding-left: 22px;
   margin-bottom: 8px;
 }
 
 .collapsed .logoutBtn {
   width: 100%;
-  max-width: 64px;
+  max-width: 52px;
   padding: 4px 0;
   justify-content: center;
   margin: 0 auto;
 }
 
-/* Prevent Ant Design inlineCollapsed icon jump + left-align with avatar */
+.navMenu {
+  border: none;
+  flex: 1;
+  background: transparent;
+  padding-top: 8px;
+}
+
+.panel :global(.ant-menu-item) {
+  color: var(--color-text);
+  margin-block: 3px !important;
+}
+
+.panel :global(.ant-menu-item-selected) {
+  color: var(--color-primary);
+  background: rgba(22, 163, 101, 0.11) !important;
+}
+
 .panel :global(.ant-menu-inline .ant-menu-item) {
   transition: none;
 }
@@ -254,23 +280,16 @@
   transition: none !important;
 }
 
-.collapsed :global(.ant-menu) {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
 .collapsed :global(.ant-menu-item) {
   display: flex;
   justify-content: flex-start;
   padding-left: 16px !important;
 }
 
-/* Collapsed: constrain menu item width to 64px and fix selected highlight overflow */
 .collapsed :global(.ant-menu-item),
 .collapsed :global(.ant-menu-item-selected),
 .collapsed :global(.ant-menu-item-active) {
-  width: 64px !important;
+  width: 52px !important;
   margin-inline: 0 !important;
   border-radius: 0 !important;
 }

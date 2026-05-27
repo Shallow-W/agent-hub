@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Button, Alert } from 'antd';
+import { Button, Alert, Avatar } from 'antd';
 import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
@@ -19,6 +19,9 @@ import { message as antMessage } from 'antd';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import styles from './AppLayout.module.css';
 
+const SETTINGS_COLLAPSED_WIDTH = 52;
+const SETTINGS_EXPANDED_WIDTH = 184;
+
 const AppLayout: React.FC = () => {
   const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
@@ -29,8 +32,8 @@ const AppLayout: React.FC = () => {
   const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
-  const [settingsCollapsed, setSettingsCollapsed] = useState(false);
-  const [convPanelWidth, setConvPanelWidth] = useState(300);
+  const [settingsCollapsed, setSettingsCollapsed] = useState(true);
+  const [convPanelWidth, setConvPanelWidth] = useState(292);
 
   // 切换到好友页时自动拉取数据
   useEffect(() => {
@@ -69,7 +72,7 @@ const AppLayout: React.FC = () => {
 
   /** 拖拽调整中间面板宽度 */
   const handleResize = useCallback((deltaX: number) => {
-    setConvPanelWidth((prev) => Math.min(500, Math.max(200, prev + deltaX)));
+    setConvPanelWidth((prev) => Math.min(380, Math.max(240, prev + deltaX)));
   }, []);
 
   /** 点击好友开始私聊 */
@@ -92,9 +95,9 @@ const AppLayout: React.FC = () => {
           <div className={styles.convPanelHeader}>
             <span className={styles.convPanelTitle}>好友</span>
           </div>
-          <div style={{ padding: 12, overflow: 'auto', flex: 1 }}>
+          <div className={styles.middleScroll}>
             <FriendRequest />
-            <div style={{ marginTop: 16, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
+            <div className={styles.middleSection}>
               <FriendList onStartChat={handleStartChat} />
             </div>
           </div>
@@ -117,62 +120,28 @@ const AppLayout: React.FC = () => {
             </Button>
           </div>
           {groupConvs.length === 0 ? (
-            <div style={{ padding: 16, color: 'var(--color-text-secondary)' }}>
+            <div className={styles.emptyState}>
               暂无群聊
             </div>
           ) : (
-            <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+            <div className={styles.groupList}>
               {groupConvs.map((conv) => (
                 <div
                   key={conv.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '10px 16px',
-                    cursor: 'pointer',
-                    transition: 'background-color 0.2s ease',
-                  }}
+                  className={styles.groupItem}
                   onClick={() => {
                     useConversationStore.getState().setActive(conv.id);
                     setActiveNav('chat');
                   }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--color-bg-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-                  }}
                 >
-                  <div
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 8,
-                      background: 'linear-gradient(135deg, #1677ff, #4096ff)',
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 16,
-                      fontWeight: 700,
-                      flexShrink: 0,
-                      marginRight: 12,
-                    }}
-                  >
+                  <Avatar className={styles.groupAvatar} shape="square">
                     {conv.title.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: 'var(--color-text)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}>
+                  </Avatar>
+                  <div className={styles.groupMeta}>
+                    <div className={styles.groupTitle}>
                       {conv.title}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                    <div className={styles.groupTime}>
                       创建于 {new Date(conv.created_at).toLocaleDateString('zh-CN')}
                     </div>
                   </div>
@@ -217,8 +186,7 @@ const AppLayout: React.FC = () => {
 
       {/* 左侧：设置面板 */}
       <div
-        className={styles.settingsPanel}
-        style={{ width: settingsCollapsed ? 64 : 'var(--settings-width)' }}
+        className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
       >
         <SettingsPanel
           username={user?.username ?? ''}
@@ -234,13 +202,15 @@ const AppLayout: React.FC = () => {
         className={styles.toggleBtn}
         onClick={() => setSettingsCollapsed((c) => !c)}
         aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
-        style={{ left: settingsCollapsed ? 64 - 13 : 220 - 13 }}
+        style={{
+          left: (settingsCollapsed ? SETTINGS_COLLAPSED_WIDTH : SETTINGS_EXPANDED_WIDTH) - 11,
+        }}
       >
         {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
       </button>
 
       {/* 中间：对话/好友/群聊列表 */}
-      <div className={styles.convPanel} style={{ width: convPanelWidth, minWidth: 200, maxWidth: 500 }}>
+      <div className={styles.convPanel} style={{ width: convPanelWidth }}>
         {renderMiddlePanel()}
       </div>
 

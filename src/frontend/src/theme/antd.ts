@@ -2,24 +2,24 @@ import type { ThemeConfig } from 'antd';
 
 const theme: ThemeConfig = {
   token: {
-    colorPrimary: '#1677ff',
-    borderRadius: 10,
+    colorPrimary: '#16a365',
+    borderRadius: 8,
     fontFamily: `-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif`,
     colorBgContainer: '#ffffff',
-    colorBgLayout: '#f0f2f5',
-    colorText: '#1a1a1a',
-    colorTextSecondary: '#666',
-    colorBorder: '#e5e7eb',
-    colorBorderSecondary: '#f0f0f0',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+    colorBgLayout: '#eef1f4',
+    colorText: '#1f2328',
+    colorTextSecondary: '#68727d',
+    colorBorder: '#e7eaee',
+    colorBorderSecondary: '#f1f3f5',
+    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.06)',
   },
   components: {
     Button: {
-      borderRadius: 10,
+      borderRadius: 8,
       controlHeight: 36,
     },
     Input: {
-      borderRadius: 10,
+      borderRadius: 8,
     },
     Card: {
       borderRadius: 14,
@@ -29,8 +29,8 @@ const theme: ThemeConfig = {
     },
     Menu: {
       itemBorderRadius: 8,
-      itemMarginInline: 8,
-      itemHeight: 40,
+      itemMarginInline: 4,
+      itemHeight: 38,
       iconSize: 16,
     },
     Avatar: {

@@ -4,64 +4,78 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
+  background: var(--color-bg-app);
 }
 
 .settingsPanel {
   background: var(--color-bg-settings);
-  border-right: 1px solid var(--color-border-light);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   z-index: 10;
-  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.03);
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
   transition: width 0.2s ease;
   overflow: hidden;
   height: 100%;
+  width: 184px;
+}
+
+.settingsPanelCollapsed {
+  width: 52px;
 }
 
 .toggleBtn {
   position: absolute;
-  top: 28px;
-  width: 26px;
-  height: 26px;
+  top: 30px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 1px solid var(--color-border);
   background: var(--color-bg-white);
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 20;
-  font-size: 11px;
-  box-shadow: var(--shadow-sm);
+  font-size: 10px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
   transition: left 0.2s ease;
 }
 
 .convPanel {
   flex-shrink: 0;
   background: var(--color-bg-convlist);
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   height: 100%;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.02);
+  min-width: 240px;
+  max-width: 380px;
   overflow: hidden;
 }
 
 .convPanelHeader {
-  padding: 20px 16px 16px;
-  border-bottom: 1px solid var(--color-border-light);
+  height: 58px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: rgba(255, 255, 255, 0.68);
 }
 
 .convPanelTitle {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
-  letter-spacing: -0.3px;
+}
+
+.convPanelHeader :global(.ant-btn) {
+  height: 36px;
+  border-radius: 9px;
+  font-weight: 600;
 }
 
 .chatPanel {
@@ -70,5 +84,74 @@
   flex-direction: column;
   overflow: hidden;
   height: 100%;
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-chat);
+}
+
+.middleScroll {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+.middleSection {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.emptyState {
+  padding: 24px 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.groupList {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+
+.groupItem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.groupItem:hover {
+  background: rgba(44, 128, 96, 0.08);
+}
+
+.groupAvatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--gradient-agent) !important;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.groupMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.groupTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupTime {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
 }

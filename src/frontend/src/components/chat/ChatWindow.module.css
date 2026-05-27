@@ -9,12 +9,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
+  height: 58px;
   padding: 0 24px;
-  background-color: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--color-border-light);
+  background-color: #fff;
+  border-bottom: 1px solid var(--color-border);
   position: relative;
   z-index: 1;
 }
@@ -26,19 +24,19 @@
   min-width: 0;
 }
 
-.convIcon {
-  font-size: 18px;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
-.headerTitle {
+.title {
+  margin: 0;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+.statusBadge {
+  margin-left: 2px;
 }
 
 .headerActions {
@@ -69,9 +67,13 @@
 }
 
 .typingIndicator {
-  padding: 4px 24px;
+  padding: 5px 24px;
   font-size: 12px;
   color: var(--color-primary);
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: #fff;
   font-weight: 500;
+}
+
+.headerActions :global(.ant-btn) {
+  color: #1f2328;
 }

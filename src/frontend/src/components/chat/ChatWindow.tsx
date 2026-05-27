@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Typography, Tooltip, Button, Dropdown, Badge } from 'antd';
+import { Tooltip, Button, Dropdown, Badge } from 'antd';
 import { SearchOutlined, MoreOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -13,8 +13,6 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import styles from './ChatWindow.module.css';
-
-const { Title } = Typography;
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -66,10 +64,10 @@ export const ChatWindow: React.FC = () => {
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <Title level={5} style={{ margin: 0 }} ellipsis>
+          <h1 className={styles.title}>
             {activeConv.title}
-          </Title>
-          <Badge status="success" style={{ marginLeft: 4 }} />
+          </h1>
+          <Badge status="success" className={styles.statusBadge} />
         </div>
         <div className={styles.headerActions}>
           <Tooltip title="搜索消息">

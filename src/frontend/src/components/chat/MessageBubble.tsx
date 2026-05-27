@@ -113,7 +113,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   if (isSystem) {
     return (
       <div className={styles.systemMessage}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
+        <Text type="secondary" className={styles.systemText}>
           {message.content}
         </Text>
       </div>
@@ -128,12 +128,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <Avatar
           size={32}
           icon={<UserOutlined />}
-          style={{ backgroundColor: '#1677ff', flexShrink: 0, marginRight: 10, marginTop: 2 }}
+          className={styles.assistantAvatar}
         >
           {message.content?.charAt(0)?.toUpperCase() ?? ''}
         </Avatar>
       )}
-      {!isUser && !showAvatar && <div style={{ width: 42, flexShrink: 0 }} />}
+      {!isUser && !showAvatar && <div className={styles.avatarSpacer} />}
       {!isSystem && onReply && (
         <Tooltip title="回复">
           <Button
@@ -142,14 +142,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             icon={<MessageOutlined />}
             className={styles.replyBtn}
             onClick={() => onReply(message)}
-            style={{ position: 'absolute', top: 0 }}
           />
         </Tooltip>
       )}
       <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
         {!isUser && showAvatar && (
           <div className={styles.meta}>
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>Agent</Text>
+            <Text type="secondary" className={styles.agentLabel}>Agent</Text>
           </div>
         )}
         <div
@@ -179,7 +178,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
           {streaming && <span className={styles.streamingCursor} />}
           {isOptimisticSending && (
-            <Spin size="small" style={{ marginLeft: 8 }} />
+            <Spin size="small" className={styles.sendingSpin} />
           )}
         </div>
         {isOptimisticFailed && (
@@ -189,7 +188,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               size="small"
               icon={<ReloadOutlined />}
               onClick={onRetry}
-              style={{ color: '#ff4d4f', padding: 0, height: 'auto', fontSize: 12 }}
+              className={styles.retryBtn}
             >
               重试
             </Button>
@@ -198,18 +197,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               size="small"
               icon={<CloseOutlined />}
               onClick={onRemove}
-              style={{ color: '#999', padding: 0, height: 'auto', fontSize: 12 }}
+              className={styles.removeBtn}
             />
           </div>
         )}
         <div
           className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
         >
-          <Text type="secondary" style={{ fontSize: 11 }}>
+          <Text type="secondary" className={styles.timestampText}>
             {formatTimestamp(message.created_at)}
           </Text>
           {isOwn && isUser && (
-            <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+            <Text type="secondary" className={styles.readText}>
               {isRead ? '已读' : '未读'}
             </Text>
           )}

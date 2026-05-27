@@ -28,9 +28,9 @@ const wsStatusText: Record<WsStatus, string> = {
 };
 
 const wsDotColor: Record<WsStatus, string> = {
-  connected: '#52c41a',
-  connecting: '#faad14',
-  disconnected: '#ff4d4f',
+  connected: styles.connected ?? '',
+  connecting: styles.connecting ?? '',
+  disconnected: styles.disconnected ?? '',
 };
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -58,7 +58,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <div className={styles.profile}>
         <Avatar
-          style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
+          className={styles.profileAvatar}
           size={34}
         >
           {initial}
@@ -71,7 +71,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         inlineCollapsed={collapsed}
         selectedKeys={[selectedKey]}
         onClick={handleMenuClick}
-        style={{ border: 'none', flex: 1 }}
+        className={styles.navMenu}
         items={[
           { key: 'chat', icon: <MessageOutlined />, label: '对话' },
           { key: 'friends', icon: <UserAddOutlined />, label: '好友' },
@@ -96,8 +96,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className={styles.wsStatus}>
           <Tooltip title={collapsed ? wsStatusText[wsStatus] : ''}>
             <span
-              className={styles.wsDot}
-              style={{ backgroundColor: wsDotColor[wsStatus] }}
+              className={`${styles.wsDot} ${wsDotColor[wsStatus]}`}
             />
           </Tooltip>
           <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>

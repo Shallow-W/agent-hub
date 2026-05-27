@@ -184,7 +184,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           icon={<SendOutlined />}
           onClick={handleSubmit}
           disabled={!canSend}
-          style={{ flexShrink: 0, height: 44, width: 44 }}
+          className={styles.sendBtn}
         />
       </div>
       <div className={styles.toolbar}>
@@ -216,7 +216,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           accept={ACCEPTED_TYPES}
           multiple
           onChange={handleFileSelect}
-          style={{ display: 'none' }}
+          className={styles.fileInput}
         />
         <span
           className={`${styles.charCount} ${charCount > 0 ? styles.charCountVisible : ''}`}
