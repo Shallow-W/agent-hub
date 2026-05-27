@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -60,6 +61,7 @@ var (
 	ErrMsgNotSender    = errors.New("只能撤回自己的消息")
 	ErrMsgRecallExpired = errors.New("消息已超过2分钟，无法撤回")
 	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
+	ErrMsgEmptyContent  = errors.New("消息内容不能为空")
 	ErrMsgReplyNotFound = errors.New("回复的消息不存在")
 	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
 )
@@ -111,6 +113,9 @@ func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, 
 func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error) {
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, ErrMsgEmptyContent
 	}
 
 	conv, err := s.convRepo.GetByID(ctx, convID)
