@@ -9,6 +9,8 @@ export interface Message {
   content: string;
   artifacts_json: string | null;
   created_at: string;
+  sender_id?: string;
+  username?: string;
   attachments?: MessageAttachment[];
   reply_to?: Message | null;
 }
@@ -33,6 +35,8 @@ export interface StreamMessage {
     role?: MessageRole;
     artifacts_json?: string | null;
     created_at?: string;
+    sender_id?: string;
+    username?: string;
     done?: boolean;
     agentId?: string;
     status?: 'thinking' | 'running' | 'idle';

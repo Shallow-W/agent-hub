@@ -1,15 +1,25 @@
 .bubble {
   display: flex;
-  width: min(100%, 980px);
+  width: min(100%, 1160px);
   margin: 0 auto;
-  padding: 13px 8px 14px;
-  border-bottom: 1px solid rgba(31, 35, 40, 0.045);
+  padding: 13px 10px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
   position: relative;
   transition: background-color var(--transition-fast);
 }
 
 .bubble:hover {
-  background: rgba(247, 249, 250, 0.72);
+  background: linear-gradient(90deg, rgba(246, 248, 250, 0.82), rgba(255, 255, 255, 0));
+}
+
+/* 自己的消息右对齐 */
+.bubbleUser {
+  flex-direction: row-reverse;
+}
+
+/* 其他人的消息左对齐 */
+.bubbleAssistant {
+  flex-direction: row;
 }
 
 .bubbleGrouped {
@@ -19,8 +29,21 @@
 .assistantAvatar,
 .userAvatar {
   flex-shrink: 0;
-  margin-right: 9px;
   margin-top: 1px;
+  box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+/* 自己消息的头像在右侧，去掉左间距加右间距 */
+.bubbleUser .userAvatar {
+  margin-right: 0;
+  margin-left: 10px;
+}
+
+/* 他人消息的头像保持左间距 */
+.bubbleAssistant .assistantAvatar,
+.bubbleAssistant .userAvatar {
+  margin-right: 10px;
+  margin-left: 0;
 }
 
 .assistantAvatar {
@@ -28,7 +51,7 @@
 }
 
 .userAvatar {
-  background: #2477f3 !important;
+  background: linear-gradient(135deg, #1d8f5a, #34c38f) !important;
   font-size: 11px;
 }
 
@@ -42,101 +65,104 @@
   min-width: 0;
 }
 
+/* 自己的消息内容右对齐 */
+.bubbleUser .content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
 .meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-height: 22px;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   flex-wrap: wrap;
+}
+
+/* 自己的消息 meta 右对齐 */
+.bubbleUser .meta {
+  flex-direction: row-reverse;
 }
 
 .agentLabel {
   font-size: 12px;
   font-weight: 700;
-  color: #24292f;
+  color: #1f2937;
 }
 
 .metaTime,
-.timestamp,
 .systemText {
   font-size: 11px;
   color: var(--color-text-tertiary);
 }
 
-.statusPill,
-.detailPill,
-.tokenPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 18px;
-}
-
-.statusPill {
-  color: #168a4a;
-  background: rgba(22, 163, 101, 0.08);
-}
-
-.detailPill {
-  color: #8a4bd6;
-  background: rgba(138, 75, 214, 0.08);
-}
-
-.tokenPill {
-  color: #2477f3;
-  background: rgba(36, 119, 243, 0.08);
-}
-
 .inner {
   color: var(--color-text);
-  font-size: 13px;
-  line-height: 1.72;
+  font-size: 12.5px;
+  line-height: 1.78;
   word-break: break-word;
   position: relative;
+  border-radius: 6px;
 }
 
+/* 自己的消息：蓝色背景白色文字 */
 .innerUser {
-  min-width: 56px;
-  width: fit-content;
-  max-width: min(100%, 720px);
-  padding: 8px 11px;
-  border: 1px solid rgba(36, 119, 243, 0.1);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(36, 119, 243, 0.06), rgba(36, 119, 243, 0.035));
-  color: #24292f;
+  max-width: 75%;
+  padding: 8px 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #1d8f5a, #34c38f);
+  border-radius: 12px 12px 2px 12px;
 }
 
+/* 自己的消息中链接和代码颜色适配 */
+.innerUser a {
+  color: #d1f5e3;
+}
+
+.innerUser code {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.innerUser strong {
+  color: #fff;
+}
+
+/* 他人/Agent 的消息：浅色背景 */
 .innerAssistant {
-  max-width: 100%;
-  padding: 10px 12px;
-  border: 1px solid rgba(31, 35, 40, 0.06);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(249, 251, 252, 0.86));
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  max-width: 75%;
+  padding: 8px 12px;
+  color: #24292f;
+  background: #f0f2f5;
+  border-radius: 12px 12px 12px 2px;
 }
 
 .innerCollapsed {
-  max-height: 132px;
+  max-height: 118px;
   overflow: hidden;
 }
 
-.markdownBody > :first-child { margin-top: 0; }
-.markdownBody > :last-child { margin-bottom: 0; }
+.markdownBody {
+  max-width: 100%;
+}
+
+.markdownBody > :first-child {
+  margin-top: 0;
+}
+
+.markdownBody > :last-child {
+  margin-bottom: 0;
+}
 
 .fadeMask {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 48px;
+  height: 54px;
   pointer-events: none;
-  border-radius: 0 0 8px 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 74%);
 }
 
 .innerAssistant strong,
@@ -147,8 +173,10 @@
 .innerAssistant :global(table) {
   width: 100%;
   border-collapse: collapse;
-  margin: 8px 0;
+  margin: 9px 0;
   font-size: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .innerAssistant :global(th),
@@ -167,7 +195,7 @@
 .codeBlockWrapper {
   margin: 8px 0;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
   background-color: #f6f8fa;
 }
@@ -244,25 +272,31 @@
   opacity: 0;
   transition: opacity var(--transition-fast);
   position: absolute;
-  right: 6px;
-  top: 10px;
+  right: 8px;
+  top: 9px;
+  color: #6b7280;
 }
 
 .expandToggle {
-  margin-top: 6px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-primary);
+  margin: 8px auto 0;
+  padding: 3px 12px;
+  border: 1px solid rgba(22, 163, 101, 0.16);
+  border-radius: 999px;
+  background: #fff;
+  color: #168a4a;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
 }
 
-.expandToggle:hover { color: var(--color-primary-hover); }
+.expandToggle:hover {
+  color: #087443;
+  border-color: rgba(22, 163, 101, 0.28);
+}
 
 .bubble:hover .replyBtn {
   opacity: 1;

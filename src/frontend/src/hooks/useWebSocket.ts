@@ -89,6 +89,8 @@ export function useWebSocket() {
               artifacts_json: msg.data.artifacts_json ?? null,
               created_at: msg.data.created_at ?? new Date().toISOString(),
               attachments: msg.data.attachments,
+              sender_id: msg.data.sender_id,
+              username: msg.data.username,
             });
           } else if (messageId && content) {
             // Streaming completion

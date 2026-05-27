@@ -11,7 +11,7 @@ import (
 
 // MessageRepo 消息数据访问
 type MessageRepo struct {
-	db            *sqlx.DB
+	db             *sqlx.DB
 	attachmentRepo *AttachmentRepo
 }
 
@@ -20,8 +20,15 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo) *MessageRepo {
 	return &MessageRepo{db: db, attachmentRepo: attachmentRepo}
 }
 
+// messageCols 通用消息查询列（含 JOIN users 获取 username）
+const messageCols = `m.id, m.conversation_id, m.role, m.content, m.artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
+u.username`
+
+// messageFrom 通用 FROM 子句
+const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
+
 // Create 创建新消息并刷新对话时间戳（事务保证原子性，附件在同一事务内写入）
-func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error) {
+func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string) (*model.Message, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -30,10 +37,10 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 
 	var m model.Message
 	err = tx.QueryRowxContext(ctx,
-		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at`,
-		conversationID, role, content, artifactsJSON, replyTo,
+		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to, sender_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at, sender_id`,
+		conversationID, role, content, artifactsJSON, replyTo, senderID,
 	).StructScan(&m)
 	if err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
@@ -59,6 +66,18 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
+
+	// 填充 username（事务外查询，不影响原子性）
+	if senderID != nil && *senderID != "" {
+		var username string
+		err = r.db.QueryRowxContext(ctx,
+			`SELECT username FROM users WHERE id = $1`, *senderID,
+		).Scan(&username)
+		if err == nil {
+			m.Username = username
+		}
+	}
+
 	return &m, nil
 }
 
@@ -82,27 +101,30 @@ func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID str
 	switch v := before.(type) {
 	case time.Time:
 		if v.IsZero() {
-			query := `SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-				FROM messages WHERE conversation_id = $1
-				ORDER BY created_at DESC LIMIT $2`
-			err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+			err := r.db.SelectContext(ctx, &list,
+				`SELECT `+messageCols+` FROM `+messageFrom+
+					` WHERE m.conversation_id = $1 ORDER BY m.created_at DESC LIMIT $2`,
+				conversationID, limit,
+			)
 			if err != nil {
 				return nil, fmt.Errorf("list messages: %w", err)
 			}
 			return r.fillAttachmentsAndReply(ctx, list)
 		}
-		query := `SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-			FROM messages WHERE conversation_id = $1 AND created_at < $2
-			ORDER BY created_at DESC LIMIT $3`
-		err := r.db.SelectContext(ctx, &list, query, conversationID, v, limit)
+		err := r.db.SelectContext(ctx, &list,
+			`SELECT `+messageCols+` FROM `+messageFrom+
+				` WHERE m.conversation_id = $1 AND m.created_at < $2 ORDER BY m.created_at DESC LIMIT $3`,
+			conversationID, v, limit,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("list messages: %w", err)
 		}
 	default:
-		query := `SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-			FROM messages WHERE conversation_id = $1
-			ORDER BY created_at DESC LIMIT $2`
-		err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+		err := r.db.SelectContext(ctx, &list,
+			`SELECT `+messageCols+` FROM `+messageFrom+
+				` WHERE m.conversation_id = $1 ORDER BY m.created_at DESC LIMIT $2`,
+			conversationID, limit,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("list messages: %w", err)
 		}
@@ -117,18 +139,20 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 
 	switch v := afterTime.(type) {
 	case time.Time:
-		query := `SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-			FROM messages WHERE conversation_id = $1 AND created_at > $2
-			ORDER BY created_at ASC LIMIT $3`
-		err := r.db.SelectContext(ctx, &list, query, conversationID, v, limit)
+		err := r.db.SelectContext(ctx, &list,
+			`SELECT `+messageCols+` FROM `+messageFrom+
+				` WHERE m.conversation_id = $1 AND m.created_at > $2 ORDER BY m.created_at ASC LIMIT $3`,
+			conversationID, v, limit,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("get messages after: %w", err)
 		}
 	default:
-		query := `SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-			FROM messages WHERE conversation_id = $1
-			ORDER BY created_at ASC LIMIT $2`
-		err := r.db.SelectContext(ctx, &list, query, conversationID, limit)
+		err := r.db.SelectContext(ctx, &list,
+			`SELECT `+messageCols+` FROM `+messageFrom+
+				` WHERE m.conversation_id = $1 ORDER BY m.created_at ASC LIMIT $2`,
+			conversationID, limit,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("get messages after: %w", err)
 		}
@@ -141,8 +165,7 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, error) {
 	var m model.Message
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at
-		 FROM messages WHERE id = $1`,
+		`SELECT `+messageCols+` FROM `+messageFrom+` WHERE m.id = $1`,
 		id,
 	).StructScan(&m)
 	if err != nil {
@@ -151,21 +174,31 @@ func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, e
 	return &m, nil
 }
 
-// GetMessageSender 获取消息的发送者（通过 conversation 中的 user_id 或 member 关联推断）
-// 对于 role=user 的消息，发送者就是 conversation 的 user_id
-// 对于群聊，需要通过 conversation_members 查找
+// GetMessageSender 获取消息的发送者
 func (r *MessageRepo) GetMessageSender(ctx context.Context, messageID string) (string, error) {
-	// 先查消息的 conversation_id 和 role
-	var convID, role string
+	// 优先使用 sender_id 字段
+	var senderID *string
 	err := r.db.QueryRowxContext(ctx,
+		`SELECT sender_id FROM messages WHERE id = $1`,
+		messageID,
+	).Scan(&senderID)
+	if err != nil {
+		return "", fmt.Errorf("get message sender: %w", err)
+	}
+	if senderID != nil && *senderID != "" {
+		return *senderID, nil
+	}
+
+	// 回退：通过 conversation 关联推断
+	var convID, role string
+	err = r.db.QueryRowxContext(ctx,
 		`SELECT conversation_id, role FROM messages WHERE id = $1`,
 		messageID,
 	).Scan(&convID, &role)
 	if err != nil {
-		return "", fmt.Errorf("get message sender: %w", err)
+		return "", fmt.Errorf("get message sender fallback: %w", err)
 	}
 
-	// 对于 role=user 的私信，发送者就是对话的 user_id
 	if role == "user" {
 		var ownerID string
 		err = r.db.QueryRowxContext(ctx,
@@ -246,14 +279,13 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 		return messages, nil
 	}
 
-	// 批量查询引用的消息
+	// 批量查询引用的消息，优先使用 messages.sender_id
 	query := `SELECT m.id, m.content, m.deleted_at,
-	          COALESCE(cm.user_id, c.user_id) AS sender_id,
+	          COALESCE(m.sender_id, c.user_id) AS sender_id,
 	          u.username
 	          FROM messages m
 	          JOIN conversations c ON c.id = m.conversation_id
-	          LEFT JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.role = 'owner'
-	          LEFT JOIN users u ON u.id = COALESCE(cm.user_id, c.user_id)
+	          LEFT JOIN users u ON u.id = COALESCE(m.sender_id, c.user_id)
 	          WHERE m.id = ANY($1)`
 	rows, err := r.db.QueryxContext(ctx, query, replyIDs)
 	if err != nil {

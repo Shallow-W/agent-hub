@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
 import {
-  CheckCircleOutlined,
   CloseOutlined,
   DownOutlined,
   MessageOutlined,
@@ -15,6 +14,8 @@ import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
 
 const { Text } = Typography;
+const COLLAPSE_CHAR_LIMIT = 280;
+const COLLAPSE_LINE_LIMIT = 6;
 
 function escapeHtml(text: string): string {
   return text
@@ -108,18 +109,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   optimisticStatus,
   onRetry,
   onRemove,
-  isOwn,
+  isOwn = false,
   onReply,
 }) => {
   const [expanded, setExpanded] = useState(false);
-  const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
-  const actorName = isUser ? '我' : 'Agent产品经理';
+  const displayName = isOwn ? '我' : (message.username || message.content?.charAt(0)?.toUpperCase() || '未知');
+  const avatarLetter = isOwn ? '我' : (message.username?.charAt(0)?.toUpperCase() || '?');
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
-  const shouldCollapse = contentLength > 360 || lineCount > 7;
+  const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
 
   if (isSystem) {
@@ -134,15 +135,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   return (
     <div
-      className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
+      className={`${styles.bubble} ${isOwn ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
     >
       {showAvatar && (
         <Avatar
           size={24}
-          icon={!isUser ? <UserOutlined /> : undefined}
-          className={isUser ? styles.userAvatar : styles.assistantAvatar}
+          icon={isOwn ? undefined : <UserOutlined />}
+          className={isOwn ? styles.userAvatar : styles.assistantAvatar}
         >
-          {isUser ? '我' : (message.content?.charAt(0)?.toUpperCase() ?? '')}
+          {avatarLetter}
         </Avatar>
       )}
       {!showAvatar && <div className={styles.avatarSpacer} />}
@@ -160,20 +161,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <div className={styles.content}>
         {showAvatar && (
           <div className={styles.meta}>
-            <Text className={styles.agentLabel}>{actorName}</Text>
+            <Text className={styles.agentLabel}>{displayName}</Text>
             <Text type="secondary" className={styles.metaTime}>
               {formatTimestamp(message.created_at)}
             </Text>
-            {!isUser && (
-              <>
-                <span className={styles.statusPill}>
-                  <CheckCircleOutlined />
-                  已完成
-                </span>
-                <span className={styles.detailPill}>查看执行详情</span>
-                <span className={styles.tokenPill}>Token: --</span>
-              </>
-            )}
           </div>
         )}
         <div
@@ -182,7 +173,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ? styles.innerFailed
               : isOptimisticSending
                 ? styles.innerSending
-                : isUser
+                : isOwn
                   ? styles.innerUser
                   : styles.innerAssistant
           }`}
@@ -190,9 +181,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.reply_to && (
             <div className={styles.replyQuote}>
               <span className={styles.replyQuoteSender}>
-                {message.reply_to.role === 'user' ? '你' : 'Agent'}
+                {message.reply_to.sender_id ? message.reply_to.username || '用户' : (message.reply_to.role === 'user' ? '你' : 'Agent')}
               </span>
-              {message.reply_to.content}
+              {'content' in message.reply_to ? message.reply_to.content : ''}
             </div>
           )}
           {message.attachments && message.attachments.length > 0 && (
@@ -223,7 +214,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </>
             ) : (
               <>
-                展示更多
+                展开完整内容
                 <DownOutlined />
               </>
             )}
@@ -249,7 +240,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             />
           </div>
         )}
-        {isOwn && isUser && <div className={styles.timestamp} />}
       </div>
     </div>
   );

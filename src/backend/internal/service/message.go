@@ -32,7 +32,7 @@ type MessageCacher interface {
 
 // MsgRepo 消息服务所需的仓库接口
 type MsgRepo interface {
-	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error)
+	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
 	MarkConversationRead(ctx context.Context, conversationID, userID string) error
 	GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error)
@@ -123,7 +123,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		role = "user"
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo)
+	senderIDPtr := &userID
+	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo, senderIDPtr)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}

@@ -21,6 +21,8 @@ type Message struct {
 	ReplyTo        *string             `json:"reply_to,omitempty" db:"reply_to"`
 	DeletedAt      *time.Time          `json:"deleted_at,omitempty" db:"deleted_at"`
 	CreatedAt      time.Time           `json:"created_at" db:"created_at"`
+	SenderID       *string             `json:"sender_id,omitempty" db:"sender_id"`
+	Username       string              `json:"username,omitempty" db:"username"`
 	Attachments    []MessageAttachment `json:"attachments,omitempty" db:"-"`
 	ReplyToMessage *ReplyToPreview     `json:"reply_to_message,omitempty" db:"-"`
 }

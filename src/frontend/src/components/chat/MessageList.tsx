@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Empty, Spin, Skeleton, Divider } from 'antd';
 import { useMessages } from '@/hooks/useMessages';
+import { useAuthStore } from '@/store/authStore';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
 import styles from './MessageList.module.css';
@@ -10,9 +11,11 @@ interface MessageListProps {
   onReply?: (message: Message) => void;
 }
 
-/** Check if two messages from the same role are within 5 minutes */
+/** Check if two messages from the same sender are within 5 minutes */
 function isGrouped(prev: Message, curr: Message): boolean {
-  if (prev.role !== curr.role) return false;
+  if (prev.sender_id !== curr.sender_id) return false;
+  // 回退：无 sender_id 时按 role 分组
+  if (!prev.sender_id && !curr.sender_id && prev.role !== curr.role) return false;
   const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
   return diff < 5 * 60 * 1000;
 }
@@ -56,6 +59,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   } = useMessages(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -125,6 +129,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
             const prev = idx > 0 ? messages[idx - 1] : undefined;
             const grouped = prev ? isGrouped(prev, msg) : false;
             const showDivider = prev ? needsTimeDivider(prev, msg) : false;
+            const isOwn = msg.sender_id === currentUserId || (!msg.sender_id && msg.role === 'user');
 
             return (
               <React.Fragment key={msg.id}>
@@ -137,7 +142,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   message={msg}
                   showAvatar={!grouped}
                   isGrouped={grouped}
-                  isOwn={msg.role === 'user'}
+                  isOwn={isOwn}
                   onReply={onReply}
                 />
               </React.Fragment>
@@ -149,6 +154,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
               key={optMsg.id}
               message={optMsg}
               showAvatar
+              isOwn={true}
               optimisticStatus={optMsg.optimisticStatus}
               onRetry={optMsg.optimisticStatus === 'failed' ? () => retry(optMsg.id) : undefined}
               onRemove={optMsg.optimisticStatus === 'failed' ? () => removeOpt(optMsg.id) : undefined}
@@ -165,6 +171,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                 created_at: new Date().toISOString(),
               }}
               streaming
+              isOwn={false}
             />
           )}
         </>
