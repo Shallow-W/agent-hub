@@ -168,6 +168,7 @@ func main() {
 
 		// 会话路由（需要鉴权）
 		convRoutes := apiGroup.Group("/conversations")
+		convRoutes.Use(middleware.ValidateUUIDParam("id"), middleware.ValidateUUIDParam("messageId"))
 		{
 			convRoutes.POST("", convHandler.Create)
 			convRoutes.POST("/private", convHandler.GetOrCreatePrivate)
@@ -190,8 +191,8 @@ func main() {
 	friendGroup.Use(authMiddleware)
 	{
 		friendGroup.POST("/request", friendHandler.SendRequest)
-		friendGroup.POST("/:id/accept", friendHandler.AcceptRequest)
-		friendGroup.POST("/:id/reject", friendHandler.RejectRequest)
+		friendGroup.POST("/:id/accept", middleware.ValidateUUIDParam("id"), friendHandler.AcceptRequest)
+		friendGroup.POST("/:id/reject", middleware.ValidateUUIDParam("id"), friendHandler.RejectRequest)
 		friendGroup.GET("", friendHandler.ListFriends)
 		friendGroup.GET("/pending", friendHandler.ListPending)
 		friendGroup.GET("/search", friendHandler.SearchUsers)
@@ -199,7 +200,7 @@ func main() {
 
 	// 群聊路由（需要鉴权）
 	groupRoutes := router.Group("/api/groups")
-	groupRoutes.Use(authMiddleware)
+	groupRoutes.Use(authMiddleware, middleware.ValidateUUIDParam("id"))
 	{
 		groupRoutes.POST("", groupHandler.CreateGroup)
 		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)

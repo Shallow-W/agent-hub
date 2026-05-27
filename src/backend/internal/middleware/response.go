@@ -2,9 +2,25 @@ package middleware
 
 import (
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 )
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// ValidateUUIDParam 校验路径参数是否为合法 UUID，否则返回 400
+func ValidateUUIDParam(param string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		val := c.Param(param)
+		if val != "" && !uuidPattern.MatchString(val) {
+			ErrorResponse(c, http.StatusBadRequest, 40040, "无效 ID 格式")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
 
 // Response 统一响应结构
 type Response struct {
