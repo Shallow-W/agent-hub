@@ -8,11 +8,11 @@
 }
 
 .collapsed {
-  width: 52px;
+  width: 44px;
 }
 
 .brand {
-  padding: 16px 8px 12px;
+  padding: 14px 6px 10px;
   display: flex;
   align-items: center;
   gap: 0;
@@ -22,16 +22,16 @@
 }
 
 .brandIcon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   background: var(--gradient-brand);
-  border-radius: 9px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 13px;
   flex-shrink: 0;
   margin-left: 2px;
   box-shadow: 0 3px 9px rgba(22, 163, 101, 0.2);
@@ -65,6 +65,10 @@
   gap: 0;
   background: #fff;
   overflow: hidden;
+}
+
+.collapsed .profile {
+  display: none;
 }
 
 .profileAvatar {
@@ -175,17 +179,9 @@
   flex-shrink: 0;
 }
 
-.connected {
-  background: #52c41a;
-}
-
-.connecting {
-  background: #faad14;
-}
-
-.disconnected {
-  background: #ff4d4f;
-}
+.connected { background: #52c41a; }
+.connecting { background: #faad14; }
+.disconnected { background: #ff4d4f; }
 
 .logoutBtn {
   display: flex;
@@ -229,20 +225,20 @@
 }
 
 .collapsed .footer {
-  padding: 12px 0;
+  padding: 10px 0;
   align-items: stretch;
   overflow: hidden;
 }
 
 .collapsed .wsStatus {
   justify-content: flex-start;
-  padding-left: 22px;
+  padding-left: 18px;
   margin-bottom: 8px;
 }
 
 .collapsed .logoutBtn {
   width: 100%;
-  max-width: 52px;
+  max-width: 44px;
   padding: 4px 0;
   justify-content: center;
   margin: 0 auto;
@@ -252,7 +248,7 @@
   border: none;
   flex: 1;
   background: transparent;
-  padding-top: 8px;
+  padding-top: 4px;
 }
 
 .panel :global(.ant-menu-item) {
@@ -283,13 +279,13 @@
 .collapsed :global(.ant-menu-item) {
   display: flex;
   justify-content: flex-start;
-  padding-left: 16px !important;
+  padding-left: 12px !important;
 }
 
 .collapsed :global(.ant-menu-item),
 .collapsed :global(.ant-menu-item-selected),
 .collapsed :global(.ant-menu-item-active) {
-  width: 52px !important;
+  width: 44px !important;
   margin-inline: 0 !important;
   border-radius: 0 !important;
 }

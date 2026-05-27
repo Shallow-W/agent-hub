@@ -1,6 +1,12 @@
 import React from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
-import { UserOutlined, ReloadOutlined, CloseOutlined, MessageOutlined } from '@ant-design/icons';
+import {
+  CheckCircleOutlined,
+  CloseOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import type { OptimisticStatus } from '@/types/message';
 import { MessageAttachmentView } from './MessageAttachmentView';
@@ -109,6 +115,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
+  const actorName = isUser ? '我' : 'Agent产品经理';
 
   if (isSystem) {
     return (
@@ -124,16 +131,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     <div
       className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
     >
-      {!isUser && showAvatar && (
+      {showAvatar && (
         <Avatar
-          size={32}
-          icon={<UserOutlined />}
-          className={styles.assistantAvatar}
+          size={24}
+          icon={!isUser ? <UserOutlined /> : undefined}
+          className={isUser ? styles.userAvatar : styles.assistantAvatar}
         >
-          {message.content?.charAt(0)?.toUpperCase() ?? ''}
+          {isUser ? '我' : (message.content?.charAt(0)?.toUpperCase() ?? '')}
         </Avatar>
       )}
-      {!isUser && !showAvatar && <div className={styles.avatarSpacer} />}
+      {!showAvatar && <div className={styles.avatarSpacer} />}
       {!isSystem && onReply && (
         <Tooltip title="回复">
           <Button
@@ -145,10 +152,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           />
         </Tooltip>
       )}
-      <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
-        {!isUser && showAvatar && (
+      <div className={styles.content}>
+        {showAvatar && (
           <div className={styles.meta}>
-            <Text type="secondary" className={styles.agentLabel}>Agent</Text>
+            <Text className={styles.agentLabel}>{actorName}</Text>
+            <Text type="secondary" className={styles.metaTime}>
+              {formatTimestamp(message.created_at)}
+            </Text>
+            {!isUser && (
+              <>
+                <span className={styles.statusPill}>
+                  <CheckCircleOutlined />
+                  已完成
+                </span>
+                <span className={styles.detailPill}>查看执行详情</span>
+                <span className={styles.tokenPill}>Token: --</span>
+              </>
+            )}
           </div>
         )}
         <div
@@ -201,12 +221,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             />
           </div>
         )}
-        <div
-          className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
-        >
-          <Text type="secondary" className={styles.timestampText}>
-            {formatTimestamp(message.created_at)}
-          </Text>
+        <div className={styles.timestamp}>
           {isOwn && isUser && (
             <Text type="secondary" className={styles.readText}>
               {isRead ? '已读' : '未读'}

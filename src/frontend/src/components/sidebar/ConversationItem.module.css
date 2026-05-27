@@ -1,9 +1,9 @@
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 9px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 7px 6px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
   position: relative;
@@ -24,9 +24,9 @@
   content: '';
   position: absolute;
   left: 0;
-  top: 7px;
-  bottom: 7px;
-  width: 3px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
   border-radius: 0 3px 3px 0;
   background: #2477f3;
   box-shadow: 0 0 8px rgba(36, 119, 243, 0.25);
@@ -52,7 +52,7 @@
 }
 
 .title {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
@@ -70,7 +70,7 @@
 }
 
 .time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-tertiary);
   flex-shrink: 0;
   line-height: 1.3;
@@ -78,7 +78,7 @@
 }
 
 .subtitle {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,7 +89,7 @@
 }
 
 .actions {
-  display: flex;
+  display: none;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
@@ -130,8 +130,8 @@
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   border: 2px solid #fff;
   z-index: 1;

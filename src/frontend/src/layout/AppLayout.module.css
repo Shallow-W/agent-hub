@@ -22,14 +22,14 @@
 }
 
 .settingsPanelCollapsed {
-  width: 52px;
+  width: 44px;
 }
 
 .toggleBtn {
   position: absolute;
-  top: 30px;
-  width: 22px;
-  height: 22px;
+  top: 28px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: 1px solid var(--color-border);
   background: var(--color-bg-white);
@@ -51,14 +51,14 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 240px;
-  max-width: 380px;
+  min-width: 150px;
+  max-width: 220px;
   overflow: hidden;
 }
 
 .convPanelHeader {
-  height: 58px;
-  padding: 0 14px;
+  height: 42px;
+  padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
@@ -67,15 +67,30 @@
 }
 
 .convPanelTitle {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
 }
 
 .convPanelHeader :global(.ant-btn) {
-  height: 36px;
-  border-radius: 9px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
   font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+}
+
+.convPanelHeader :global(.ant-btn:hover) {
+  background: rgba(22, 163, 101, 0.08) !important;
+  color: var(--color-primary) !important;
+}
+
+.convPanelHeader :global(.ant-btn > span:not(.anticon)) {
+  display: none;
 }
 
 .chatPanel {

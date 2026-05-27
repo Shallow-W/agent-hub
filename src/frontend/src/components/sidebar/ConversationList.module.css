@@ -6,7 +6,7 @@
 }
 
 .searchWrapper {
-  padding: 10px 10px 6px;
+  padding: 8px 6px 6px;
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.5);
 }
@@ -14,7 +14,7 @@
 .items {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 6px 8px;
+  padding: 3px 5px 8px;
 }
 
 .searchWrapper :global(.ant-input-affix-wrapper),
@@ -25,7 +25,16 @@
 }
 
 .searchWrapper :global(.ant-input-search-button) {
-  width: 38px;
+  width: 30px;
+}
+
+.searchWrapper :global(.ant-input),
+.searchWrapper :global(.ant-input-search-button) {
+  font-size: 12px;
+}
+
+.searchWrapper :global(.ant-input-affix-wrapper) {
+  height: 30px;
 }
 
 .items::-webkit-scrollbar {

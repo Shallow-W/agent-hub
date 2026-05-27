@@ -1,5 +1,5 @@
 .container {
-  padding: 12px 24px 14px;
+  padding: 8px 14px 9px;
   background-color: #fff;
   border-top: 1px solid var(--color-border);
   position: relative;
@@ -18,15 +18,15 @@
 
 .inputRow {
   display: flex;
-  gap: 10px;
-  align-items: flex-end;
-  max-width: 980px;
+  gap: 8px;
+  align-items: center;
+  max-width: none;
   margin: 0 auto;
 }
 
 .textarea {
   flex: 1;
-  border-radius: 14px !important;
+  border-radius: 3px !important;
   border: 1px solid #d9dee5 !important;
   background: var(--color-bg-white) !important;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
@@ -41,9 +41,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 4px 0;
+  padding: 5px 4px 0;
   position: relative;
-  max-width: 980px;
+  max-width: none;
   margin: 0 auto;
 }
 
@@ -60,9 +60,9 @@
 
 .sendBtn {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 34px;
+  height: 32px;
+  border-radius: 4px;
 }
 
 .fileInput {

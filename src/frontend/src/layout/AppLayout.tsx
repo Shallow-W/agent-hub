@@ -19,7 +19,7 @@ import { message as antMessage } from 'antd';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import styles from './AppLayout.module.css';
 
-const SETTINGS_COLLAPSED_WIDTH = 52;
+const SETTINGS_COLLAPSED_WIDTH = 44;
 const SETTINGS_EXPANDED_WIDTH = 184;
 
 const AppLayout: React.FC = () => {
@@ -33,7 +33,7 @@ const AppLayout: React.FC = () => {
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
-  const [convPanelWidth, setConvPanelWidth] = useState(292);
+  const [convPanelWidth, setConvPanelWidth] = useState(166);
 
   // 切换到好友页时自动拉取数据
   useEffect(() => {
@@ -72,7 +72,7 @@ const AppLayout: React.FC = () => {
 
   /** 拖拽调整中间面板宽度 */
   const handleResize = useCallback((deltaX: number) => {
-    setConvPanelWidth((prev) => Math.min(380, Math.max(240, prev + deltaX)));
+    setConvPanelWidth((prev) => Math.min(220, Math.max(150, prev + deltaX)));
   }, []);
 
   /** 点击好友开始私聊 */

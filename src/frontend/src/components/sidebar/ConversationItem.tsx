@@ -151,7 +151,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
             flexShrink: 0,
             borderRadius: isGroup ? 10 : 50,
           }}
-          size={40}
+          size={32}
           icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
         >
           {!isGroup ? firstChar : undefined}
