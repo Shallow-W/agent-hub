@@ -39,9 +39,7 @@
 }
 
 .convPanel {
-  flex: 1 0 0;
-  min-width: var(--convlist-width);
-  max-width: 400px;
+  flex-shrink: 0;
   background: var(--color-bg-convlist);
   border-right: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;

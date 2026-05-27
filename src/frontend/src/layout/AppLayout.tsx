@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Button, Alert } from 'antd';
 import { PlusOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
@@ -14,6 +14,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { message as antMessage } from 'antd';
+import ResizeHandle from '@/components/common/ResizeHandle';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
@@ -24,6 +25,7 @@ const AppLayout: React.FC = () => {
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(false);
+  const [convPanelWidth, setConvPanelWidth] = useState(300);
 
   // Update document.title with total unread count
   const unreadCounts = useMessageStore((s) => s.unreadCounts);
@@ -51,6 +53,11 @@ const AppLayout: React.FC = () => {
       antMessage.error('创建群聊失败');
     }
   };
+
+  /** 拖拽调整中间面板宽度 */
+  const handleResize = useCallback((deltaX: number) => {
+    setConvPanelWidth((prev) => Math.min(500, Math.max(200, prev + deltaX)));
+  }, []);
 
   /** 中间面板内容：根据左侧导航切换 */
   const renderMiddlePanel = () => {
@@ -208,9 +215,12 @@ const AppLayout: React.FC = () => {
       </button>
 
       {/* 中间：对话/好友/群聊列表 */}
-      <div className={styles.convPanel}>
+      <div className={styles.convPanel} style={{ width: convPanelWidth, minWidth: 200, maxWidth: 500 }}>
         {renderMiddlePanel()}
       </div>
+
+      {/* 拖拽分隔条 */}
+      <ResizeHandle onResize={handleResize} />
 
       {/* 右侧：聊天区域 */}
       <div className={styles.chatPanel}>
