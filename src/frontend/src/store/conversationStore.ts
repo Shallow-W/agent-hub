@@ -49,15 +49,20 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   deleteConversation: async (id) => {
-    await convApi.deleteConversation(id);
-    set((state) => {
-      const next = state.conversations.filter((c) => c.id !== id);
-      const activeId =
-        state.activeConversationId === id
-          ? (next[0]?.id ?? null)
-          : state.activeConversationId;
-      return { conversations: next, activeConversationId: activeId };
-    });
+    try {
+      await convApi.deleteConversation(id);
+      set((state) => {
+        const next = state.conversations.filter((c) => c.id !== id);
+        const activeId =
+          state.activeConversationId === id
+            ? (next[0]?.id ?? null)
+            : state.activeConversationId;
+        return { conversations: next, activeConversationId: activeId };
+      });
+    } catch {
+      const { message } = await import('antd');
+      message.error('删除对话失败');
+    }
   },
 
   togglePin: async (id) => {

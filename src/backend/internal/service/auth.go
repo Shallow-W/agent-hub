@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -11,6 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// usernamePattern 用户名白名单：字母、数字、下划线、中文，2-20 字符
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_\p{Han}]{2,20}$`)
 
 // 错误定义
 var (
@@ -47,6 +51,9 @@ func NewAuthService(repo UserRepo, cfg AuthConfig) *AuthService {
 func (s *AuthService) Register(ctx context.Context, username, password string) (string, *model.User, error) {
 	if username == "" || password == "" {
 		return "", nil, fmt.Errorf("%w: 用户名和密码不能为空", ErrInvalidInput)
+	}
+	if !usernamePattern.MatchString(username) {
+		return "", nil, fmt.Errorf("%w: 用户名只能包含字母、数字、下划线或中文", ErrInvalidInput)
 	}
 	if len(username) < 3 || len(username) > 50 {
 		return "", nil, fmt.Errorf("%w: 用户名长度需在 3-50 之间", ErrInvalidInput)
