@@ -220,24 +220,45 @@
 
 .collapsed .footer {
   padding: 14px 0;
-  align-items: center;
+  align-items: stretch;
+}
+
+.collapsed .wsStatus {
+  justify-content: flex-start;
+  padding-left: 16px;
 }
 
 .collapsed .logoutBtn {
-  width: 32px;
-  padding: 0;
+  width: auto;
+  padding: 4px 0;
+  justify-content: flex-start;
+  padding-left: 12px;
 }
 
-/* Prevent Ant Design inlineCollapsed icon jump */
+/* Prevent Ant Design inlineCollapsed icon jump + left-align with avatar */
 .panel :global(.ant-menu-inline .ant-menu-item) {
   transition: none;
 }
 
-.panel :global(.ant-menu-inline-collapsed .ant-menu-item) {
+.panel :global(.ant-menu-inline-collapsed > .ant-menu-item) {
   transition: none;
+  justify-content: flex-start;
+  padding-left: 16px !important;
 }
 
 .panel :global(.ant-menu-item-icon) {
   font-size: 16px !important;
   transition: none !important;
+}
+
+.collapsed :global(.ant-menu) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.collapsed :global(.ant-menu-item) {
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 16px !important;
 }
