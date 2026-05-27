@@ -27,6 +27,7 @@ export class ApiError extends Error {
 
 const MAX_RETRY = 1;
 const RETRY_DELAY_MS = 1000;
+let handling401 = false;
 
 async function request<T>(
   method: string,
@@ -64,10 +65,13 @@ async function request<T>(
   }
 
   if (!res.ok || json.code !== 0) {
-    // 401 → token 过期，清除并跳转登录
+    // 401 → token 过期，清除并跳转登录（防并发重复）
     if (res.status === 401) {
-      clearToken();
-      window.location.href = '/login';
+      if (!handling401) {
+        handling401 = true;
+        clearToken();
+        window.location.href = '/login';
+      }
       throw new ApiError(res.status, json.code, json.message);
     }
     // Retry once on 5xx errors
