@@ -159,7 +159,12 @@ func (c *Client) Send(msg WSMessage) error {
 	return nil
 }
 
-// Hub 管理所有 WebSocket 连接，基于消息总线模式
+// Hub 管理所有 WebSocket 连接，基于消息总线模式。
+//
+// 注意：Register/Unregister 通过 bus channel 异步处理。当客户端注册后立即发送消息时，
+// 消息可能在 Register 处理之前到达 bus。这是已知的设计权衡：使用单 goroutine 事件循环
+// 避免了锁竞争，且不影响正确性——未注册的客户端不在任何房间中，消息不会路由到该客户端。
+// 客户端应先等待服务端确认（如 online 事件），再发送业务消息。
 type Hub struct {
 	// sync.Map 替代 map+mutex，优化高并发读写
 	clients sync.Map // string -> *[]*Client（同一用户多设备）
@@ -457,26 +462,43 @@ func (h *Hub) Shutdown(ctx context.Context) {
 // Register 注册连接
 func (h *Hub) Register(client *Client) {
 	h.wg.Add(1)
-	h.bus <- BusMessage{Type: BusRegister, Payload: client}
+	select {
+	case h.bus <- BusMessage{Type: BusRegister, Payload: client}:
+	default:
+		h.wg.Done()
+		h.logger.Warn("hub bus full, dropping register", "user_id", client.UserID)
+	}
 }
 
 // Unregister 注销连接
 func (h *Hub) Unregister(client *Client) {
-	h.bus <- BusMessage{Type: BusUnregister, Payload: client}
+	select {
+	case h.bus <- BusMessage{Type: BusUnregister, Payload: client}:
+	default:
+		h.logger.Warn("hub bus full, dropping unregister", "user_id", client.UserID)
+	}
 }
 
 // SendToUser 向指定用户的所有连接发送消息
 func (h *Hub) SendToUser(userID string, msg WSMessage) {
-	h.bus <- BusMessage{
-		Type:   BusDirectMsg,
-		Target: userID,
+	select {
+	case h.bus <- BusMessage{
+		Type:    BusDirectMsg,
+		Target:  userID,
 		Payload: &directMsgPayload{UserID: userID, Msg: msg},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping send-to-user", "user_id", userID)
 	}
 }
 
 // Broadcast 向所有在线用户广播消息
 func (h *Hub) Broadcast(msg WSMessage) {
-	h.bus <- BusMessage{Type: BusBroadcast, Payload: msg}
+	select {
+	case h.bus <- BusMessage{Type: BusBroadcast, Payload: msg}:
+	default:
+		h.logger.Warn("hub bus full, dropping broadcast")
+	}
 }
 
 // IsOnline 检查用户是否在线
@@ -492,34 +514,47 @@ func (h *Hub) IsUserOnline(userID string) bool {
 
 // JoinRoom 将连接加入指定会话房间
 func (h *Hub) JoinRoom(conversationID string, client *Client) {
-	h.bus <- BusMessage{
-		Type:   BusJoinRoom,
-		Target: conversationID,
+	select {
+	case h.bus <- BusMessage{
+		Type:    BusJoinRoom,
+		Target:  conversationID,
 		Payload: &roomAction{ConversationID: conversationID, Conn: client},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping join-room", "conversation_id", conversationID)
 	}
 }
 
 // LeaveRoom 将连接移出指定会话房间
 func (h *Hub) LeaveRoom(conversationID string, client *Client) {
-	h.bus <- BusMessage{
-		Type:   BusLeaveRoom,
-		Target: conversationID,
+	select {
+	case h.bus <- BusMessage{
+		Type:    BusLeaveRoom,
+		Target:  conversationID,
 		Payload: &roomAction{ConversationID: conversationID, Conn: client},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping leave-room", "conversation_id", conversationID)
 	}
 }
 
 // SendToRoom 向指定会话房间的所有连接发送消息
 func (h *Hub) SendToRoom(conversationID string, msg WSMessage) {
-	h.bus <- BusMessage{
-		Type:   BusRoomMsg,
-		Target: conversationID,
+	select {
+	case h.bus <- BusMessage{
+		Type:    BusRoomMsg,
+		Target:  conversationID,
 		Payload: &roomMessage{ConversationID: conversationID, Message: msg},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping send-to-room", "conversation_id", conversationID)
 	}
 }
 
 // PushToConversation 推送持久化消息给会话所有成员（在线房间推送 + 按用户推送）
 func (h *Hub) PushToConversation(conversationID string, memberIDs []string, message interface{}) {
-	h.bus <- BusMessage{
+	select {
+	case h.bus <- BusMessage{
 		Type:   BusPersistedMsg,
 		Target: conversationID,
 		Payload: &persistedMsgPayload{
@@ -527,6 +562,9 @@ func (h *Hub) PushToConversation(conversationID string, memberIDs []string, mess
 			MemberIDs:      memberIDs,
 			Message:        message,
 		},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping push-to-conversation", "conversation_id", conversationID)
 	}
 }
 
@@ -587,7 +625,8 @@ func (h *Hub) handleCustomEvent(msg BusMessage) {
 
 // PushCustomEvent 向会话成员推送自定义事件（通过 bus 保证线程安全）
 func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventType string, data interface{}) {
-	h.bus <- BusMessage{
+	select {
+	case h.bus <- BusMessage{
 		Type:   BusCustomEvent,
 		Target: conversationID,
 		Payload: &customEventPayload{
@@ -596,6 +635,9 @@ func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventTy
 			EventType:      eventType,
 			Data:           data,
 		},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping custom-event", "conversation_id", conversationID, "event_type", eventType)
 	}
 }
 
