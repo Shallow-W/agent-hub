@@ -311,6 +311,24 @@
 
 ---
 
+## 前端状态/逻辑问题（第七轮）
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| FE-01 | useWebSocket 中 currentUserId 闭包过期导致 typing 判断错误 | P1 | [ ] |
+| FE-02 | archive handler 错误调用 deleteConversation(归档变删除) | P1 | [ ] |
+| FE-03 | upload.ts 绕过共享 request()函数，缺 retry/错误标准化 | P2 | [ ] |
+| FE-04 | conversationStore.togglePin/createConversation 无错误处理 | P2 | [ ] |
+| FE-05 | retryOptimistic 中 attachments 类型强转隐藏类型不匹配 | P2 | [ ] |
+| FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [ ] |
+| FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
+| FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [ ] |
+| FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [ ] |
+| FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [ ] |
+| FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [ ] |
+
+---
+
 ## 关键路径
 
 ```
