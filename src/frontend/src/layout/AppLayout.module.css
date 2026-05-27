@@ -29,7 +29,7 @@
   flex-direction: column;
   height: 100%;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.02);
-  transition: flex 0.2s ease;
+  overflow: hidden;
 }
 
 .convPanelHeader {

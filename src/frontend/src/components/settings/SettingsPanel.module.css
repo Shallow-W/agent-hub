@@ -39,17 +39,17 @@
 }
 
 .brand {
-  padding: 24px 16px 20px;
+  padding: 24px 12px 20px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0;
   background: linear-gradient(180deg, rgba(22, 119, 255, 0.06) 0%, transparent 100%);
   position: relative;
+  overflow: hidden;
 }
 
 .collapsed .brand {
-  padding: 24px 0 20px;
-  justify-content: center;
+  padding: 24px 12px 20px;
 }
 
 .brandIcon {
@@ -64,14 +64,8 @@
   font-weight: 700;
   font-size: 15px;
   flex-shrink: 0;
+  margin-left: 4px;
   box-shadow: 0 3px 8px rgba(22, 119, 255, 0.3);
-}
-
-.collapsed .brandIcon {
-  width: 30px;
-  height: 30px;
-  font-size: 13px;
-  border-radius: 8px;
 }
 
 .brandName {
@@ -81,21 +75,31 @@
   letter-spacing: -0.3px;
   white-space: nowrap;
   overflow: hidden;
+  max-width: 140px;
+  opacity: 1;
+  margin-left: 10px;
+  transition: max-width 0.2s ease, opacity 0.15s ease, margin-left 0.2s ease;
+}
+
+.collapsed .brandName {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
 }
 
 .profile {
-  padding: 14px 16px;
+  padding: 14px 12px;
   border-top: 1px solid var(--color-border-light);
   border-bottom: 1px solid var(--color-border-light);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0;
   background: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
 }
 
 .collapsed .profile {
-  padding: 14px 0;
-  justify-content: center;
+  padding: 14px 12px;
 }
 
 .profileName {
@@ -105,6 +109,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 120px;
+  opacity: 1;
+  margin-left: 10px;
+  transition: max-width 0.2s ease, opacity 0.15s ease, margin-left 0.2s ease;
+}
+
+.collapsed .profileName {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
 }
 
 .footer {
@@ -181,4 +195,18 @@
   width: 32px;
   padding: 0;
   margin: 0 auto;
+}
+
+/* Prevent Ant Design inlineCollapsed icon jump */
+.panel :global(.ant-menu-inline .ant-menu-item) {
+  transition: none;
+}
+
+.panel :global(.ant-menu-inline-collapsed .ant-menu-item) {
+  transition: none;
+}
+
+.panel :global(.ant-menu-item-icon) {
+  font-size: 16px !important;
+  transition: none !important;
 }

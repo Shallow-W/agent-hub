@@ -66,17 +66,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <div className={styles.brand}>
         <div className={styles.brandIcon}>A</div>
-        {!collapsed && <span className={styles.brandName}>AgentHub</span>}
+        <span className={styles.brandName}>AgentHub</span>
       </div>
 
       <div className={styles.profile}>
         <Avatar
           style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
-          size={collapsed ? 28 : 34}
+          size={34}
         >
           {initial}
         </Avatar>
-        {!collapsed && <span className={styles.profileName}>{username}</span>}
+        <span className={styles.profileName}>{username}</span>
       </div>
 
       <Menu
