@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
 import {
   CloseOutlined,
@@ -121,6 +121,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isOptimisticFailed = optimisticStatus === 'failed';
   const displayName = message.username || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
   const avatarLetter = message.username?.charAt(0)?.toUpperCase() || '?';
+  const renderedContent = useMemo(() => renderMarkdown(message.content ?? ''), [message.content]);
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
@@ -210,7 +211,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.content && (
             <div
               className={styles.markdownBody}
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+              dangerouslySetInnerHTML={{ __html: renderedContent }}
             />
           )}
           {collapsed && <div className={styles.fadeMask} />}

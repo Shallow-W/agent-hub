@@ -25,7 +25,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
 
 export const useConversationStore = create<ConversationState>((set) => ({
   conversations: [],
-  activeConversationId: null,
+  activeConversationId: localStorage.getItem('agenthub_active_conv'),
   memberPanelOpen: false,
   loading: false,
 
@@ -77,6 +77,8 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   setActive: (id) => {
+    if (id) localStorage.setItem('agenthub_active_conv', id);
+    else localStorage.removeItem('agenthub_active_conv');
     set({ activeConversationId: id, memberPanelOpen: false });
   },
 
