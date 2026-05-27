@@ -30,6 +30,7 @@ type ConvRepo interface {
 	Archive(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	DeleteMember(ctx context.Context, conversationID, userID string) error
+	AddMember(ctx context.Context, conversationID, userID, role string) error
 	FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error)
 	CreatePrivateChat(ctx context.Context, userID, friendID, title string) (*model.Conversation, error)
 }
@@ -60,6 +61,12 @@ func (s *ConversationService) CreateConversation(ctx context.Context, userID, co
 	conv, err := s.repo.Create(ctx, userID, convType, title)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
+	}
+	// 群聊需将创建者加入成员表
+	if convType == "group" {
+		if err := s.repo.AddMember(ctx, conv.ID, userID, "owner"); err != nil {
+			return nil, fmt.Errorf("add creator as member: %w", err)
+		}
 	}
 	return conv, nil
 }

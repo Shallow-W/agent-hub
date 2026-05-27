@@ -186,6 +186,19 @@ func (r *ConversationRepo) ListMemberIDs(ctx context.Context, conversationID str
 	return ids, nil
 }
 
+// AddMember 添加用户为会话成员
+func (r *ConversationRepo) AddMember(ctx context.Context, conversationID, userID, role string) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)
+		 ON CONFLICT (conversation_id, user_id) DO NOTHING`,
+		conversationID, userID, role,
+	)
+	if err != nil {
+		return fmt.Errorf("add member: %w", err)
+	}
+	return nil
+}
+
 // FindPrivateChat 查找两个用户之间的私聊会话
 func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
 	var c model.Conversation
