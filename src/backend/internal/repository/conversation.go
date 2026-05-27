@@ -26,7 +26,7 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, $2, $3)
 		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
-		 ''::text AS peer_name, ''::text AS last_message`,
+		 ''::text AS peer_id, ''::text AS peer_name, ''::text AS last_message`,
 		userID, convType, title,
 	).StructScan(&c)
 	if err != nil {
@@ -41,7 +41,8 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
-		        COALESCE(peer_u.username, creator_u.username, '') AS peer_name,
+		        COALESCE(peer_cm.user_id, '') AS peer_id,
+			        COALESCE(peer_u.username, creator_u.username, '') AS peer_name,
 		        COALESCE(latest_msg.content, '') AS last_message,
 			        COALESCE((SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id), 0) AS member_count
 		 FROM conversations c
@@ -251,7 +252,7 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'single', $2)
 		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
-		 ''::text AS peer_name, ''::text AS last_message`,
+		 ''::text AS peer_id, ''::text AS peer_name, ''::text AS last_message`,
 		userID, title,
 	).StructScan(&c)
 	if err != nil {

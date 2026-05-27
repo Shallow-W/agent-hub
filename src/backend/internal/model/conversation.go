@@ -14,6 +14,7 @@ type Conversation struct {
 	UpdatedAt  time.Time  `json:"updated_at" db:"updated_at"`
 
 	// 计算字段，非 DB 列
+	PeerID      string `json:"peer_id,omitempty" db:"peer_id"`
 	PeerName    string `json:"peer_name,omitempty" db:"peer_name"`
 	LastMessage string `json:"last_message,omitempty" db:"last_message"`
 	MemberCount int    `json:"member_count,omitempty" db:"member_count"`

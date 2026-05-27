@@ -137,10 +137,12 @@ export function useWebSocket() {
           }
           break;
         }
-        case 'error':
-          // TODO: 全局错误提示
-          console.error('WebSocket error:', msg.data.message);
+        case 'error': {
+          const errMsg = msg.data.message || '连接发生错误';
+          console.error('WebSocket error:', errMsg);
+          import('antd').then(({ message }) => message.error(errMsg));
           break;
+        }
       }
     };
 
