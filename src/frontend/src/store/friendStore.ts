@@ -32,7 +32,7 @@ export const useFriendStore = create<FriendState>((set) => ({
     set({ loading: true, error: null });
     try {
       const list = await friendApi.listFriends();
-      set({ friends: list });
+      set({ friends: list ?? [] });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '获取好友列表失败';
       set({ error: msg });
@@ -44,7 +44,7 @@ export const useFriendStore = create<FriendState>((set) => ({
   fetchPending: async () => {
     try {
       const list = await friendApi.listPendingRequests();
-      set({ pendingRequests: list });
+      set({ pendingRequests: list ?? [] });
     } catch {
       // 静默失败，不影响主流程
     }
@@ -58,7 +58,7 @@ export const useFriendStore = create<FriendState>((set) => ({
         friendApi.listFriends(),
         friendApi.listPendingRequests(),
       ]).then(([friends, pending]) => {
-        set({ friends, pendingRequests: pending });
+        set({ friends: friends ?? [], pendingRequests: pending ?? [] });
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '发送请求失败';
@@ -77,7 +77,7 @@ export const useFriendStore = create<FriendState>((set) => ({
         friendApi.listFriends(),
         friendApi.listPendingRequests(),
       ]);
-      set({ friends, pendingRequests: pending });
+      set({ friends: friends ?? [], pendingRequests: pending ?? [] });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
@@ -88,7 +88,7 @@ export const useFriendStore = create<FriendState>((set) => ({
     try {
       await friendApi.rejectFriendRequest(id);
       const pending = await friendApi.listPendingRequests();
-      set({ pendingRequests: pending });
+      set({ pendingRequests: pending ?? [] });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
@@ -99,7 +99,7 @@ export const useFriendStore = create<FriendState>((set) => ({
     set({ isSearching: true });
     try {
       const results = await friendApi.searchUsers(username);
-      set({ searchResults: results });
+      set({ searchResults: results ?? [] });
     } catch {
       set({ searchResults: [] });
     } finally {
