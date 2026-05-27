@@ -471,12 +471,8 @@ func (h *Hub) Broadcast(msg WSMessage) {
 
 // IsOnline 检查用户是否在线
 func (h *Hub) IsOnline(userID string) bool {
-	val, ok := h.clients.Load(userID)
-	if !ok {
-		return false
-	}
-	list := val.(*[]*Client)
-	return len(*list) > 0
+	_, ok := h.clients.Load(userID)
+	return ok
 }
 
 // IsUserOnline 检查用户是否在线（IsOnline 的别名，供外部调用）
