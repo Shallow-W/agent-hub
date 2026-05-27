@@ -116,8 +116,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
-  const displayName = isOwn ? '我' : (message.username || (message.role === 'user' ? '用户' : '助手'));
-  const avatarLetter = isOwn ? '我' : (message.username?.charAt(0)?.toUpperCase() || '?');
+  const displayName = message.username || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+  const avatarLetter = message.username?.charAt(0)?.toUpperCase() || (isOwn ? '我' : '?');
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
