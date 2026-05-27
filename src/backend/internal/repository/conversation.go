@@ -147,8 +147,7 @@ func (r *ConversationRepo) Archive(ctx context.Context, id string) error {
 func (r *ConversationRepo) GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error) {
 	var m model.ConversationMember
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT cm.id, cm.conversation_id, cm.user_id, cm.role, cm.joined_at,
-		        u.username
+		`SELECT cm.id, cm.conversation_id, cm.user_id, cm.role, cm.joined_at, cm.last_read_at, u.username
 		 FROM conversation_members cm JOIN users u ON u.id = cm.user_id
 		 WHERE cm.conversation_id = $1 AND cm.user_id = $2`,
 		conversationID, userID,

@@ -292,7 +292,14 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		}
 	}
 
-	messages, err := s.msgRepo.GetMessagesAfter(ctx, convID, nil, limit)
+	// 降级查询：使用 last_read_at 作为起点，而非返回全部消息
+	member, _ := s.convRepo.GetMember(ctx, convID, userID)
+	var afterTime interface{}
+	if member != nil && member.LastReadAt != "" {
+		afterTime = member.LastReadAt
+	}
+
+	messages, err := s.msgRepo.GetMessagesAfter(ctx, convID, afterTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
