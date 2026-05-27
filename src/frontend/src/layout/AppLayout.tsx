@@ -23,6 +23,7 @@ const AppLayout: React.FC = () => {
   const { user, logout: handleLogout } = useAuth();
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [settingsCollapsed, setSettingsCollapsed] = useState(false);
 
   // Update document.title with total unread count
   const unreadCounts = useMessageStore((s) => s.unreadCounts);
@@ -183,12 +184,17 @@ const AppLayout: React.FC = () => {
       )}
 
       {/* 左侧：设置面板 */}
-      <div className={styles.settingsPanel}>
+      <div
+        className={styles.settingsPanel}
+        style={{ width: settingsCollapsed ? 64 : undefined }}
+      >
         <SettingsPanel
           username={user?.username ?? ''}
           onLogout={handleLogout}
           wsStatus={status}
           onNavChange={setActiveNav}
+          collapsed={settingsCollapsed}
+          onToggle={() => setSettingsCollapsed((c) => !c)}
         />
       </div>
 

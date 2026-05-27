@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Avatar, Button, Menu, Switch, Tooltip } from 'antd';
+import { Avatar, Menu, Switch, Tooltip } from 'antd';
 import {
   MessageOutlined,
   SettingOutlined,
@@ -8,6 +8,8 @@ import {
   LogoutOutlined,
   TeamOutlined,
   BulbOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -18,6 +20,8 @@ interface SettingsPanelProps {
   onLogout: () => void;
   wsStatus: WsStatus;
   onNavChange: (key: string) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
 const wsStatusText: Record<WsStatus, string> = {
@@ -37,6 +41,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onLogout,
   wsStatus,
   onNavChange,
+  collapsed,
+  onToggle,
 }) => {
   const [selectedKey, setSelectedKey] = useState('chat');
   const [darkMode, setDarkMode] = useState(false);
@@ -48,24 +54,34 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className={styles.panel}>
+    <div className={`${styles.panel} ${collapsed ? styles.collapsed : ''}`}>
+      {/* 折叠/展开切换按钮 */}
+      <button
+        className={styles.toggleBtn}
+        onClick={onToggle}
+        aria-label={collapsed ? '展开侧栏' : '折叠侧栏'}
+      >
+        {collapsed ? <RightOutlined /> : <LeftOutlined />}
+      </button>
+
       <div className={styles.brand}>
         <div className={styles.brandIcon}>A</div>
-        <span className={styles.brandName}>AgentHub</span>
+        {!collapsed && <span className={styles.brandName}>AgentHub</span>}
       </div>
 
       <div className={styles.profile}>
         <Avatar
           style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
-          size={34}
+          size={collapsed ? 28 : 34}
         >
           {initial}
         </Avatar>
-        <span className={styles.profileName}>{username}</span>
+        {!collapsed && <span className={styles.profileName}>{username}</span>}
       </div>
 
       <Menu
         mode="inline"
+        inlineCollapsed={collapsed}
         selectedKeys={[selectedKey]}
         onClick={handleMenuClick}
         style={{ border: 'none', flex: 1 }}
@@ -79,34 +95,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       />
 
       <div className={styles.footer}>
-        <div className={styles.themeRow}>
-          <div className={styles.themeLabel}>
-            <BulbOutlined style={{ marginRight: 6 }} />
-            暗色主题
+        {!collapsed && (
+          <div className={styles.themeRow}>
+            <div className={styles.themeLabel}>
+              <BulbOutlined style={{ marginRight: 6 }} />
+              暗色主题
+            </div>
+            <Tooltip title={darkMode ? '切换亮色' : '切换暗色'}>
+              <Switch
+                size="small"
+                checked={darkMode}
+                onChange={setDarkMode}
+              />
+            </Tooltip>
           </div>
-          <Tooltip title={darkMode ? '切换亮色' : '切换暗色'}>
-            <Switch
-              size="small"
-              checked={darkMode}
-              onChange={setDarkMode}
+        )}
+        <div className={styles.wsStatus}>
+          <Tooltip title={wsStatusText[wsStatus]}>
+            <span
+              className={styles.wsDot}
+              style={{ backgroundColor: wsDotColor[wsStatus] }}
             />
           </Tooltip>
+          {!collapsed && wsStatusText[wsStatus]}
         </div>
-        <div className={styles.wsStatus}>
-          <span
-            className={styles.wsDot}
-            style={{ backgroundColor: wsDotColor[wsStatus] }}
-          />
-          {wsStatusText[wsStatus]}
-        </div>
-        <Button
-          block
-          danger
-          icon={<LogoutOutlined />}
-          onClick={onLogout}
-        >
-          退出登录
-        </Button>
+        <Tooltip title={collapsed ? '退出登录' : ''}>
+          <button className={styles.logoutBtn} onClick={onLogout}>
+            <LogoutOutlined />
+            {!collapsed && <span>退出登录</span>}
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
