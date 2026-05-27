@@ -186,7 +186,7 @@ const AppLayout: React.FC = () => {
       {/* 左侧：设置面板 */}
       <div
         className={styles.settingsPanel}
-        style={{ width: settingsCollapsed ? 64 : undefined }}
+        style={{ width: settingsCollapsed ? 64 : 'var(--settings-width)' }}
       >
         <SettingsPanel
           username={user?.username ?? ''}
