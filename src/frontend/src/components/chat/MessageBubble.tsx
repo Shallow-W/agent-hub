@@ -6,9 +6,9 @@ import {
   MessageOutlined,
   ReloadOutlined,
   UpOutlined,
-  UserOutlined,
 } from '@ant-design/icons';
 import type { Message } from '@/types/message';
+import { getAvatarColor } from '@/utils/avatarColor';
 import type { OptimisticStatus } from '@/types/message';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
@@ -117,7 +117,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
   const displayName = message.username || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
-  const avatarLetter = message.username?.charAt(0)?.toUpperCase() || (isOwn ? '我' : '?');
+  const avatarLetter = message.username?.charAt(0)?.toUpperCase() || '?';
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
@@ -140,8 +140,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {showAvatar && (
         <Avatar
           size={24}
-          icon={isOwn ? undefined : <UserOutlined />}
-          className={isOwn ? styles.userAvatar : styles.assistantAvatar}
+          style={{ backgroundColor: getAvatarColor(message.username || message.role) }}
+          className={styles.chatAvatar}
         >
           {avatarLetter}
         </Avatar>

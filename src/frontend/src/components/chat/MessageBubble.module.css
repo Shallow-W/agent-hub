@@ -26,33 +26,24 @@
   padding-top: 4px;
 }
 
-.assistantAvatar,
-.userAvatar {
+.chatAvatar {
   flex-shrink: 0;
   margin-top: 1px;
   box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(15, 23, 42, 0.12);
+  font-size: 11px;
+  color: #fff;
 }
 
-/* 自己消息的头像在右侧，去掉左间距加右间距 */
-.bubbleUser .userAvatar {
+/* own message avatar on the right side */
+.bubbleUser .chatAvatar {
   margin-right: 0;
   margin-left: 10px;
 }
 
-/* 他人消息的头像保持左间距 */
-.bubbleAssistant .assistantAvatar,
-.bubbleAssistant .userAvatar {
+/* other's message avatar on the left side */
+.bubbleAssistant .chatAvatar {
   margin-right: 10px;
   margin-left: 0;
-}
-
-.assistantAvatar {
-  background: var(--gradient-agent) !important;
-}
-
-.userAvatar {
-  background: linear-gradient(135deg, #1d8f5a, #34c38f) !important;
-  font-size: 11px;
 }
 
 .avatarSpacer {
