@@ -253,6 +253,7 @@ func main() {
 	defer shutdownCancel()
 
 	cancel() // 停止 Hub
+		middleware.StopRateLimiter()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown failed", "error", err)

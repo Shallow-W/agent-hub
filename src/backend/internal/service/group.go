@@ -24,6 +24,7 @@ var (
 	ErrNotOwner      = errors.New("只有群主才能执行此操作")
 	ErrNotAdmin      = errors.New("需要管理员权限")
 	ErrAlreadyMember = errors.New("用户已是群成员")
+	ErrGroupNotFound = errors.New("群不存在")
 	ErrNotMember     = errors.New("用户不是群成员")
 	ErrOwnerLeave    = errors.New("群主不能离开群聊，请先转让群主")
 )
@@ -167,20 +168,20 @@ func (s *GroupService) LeaveGroup(ctx context.Context, conversationID, userID st
 
 // GetGroupInfo 获取群信息+成员列表（验证调用者是否为成员）
 func (s *GroupService) GetGroupInfo(ctx context.Context, conversationID, userID string) (*model.Conversation, []*model.ConversationMember, error) {
+	conv, err := s.repo.GetConversationByID(ctx, conversationID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return nil, nil, ErrGroupNotFound
+	}
+
 	isMember, err := s.repo.IsMember(ctx, conversationID, userID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("check membership: %w", err)
 	}
 	if !isMember {
 		return nil, nil, ErrNotMember
-	}
-
-	conv, err := s.repo.GetConversationByID(ctx, conversationID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get conversation: %w", err)
-	}
-	if conv == nil {
-		return nil, nil, errors.New("群不存在")
 	}
 
 	members, err := s.repo.ListMembers(ctx, conversationID)
