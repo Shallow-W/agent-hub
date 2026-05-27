@@ -14,6 +14,7 @@ const EMPTY_MESSAGES: Message[] = [];
 export const ConversationList: React.FC = () => {
   const { conversations, activeId, loading, setActive, remove, togglePin } =
     useConversation();
+  const archiveConversationLocal = useConversationStore((s) => s.archiveConversationLocal);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
 
   if (loading && conversations.length === 0) {
@@ -62,7 +63,7 @@ export const ConversationList: React.FC = () => {
               onTogglePin={() => togglePin(conv.id)}
               onArchive={async () => {
                 await convApi.archiveConversation(conv.id);
-                remove(conv.id);
+                archiveConversationLocal(conv.id);
               }}
               onInviteMembers={
                 conv.type === 'group'

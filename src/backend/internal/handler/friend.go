@@ -21,7 +21,7 @@ func NewFriendHandler(svc *service.FriendService) *FriendHandler {
 
 // SendFriendRequest 发送好友申请请求体
 type SendFriendRequestBody struct {
-	FriendID string `json:"friend_id"`
+	FriendID string `json:"friend_id" binding:"omitempty,uuid"`
 	Username string `json:"username"`
 }
 

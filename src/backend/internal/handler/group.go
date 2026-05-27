@@ -22,7 +22,7 @@ func NewGroupHandler(svc *service.GroupService) *GroupHandler {
 // CreateGroupRequest 创建群聊请求体
 type CreateGroupRequest struct {
 	Name      string   `json:"name" binding:"required,min=1,max=50"`
-	MemberIDs []string `json:"member_ids" binding:"max=100"`
+	MemberIDs []string `json:"member_ids" binding:"max=100,dive,uuid"`
 }
 
 // AddMemberRequest 添加成员请求体

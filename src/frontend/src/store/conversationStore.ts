@@ -9,6 +9,7 @@ interface ConversationState {
   loading: boolean;
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
+  archiveConversationLocal: (id: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
   setActive: (id: string | null) => void;
@@ -46,6 +47,17 @@ export const useConversationStore = create<ConversationState>((set) => ({
       activeConversationId: conv.id,
     }));
     return conv;
+  },
+
+  archiveConversationLocal: (id) => {
+    set((state) => {
+      const next = state.conversations.filter((c) => c.id !== id);
+      const activeId =
+        state.activeConversationId === id
+          ? (next[0]?.id ?? null)
+          : state.activeConversationId;
+      return { conversations: next, activeConversationId: activeId };
+    });
   },
 
   deleteConversation: async (id) => {

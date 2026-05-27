@@ -49,8 +49,6 @@ export function useWebSocket() {
   const updateStreaming = useMessageStore((s) => s.updateStreaming);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
-  const currentUserId = useAuthStore((s) => s.user?.id);
-
   const addMessage = useMessageStore((s) => s.addMessage);
 
   useEffect(() => {
@@ -111,7 +109,7 @@ export function useWebSocket() {
         }
         case 'user.typing_start': {
           const userId = msg.data.userId;
-          if (userId && userId !== currentUserId) {
+          if (userId && userId !== useAuthStore.getState().user?.id) {
             useWsStore.getState().addTypingUser(convId, userId, msg.data.username);
             scheduleTypingRemove(convId, userId);
           }

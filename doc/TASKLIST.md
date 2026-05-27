@@ -65,10 +65,10 @@
 | B28 | 好友请求发给不存在用户返回 500 | P3 | [x] |
 | B29 | 消息历史 limit 负数未处理 | P3 | [x] |
 | B30 | 不存在的群聊 UUID 返回 403 非 404 | P3 | [x] |
-| B31 | leave_room 后仍通过成员推送收到消息 | P3 | [ ] |
+| B31 | leave_room 后仍通过成员推送收到消息 | P3 | [-] |
 | B32 | 群成员数量硬编码为 9 | P1 | [x] |
-| B33 | WebSocket 发消息静默丢弃 DB 持久化错误 | P1 | [ ] |
-| B34 | 负 offset 值直接传 SQL 无校验 | P2 | [ ] |
+| B33 | WebSocket 发消息静默丢弃 DB 持久化错误 | P1 | [x] |
+| B34 | 负 offset 值直接传 SQL 无校验 | P2 | [x] |
 | B35 | conversation 服务创建群聊非原子(补偿删除可失败) | P1 | [ ] |
 | B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [ ] |
 | B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [ ] |
@@ -87,7 +87,7 @@
 | SEC-01 | 用户名缺少白名单校验(XSS/特殊字符) | P1 | [x] |
 | SEC-02 | 消息 content 纯空格被接受 | P2 | [x] |
 | SEC-03 | 群名纯空格通过 binding 校验 | P2 | [x] |
-| SEC-04 | 上传文件名 XSS 字符未净化 | P3 | [ ] |
+| SEC-04 | 上传文件名 XSS 字符未净化 | P3 | [x] |
 | SEC-05 | limit 参数无上界/无正数校验 | P3 | [x] |
 | SEC-06 | 用户搜索接口缺少独立限流 | P3 | [x] |
 | SEC-07 | WebSocket JWT 通过 query string 传入被日志明文记录 | P2 | [ ] |
@@ -107,11 +107,11 @@
 | UI-05 | 无对话级别 URL，刷新丢状态 | P2 | [ ] |
 | UI-06 | 页面刷新后恢复到空状态 | P2 | [x] |
 | UI-07 | 多处硬编码颜色不跟随主题 | P2 | [ ] |
-| UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [ ] |
+| UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [x] |
 | UI-09 | 多处内联 style 无法被暗色主题覆盖 | P2 | [ ] |
 | UI-10 | WebSocket 重连无 jitter 惊群风险 | P2 | [x] |
 | UI-11 | 断线期间发送队列不持久化 | P2 | [ ] |
-| UI-12 | 无键盘 focus-visible 样式 | P3 | [ ] |
+| UI-12 | 无键盘 focus-visible 样式 | P3 | [x] |
 | UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [ ] |
 | UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [ ] |
 | UI-15 | friendStore accept/reject 缺少 loading | P3 | [ ] |
@@ -126,16 +126,16 @@
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
 | CODE-01 | rate limiter goroutine 永不退出(泄漏) | P0 | [x] |
-| CODE-02 | Hub.clients 值 (*[]*Client) 并发竞争 | P1 | [ ] |
+| CODE-02 | Hub.clients 值 (*[]*Client) 并发竞争 | P1 | [x] |
 | CODE-03 | WebSocket 连接 ctx 未绑定 hub 生命周期 | P1 | [ ] |
 | CODE-04 | Hub bus channel 发送可无限阻塞 handler | P1 | [ ] |
 | CODE-05 | config.yaml 缺 upload 和 redis.db 字段 | P1 | [ ] |
-| CODE-06 | Client.LastActive 无同步并发读写 | P1 | [ ] |
+| CODE-06 | Client.LastActive 无同步并发读写 | P1 | [x] |
 | CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [ ] |
 | CODE-08 | 多语句迁移无事务包裹 | P2 | [ ] |
 | CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [ ] |
 | CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [ ] |
-| CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [ ] |
+| CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
 | CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [ ] |
 | CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [ ] |
 | CODE-14 | postPersist 异步推送无重试/死信队列 | P2 | [ ] |
@@ -144,9 +144,9 @@
 | CODE-17 | Hub Register/Unregister 异步竞态 | P2 | [ ] |
 | CODE-18 | Client.enqueue 背压时可能阻塞 dispatch | P3 | [ ] |
 | CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [ ] |
-| CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [ ] |
+| CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [x] |
 | CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [ ] |
-| CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [ ] |
+| CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [x] |
 | CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [ ] |
 | CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [ ] |
 | CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [ ] |
@@ -154,7 +154,7 @@
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
-| CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [ ] |
+| CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
 | CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [ ] |
 | CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [ ] |
 
@@ -181,7 +181,7 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| RT-01 | Conversation 类型缺 archived_at 字段 | P2 | [ ] |
+| RT-01 | Conversation 类型缺 archived_at 字段 | P2 | [x] |
 | RT-02 | createGroup 返回字段名不匹配(id vs conversation_id) | P1 | [x] |
 | RT-03 | accept/reject 好友请求后端返回 null，前端类型错误 | P2 | [x] |
 | RT-04 | 缺少 ErrorBoundary——渲染错误全页白屏 | P1 | [x] |

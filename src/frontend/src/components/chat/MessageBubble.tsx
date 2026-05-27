@@ -103,7 +103,7 @@ function formatTimestamp(dateStr: string): string {
   return `${month}-${day} ${hh}:${mm}`;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
   showAvatar = true,
@@ -263,3 +263,5 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     </div>
   );
 };
+
+export const MessageBubble = React.memo(MessageBubbleInner);
