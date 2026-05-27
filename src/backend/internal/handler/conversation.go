@@ -47,6 +47,10 @@ func (h *ConversationHandler) GetOrCreatePrivate(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	conv, err := h.svc.GetOrCreatePrivateChat(c.Request.Context(), userID, req.FriendID)
 	if err != nil {
+		if errors.Is(err, service.ErrSelfChat) || errors.Is(err, service.ErrNotFriends) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40041, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50016, "创建私聊失败")
 		return
 	}

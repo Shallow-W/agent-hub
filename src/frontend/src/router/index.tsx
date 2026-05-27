@@ -18,14 +18,23 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** 已登录用户访问登录/注册页时重定向到首页 */
+function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('agenthub_token');
+  if (token) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
 const routes: RouteObject[] = [
   {
     path: '/login',
-    element: <LoginView />,
+    element: <PublicOnlyRoute><LoginView /></PublicOnlyRoute>,
   },
   {
     path: '/register',
-    element: <RegisterView />,
+    element: <PublicOnlyRoute><RegisterView /></PublicOnlyRoute>,
   },
   {
     path: '/',

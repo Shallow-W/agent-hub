@@ -13,6 +13,11 @@ type ConvFriendRepo interface {
 	GetFriendship(ctx context.Context, userID, friendID string) (*model.Friend, error)
 }
 
+var (
+	ErrSelfChat     = errors.New("不能与自己创建私聊")
+	ErrNotFriends   = errors.New("双方不是好友，无法创建私聊")
+)
+
 // ConversationService 对话服务所需的仓库接口
 type ConvRepo interface {
 	Create(ctx context.Context, userID, convType, title string) (*model.Conversation, error)
@@ -62,7 +67,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, userID, co
 // GetOrCreatePrivateChat 查找或创建两个用户之间的私聊会话
 func (s *ConversationService) GetOrCreatePrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
 	if userID == friendID {
-		return nil, errors.New("不能与自己创建私聊")
+		return nil, ErrSelfChat
 	}
 
 	// 校验好友关系（双向检查）
@@ -76,7 +81,7 @@ func (s *ConversationService) GetOrCreatePrivateChat(ctx context.Context, userID
 			return nil, fmt.Errorf("check friendship reverse: %w", err2)
 		}
 		if friendship2 == nil || friendship2.Status != "accepted" {
-			return nil, errors.New("双方不是好友，无法创建私聊")
+			return nil, ErrNotFriends
 		}
 	}
 
