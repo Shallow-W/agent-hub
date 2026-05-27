@@ -1,4 +1,5 @@
 import type { MessageAttachment } from './attachment';
+import type { AttachmentPayload } from './attachment';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -29,6 +30,8 @@ export type OptimisticStatus = 'sending' | 'failed';
 export interface OptimisticMessage extends Message {
   optimistic: true;
   optimisticStatus: OptimisticStatus;
+  /** Original attachment payloads used when sending, for retry */
+  pendingAttachments?: AttachmentPayload[];
 }
 
 export type DisplayMessage = Message | OptimisticMessage;

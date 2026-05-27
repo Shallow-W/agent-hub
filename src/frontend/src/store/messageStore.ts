@@ -95,6 +95,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       created_at: new Date().toISOString(),
       optimistic: true,
       optimisticStatus: 'sending',
+      pendingAttachments: attachments,
     };
 
     // Add optimistic message immediately
@@ -224,7 +225,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.attachments as AttachmentPayload[] | undefined);
+      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.pendingAttachments);
       get().addMessage(conversationId, msg);
       // Remove on success
       set((s) => {

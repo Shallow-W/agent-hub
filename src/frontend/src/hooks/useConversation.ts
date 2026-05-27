@@ -12,6 +12,8 @@ export function useConversation() {
   const setActive = useConversationStore((s) => s.setActive);
 
   useEffect(() => {
+    const { conversations, loading } = useConversationStore.getState();
+    if (conversations.length > 0 || loading) return;
     fetchConversations();
   }, [fetchConversations]);
 
