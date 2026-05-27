@@ -44,6 +44,8 @@ export const ChatWindow: React.FC = () => {
     markAllRead(activeId);
     convApi.markConversationRead(activeId).catch(() => {});
     setReplyTo(null);
+    setSearchOpen(false);
+    setSearchResults([]);
   }, [activeId, markAllRead]);
 
   const toggleSearch = useCallback(() => {

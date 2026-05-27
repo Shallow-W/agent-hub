@@ -276,7 +276,17 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 }
 
 // SearchMessages 搜索对话消息
-func (s *MessageService) SearchMessages(ctx context.Context, conversationID, keyword string) ([]model.Message, error) {
+func (s *MessageService) SearchMessages(ctx context.Context, conversationID, userID, keyword string) ([]model.Message, error) {
+	conv, err := s.convRepo.GetByID(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return nil, ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return nil, err
+	}
 	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
 }
 

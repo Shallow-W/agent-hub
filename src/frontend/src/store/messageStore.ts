@@ -136,14 +136,19 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   recall: async (conversationId, messageId) => {
-    await msgApi.recallMessage(conversationId, messageId);
-    set((state) => {
-      const list = (state.messages[conversationId] ?? [])
-        .filter((m) => m.id !== messageId);
-      return {
-        messages: { ...state.messages, [conversationId]: list },
-      };
-    });
+    try {
+      await msgApi.recallMessage(conversationId, messageId);
+      set((state) => {
+        const list = (state.messages[conversationId] ?? []).map((m) =>
+          m.id === messageId
+            ? { ...m, content: '你撤回了一条消息', role: 'system' as const, attachments: undefined }
+            : m
+        );
+        return { messages: { ...state.messages, [conversationId]: list } };
+      });
+    } catch {
+      // 失败时不移除消息，保留原内容
+    }
   },
 
   addMessage: (conversationId, message) => {

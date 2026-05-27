@@ -127,7 +127,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
     await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id);
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

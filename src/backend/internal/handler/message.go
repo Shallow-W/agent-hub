@@ -174,8 +174,17 @@ func (h *MessageHandler) Search(c *gin.Context) {
 		return
 	}
 
-	msgs, err := h.svc.SearchMessages(c.Request.Context(), convID, keyword)
+	userID := middleware.GetUserID(c)
+	msgs, err := h.svc.SearchMessages(c.Request.Context(), convID, userID, keyword)
 	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40426, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40326, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50025, "搜索消息失败")
 		return
 	}
