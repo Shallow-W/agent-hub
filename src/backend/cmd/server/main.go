@@ -375,5 +375,24 @@ func loadConfig(path string) (*Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 	return &cfg, nil
+}
+
+func (c *Config) validate() error {
+	if c.JWT.Secret == "" {
+		return fmt.Errorf("jwt.secret is required")
+	}
+	if c.Server.Port <= 0 {
+		return fmt.Errorf("server.port must be positive")
+	}
+	if c.Database.Host == "" {
+		return fmt.Errorf("database.host is required")
+	}
+	if c.Database.DBName == "" {
+		return fmt.Errorf("database.dbname is required")
+	}
+	return nil
 }

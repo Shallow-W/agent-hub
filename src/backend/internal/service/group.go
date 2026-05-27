@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -46,8 +47,8 @@ func (s *GroupService) IsConversationMember(ctx context.Context, conversationID,
 
 // CreateGroup 创建群聊
 func (s *GroupService) CreateGroup(ctx context.Context, ownerID, name string, memberIDs []string) (*model.Conversation, error) {
-	if name == "" {
-		return nil, errors.New("群名不能为空")
+	if strings.TrimSpace(name) == "" {
+		return nil, errors.New("群名不能为空格")
 	}
 
 	// memberIDs 去重且排除 owner

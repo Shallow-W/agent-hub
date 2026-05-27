@@ -178,7 +178,9 @@ func (r *ConversationRepo) DeleteMember(ctx context.Context, conversationID, use
 func (r *ConversationRepo) ListMemberIDs(ctx context.Context, conversationID string) ([]string, error) {
 	var ids []string
 	err := r.db.SelectContext(ctx, &ids,
-		`SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
+		`SELECT user_id FROM conversation_members WHERE conversation_id = $1
+		 UNION
+		 SELECT user_id FROM conversations WHERE id = $1`,
 		conversationID,
 	)
 	if err != nil {

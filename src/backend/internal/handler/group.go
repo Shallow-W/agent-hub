@@ -82,7 +82,7 @@ func (h *GroupHandler) AddMember(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrGroupNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			middleware.ErrorResponse(c, http.StatusNotFound, 40415, err.Error())
 			return
 		}
 		if errors.Is(err, service.ErrNotMember) {

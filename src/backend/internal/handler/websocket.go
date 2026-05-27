@@ -161,7 +161,13 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			}
 			// 通过 Service 持久化（内部触发 Hub 推送 + Redis 缓存）
 			if h.msgSender != nil {
-				_, _ = h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "", nil)
+				if _, err := h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "", nil); err != nil {
+					h.logger.Error("ws message persist failed", "conversation_id", payload.ConversationID, "user_id", client.UserID, "error", err)
+					h.hub.SendToUser(client.UserID, ws.WSMessage{
+						Type: ws.TypeError,
+						Data: map[string]string{"message": "消息发送失败，请重试"},
+					})
+				}
 			}
 		case "typing_start":
 			var payload struct {

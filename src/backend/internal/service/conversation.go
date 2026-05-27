@@ -122,6 +122,9 @@ func (s *ConversationService) ListConversations(ctx context.Context, userID stri
 	if limit > 100 {
 		limit = 100
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	list, err := s.repo.ListByUserID(ctx, userID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
