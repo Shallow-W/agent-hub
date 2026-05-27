@@ -190,6 +190,10 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	conv, members, err := h.svc.GetGroupInfo(c.Request.Context(), conversationID, userID)
 	if err != nil {
+		if errors.Is(err, service.ErrGroupNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			return
+		}
 		if errors.Is(err, service.ErrNotMember) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
 			return

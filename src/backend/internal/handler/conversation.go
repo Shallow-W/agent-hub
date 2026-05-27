@@ -185,6 +185,10 @@ func (h *ConversationHandler) RenameConversation(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40313, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrConvInvalidTitle) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40045, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50014, "重命名对话失败")
 		return
 	}
