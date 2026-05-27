@@ -31,6 +31,29 @@ type RenameRequest struct {
 	Title string `json:"title" binding:"required"`
 }
 
+// PrivateChatRequest 私聊请求体
+type PrivateChatRequest struct {
+	FriendID string `json:"friend_id" binding:"required"`
+}
+
+// GetOrCreatePrivate 查找或创建与指定好友的私聊会话
+func (h *ConversationHandler) GetOrCreatePrivate(c *gin.Context) {
+	var req PrivateChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40019, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	conv, err := h.svc.GetOrCreatePrivateChat(c.Request.Context(), userID, req.FriendID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50016, "创建私聊失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, conv)
+}
+
 // Create 创建新对话
 func (h *ConversationHandler) Create(c *gin.Context) {
 	var req CreateRequest

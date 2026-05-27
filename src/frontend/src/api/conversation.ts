@@ -12,6 +12,12 @@ export async function createConversation(
   return post<Conversation>('/api/conversations', { type, title });
 }
 
+export async function getOrCreatePrivateChat(
+  friendId: string,
+): Promise<Conversation> {
+  return post<Conversation>('/api/conversations/private', { friend_id: friendId });
+}
+
 export async function deleteConversation(id: string): Promise<void> {
   return del<void>(`/api/conversations/${id}`);
 }

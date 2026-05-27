@@ -13,6 +13,8 @@ import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
+import { useFriendStore } from '@/store/friendStore';
+import { getOrCreatePrivateChat } from '@/api/conversation';
 import { message as antMessage } from 'antd';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import styles from './AppLayout.module.css';
@@ -20,12 +22,23 @@ import styles from './AppLayout.module.css';
 const AppLayout: React.FC = () => {
   const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
+  const setActive = useConversationStore((s) => s.setActive);
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
+  const fetchFriends = useFriendStore((s) => s.fetchFriends);
+  const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(false);
   const [convPanelWidth, setConvPanelWidth] = useState(300);
+
+  // 切换到好友页时自动拉取数据
+  useEffect(() => {
+    if (activeNav === 'friends') {
+      fetchFriends();
+      fetchPending();
+    }
+  }, [activeNav, fetchFriends, fetchPending]);
 
   // Update document.title with total unread count
   const unreadCounts = useMessageStore((s) => s.unreadCounts);
@@ -59,6 +72,18 @@ const AppLayout: React.FC = () => {
     setConvPanelWidth((prev) => Math.min(500, Math.max(200, prev + deltaX)));
   }, []);
 
+  /** 点击好友开始私聊 */
+  const handleStartChat = useCallback(async (friendId: string) => {
+    try {
+      const conv = await getOrCreatePrivateChat(friendId);
+      await fetchConversations();
+      setActive(conv.id);
+      setActiveNav('chat');
+    } catch {
+      antMessage.error('创建私聊失败');
+    }
+  }, [fetchConversations, setActive]);
+
   /** 中间面板内容：根据左侧导航切换 */
   const renderMiddlePanel = () => {
     if (activeNav === 'friends') {
@@ -70,7 +95,7 @@ const AppLayout: React.FC = () => {
           <div style={{ padding: 12, overflow: 'auto', flex: 1 }}>
             <FriendRequest />
             <div style={{ marginTop: 16, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
-              <FriendList onStartChat={() => setActiveNav('chat')} />
+              <FriendList onStartChat={handleStartChat} />
             </div>
           </div>
         </>

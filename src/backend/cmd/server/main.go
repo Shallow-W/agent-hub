@@ -170,6 +170,7 @@ func main() {
 		convRoutes := apiGroup.Group("/conversations")
 		{
 			convRoutes.POST("", convHandler.Create)
+			convRoutes.POST("/private", convHandler.GetOrCreatePrivate)
 			convRoutes.GET("", convHandler.List)
 			convRoutes.PUT("/:id", convHandler.RenameConversation)
 			convRoutes.DELETE("/:id", convHandler.Delete)

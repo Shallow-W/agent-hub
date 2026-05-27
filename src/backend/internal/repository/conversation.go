@@ -170,3 +170,60 @@ func (r *ConversationRepo) ListMemberIDs(ctx context.Context, conversationID str
 	}
 	return ids, nil
 }
+
+// FindPrivateChat 查找两个用户之间的私聊会话
+func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
+	var c model.Conversation
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at
+		 FROM conversations c
+		 LEFT JOIN conversation_members cm ON cm.conversation_id = c.id
+		 WHERE c.type = 'single' AND c.archived_at IS NULL
+		   AND (
+		     (c.user_id = $1 AND cm.user_id = $2)
+		     OR
+		     (c.user_id = $2 AND cm.user_id = $1)
+		   )
+		 LIMIT 1`,
+		userID, friendID,
+	).StructScan(&c)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find private chat: %w", err)
+	}
+	return &c, nil
+}
+
+// CreatePrivateChat 创建私聊会话并添加好友为成员（事务保证原子性）
+func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friendID, title string) (*model.Conversation, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var c model.Conversation
+	err = tx.QueryRowxContext(ctx,
+		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'single', $2)
+		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at`,
+		userID, title,
+	).StructScan(&c)
+	if err != nil {
+		return nil, fmt.Errorf("insert conversation: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
+		c.ID, friendID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("add friend as member: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return &c, nil
+}

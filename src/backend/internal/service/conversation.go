@@ -20,6 +20,8 @@ type ConvRepo interface {
 	Archive(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	DeleteMember(ctx context.Context, conversationID, userID string) error
+	FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error)
+	CreatePrivateChat(ctx context.Context, userID, friendID, title string) (*model.Conversation, error)
 }
 
 var (
@@ -49,6 +51,20 @@ func (s *ConversationService) CreateConversation(ctx context.Context, userID, co
 		return nil, fmt.Errorf("create conversation: %w", err)
 	}
 	return conv, nil
+}
+
+// GetOrCreatePrivateChat 查找或创建两个用户之间的私聊会话
+func (s *ConversationService) GetOrCreatePrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
+	// 先尝试查找已有的私聊
+	conv, err := s.repo.FindPrivateChat(ctx, userID, friendID)
+	if err != nil {
+		return nil, fmt.Errorf("find private chat: %w", err)
+	}
+	if conv != nil {
+		return conv, nil
+	}
+	// 不存在则创建
+	return s.repo.CreatePrivateChat(ctx, userID, friendID, "私聊")
 }
 
 // ListConversations 查询用户对话列表
