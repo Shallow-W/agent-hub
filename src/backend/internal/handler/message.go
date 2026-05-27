@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -48,6 +49,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo)
 	if err != nil {
+		slog.Error("send message failed", "error", err, "convID", convID, "userID", userID)
 		if errors.Is(err, service.ErrMsgConvNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40420, err.Error())
 			return

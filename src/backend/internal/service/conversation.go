@@ -104,6 +104,9 @@ func (s *ConversationService) ListConversations(ctx context.Context, userID stri
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
+	if list == nil {
+		list = []model.Conversation{}
+	}
 	return list, nil
 }
 

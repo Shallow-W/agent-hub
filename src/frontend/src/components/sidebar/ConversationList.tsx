@@ -127,8 +127,8 @@ const ConversationItemWrapper: React.FC<{
   );
 
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
-  // 优先使用 API 返回的 last_message，实时更新时回退到本地 store
-  const lastMessage = conversation.last_message || lastMsg?.content;
+  // 优先使用本地 store 实时数据，API 数据作为兜底
+  const lastMessage = lastMsg?.content || conversation.last_message;
 
   return (
     <ConversationItem
