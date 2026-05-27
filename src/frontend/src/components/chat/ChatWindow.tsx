@@ -120,7 +120,7 @@ export const ChatWindow: React.FC = () => {
           <h1 className={styles.title}>
             {displayName}
           </h1>
-          {isGroup && <span className={styles.memberCount}>9</span>}
+          {isGroup && activeConv.member_count && <span className={styles.memberCount}>{activeConv.member_count}</span>}
         </div>
         <div className={styles.headerActions}>
           <Tooltip title="文件">

@@ -10,4 +10,5 @@ export interface Conversation {
   updated_at: string;
   peer_name?: string;
   last_message?: string;
+  member_count?: number;
 }

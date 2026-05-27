@@ -16,4 +16,5 @@ type Conversation struct {
 	// 计算字段，非 DB 列
 	PeerName    string `json:"peer_name,omitempty" db:"peer_name"`
 	LastMessage string `json:"last_message,omitempty" db:"last_message"`
+	MemberCount int    `json:"member_count,omitempty" db:"member_count"`
 }
