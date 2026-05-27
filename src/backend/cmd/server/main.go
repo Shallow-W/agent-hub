@@ -51,6 +51,7 @@ type Config struct {
 		Host     string `koanf:"host"`
 		Port     int    `koanf:"port"`
 		Password string `koanf:"password"`
+		DB       int    `koanf:"db"`
 	} `koanf:"redis"`
 	Upload struct {
 		Dir        string `koanf:"dir"`
@@ -106,6 +107,7 @@ func main() {
 		Host:     cfg.Redis.Host,
 		Port:     cfg.Redis.Port,
 		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
 	})
 	if err != nil {
 		logger.Warn("redis init failed, running without cache", "error", err)

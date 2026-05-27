@@ -7,9 +7,18 @@ database:
   password: agenthub
   dbname: agenthub
   sslmode: disable
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
 jwt:
   secret: dev-secret-change-in-prod
   expiry_hours: 24
 cors:
   allowed_origins:
     - http://localhost:5173
+upload:
+  dir: "./uploads"
+  max_image_mb: 20
+  max_pdf_mb: 50

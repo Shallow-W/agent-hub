@@ -89,19 +89,20 @@ func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
 }
 
-// checkMembership 校验用户是否为会话成员（含会话创建者）
+// checkMembership 校验用户是否为会话成员（优先查成员表）
 func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conversation, userID string) error {
-	if conv.UserID == userID {
-		return nil
-	}
 	member, err := s.convRepo.GetMember(ctx, conv.ID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
 	}
-	if member == nil {
-		return ErrMsgConvNoPerm
+	if member != nil {
+		return nil
 	}
-	return nil
+	// Fallback: 群创建者可能尚未加入成员表
+	if conv.Type == "group" && conv.UserID == userID {
+		return nil
+	}
+	return ErrMsgConvNoPerm
 }
 
 // SendMessage 发送消息：持久化 → 推送 → 缓存
