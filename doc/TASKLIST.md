@@ -73,8 +73,8 @@
 | B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [ ] |
 | B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [ ] |
 | B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [ ] |
-| B39 | 归档对话错误触发 delete API(双重请求) | P1 | [ ] |
-| B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [ ] |
+| B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
+| B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 
@@ -90,9 +90,9 @@
 | SEC-04 | 上传文件名 XSS 字符未净化 | P3 | [x] |
 | SEC-05 | limit 参数无上界/无正数校验 | P3 | [x] |
 | SEC-06 | 用户搜索接口缺少独立限流 | P3 | [x] |
-| SEC-07 | WebSocket JWT 通过 query string 传入被日志明文记录 | P2 | [ ] |
-| SEC-08 | SendFriendRequest 的 friend_id 未校验 UUID 格式 | P2 | [ ] |
-| SEC-09 | CreateGroup 的 member_ids 未逐个校验 UUID 格式 | P2 | [ ] |
+| SEC-07 | WebSocket JWT 通过 query string 传入被日志明文记录 | P2 | [x] |
+| SEC-08 | SendFriendRequest 的 friend_id 未校验 UUID 格式 | P2 | [x] |
+| SEC-09 | CreateGroup 的 member_ids 未逐个校验 UUID 格式 | P2 | [x] |
 
 ---
 
@@ -137,7 +137,7 @@
 | CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [ ] |
 | CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
 | CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [ ] |
-| CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [ ] |
+| CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [x] |
 | CODE-14 | postPersist 异步推送无重试/死信队列 | P2 | [ ] |
 | CODE-15 | config.example 缺 upload 和 redis.db 字段 | P2 | [ ] |
 | CODE-16 | 无单用户 WebSocket 连接数限制(DoS风险) | P2 | [ ] |
@@ -305,11 +305,11 @@
 | PERF-01 | messages store 无限增长，永不清理 | P1 | [ ] |
 | PERF-02 | AppLayout 订阅整个 unreadCounts 对象 | P1 | [ ] |
 | PERF-03 | ChatWindow 订阅全部 typingUsers | P1 | [ ] |
-| PERF-04 | MessageBubble 未使用 React.memo | P2 | [ ] |
+| PERF-04 | MessageBubble 未使用 React.memo | P2 | [x] |
 | PERF-05 | smooth scroll 在流式消息时引起抖动 | P2 | [ ] |
 | PERF-06 | 对话切换重复 API 请求 | P2 | [ ] |
 | PERF-07 | transition:all 导致布局抖动 | P2 | [ ] |
-| PERF-08 | renderMarkdown 无缓存(useMemo) | P2 | [ ] |
+| PERF-08 | renderMarkdown 无缓存(useMemo) | P2 | [x] |
 | PERF-09 | conversationStore 订阅粒度过粗 | P3 | [ ] |
 | PERF-10 | friendStore 订阅全量 friends 数组 | P3 | [ ] |
 | PERF-11 | 未使用 React.lazy 懒加载 | P3 | [ ] |
@@ -321,10 +321,10 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| FE-01 | useWebSocket 中 currentUserId 闭包过期导致 typing 判断错误 | P1 | [ ] |
-| FE-02 | archive handler 错误调用 deleteConversation(归档变删除) | P1 | [ ] |
+| FE-01 | useWebSocket 中 currentUserId 闭包过期导致 typing 判断错误 | P1 | [x] |
+| FE-02 | archive handler 错误调用 deleteConversation(归档变删除) | P1 | [x] |
 | FE-03 | upload.ts 绕过共享 request()函数，缺 retry/错误标准化 | P2 | [ ] |
-| FE-04 | conversationStore.togglePin/createConversation 无错误处理 | P2 | [ ] |
+| FE-04 | conversationStore.togglePin/createConversation 无错误处理 | P2 | [x] |
 | FE-05 | retryOptimistic 中 attachments 类型强转隐藏类型不匹配 | P2 | [ ] |
 | FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [ ] |
 | FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
