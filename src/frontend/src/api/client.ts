@@ -43,13 +43,25 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    const { message } = await import('antd');
+    message.error('网络连接失败，请检查网络');
+    throw new ApiError(0, 0, '网络连接失败');
+  }
 
-  const json: ApiResponse<T> = await res.json();
+  let json: ApiResponse<T>;
+  try {
+    json = await res.json();
+  } catch {
+    throw new ApiError(res.status, 0, `服务器错误 (${res.status})`);
+  }
 
   if (!res.ok || json.code !== 0) {
     // 401 → token 过期，清除并跳转登录

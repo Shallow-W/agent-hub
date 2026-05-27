@@ -11,6 +11,7 @@ export class WebSocketClient {
   private maxRetryDelay = 30000;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: string[] = [];
+  private intentionalClose = false;
   private onMessageCallback: MessageHandler | null = null;
   private statusValue: WsStatus = 'disconnected';
   private statusListeners: Set<(status: WsStatus) => void> = new Set();
@@ -47,6 +48,7 @@ export class WebSocketClient {
   }
 
   disconnect(): void {
+    this.intentionalClose = true;
     this.clearRetryTimer();
     if (this.ws) {
       this.ws.close();
@@ -56,6 +58,7 @@ export class WebSocketClient {
   }
 
   private doConnect(): void {
+    this.intentionalClose = false;
     this.clearRetryTimer();
     this.setStatus('connecting');
 
@@ -79,7 +82,10 @@ export class WebSocketClient {
 
     this.ws.onclose = () => {
       this.setStatus('disconnected');
-      this.scheduleReconnect();
+      if (!this.intentionalClose) {
+        this.scheduleReconnect();
+      }
+      this.intentionalClose = false;
     };
 
     this.ws.onerror = () => {
@@ -88,9 +94,10 @@ export class WebSocketClient {
   }
 
   private scheduleReconnect(): void {
+    const jitter = Math.random() * 500;
     this.retryTimer = setTimeout(() => {
       this.doConnect();
-    }, this.retryDelay);
+    }, this.retryDelay + jitter);
     // 指数退避
     this.retryDelay = Math.min(this.retryDelay * 2, this.maxRetryDelay);
   }
