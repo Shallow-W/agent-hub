@@ -64,6 +64,9 @@ func (h *WebSocketHandler) Handle(c *gin.Context) {
 	}
 
 	client := ws.NewClient(conn, userID)
+	if u, err := h.authSvc.GetUserByID(c.Request.Context(), userID); err == nil && u != nil {
+		client.SetUsername(u.Username)
+	}
 	conn.SetReadLimit(1 << 17) // 128KB max WS frame
 	h.hub.Register(client)
 
@@ -176,6 +179,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					Type: "user.typing",
 					Data: map[string]string{
 						"user_id":         client.UserID,
+						"username":        client.Username,
 						"conversation_id": payload.ConversationID,
 					},
 				})
@@ -195,6 +199,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					Type: "user.typing_stop",
 					Data: map[string]string{
 						"user_id":         client.UserID,
+						"username":        client.Username,
 						"conversation_id": payload.ConversationID,
 					},
 				})

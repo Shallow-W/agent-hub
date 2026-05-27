@@ -1,14 +1,19 @@
 import { create } from 'zustand';
 import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
+export interface TypingUser {
+  userId: string;
+  username?: string;
+}
+
 interface WsState {
   status: WsStatus;
   wsClient: WebSocketClient | null;
-  /** conversationId → typing user IDs */
-  typingUsers: Record<string, string[]>;
+  /** conversationId → typing users */
+  typingUsers: Record<string, TypingUser[]>;
   connect: (token: string) => WebSocketClient | null;
   disconnect: () => void;
-  addTypingUser: (conversationId: string, userId: string) => void;
+  addTypingUser: (conversationId: string, userId: string, username?: string) => void;
   removeTypingUser: (conversationId: string, userId: string) => void;
 }
 
@@ -41,14 +46,14 @@ export const useWsStore = create<WsState>((set, get) => ({
     set({ wsClient: null, status: 'disconnected' });
   },
 
-  addTypingUser: (conversationId, userId) => {
+  addTypingUser: (conversationId, userId, username) => {
     set((state) => {
       const current = state.typingUsers[conversationId] ?? [];
-      if (current.includes(userId)) return state;
+      if (current.some((u) => u.userId === userId)) return state;
       return {
         typingUsers: {
           ...state.typingUsers,
-          [conversationId]: [...current, userId],
+          [conversationId]: [...current, { userId, username }],
         },
       };
     });
@@ -60,7 +65,7 @@ export const useWsStore = create<WsState>((set, get) => ({
       return {
         typingUsers: {
           ...state.typingUsers,
-          [conversationId]: current.filter((id) => id !== userId),
+          [conversationId]: current.filter((u) => u.userId !== userId),
         },
       };
     });

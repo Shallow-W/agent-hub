@@ -140,5 +140,10 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 	return userID, nil
 }
 
+// GetUserByID 根据 ID 获取用户信息
+func (s *AuthService) GetUserByID(ctx context.Context, id string) (*model.User, error) {
+	return s.repo.GetUserByID(ctx, id)
+}
+
 // 确保 repository 实现满足接口
 var _ UserRepo = (*repository.UserRepo)(nil)

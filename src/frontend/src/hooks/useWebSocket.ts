@@ -112,7 +112,7 @@ export function useWebSocket() {
         case 'user.typing_start': {
           const userId = msg.data.userId;
           if (userId && userId !== currentUserId) {
-            useWsStore.getState().addTypingUser(convId, userId);
+            useWsStore.getState().addTypingUser(convId, userId, msg.data.username);
             scheduleTypingRemove(convId, userId);
           }
           break;

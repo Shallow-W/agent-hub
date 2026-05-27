@@ -61,6 +61,7 @@ const (
 type Client struct {
 	Conn        *websocket.Conn
 	UserID      string
+	Username    string
 	ConnectedAt time.Time
 	lastPong    atomic.Int64 // unix nanos，原子操作避免数据竞争
 	LastActive  time.Time
@@ -81,6 +82,11 @@ func NewClient(conn *websocket.Conn, userID string) *Client {
 	}
 	c.lastPong.Store(now.UnixNano())
 	return c
+}
+
+// SetUsername 设置用户名（导出供 handler 在连接建立后调用）
+func (c *Client) SetUsername(name string) {
+	c.Username = name
 }
 
 // UpdateLastPong 原子更新最后 pong 时间

@@ -89,7 +89,7 @@ export const ChatWindow: React.FC = () => {
     : (activeConv.peer_name || activeConv.title);
   const avatarText = displayName.charAt(0).toUpperCase();
   const typingUsers = typingUsersMap[activeConv.id] ?? [];
-  const otherTyping = typingUsers.filter((id) => id !== currentUserId);
+  const otherTyping = typingUsers.filter((u) => u.userId !== currentUserId);
 
   const menuItems: MenuProps['items'] = [
     {
@@ -231,7 +231,7 @@ export const ChatWindow: React.FC = () => {
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
           {otherTyping.length === 1
-            ? `${otherTyping[0]} 正在输入...`
+            ? `${otherTyping[0]?.username || otherTyping[0]?.userId || '用户'} 正在输入...`
             : `${otherTyping.length} 人正在输入...`}
         </div>
       )}
