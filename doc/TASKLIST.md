@@ -159,7 +159,7 @@
 | UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [x] |
 | UI-09 | 多处内联 style 无法被暗色主题覆盖 | P2 | [ ] |
 | UI-10 | WebSocket 重连无 jitter 惊群风险 | P2 | [x] |
-| UI-11 | 断线期间发送队列不持久化 | P2 | [ ] |
+| UI-11 | 断线期间发送队列不持久化 | P2 | [-] |
 | UI-12 | 无键盘 focus-visible 样式 | P3 | [x] |
 | UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [x] |
 | UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [x] |
@@ -216,7 +216,7 @@
 |---|------|--------|------|
 | BUILD-01 | 缺少 ESLint 配置 | P3 | [ ] |
 | BUILD-02 | vendor-antd chunk 超 500 kB | P2 | [ ] |
-| BUILD-03 | 多个依赖有 Major 版本更新 | P3 | [ ] |
+| BUILD-03 | 多个依赖有 Major 版本更新 | P3 | [-] |
 | BUILD-04 | screenshot.mjs 幽灵 playwright 依赖 | P3 | [-] |
 | BUILD-05 | 无 .env 环境文件 | P3 | [-] |
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [x] |
@@ -248,7 +248,7 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| DEPLOY-01 | 无 CI/CD 配置 | P1 | [ ] |
+| DEPLOY-01 | 无 CI/CD 配置 | P1 | [-] |
 | DEPLOY-02 | 无 Dockerfile | P1 | [x] |
 | DEPLOY-03 | 无 README.md | P1 | [x] |
 | DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [x] |
@@ -259,7 +259,7 @@
 | DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [x] |
 | DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [x] |
 | DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [-] |
-| DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [ ] |
+| DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [-] |
 | DEPLOY-13 | 健康检查不验证 DB/Redis 连接状态 | P3 | [x] |
 
 ---
@@ -399,13 +399,13 @@
 | UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [x] |
 | UX-09 | 群聊创建后不自动打开成员面板 | P2 | [x] |
 | UX-10 | 好友申请无备注/留言字段 | P2 | [ ] |
-| UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [ ] |
+| UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [x] |
 | UX-12 | 输入框不支持 Shift+Enter 换行 | P2 | [x] |
 | UX-13 | 消息列表不支持键盘快捷键（Esc关闭面板等） | P2 | [ ] |
 | UX-14 | 长消息无折叠/展开功能 | P2 | [ ] |
 | UX-15 | 无消息搜索功能（对话内搜索） | P2 | [ ] |
 | UX-16 | 右键菜单仅显示"撤回"，缺少"复制""转发"等常见操作 | P3 | [ ] |
-| UX-17 | 未读消息数 badge 超 99 无特殊显示（如 99+） | P3 | [ ] |
+| UX-17 | 未读消息数 badge 超 99 无特殊显示（如 99+） | P3 | [x] |
 | UX-18 | 对话列表项无 hover 预览（最后一条消息摘要） | P3 | [ ] |
 | UX-19 | 无消息发送失败的全局重试提示 | P3 | [ ] |
 | UX-20 | Emoji 选择器无最近使用/常用分类 | P3 | [ ] |
