@@ -74,6 +74,10 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40603, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40604, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50602, "更新用户资料失败")
 		return
 	}
