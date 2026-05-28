@@ -234,6 +234,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                             size="small"
                             icon={<DeleteOutlined />}
                             loading={actionLoading === member.user_id}
+                            aria-label={`移除 ${member.username ?? '成员'}`}
                           />
                         </Popconfirm>,
                       ]

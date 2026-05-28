@@ -161,7 +161,7 @@
 | UI-10 | WebSocket 重连无 jitter 惊群风险 | P2 | [x] |
 | UI-11 | 断线期间发送队列不持久化 | P2 | [ ] |
 | UI-12 | 无键盘 focus-visible 样式 | P3 | [x] |
-| UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [ ] |
+| UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [x] |
 | UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [x] |
 | UI-15 | friendStore accept/reject 缺少 loading | P3 | [x] |
 | UI-16 | hasMore 翻页边界判断不准 | P3 | [ ] |
@@ -343,7 +343,7 @@
 | DOC-06 | ErrGroupNotFound 可能未定义 | P2 | [x] |
 | DOC-07 | ConversationMember.JoinedAt 类型 string 应为 time.Time | P2 | [ ] |
 | DOC-08 | ConversationMember 缺少 last_read_at 字段 | P2 | [ ] |
-| DOC-09 | service/message.go 超 300 行限制(402行) | P3 | [ ] |
+| DOC-09 | service/message.go 超 300 行限制(425行) | P3 | [-] |
 | DOC-10 | Commit message 格式违反 50 字符限制 | P3 | [ ] |
 
 ---
@@ -377,8 +377,8 @@
 | FE-04 | conversationStore.togglePin/createConversation 无错误处理 | P2 | [x] |
 | FE-05 | retryOptimistic 中 attachments 类型强转隐藏类型不匹配 | P2 | [x] |
 | FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [x] |
-| FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
-| FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [ ] |
+| FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [-] |
+| FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [-] |
 | FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [x] |
 | FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [x] |
 | FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [x] |
