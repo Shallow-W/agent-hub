@@ -192,7 +192,7 @@
 | CODE-16 | 无单用户 WebSocket 连接数限制(DoS风险) | P2 | [x] |
 | CODE-17 | Hub Register/Unregister 异步竞态 | P2 | [-] |
 | CODE-18 | Client.enqueue 背压时可能阻塞 dispatch | P3 | [ ] |
-| CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [ ] |
+| CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [x] |
 | CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [x] |
 | CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [x] |
 | CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [x] |
@@ -205,7 +205,7 @@
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
 | CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [x] |
-| CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [ ] |
+| CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [x] |
 | CODE-33 | 整个项目零测试覆盖——后端无 _test.go、前端无 .test/.spec 文件 | P0 | [ ] |
 
 ---
