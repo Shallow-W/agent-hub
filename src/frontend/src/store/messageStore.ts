@@ -52,6 +52,9 @@ function generateTempId(): string {
   return `__temp_${Date.now()}_${++tempIdCounter}`;
 }
 
+const recentlyRecalled = new Set<string>();
+const RECALL_DEDUP_TTL = 30_000;
+
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
   streamingContent: {},
@@ -146,6 +149,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   recall: async (conversationId, messageId) => {
     try {
+      recentlyRecalled.add(messageId);
+      setTimeout(() => recentlyRecalled.delete(messageId), RECALL_DEDUP_TTL);
       await msgApi.recallMessage(conversationId, messageId);
       set((state) => {
         const list = (state.messages[conversationId] ?? []).map((m) =>
@@ -312,6 +317,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   handleRecallPush: (conversationId, messageId) => {
+    if (recentlyRecalled.has(messageId)) return;
     set((state) => {
       const list = (state.messages[conversationId] ?? []).map((m) =>
         m.id === messageId

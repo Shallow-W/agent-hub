@@ -45,7 +45,6 @@ export function useWebSocket() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const status = useWsStore((s) => s.status);
   const connect = useWsStore((s) => s.connect);
-  const disconnect = useWsStore((s) => s.disconnect);
   const wsClient = useWsStore((s) => s.wsClient);
   const updateStreaming = useMessageStore((s) => s.updateStreaming);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
@@ -148,7 +147,9 @@ export function useWebSocket() {
     client?.onMessage(handleMessage);
 
     return () => {
-      disconnect();
+      client?.offMessage();
+      // 仅清理本组件注册的消息回调，不断开全局 WebSocket。
+      // wsStore.connect() 内部会在依赖变化重连时自动断开旧连接。
     };
     // 仅在认证状态变化时重连
     // eslint-disable-next-line react-hooks/exhaustive-deps

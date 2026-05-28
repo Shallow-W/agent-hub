@@ -32,6 +32,10 @@ export class WebSocketClient {
     this.onMessageCallback = handler;
   }
 
+  offMessage(): void {
+    this.onMessageCallback = null;
+  }
+
   connect(connectToken: string): void {
     // 开发环境通过 Vite 代理，生产环境直接连
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
