@@ -30,6 +30,7 @@ import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -40,7 +41,7 @@ export const ChatWindow: React.FC = () => {
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
-  const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? []) : []);
+  const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);

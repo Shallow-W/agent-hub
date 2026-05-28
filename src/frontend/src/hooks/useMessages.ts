@@ -11,6 +11,8 @@ const CACHE_TTL_MS = 30_000;
 const MAX_MESSAGES = 200;
 /** Per-conversation last fetch timestamp */
 const lastFetchedAt: Record<string, number> = {};
+const EMPTY_MESSAGES_ARRAY: import('@/types/message').Message[] = [];
+const EMPTY_OPTIMISTIC_ARRAY: import('@/types/message').OptimisticMessage[] = [];
 
 /** Invalidate cache on WS reconnect so missed messages are re-fetched */
 export function invalidateMessageCache() {
@@ -36,10 +38,10 @@ export function useMessages(conversationId: string | null) {
   const retryOptimistic = useMessageStore((s) => s.retryOptimistic);
   const removeOptimistic = useMessageStore((s) => s.removeOptimistic);
 
-  const messages = conversationMessages ?? [];
+  const messages = conversationMessages ?? EMPTY_MESSAGES_ARRAY;
   const streamingContent = streaming ?? '';
   const hasMore = hasMoreEntry === true;
-  const optimisticMessages: OptimisticMessage[] = optimisticEntry ?? [];
+  const optimisticMessages: OptimisticMessage[] = optimisticEntry ?? EMPTY_OPTIMISTIC_ARRAY;
 
   // 追踪当前活跃的 conversationId，用于 stale check
   const activeIdRef = useRef<string | null>(null);
