@@ -73,6 +73,9 @@
 | B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [x] |
 | B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [x] |
 | B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [x] |
+| B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [ ] |
+| B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [ ] |
+| B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
@@ -243,8 +246,8 @@
 | ID | 功能 | 后端状态 | 状态 |
 |----|------|----------|------|
 | MISS-001 | 群聊重命名 UI | 已有 API | [ ] |
-| MISS-002 | 个人资料编辑/展示 | 需新增 API | [ ] |
-| MISS-003 | 设置页面实现 | 大部分前端本地 | [ ] |
+| MISS-002 | 个人资料编辑/展示 | 已有 API(placeholder UI) | [ ] |
+| MISS-003 | 设置页面实现 | 大部分前端本地(主题按钮无功能) | [ ] |
 
 ### P1 — 重要功能缺失
 
@@ -252,9 +255,9 @@
 |----|------|----------|------|
 | MISS-004 | 群成员角色管理 UI | 部分已有 | [ ] |
 | MISS-005 | 好友删除 | 需新增 API | [ ] |
-| MISS-006 | /api/users/search 对接 | 已有 API | [ ] |
+| MISS-006 | /api/users/search 对接 | 已有 API | [x] |
 | MISS-007 | 归档对话列表/查看 | 需新增 API | [ ] |
-| MISS-008 | GetGroupInfo 对接 | 已有 API | [ ] |
+| MISS-008 | GetGroupInfo 对接 | 已有 API | [x] |
 | MISS-009 | 消息转发 | 需新增 API | [ ] |
 | MISS-010 | @提及功能 | 需新增 API | [ ] |
 | MISS-011 | 消息已读回执展示 | 部分已有 | [ ] |
