@@ -1,5 +1,6 @@
-import React, { useRef, useEffect } from 'react';
-import { Empty, Spin, Skeleton, Divider } from 'antd';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Empty, Spin, Skeleton, Divider, Badge } from 'antd';
+import { ArrowDownOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useAuthStore } from '@/store/authStore';
 import { useMessageStore } from '@/store/messageStore';
@@ -66,14 +67,37 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   const containerRef = useRef<HTMLDivElement>(null);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
+  const [showNewMsgBtn, setShowNewMsgBtn] = useState(false);
+  const [unreadSinceScroll, setUnreadSinceScroll] = useState(0);
+  const nearBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    nearBottomRef.current = isNearBottom;
+    if (isNearBottom) {
+      setShowNewMsgBtn(false);
+      setUnreadSinceScroll(0);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowNewMsgBtn(false);
+    setUnreadSinceScroll(0);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    if (nearBottom) {
+    if (nearBottomRef.current) {
       // Use instant scroll during streaming to avoid jitter; smooth for new messages
       bottomRef.current?.scrollIntoView({ behavior: streamingContent ? 'instant' : 'smooth' });
+    } else {
+      // User scrolled up — show indicator for new messages
+      setShowNewMsgBtn(true);
+      setUnreadSinceScroll((n) => n + 1);
     }
   }, [messages, streamingContent, optimisticMessages]);
 
@@ -108,7 +132,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   const isEmpty = messages.length === 0 && !streamingContent && optimisticMessages.length === 0;
 
   return (
-    <div className={styles.container} ref={containerRef}>
+    <div className={styles.container} ref={containerRef} onScroll={handleScroll}>
       {hasMore && (
         <div className={styles.loadMore}>
           {loading ? (
@@ -183,6 +207,14 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
             />
           )}
         </>
+      )}
+      {showNewMsgBtn && unreadSinceScroll > 0 && (
+        <button className={styles.newMsgBtn} onClick={scrollToBottom}>
+          <Badge count={unreadSinceScroll > 1 ? unreadSinceScroll : 0} size="small">
+            <ArrowDownOutlined />
+          </Badge>
+          <span style={{ marginLeft: 4 }}>新消息</span>
+        </button>
       )}
       <div ref={bottomRef} />
     </div>
