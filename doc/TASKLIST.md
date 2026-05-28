@@ -75,7 +75,7 @@
 | B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [x] |
 | B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [x] |
 | B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [x] |
-| B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
+| B43 | ConversationList noResults 分支不可达(死代码) | P3 | [-] |
 | B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [x] |
 | B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [x] |
 | B46 | ListMemberIDs UNION 返回重复 userID，群主收到重复消息 | P1 | [x] |
@@ -201,7 +201,7 @@
 | CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [x] |
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [x] |
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [-] |
-| CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
+| CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [-] |
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
 | CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [x] |
