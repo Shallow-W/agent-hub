@@ -925,3 +925,177 @@
 - **文件**: `src/frontend/src/api/client.ts`
 - **现象**: 所有 fetch 请求无 signal，组件卸载后请求继续执行并更新状态
 - **修复**: request 函数接受 AbortSignal 参数
+
+---
+
+## 第十轮：后端 E2E 流程追踪 + 前端 UX 审计
+
+### B44 [P1] 好友请求只单向检查，允许双向重复请求
+
+- **文件**: `src/backend/internal/repository/friend.go` — GetFriendship
+- **现象**: GetFriendship 仅查询 `(user_id=A, friend_id=B)`，不检查 `(user_id=B, friend_id=A)`。用户 B 可在收到 A 的请求后，再向 A 发送好友请求，产生两条 friend 记录
+- **复现**: A→B 发请求（status=pending），B→A 再发请求成功（第二条 pending 记录）
+- **修复**: GetFriendship 改为 `WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)`
+
+### B45 [P1] 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话
+
+- **文件**: `src/backend/internal/repository/conversation.go` — FindPrivateChat
+- **现象**: FindPrivateChat 带 `archived_at IS NULL` 过滤，用户 A 归档私聊后，B 调用 GetOrCreatePrivateChat 找不到原对话，创建新的。同一对用户出现两条 single 类型对话
+- **修复**: FindPrivateChat 仅用 user_id 过滤，归档用 conversation_members 维护而非对话级别
+
+### B46 [P1] ListMemberIDs UNION 返回重复 userID，群主收到重复消息
+
+- **文件**: `src/backend/internal/repository/conversation.go` — ListMemberIDs
+- **现象**: 查询用 `SELECT user_id FROM conversations WHERE … UNION SELECT user_id FROM conversation_members WHERE …`，群主同时出现在两表中，UNION 去重了但实际推送时 Hub 按 memberIDs 循环发送，若调用方展开为 slice 则重复
+- **修复**: 改用 `UNION` 后 `SELECT DISTINCT` 或统一为单查询
+
+### B47 [P1] 私聊非创建者无法归档（只检查 conv.UserID）
+
+- **文件**: `src/backend/internal/service/conversation.go` — Archive
+- **现象**: 归档权限仅检查 `conv.UserID == userID`，私聊对方无法归档自己的副本
+- **修复**: single 类型应检查 conversation_members 而非 conv.UserID
+
+### B48 [P1] WS join_room 权限检查与 REST 不一致
+
+- **文件**: `src/backend/internal/handler/websocket.go` vs `service/conversation.go`
+- **现象**: WS join_room 用 `GroupRepo.IsMember` 仅查 conversation_members 表，REST checkMembership 有 fallback 查 conv.UserID。对 single 类型对话，WS join 可能拒绝合法用户
+- **修复**: WS 复用 service 层 checkMembership
+
+### B49 [P1] 群创建 owner INSERT 无 ON CONFLICT 非幂等
+
+- **文件**: `src/backend/internal/repository/group.go` — CreateGroup
+- **现象**: 群主 INSERT conversation_members 无 ON CONFLICT，重试/并发时主键冲突返回 500
+- **修复**: 添加 `ON CONFLICT (conversation_id, user_id) DO NOTHING`
+
+### B50 [P2] username 校验 max 冲突：binding 50 vs regex 20
+
+- **文件**: `src/backend/internal/dto/request.go` + `service/user.go`
+- **现象**: Gin binding tag `max=50`，但 regex 校验 `^.{2,20}$`。21-50 字符用户名通过 binding 但被 regex 拒绝，错误消息不明确
+- **修复**: 统一为同一上限值
+
+### B51 [P2] typing 通知广播包含发送者自己
+
+- **文件**: `src/backend/internal/handler/websocket.go` — typing handler
+- **现象**: 广播 typing 事件给所有在线成员包括发送者自己，浪费流量
+- **修复**: 推送时排除 sender connection
+
+### B52 [P2] RecallMessage 对无 sender_id 的群聊历史消息推断错误
+
+- **文件**: `src/backend/internal/service/message.go` — RecallMessage
+- **现象**: 群聊历史消息 sender_id 可能为空（系统消息等），撤回权限检查时 fallback 到 conv.UserID（群创建者），普通成员撤回自己的消息反而失败
+- **修复**: sender_id 为空时直接拒绝撤回（非正常路径），不要 fallback
+
+---
+
+## 第十轮：前端 UX 审计发现
+
+### UX-01 [P1] 删除对话无二次确认弹窗
+
+- **文件**: `src/frontend/src/components/sidebar/ConversationList.tsx`
+- **现象**: 点击删除直接调用 deleteConversation API，无确认弹窗。误触即不可恢复
+- **修复**: 添加 Ant Design `Modal.confirm` 二次确认
+
+### UX-02 [P1] 创建群组后群不自动激活
+
+- **文件**: `src/frontend/src/layout/AppLayout.tsx` — handleGroupCreate
+- **现象**: handleGroupCreate 调用 createConversation 但不调用 setActive，用户需手动在列表中找新建的群
+- **修复**: createConversation 成功后调用 setActive(conv.id)
+
+### UX-03 [P1] 切换对话无"新消息"指示器
+
+- **现象**: 用户在 A 对话中时，B 对话收到新消息仅靠 badge 数字提示，无"跳到新消息"按钮。消息列表长时新消息不可见
+- **修复**: 添加浮动"新消息 N 条 ↓"按钮，点击跳转到底部
+
+### UX-04 [P1] 无响应式设计
+
+- **文件**: `src/frontend/src/layout/AppLayout.tsx`
+- **现象**: 三栏布局固定宽度，移动端(<768px)三列挤在一起不可用。无断点切换逻辑
+- **修复**: 添加 CSS media query 或移动端适配（单栏/抽屉模式）
+
+### UX-05 [P1] 快速切换对话时 fetchMessages 竞态
+
+- **文件**: `src/frontend/src/store/messageStore.ts` — fetchMessages
+- **现象**: 快速在 A→B→C 之间切换，三个 fetch 并发。A/B 的响应可能在 C 之后到达，覆盖 C 的正确数据
+- **修复**: 添加请求序列号或 AbortController，旧请求完成时检查当前活跃对话是否仍匹配
+
+### UX-06 [P2] 新建对话默认标题"新对话"硬编码
+
+- **文件**: `src/frontend/src/layout/AppLayout.tsx` — handleCreate
+- **现象**: `title: '新对话'` 硬编码，所有新对话同名，无法区分
+- **修复**: 弹出输入框让用户命名，或自动生成唯一标题（如 "对话 #N"）
+
+### UX-07 [P2] 对话列表无空状态引导
+
+- **现象**: 新注册用户对话列表为空，无任何引导文字或"创建第一个对话"按钮
+- **修复**: 空列表时显示 Empty 组件 + 创建引导
+
+### UX-08 [P2] 发送按钮无 loading 状态
+
+- **文件**: `src/frontend/src/components/chat/ChatInput.tsx`
+- **现象**: 发送消息时按钮无 loading 效果，用户可连续点击触发多次 sendMessage
+- **修复**: 发送中禁用按钮或显示 spinner
+
+### UX-09 [P2] 群聊创建后不自动打开成员面板
+
+- **现象**: 新建群组后用户不知道如何管理成员，需手动点击成员按钮
+- **修复**: 群创建成功后自动打开成员面板
+
+### UX-10 [P2] 好友申请无备注/留言字段
+
+- **文件**: `src/frontend/src/components/friends/FriendPanel.tsx`
+- **现象**: 发送好友申请仅能点按钮，无法附言（如"我是XXX"），对方无法判断来源
+- **修复**: 添加可选的留言输入框（需后端配合）
+
+### UX-11 [P2] 消息时间戳仅显示时间不显示日期
+
+- **文件**: `src/frontend/src/components/chat/MessageBubble.tsx`
+- **现象**: 所有消息仅显示 HH:mm，跨天消息无法区分日期
+- **修复**: 当天显示时间，非当天显示"昨天/MM-DD HH:mm"
+
+### UX-12 [P2] 输入框不支持 Shift+Enter 换行
+
+- **文件**: `src/frontend/src/components/chat/ChatInput.tsx`
+- **现象**: Enter 直接发送，无法多行输入。长消息只能一段段发
+- **修复**: Shift+Enter 换行，Enter 发送
+
+### UX-13 [P2] 消息列表不支持键盘快捷键
+
+- **现象**: 无 Esc 关闭面板、↑↓ 选择消息、Ctrl+F 搜索等键盘操作
+- **修复**: 添加常见快捷键支持
+
+### UX-14 [P2] 长消息无折叠/展开功能
+
+- **现象**: AI Agent 返回的长消息（代码块等）占满整个视口，无法折叠
+- **修复**: 超过 N 行自动折叠，点击展开
+
+### UX-15 [P2] 无对话内消息搜索功能
+
+- **现象**: 无法在当前对话中搜索关键词，找不到历史消息
+- **修复**: 添加 Ctrl+F 弹出搜索栏，高亮匹配消息
+
+### UX-16 [P3] 右键菜单仅显示"撤回"
+
+- **文件**: `src/frontend/src/components/chat/MessageBubble.tsx`
+- **现象**: 右键/长按菜单只有"撤回"，缺少"复制文本""转发""引用回复"等常见 IM 操作
+- **修复**: 扩展右键菜单选项
+
+### UX-17 [P3] 未读 badge 超 99 无特殊显示
+
+- **现象**: 100+ 条未读仍显示具体数字，占据大量空间
+- **修复**: 超过 99 显示 "99+"
+
+### UX-18 [P3] 对话列表项无 hover 预览
+
+- **现象**: 鼠标悬停对话项时不显示最后一条消息摘要，需点击进入才能看到
+- **修复**: Tooltip 显示最近消息预览
+
+### UX-19 [P3] 无消息发送失败的全局重试提示
+
+- **现象**: 乐观消息失败后仅在消息旁显示小图标，无全局提示条"有 N 条消息发送失败"
+- **修复**: 添加顶部提示条，一键重试所有失败消息
+
+### UX-20 [P3] Emoji 选择器无最近使用/常用分类
+
+- **文件**: `src/frontend/src/components/chat/EmojiPicker.tsx`
+- **现象**: Emoji 面板无历史记录，每次从分类中翻找
+- **修复**: 添加"最近使用"分类，localStorage 持久化
