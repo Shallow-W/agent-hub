@@ -164,9 +164,14 @@ func main() {
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
 			filePath := c.Param("filepath")
+			cleaned := filepath.Clean(filePath)
+			if strings.HasPrefix(cleaned, "..") {
+				c.Status(http.StatusNotFound)
+				return
+			}
 			c.Header("Content-Disposition", "inline")
 			c.Header("X-Content-Type-Options", "nosniff")
-			c.File(filepath.Join(uploadDir, filepath.Clean(filePath)))
+			c.File(filepath.Join(uploadDir, cleaned))
 		})
 
 		// 文件上传
