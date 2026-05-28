@@ -134,6 +134,7 @@ func main() {
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery())
 	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 	router.Use(middleware.RequestLogger(logger))

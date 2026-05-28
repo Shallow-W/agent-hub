@@ -155,8 +155,9 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     }
   };
 
-  const memberIds = new Set(members.map((m) => m.user_id));
-  const availableFriends = friends.filter((f) => !memberIds.has(f.friend_id));
+  const memberIdsRef = useRef(new Set<string>());
+  memberIdsRef.current = new Set(members.map((m) => m.user_id));
+  const availableFriends = friends.filter((f) => !memberIdsRef.current.has(f.friend_id));
   const filteredInviteFriends = inviteSearch
     ? availableFriends.filter((f) =>
         (f.friend_name ?? '').toLowerCase().includes(inviteSearch.toLowerCase()),
@@ -174,14 +175,14 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
       setUserSearchLoading(true);
       try {
         const results = await searchUsersApi(value.trim());
-        setUserSearchResults((results ?? []).filter((u) => !memberIds.has(u.id)));
+        setUserSearchResults((results ?? []).filter((u) => !memberIdsRef.current.has(u.id)));
       } catch {
         setUserSearchResults([]);
       } finally {
         setUserSearchLoading(false);
       }
     }, 300);
-  }, [memberIds]);
+  }, []);
 
   useEffect(() => {
     return () => {

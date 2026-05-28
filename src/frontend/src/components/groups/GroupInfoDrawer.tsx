@@ -70,10 +70,10 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
           <>
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="群名称">
-                {info.conversation.title}
+                {info.conversation?.title ?? "未命名"}
               </Descriptions.Item>
               <Descriptions.Item label="创建时间">
-                {new Date(info.conversation.created_at).toLocaleString()}
+                {info.conversation?.created_at ? new Date(info.conversation.created_at).toLocaleString() : "-"}
               </Descriptions.Item>
               <Descriptions.Item label="成员数">
                 {info.members.length}
@@ -103,8 +103,8 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
                         </span>
                       }
                       description={
-                        <Tag color={ROLE_COLORS[member.role]} style={{ fontSize: 11 }}>
-                          {ROLE_LABELS[member.role]}
+                        <Tag color={ROLE_COLORS[member.role] ?? 'default'} style={{ fontSize: 11 }}>
+                          {ROLE_LABELS[member.role] ?? member.role}
                         </Tag>
                       }
                     />

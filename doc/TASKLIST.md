@@ -83,15 +83,15 @@
 | B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [x] |
 | B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [x] |
 | B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [x] |
-| B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
+| B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [x] |
 | B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [x] |
-| B53 | user.stop_stream 前端发送但后端无处理(stop按钮无效) | P1 | [ ] |
-| B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [ ] |
+| B53 | user.stop_stream 前端发送但后端无处理(stop按钮无效) | P1 | [x] |
+| B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [x] |
 | B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
-| B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [ ] |
+| B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [x] |
 | B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [ ] |
-| B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [ ] |
-| B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [ ] |
+| B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [x] |
+| B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [x] |
 | B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [ ] |
 | B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [ ] |
 | B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [ ] |
@@ -107,15 +107,15 @@
 | B72 | MIME 检测基于 512 字节——polyglot 文件绕过 | P3 | [ ] |
 | B73 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [ ] |
 | B74 | Upload FileSize 用客户端值 fileHeader.Size 而非实际磁盘大小 | P2 | [ ] |
-| B75 | authStore login/register 不调用 setToken——刷新后 token 丢失 | P1 | [ ] |
+| B75 | authStore login/register 不调用 setToken——刷新后 token 丢失 | P1 | [x] |
 | B76 | WS 重连后不恢复房间订阅——断线期间消息静默丢失 | P1 | [ ] |
-| B77 | GroupMemberPanel handleAddUser 无防重复点击 | P1 | [ ] |
-| B78 | FriendList handleAddFriend 无防重复点击——重复好友请求 | P1 | [ ] |
+| B77 | GroupMemberPanel handleAddUser 无防重复点击 | P1 | [x] |
+| B78 | FriendList handleAddFriend 无防重复点击——重复好友请求 | P1 | [x] |
 | B79 | SettingsPanel 主题切换按钮无实际功能 | P1 | [ ] |
 | B80 | GroupInfoDrawer info.conversation 可能 undefined 渲染崩溃 | P2 | [ ] |
-| B81 | ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined | P2 | [ ] |
+| B81 | ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined | P2 | [x] |
 | B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [ ] |
-| B83 | FriendRequest formatTime 对无效日期返回 NaN | P2 | [ ] |
+| B83 | FriendRequest formatTime 对无效日期返回 NaN | P2 | [x] |
 | B84 | FriendRequest sendRequest loading 复用全局 loading——UI 误判 | P2 | [ ] |
 | B85 | WS flushQueue 期间断开——消息顺序错乱 | P2 | [ ] |
 | B86 | 多 tab 打开 WS 状态不同步 | P3 | [ ] |
@@ -277,10 +277,10 @@
 | DB-07 | friends.status 无 CHECK 约束 | P2 | [x] |
 | DB-08 | CASCADE 删除用户时销毁群聊(应 SET NULL) | P1 | [ ] |
 | DB-09 | 可空 DB 列映射为非指针 Go 类型(StructScan 崩溃) | P1 | [ ] |
-| DB-10 | ANY($1)+[]string 在 sqlx 下可能运行时失败 | P2 | [ ] |
+| DB-10 | ANY($1)+[]string 在 sqlx 下可能运行时失败 | P2 | [x] |
 | DB-11 | GroupRepo.AddMember 缺 ON CONFLICT 幂等保护 | P2 | [x] |
 | DB-12 | 仓库方法重复且行为不一致(AddMember/GetUserByID) | P3 | [ ] |
-| DB-13 | user.go 用 err==sql.ErrNoRows 而非 errors.Is | P3 | [ ] |
+| DB-13 | user.go 用 err==sql.ErrNoRows 而非 errors.Is | P3 | [x] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 

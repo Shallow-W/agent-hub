@@ -116,18 +116,21 @@ func (c *Client) enqueue(data []byte) {
 	select {
 	case c.sendCh <- data:
 	default:
-		// 背压：丢弃最旧消息
+		// 背压：丢弃最旧消息腾出一个位置
 		select {
 		case <-c.sendCh:
 		default:
 		}
-		c.sendCh <- data
-		// 复制一份用于日志，避免引用底层缓冲区
-		snippet := string(data)
-		if len(snippet) > 80 {
-			snippet = snippet[:80] + "..."
+		select {
+		case c.sendCh <- data:
+		default:
+			// 二次写入仍失败则直接丢弃
+			snippet := string(data)
+			if len(snippet) > 80 {
+				snippet = snippet[:80] + "..."
+			}
+			slog.Warn("write buffer full after drain, dropping message", "user_id", c.UserID, "msg", snippet)
 		}
-		slog.Warn("write buffer full, dropped oldest message", "user_id", c.UserID, "msg", snippet)
 	}
 }
 

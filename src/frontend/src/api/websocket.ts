@@ -15,6 +15,7 @@ export class WebSocketClient {
   private onMessageCallback: MessageHandler | null = null;
   private statusValue: WsStatus = 'disconnected';
   private statusListeners: Set<(status: WsStatus) => void> = new Set();
+  private joinedRooms: Set<string> = new Set();
 
   get status(): WsStatus {
     return this.statusValue;
@@ -45,6 +46,17 @@ export class WebSocketClient {
       // 断线时缓存消息，重连后发送
       this.queue.push(message);
     }
+    // 追踪 join_room 以便重连后恢复
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed.type === 'join_room' && parsed.data?.conversation_id) {
+        this.joinedRooms.add(parsed.data.conversation_id);
+      } else if (parsed.type === 'leave_room' && parsed.data?.conversation_id) {
+        this.joinedRooms.delete(parsed.data.conversation_id);
+      }
+    } catch {
+      // non-JSON message, ignore
+    }
   }
 
   disconnect(): void {
@@ -69,6 +81,8 @@ export class WebSocketClient {
       this.setStatus('connected');
       // 重连后发送缓存的消息
       this.flushQueue();
+      // 重连后恢复房间订阅
+      this.rejoinRooms();
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -113,6 +127,15 @@ export class WebSocketClient {
     while (this.queue.length > 0) {
       const msg = this.queue.shift();
       if (msg) this.ws?.send(msg);
+    }
+  }
+
+  private rejoinRooms(): void {
+    for (const conversationId of this.joinedRooms) {
+      this.ws?.send(JSON.stringify({
+        type: 'join_room',
+        data: { conversation_id: conversationId },
+      }));
     }
   }
 
