@@ -1,15 +1,19 @@
 import { create } from 'zustand';
-import type { Conversation, ConversationType } from '@/types/conversation';
+import type { Conversation, ConversationAgent, ConversationType } from '@/types/conversation';
 import * as convApi from '@/api/conversation';
 
 interface ConversationState {
   conversations: Conversation[];
+  conversationAgents: Record<string, ConversationAgent[]>;
   activeConversationId: string | null;
   loading: boolean;
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
   deleteConversation: (id: string) => Promise<void>;
   togglePin: (id: string, pinned: boolean) => Promise<void>;
+  fetchConversationAgents: (id: string) => Promise<void>;
+  addConversationAgent: (id: string, agentId: string) => Promise<ConversationAgent>;
+  removeConversationAgent: (id: string, agentId: string) => Promise<void>;
   setActive: (id: string | null) => void;
 }
 
@@ -23,6 +27,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
 
 export const useConversationStore = create<ConversationState>((set) => ({
   conversations: [],
+  conversationAgents: {},
   activeConversationId: null,
   loading: false,
 
@@ -53,7 +58,13 @@ export const useConversationStore = create<ConversationState>((set) => ({
         state.activeConversationId === id
           ? (next[0]?.id ?? null)
           : state.activeConversationId;
-      return { conversations: next, activeConversationId: activeId };
+      const nextAgents = { ...state.conversationAgents };
+      delete nextAgents[id];
+      return {
+        conversations: next,
+        activeConversationId: activeId,
+        conversationAgents: nextAgents,
+      };
     });
   },
 
@@ -66,6 +77,47 @@ export const useConversationStore = create<ConversationState>((set) => ({
         ),
       ),
     }));
+  },
+
+  fetchConversationAgents: async (id) => {
+    const agents = await convApi.getConversationAgents(id);
+    set((state) => ({
+      conversationAgents: {
+        ...state.conversationAgents,
+        [id]: agents,
+      },
+    }));
+  },
+
+  addConversationAgent: async (id, agentId) => {
+    const item = await convApi.addConversationAgent(id, agentId);
+    set((state) => {
+      const current = state.conversationAgents[id] ?? [];
+      const next = [
+        ...current.filter((agent) => agent.agent_id !== item.agent_id),
+        item,
+      ];
+      return {
+        conversationAgents: {
+          ...state.conversationAgents,
+          [id]: next,
+        },
+      };
+    });
+    return item;
+  },
+
+  removeConversationAgent: async (id, agentId) => {
+    await convApi.removeConversationAgent(id, agentId);
+    set((state) => {
+      const current = state.conversationAgents[id] ?? [];
+      return {
+        conversationAgents: {
+          ...state.conversationAgents,
+          [id]: current.filter((agent) => agent.agent_id !== agentId),
+        },
+      };
+    });
   },
 
   setActive: (id) => {

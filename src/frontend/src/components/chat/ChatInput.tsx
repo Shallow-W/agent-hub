@@ -1,11 +1,18 @@
-import React, { useState, useCallback } from 'react';
-import { Input, Button, Tooltip, Spin, Select } from 'antd';
-import { SendOutlined, PaperClipOutlined, RobotOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Input, Button, Tooltip, Spin, Select, Modal, message } from 'antd';
+import {
+  PlusOutlined,
+  SendOutlined,
+  PaperClipOutlined,
+  RobotOutlined,
+} from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useAgents } from '@/hooks/useAgents';
+import { useConversationStore } from '@/store/conversationStore';
 import styles from './ChatInput.module.css';
 
 const { TextArea } = Input;
+const EMPTY_CONVERSATION_AGENTS: ReturnType<typeof useConversationStore.getState>['conversationAgents'][string] = [];
 
 interface ChatInputProps {
   conversationId: string;
@@ -14,10 +21,30 @@ interface ChatInputProps {
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const [value, setValue] = useState('');
   const [agentId, setAgentId] = useState<string | undefined>();
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addAgentIds, setAddAgentIds] = useState<string[]>([]);
   const { send, streamingContent } = useMessages(conversationId);
   const { agents } = useAgents();
+  const conversationAgents = useConversationStore(
+    (s) => s.conversationAgents[conversationId] ?? EMPTY_CONVERSATION_AGENTS,
+  );
+  const addConversationAgent = useConversationStore((s) => s.addConversationAgent);
   const isStreaming = (streamingContent ?? '').length > 0;
-  const selectedAgent = agents.find((agent) => agent.id === agentId);
+  const selectedAgent = conversationAgents.find((agent) => agent.agent_id === agentId);
+  const availableAgents = useMemo(() => {
+    const joined = new Set(conversationAgents.map((agent) => agent.agent_id));
+    return agents.filter((agent) => !joined.has(agent.id));
+  }, [agents, conversationAgents]);
+
+  useEffect(() => {
+    const firstAgentId = conversationAgents[0]?.agent_id;
+    setAgentId((current) => {
+      if (current && conversationAgents.some((agent) => agent.agent_id === current)) {
+        return current;
+      }
+      return firstAgentId;
+    });
+  }, [conversationAgents, conversationId]);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
@@ -26,7 +53,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     try {
       await send(trimmed, agentId);
     } catch {
-      // 发送失败时恢复输入内容
+      // 发送失败时恢复输入，避免用户丢失刚才写的内容。
       setValue(trimmed);
     }
   }, [value, isStreaming, send, agentId]);
@@ -41,6 +68,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
     [handleSubmit],
   );
 
+  const handleAddRobots = useCallback(async () => {
+    if (addAgentIds.length === 0) return;
+    const added = await Promise.all(
+      addAgentIds.map((id) => addConversationAgent(conversationId, id)),
+    );
+    setAgentId((current) => current ?? added[0]?.agent_id);
+    setAddAgentIds([]);
+    setAddModalOpen(false);
+    message.success(`已加入 ${added.length} 个 Robot`);
+  }, [addAgentIds, addConversationAgent, conversationId]);
+
   const charCount = value.length;
 
   return (
@@ -48,7 +86,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
       {isStreaming && (
         <div className={styles.typingIndicator}>
           <Spin size="small" />
-          <span>Agent 正在输入</span>
+          <span>Agent 正在思考</span>
         </div>
       )}
       <div className={styles.agentRow}>
@@ -58,16 +96,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           aria-label="选择 Agent"
           className={styles.agentSelect}
           optionFilterProp="label"
-          options={agents.map((agent) => ({
+          options={conversationAgents.map((agent) => ({
             label: `${agent.name} · ${agent.cli_tool}`,
-            value: agent.id,
+            value: agent.agent_id,
           }))}
-          placeholder={agents.length === 0 ? '暂无可用 Agent' : '选择 Agent 接入本次消息'}
+          placeholder={conversationAgents.length === 0 ? '当前对话未添加 Robot' : '选择本对话 Robot'}
           showSearch
           size="small"
           value={agentId}
           onChange={setAgentId}
         />
+        <Tooltip title="添加 Robot 到当前对话">
+          <Button
+            aria-label="添加 Robot"
+            className={styles.addRobotButton}
+            icon={<PlusOutlined />}
+            size="small"
+            onClick={() => setAddModalOpen(true)}
+          />
+        </Tooltip>
         {selectedAgent ? (
           <span className={styles.agentHint}>
             {selectedAgent.machine_name || selectedAgent.source}
@@ -102,6 +149,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           {charCount}
         </span>
       </div>
+      <Modal
+        title="添加 Robot 到当前对话"
+        open={addModalOpen}
+        okText="添加"
+        cancelText="取消"
+        okButtonProps={{ disabled: addAgentIds.length === 0 }}
+        onOk={handleAddRobots}
+        onCancel={() => {
+          setAddModalOpen(false);
+          setAddAgentIds([]);
+        }}
+      >
+        <Select
+          aria-label="选择要加入的 Robot"
+          className={styles.addRobotSelect}
+          mode="multiple"
+          optionFilterProp="label"
+          options={availableAgents.map((agent) => ({
+            label: `${agent.name} · ${agent.cli_tool}${agent.machine_name ? ` · ${agent.machine_name}` : ''}`,
+            value: agent.id,
+          }))}
+          placeholder={availableAgents.length === 0 ? '所有 Robot 都已在当前对话中' : '选择一个或多个 Robot'}
+          showSearch
+          value={addAgentIds}
+          onChange={setAddAgentIds}
+        />
+      </Modal>
     </div>
   );
 };

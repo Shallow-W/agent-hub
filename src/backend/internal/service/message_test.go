@@ -45,8 +45,9 @@ func (r *fakeConvRepoForMsg) UpdateTimestamp(ctx context.Context, id string) err
 }
 
 type fakeAgentRepoForMsg struct {
-	agent *model.Agent
-	task  *model.DaemonTask
+	agent          *model.Agent
+	task           *model.DaemonTask
+	inConversation bool
 }
 
 func (r *fakeAgentRepoForMsg) GetByID(ctx context.Context, id string) (*model.Agent, error) {
@@ -54,6 +55,10 @@ func (r *fakeAgentRepoForMsg) GetByID(ctx context.Context, id string) (*model.Ag
 		return r.agent, nil
 	}
 	return nil, nil
+}
+
+func (r *fakeAgentRepoForMsg) IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error) {
+	return r.inConversation, nil
 }
 
 func (r *fakeAgentRepoForMsg) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error) {
@@ -86,7 +91,8 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		conv: &model.Conversation{ID: "conv-1", UserID: userID},
 	}
 	agentRepo := &fakeAgentRepoForMsg{
-		agent: &model.Agent{ID: "agent-1", UserID: &userID, Name: "Codex Agent", CLITool: "codex", MachineID: stringPtr("machine-1")},
+		agent:          &model.Agent{ID: "agent-1", UserID: &userID, Name: "Codex Agent", CLITool: "codex", MachineID: stringPtr("machine-1")},
+		inConversation: true,
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
 

@@ -14,6 +14,12 @@ interface MessageState {
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, agentId?: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
+  replaceMessage: (
+    conversationId: string,
+    localId: string,
+    message: Message,
+  ) => void;
+  removeMessage: (conversationId: string, messageId: string) => void;
   updateStreaming: (
     conversationId: string,
     messageId: string,
@@ -60,10 +66,39 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: async (conversationId, content, agentId) => {
-    const result = await msgApi.sendMessage(conversationId, content, 'user', agentId);
-    get().addMessage(conversationId, result.user_message);
-    if (result.agent_message) {
-      get().addMessage(conversationId, result.agent_message);
+    const localID = `local-${Date.now()}`;
+    const localMessage: Message = {
+      id: localID,
+      conversation_id: conversationId,
+      role: 'user',
+      content,
+      artifacts_json: null,
+      created_at: new Date().toISOString(),
+    };
+    get().addMessage(conversationId, localMessage);
+    if (agentId) {
+      set((state) => ({
+        streamingContent: {
+          ...state.streamingContent,
+          [conversationId]: 'Agent 正在思考...',
+        },
+      }));
+    }
+    try {
+      const result = await msgApi.sendMessage(conversationId, content, 'user', agentId);
+      get().replaceMessage(conversationId, localID, result.user_message);
+      if (result.agent_message) {
+        get().addMessage(conversationId, result.agent_message);
+      }
+    } catch (error) {
+      get().removeMessage(conversationId, localID);
+      throw error;
+    } finally {
+      set((state) => {
+        const next = { ...state.streamingContent };
+        delete next[conversationId];
+        return { streamingContent: next };
+      });
     }
   },
 
@@ -74,6 +109,32 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         messages: {
           ...state.messages,
           [conversationId]: [...existing, message],
+        },
+      };
+    });
+  },
+
+  replaceMessage: (conversationId, localId, message) => {
+    set((state) => {
+      const existing = state.messages[conversationId] ?? [];
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: existing.map((item) => (
+            item.id === localId ? message : item
+          )),
+        },
+      };
+    });
+  },
+
+  removeMessage: (conversationId, messageId) => {
+    set((state) => {
+      const existing = state.messages[conversationId] ?? [];
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: existing.filter((item) => item.id !== messageId),
         },
       };
     });

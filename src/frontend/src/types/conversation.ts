@@ -9,3 +9,23 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
 }
+
+export interface ConversationAgent {
+  id: string;
+  conversation_id: string;
+  agent_id: string;
+  added_by: string;
+  role: 'robot';
+  joined_at: string;
+  name: string;
+  type: string;
+  cli_tool: string;
+  avatar: string;
+  source: string;
+  status: string;
+  version: string;
+  machine_id?: string;
+  machine_name: string;
+  last_seen_at?: string;
+  capabilities_json: string;
+}

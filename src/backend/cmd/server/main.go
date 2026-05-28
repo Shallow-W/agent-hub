@@ -123,6 +123,9 @@ func main() {
 		apiGroup.GET("/conversations", convHandler.List)
 		apiGroup.DELETE("/conversations/:id", convHandler.Delete)
 		apiGroup.PUT("/conversations/:id/pin", convHandler.TogglePin)
+		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
+		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
 
 		apiGroup.POST("/conversations/:id/messages", msgHandler.Send)
 		apiGroup.GET("/conversations/:id/messages", msgHandler.History)

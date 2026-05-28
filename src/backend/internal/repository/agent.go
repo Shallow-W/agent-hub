@@ -237,6 +237,28 @@ func (r *AgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, 
 	return &a, nil
 }
 
+// IsAgentInConversation 校验 Agent 是否已作为 Robot 加入当前用户的对话。
+func (r *AgentRepo) IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT EXISTS (
+		   SELECT 1
+		   FROM conversation_agents ca
+		   JOIN conversations c ON c.id = ca.conversation_id
+		   JOIN agents a ON a.id = ca.agent_id
+		   WHERE ca.conversation_id = $1
+		     AND ca.agent_id = $2
+		     AND c.user_id = $3
+		     AND (a.user_id IS NULL OR a.user_id = $3)
+		 )`,
+		conversationID, agentID, userID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check conversation agent: %w", err)
+	}
+	return exists, nil
+}
+
 // GetByID 按 ID 查询 Agent
 func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error) {
 	var a model.Agent

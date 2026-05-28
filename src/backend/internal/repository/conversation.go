@@ -98,3 +98,81 @@ func (r *ConversationRepo) UpdateTimestamp(ctx context.Context, id string) error
 	}
 	return nil
 }
+
+// ListAgents 查询某个对话中已加入的 Robot 成员。
+func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error) {
+	list := make([]model.ConversationAgent, 0)
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
+		        a.name, a.type, a.cli_tool, a.avatar, a.source, a.status, a.version,
+		        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json
+		 FROM conversation_agents ca
+		 JOIN conversations c ON c.id = ca.conversation_id
+		 JOIN agents a ON a.id = ca.agent_id
+		 WHERE ca.conversation_id = $1
+		   AND c.user_id = $2
+		   AND (a.user_id IS NULL OR a.user_id = $2)
+		 ORDER BY ca.joined_at ASC`,
+		conversationID, userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list conversation agents: %w", err)
+	}
+	return list, nil
+}
+
+// AddAgent 把当前用户可用的 Agent 加入指定对话。
+func (r *ConversationRepo) AddAgent(ctx context.Context, conversationID, agentID, userID string) (*model.ConversationAgent, error) {
+	var item model.ConversationAgent
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO conversation_agents (conversation_id, agent_id, added_by)
+		 SELECT c.id, a.id, $3
+		 FROM conversations c
+		 JOIN agents a ON a.id = $2
+		 WHERE c.id = $1
+		   AND c.user_id = $3
+		   AND (a.user_id IS NULL OR a.user_id = $3)
+		 ON CONFLICT (conversation_id, agent_id) DO UPDATE
+		   SET joined_at = conversation_agents.joined_at
+		 RETURNING id, conversation_id, agent_id, added_by, role, joined_at`,
+		conversationID, agentID, userID,
+	).StructScan(&item)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("add conversation agent: %w", err)
+	}
+
+	list, err := r.ListAgents(ctx, conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, current := range list {
+		if current.ID == item.ID {
+			return &current, nil
+		}
+	}
+	return &item, nil
+}
+
+// RemoveAgent 从指定对话移除 Robot 成员。
+func (r *ConversationRepo) RemoveAgent(ctx context.Context, conversationID, agentID, userID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM conversation_agents ca
+		 USING conversations c
+		 WHERE ca.conversation_id = c.id
+		   AND ca.conversation_id = $1
+		   AND ca.agent_id = $2
+		   AND c.user_id = $3`,
+		conversationID, agentID, userID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("remove conversation agent: %w", err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+	return count > 0, nil
+}

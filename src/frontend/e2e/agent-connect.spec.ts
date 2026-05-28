@@ -165,9 +165,14 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
     await codexRow.getByRole('button', { name: '添加 Agent' }).click();
     await expect(page.getByText('AgentHub UI E2E B 已添加')).toBeVisible();
 
+    await codexRow.getByRole('textbox').fill('AgentHub UI E2E C');
+    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
+    await expect(page.getByText('AgentHub UI E2E C 已添加')).toBeVisible();
+
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: /AgentHub UI E2E A/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /AgentHub UI E2E C/ })).toBeVisible();
 
   const agentCard = page.getByRole('button', { name: /AgentHub UI E2E A/ });
   await agentCard.getByRole('button').click();
@@ -182,12 +187,29 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
     data: { type: 'single', title: chatTitle },
   });
   expect(conversationResponse.ok()).toBeTruthy();
+  const conversation = (await conversationResponse.json()).data;
+  const agentsResponse = await request.get(`${apiBaseURL}/api/agents`, { headers });
+  expect(agentsResponse.ok()).toBeTruthy();
+  const agents = (await agentsResponse.json()).data as Array<{ id: string; name: string }>;
+  const chatAgent = agents.find((agent) => agent.name === 'AgentHub UI E2E B');
+  expect(chatAgent).toBeTruthy();
+  const addRobotResponse = await request.post(`${apiBaseURL}/api/conversations/${conversation.id}/agents`, {
+    headers,
+    data: { agent_id: chatAgent?.id },
+  });
+  expect(addRobotResponse.ok()).toBeTruthy();
 
   await page.reload();
   await page.getByRole('menuitem', { name: '对话' }).click();
   await page.getByText(chatTitle, { exact: true }).click();
-  await page.getByLabel('选择 Agent').click();
-  await page.getByText('AgentHub UI E2E B ·').click();
+  await expect(page.getByText('AgentHub UI E2E B', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '添加 Robot' }).click();
+  const addRobotDialog = page.getByRole('dialog', { name: '添加 Robot 到当前对话' });
+  await addRobotDialog.getByLabel('选择要加入的 Robot').click();
+  await page.getByText('AgentHub UI E2E C ·').click();
+  await page.keyboard.press('Escape');
+  await addRobotDialog.locator('.ant-modal-footer .ant-btn-primary').click();
+  await expect(page.getByText('AgentHub UI E2E C', { exact: true })).toBeVisible();
   const chatInput = page.getByPlaceholder('输入消息... (Enter 发送, Shift+Enter 换行)');
   await chatInput.click();
   await chatInput.fill('Reply with exactly: AgentHub-claude-ok');
@@ -197,6 +219,8 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
     response.url().includes('/messages') && response.request().method() === 'POST'
   ), { timeout: 10000 });
   await page.locator('button').filter({ has: page.locator('.anticon-send') }).click();
+  await expect(page.getByText('Reply with exactly: AgentHub-claude-ok', { exact: true })).toBeVisible();
+  await expect(page.getByText('Agent 正在思考...', { exact: true })).toBeVisible();
   await messageRequest;
   await expect(page.getByText('AgentHub-claude-ok', { exact: true })).toBeVisible({ timeout: 120000 });
 

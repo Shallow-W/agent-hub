@@ -6,6 +6,7 @@ import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import FriendList from '@/components/friends/FriendList';
 import FriendRequest from '@/components/friends/FriendRequest';
+import { RobotFriendList } from '@/components/friends/RobotFriendList';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { AgentList } from '@/components/agent/AgentList';
 import { AgentProfile } from '@/components/agent/AgentProfile';
@@ -17,7 +18,7 @@ import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
-  const { create } = useConversation();
+  const { create, addConversationAgent } = useConversation();
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
   const { agents } = useAgents();
@@ -26,11 +27,21 @@ const AppLayout: React.FC = () => {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const handleCreate = async () => {
-    await create('single', `新对话`);
+    const time = new Date().toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    await create('single', `新对话 ${time}`);
+    setActiveNav('chat');
+  };
+
+  const handleStartRobotChat = async (agent: Agent) => {
+    const conv = await create('single', agent.name);
+    await addConversationAgent(conv.id, agent.id);
+    setActiveNav('chat');
   };
 
   const handleGroupCreate = (name: string, memberIds: string[]) => {
-    // TODO: 调用后端创建群聊 API
     console.log('创建群聊:', name, memberIds);
     setGroupModalOpen(false);
   };
@@ -42,7 +53,6 @@ const AppLayout: React.FC = () => {
     setSelectedAgentId(agent.id);
   };
 
-  /** 中间面板内容：根据左侧导航切换 */
   const renderMiddlePanel = () => {
     if (activeNav === 'friends') {
       return (
@@ -53,7 +63,12 @@ const AppLayout: React.FC = () => {
           <div className={styles.middleContent}>
             <FriendRequest />
             <div className={styles.friendListSection}>
+              <div className={styles.sectionTitle}>用户好友</div>
               <FriendList onStartChat={() => setActiveNav('chat')} />
+            </div>
+            <div className={styles.friendListSection}>
+              <div className={styles.sectionTitle}>Robot 好友</div>
+              <RobotFriendList agents={agents} onStartChat={handleStartRobotChat} />
             </div>
           </div>
         </>
@@ -94,7 +109,6 @@ const AppLayout: React.FC = () => {
       );
     }
 
-    // 默认：对话列表
     return (
       <>
         <div className={styles.convPanelHeader}>
@@ -114,7 +128,6 @@ const AppLayout: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      {/* 左侧：设置面板 */}
       <div className={styles.settingsPanel}>
         <SettingsPanel
           username={user?.username ?? ''}
@@ -124,12 +137,10 @@ const AppLayout: React.FC = () => {
         />
       </div>
 
-      {/* 中间：对话/好友/群聊列表 */}
       <div className={styles.convPanel}>
         {renderMiddlePanel()}
       </div>
 
-      {/* 右侧：聊天区域 */}
       <div className={styles.chatPanel}>
         {activeNav === 'agents' ? (
           <AgentProfile agent={selectedAgent} />
@@ -138,7 +149,6 @@ const AppLayout: React.FC = () => {
         )}
       </div>
 
-      {/* 群聊创建弹窗 */}
       <GroupCreateModal
         open={groupModalOpen}
         onCancel={() => setGroupModalOpen(false)}

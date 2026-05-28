@@ -26,6 +26,7 @@ type ConvRepoForMsg interface {
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
 type AgentRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
+	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
 }
@@ -135,6 +136,13 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, ErrAgentNotFound
 	}
 	if agent.UserID != nil && *agent.UserID != userID {
+		return nil, ErrMsgAgentNoPerm
+	}
+	ok, err := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check conversation agent: %w", err)
+	}
+	if !ok {
 		return nil, ErrMsgAgentNoPerm
 	}
 	if agent.MachineID == nil || *agent.MachineID == "" {

@@ -22,6 +22,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1;
 }
 
 .convIcon {
@@ -37,6 +38,26 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.robotStrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  overflow: hidden;
+}
+
+.robotHint {
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .headerActions {

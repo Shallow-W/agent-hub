@@ -11,6 +11,8 @@ build/
 src/backend/bin/
 src/daemon/bin/
 bin/
+!src/daemon-npm/bin/
+!src/daemon-npm/bin/**
 *.o
 *.a
 *.test
