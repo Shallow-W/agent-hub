@@ -80,7 +80,7 @@
 | B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [x] |
 | B46 | ListMemberIDs UNION 返回重复 userID，群主收到重复消息 | P1 | [x] |
 | B47 | 私聊非创建者无法归档(只检查 conv.UserID) | P1 | [x] |
-| B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [ ] |
+| B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [x] |
 | B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [x] |
 | B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [x] |
 | B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
@@ -199,7 +199,7 @@
 | CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [-] |
 | CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [x] |
 | CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [x] |
-| CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [ ] |
+| CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [x] |
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
@@ -251,7 +251,7 @@
 | DEPLOY-01 | 无 CI/CD 配置 | P1 | [ ] |
 | DEPLOY-02 | 无 Dockerfile | P1 | [ ] |
 | DEPLOY-03 | 无 README.md | P1 | [ ] |
-| DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [ ] |
+| DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [x] |
 | DEPLOY-05 | docker-compose 缺 Redis 服务 | P2 | [ ] |
 | DEPLOY-06 | config.example 与实际 config 不同步 | P2 | [ ] |
 | DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [ ] |
@@ -339,7 +339,7 @@
 | DOC-02 | 错误响应格式文档与代码不一致(嵌套vs扁平) | P1 | [ ] |
 | DOC-03 | WebSocket 消息类型命名文档与代码不匹配 | P1 | [ ] |
 | DOC-04 | Conversation type 文档 "direct" vs 代码 "single" | P2 | [ ] |
-| DOC-05 | username 校验规则三处冲突(min=2 vs 3) | P2 | [ ] |
+| DOC-05 | username 校验规则三处冲突(min=2 vs 3) | P2 | [x] |
 | DOC-06 | ErrGroupNotFound 可能未定义 | P2 | [ ] |
 | DOC-07 | ConversationMember.JoinedAt 类型 string 应为 time.Time | P2 | [ ] |
 | DOC-08 | ConversationMember 缺少 last_read_at 字段 | P2 | [ ] |

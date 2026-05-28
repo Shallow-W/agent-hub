@@ -134,7 +134,7 @@ func (r *GroupRepo) GetMember(ctx context.Context, conversationID, userID string
 func (r *GroupRepo) IsMember(ctx context.Context, conversationID, userID string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)`,
+		`SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2 UNION ALL SELECT 1 FROM conversations WHERE id = $1 AND user_id = $2)`,
 		conversationID, userID,
 	).Scan(&exists)
 	if err != nil {
