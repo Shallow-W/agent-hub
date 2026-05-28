@@ -234,6 +234,7 @@ func main() {
 		friendGroup.GET("", friendHandler.ListFriends)
 		friendGroup.GET("/pending", friendHandler.ListPending)
 		friendGroup.GET("/search", middleware.RateLimit(10, 20), friendHandler.SearchUsers)
+		friendGroup.DELETE("/:id", middleware.ValidateUUIDParam("id"), friendHandler.DeleteFriend)
 	}
 
 	// 群聊路由（需要鉴权）
@@ -245,6 +246,7 @@ func main() {
 		groupRoutes.POST("/:id/members", groupHandler.AddMember)
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
+		groupRoutes.PUT("/:id/members/:memberId/role", groupHandler.ChangeMemberRole)
 		groupRoutes.POST("/:id/leave", groupHandler.LeaveGroup)
 	}
 

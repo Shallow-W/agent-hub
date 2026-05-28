@@ -16,6 +16,7 @@ type GroupRepo interface {
 	RemoveMember(ctx context.Context, conversationID, userID string) error
 	ListMembers(ctx context.Context, conversationID string) ([]*model.ConversationMember, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
+	UpdateMemberRole(ctx context.Context, conversationID, userID, role string) error
 	IsMember(ctx context.Context, conversationID, userID string) (bool, error)
 	GetConversationByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
@@ -190,6 +191,40 @@ func (s *GroupService) GetGroupInfo(ctx context.Context, conversationID, userID 
 		return nil, nil, fmt.Errorf("list members: %w", err)
 	}
 	return conv, members, nil
+}
+
+// ChangeMemberRole 修改群成员角色
+func (s *GroupService) ChangeMemberRole(ctx context.Context, convID, operatorID, targetUserID, newRole string) error {
+	// 验证请求者是群主
+	op, err := s.repo.GetMember(ctx, convID, operatorID)
+	if err != nil {
+		return fmt.Errorf("check operator: %w", err)
+	}
+	if op == nil {
+		return ErrNotMember
+	}
+	if op.Role != "owner" {
+		return ErrNotOwner
+	}
+
+	// 验证目标成员
+	target, err := s.repo.GetMember(ctx, convID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("check target: %w", err)
+	}
+	if target == nil {
+		return ErrNotMember
+	}
+	if target.Role == "owner" {
+		return errors.New("不能修改群主角色")
+	}
+
+	// 验证新角色
+	if newRole != "admin" && newRole != "member" {
+		return errors.New("无效的角色")
+	}
+
+	return s.repo.UpdateMemberRole(ctx, convID, targetUserID, newRole)
 }
 
 // dedupMembers 去重并排除 ownerID

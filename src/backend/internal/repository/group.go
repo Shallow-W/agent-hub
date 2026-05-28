@@ -130,6 +130,22 @@ func (r *GroupRepo) GetMember(ctx context.Context, conversationID, userID string
 	return &m, nil
 }
 
+// UpdateMemberRole 更新群成员角色
+func (r *GroupRepo) UpdateMemberRole(ctx context.Context, conversationID, userID, role string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_members SET role = $1 WHERE conversation_id = $2 AND user_id = $3`,
+		role, conversationID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update member role: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("member not found")
+	}
+	return nil
+}
+
 // IsMember 检查用户是否为群成员
 func (r *GroupRepo) IsMember(ctx context.Context, conversationID, userID string) (bool, error) {
 	var exists bool

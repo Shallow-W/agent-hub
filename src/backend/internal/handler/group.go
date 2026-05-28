@@ -207,3 +207,40 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 		"members":      members,
 	})
 }
+
+// ChangeRoleRequest 修改成员角色请求体
+type ChangeRoleRequest struct {
+	Role string `json:"role" binding:"required,oneof=admin member"`
+}
+
+// ChangeMemberRole 修改群成员角色
+func (h *GroupHandler) ChangeMemberRole(c *gin.Context) {
+	convID := c.Param("id")
+	memberID := c.Param("memberId")
+	if convID == "" || memberID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "缺少群聊 ID 或成员 ID")
+		return
+	}
+
+	var req ChangeRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if err := h.svc.ChangeMemberRole(c.Request.Context(), convID, userID, memberID, req.Role); err != nil {
+		if errors.Is(err, service.ErrNotOwner) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40316, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40416, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50306, "修改角色失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}

@@ -1,4 +1,4 @@
-import { post, get, del } from './client';
+import { post, get, del, put } from './client';
 import type { Conversation } from '@/types/conversation';
 import type { GroupMember } from '@/types/group';
 
@@ -31,3 +31,6 @@ export const getGroupInfo = (groupId: string) =>
 
 export const leaveGroup = (groupId: string) =>
   post<void>(`/api/groups/${groupId}/leave`);
+
+export const changeMemberRole = (groupId: string, memberId: string, role: string) =>
+  put<void>(`/api/groups/${groupId}/members/${memberId}/role`, { role });

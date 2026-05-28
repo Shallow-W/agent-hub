@@ -12,13 +12,18 @@ import {
   Tag,
   Input,
   Tabs,
+  Dropdown,
 } from 'antd';
 import {
   UserAddOutlined,
   DeleteOutlined,
   LogoutOutlined,
+  MoreOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
-import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember } from '@/api/group';
+import type { MenuProps } from 'antd';
+import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember, changeMemberRole } from '@/api/group';
 import type { GroupMember } from '@/types/group';
 import { useFriendStore } from '@/store/friendStore';
 import { searchUsers as searchUsersApi } from '@/api/friend';
@@ -98,6 +103,46 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleRoleChange = async (userId: string, role: string) => {
+    setActionLoading(userId);
+    try {
+      await changeMemberRole(conversationId, userId, role);
+      message.success(role === 'admin' ? '已设为管理员' : '已取消管理员');
+      await fetchMembers();
+    } catch {
+      message.error('修改角色失败');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const buildMemberActions = (member: GroupMember): MenuProps['items'] => {
+    const items: MenuProps['items'] = [];
+    if (member.role === 'member') {
+      items.push({
+        key: 'set-admin',
+        icon: <TeamOutlined />,
+        label: '设为管理员',
+        onClick: () => handleRoleChange(member.user_id, 'admin'),
+      });
+    } else if (member.role === 'admin') {
+      items.push({
+        key: 'set-member',
+        icon: <UserOutlined />,
+        label: '取消管理员',
+        onClick: () => handleRoleChange(member.user_id, 'member'),
+      });
+    }
+    items.push({
+      key: 'remove',
+      icon: <DeleteOutlined />,
+      label: '移除成员',
+      danger: true,
+      onClick: () => handleRemove(member.user_id),
+    });
+    return items;
   };
 
   const handleLeave = async () => {
@@ -219,26 +264,46 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
             renderItem={(member) => (
               <List.Item
                 actions={[
-                  ...(canManage && member.user_id !== currentUserId && member.role !== 'owner'
+                  ...(currentUserRole === 'owner' &&
+                  member.user_id !== currentUserId &&
+                  member.role !== 'owner'
                     ? [
-                        <Popconfirm
-                          key="remove"
-                          title="确定移除该成员？"
-                          onConfirm={() => handleRemove(member.user_id)}
-                          okText="确定"
-                          cancelText="取消"
+                        <Dropdown
+                          key="actions"
+                          menu={{ items: buildMemberActions(member) }}
+                          trigger={['click']}
                         >
                           <Button
                             type="text"
-                            danger
                             size="small"
-                            icon={<DeleteOutlined />}
+                            icon={<MoreOutlined />}
                             loading={actionLoading === member.user_id}
-                            aria-label={`移除 ${member.username ?? '成员'}`}
+                            aria-label={`${member.username ?? '成员'} 的操作菜单`}
                           />
-                        </Popconfirm>,
+                        </Dropdown>,
                       ]
-                    : []),
+                    : canManage &&
+                      member.user_id !== currentUserId &&
+                      member.role !== 'owner'
+                      ? [
+                          <Popconfirm
+                            key="remove"
+                            title="确定移除该成员？"
+                            onConfirm={() => handleRemove(member.user_id)}
+                            okText="确定"
+                            cancelText="取消"
+                          >
+                            <Button
+                              type="text"
+                              danger
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              loading={actionLoading === member.user_id}
+                              aria-label={`移除 ${member.username ?? '成员'}`}
+                            />
+                          </Popconfirm>,
+                        ]
+                      : []),
                 ]}
               >
                 <List.Item.Meta
