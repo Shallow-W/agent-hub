@@ -105,7 +105,7 @@ export class WebSocketClient {
       if (!this.intentionalClose) {
         this.scheduleReconnect();
       }
-      this.intentionalClose = false;
+      // intentionalClose 仅在 doConnect() 开头重置，不在此处
     };
 
     this.ws.onerror = () => {
