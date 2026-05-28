@@ -1,0 +1,32 @@
+.friendItem {
+  cursor: pointer;
+  padding: 8px 12px;
+  transition: background-color 0.2s ease;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.friendItem:hover .actionBtn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.actionBtn:hover {
+  background: rgba(22, 163, 101, 0.08);
+  color: var(--color-primary);
+}

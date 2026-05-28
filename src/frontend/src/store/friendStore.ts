@@ -21,6 +21,7 @@ interface FriendState {
   rejectRequest: (id: string) => Promise<void>;
   searchUsers: (username: string) => Promise<void>;
   clearSearch: () => void;
+  deleteFriend: (friendId: string) => Promise<void>;
 }
 
 export const useFriendStore = create<FriendState>((set) => ({
@@ -120,5 +121,18 @@ export const useFriendStore = create<FriendState>((set) => ({
 
   clearSearch: () => {
     set({ searchResults: [], isSearching: false });
+  },
+
+  deleteFriend: async (friendId: string) => {
+    try {
+      await friendApi.deleteFriend(friendId);
+      set((state) => ({
+        friends: state.friends.filter((f) => f.friend_id !== friendId),
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '删除好友失败';
+      set({ error: msg });
+      throw err;
+    }
   },
 }));

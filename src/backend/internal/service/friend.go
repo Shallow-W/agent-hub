@@ -21,6 +21,7 @@ type FriendRepo interface {
 	GetUserByUsername(ctx context.Context, username string) (*model.User, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
 	SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error)
+	DeleteFriend(ctx context.Context, userID, friendID string) error
 }
 
 var (
@@ -164,6 +165,25 @@ func (s *FriendService) SearchUsers(ctx context.Context, userID, query string, l
 		}
 	}
 	return filtered, nil
+}
+
+// DeleteFriend 删除好友关系
+func (s *FriendService) DeleteFriend(ctx context.Context, userID, friendID string) error {
+	// 检查好友关系是否存在
+	existing, err := s.repo.GetFriendship(ctx, userID, friendID)
+	if err != nil {
+		return fmt.Errorf("check friendship: %w", err)
+	}
+	if existing == nil {
+		existing, err = s.repo.GetFriendship(ctx, friendID, userID)
+		if err != nil {
+			return fmt.Errorf("check reverse friendship: %w", err)
+		}
+	}
+	if existing == nil {
+		return ErrFriendNotFound
+	}
+	return s.repo.DeleteFriend(ctx, userID, friendID)
 }
 
 // ListPending 查询收到的好友申请

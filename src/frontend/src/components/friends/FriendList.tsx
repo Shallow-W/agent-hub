@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Avatar, Input, List, Badge, Tabs, Skeleton, Spin, Empty, message } from 'antd';
-import { UserAddOutlined } from '@ant-design/icons';
+import { Avatar, Input, List, Badge, Tabs, Skeleton, Spin, Empty, Dropdown, Modal, message } from 'antd';
+import type { MenuProps } from 'antd';
+import { UserAddOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import FriendRequest from './FriendRequest';
+import styles from './FriendList.module.css';
 
 interface FriendListProps {
   onStartChat: (friendId: string) => void;
@@ -18,6 +20,7 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
     searchUsers,
     clearSearch,
     sendRequest,
+    deleteFriend,
   } = useFriendStore();
 
   const [search, setSearch] = useState('');
@@ -59,6 +62,24 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
   };
 
   const pendingCount = pendingRequests.length;
+
+  const handleDeleteFriend = (friendId: string, friendName: string) => {
+    Modal.confirm({
+      title: '确认删除好友',
+      content: `确定要删除好友「${friendName}」吗？`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteFriend(friendId);
+          message.success('已删除好友');
+        } catch {
+          // error handled in store
+        }
+      },
+    });
+  };
 
   const filteredFriends = search
     ? friends.filter((f) =>
@@ -130,30 +151,62 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
               />
             ),
           }}
-          renderItem={(friend) => (
-            <List.Item
-              style={{ cursor: 'pointer', padding: '8px 12px', transition: 'background-color 0.2s ease' }}
-              onClick={() => onStartChat(friend.friend_id)}
-            >
-              <List.Item.Meta
-                avatar={
-                  <Badge
-                    dot
-                    color="green"
-                    offset={[-4, 30]}
+          renderItem={(friend) => {
+            const friendName = friend.friend_name ?? '未知用户';
+            const menuItems: MenuProps['items'] = [
+              {
+                key: 'delete',
+                icon: <DeleteOutlined />,
+                label: '删除好友',
+                danger: true,
+                onClick: (info) => {
+                  info.domEvent.stopPropagation();
+                  handleDeleteFriend(friend.friend_id, friendName);
+                },
+              },
+            ];
+
+            return (
+              <List.Item
+                className={styles.friendItem}
+                onClick={() => onStartChat(friend.friend_id)}
+                actions={[
+                  <Dropdown
+                    key="more"
+                    menu={{ items: menuItems }}
+                    trigger={['click']}
+                    placement="bottomRight"
                   >
-                    <Avatar
-                      style={{ backgroundColor: '#1677ff' }}
-                      size="small"
+                    <button
+                      className={styles.actionBtn}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="更多操作"
                     >
-                      {(friend.friend_name ?? '?').charAt(0).toUpperCase()}
-                    </Avatar>
-                  </Badge>
-                }
-                title={friend.friend_name ?? '未知用户'}
-              />
-            </List.Item>
-          )}
+                      <MoreOutlined />
+                    </button>
+                  </Dropdown>,
+                ]}
+              >
+                <List.Item.Meta
+                  avatar={
+                    <Badge
+                      dot
+                      color="green"
+                      offset={[-4, 30]}
+                    >
+                      <Avatar
+                        style={{ backgroundColor: '#1677ff' }}
+                        size="small"
+                      >
+                        {friendName.charAt(0).toUpperCase()}
+                      </Avatar>
+                    </Badge>
+                  }
+                  title={friendName}
+                />
+              </List.Item>
+            );
+          }}
         />
       </>
     );

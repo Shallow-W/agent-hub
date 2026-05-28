@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -117,6 +118,27 @@ func (h *FriendHandler) ListFriends(c *gin.Context) {
 	}
 
 	middleware.SuccessResponse(c, list)
+}
+
+// DeleteFriend 删除好友
+func (h *FriendHandler) DeleteFriend(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	friendID := c.Param("id")
+	if _, err := uuid.Parse(friendID); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40206, "无效的好友 ID")
+		return
+	}
+
+	if err := h.svc.DeleteFriend(c.Request.Context(), userID, friendID); err != nil {
+		if errors.Is(err, service.ErrFriendNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40433, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50205, "删除好友失败")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
 }
 
 // ListPending 查询收到的好友申请

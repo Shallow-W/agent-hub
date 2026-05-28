@@ -191,6 +191,24 @@ func escapeLike(s string) string {
 	return s
 }
 
+// DeleteFriend 删除好友关系（双向）
+func (r *FriendRepo) DeleteFriend(ctx context.Context, userID, friendID string) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM friends
+		 WHERE (user_id = $1 AND friend_id = $2)
+		    OR (user_id = $2 AND friend_id = $1)`,
+		userID, friendID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete friend: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // GetUserByID 按 ID 查找用户（好友模块复用，不查询密码）
 func (r *FriendRepo) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	var u model.User

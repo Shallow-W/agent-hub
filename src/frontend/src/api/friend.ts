@@ -1,4 +1,4 @@
-import { get, post } from './client';
+import { get, post, del } from './client';
 import type { Friend, FriendRequest } from '@/types/friend';
 import type { User } from '@/types/auth';
 
@@ -19,3 +19,6 @@ export const listPendingRequests = () =>
 
 export const searchUsers = (username: string) =>
   get<User[]>(`/api/friends/search?username=${encodeURIComponent(username)}`);
+
+export const deleteFriend = (friendId: string) =>
+  del<void>(`/api/friends/${friendId}`);
