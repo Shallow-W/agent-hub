@@ -200,7 +200,7 @@
 | CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [x] |
 | CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [x] |
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [x] |
-| CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
+| CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [-] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
@@ -380,7 +380,7 @@
 | FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
 | FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [ ] |
 | FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [ ] |
-| FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [ ] |
+| FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [x] |
 | FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [ ] |
 
 ---

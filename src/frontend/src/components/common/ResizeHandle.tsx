@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './ResizeHandle.module.css';
 
 interface ResizeHandleProps {
@@ -8,7 +8,22 @@ interface ResizeHandleProps {
 const ResizeHandle: React.FC<ResizeHandleProps> = ({ onResize }) => {
   const startXRef = useRef(0);
   const activeRef = useRef(false);
+  const moveHandlerRef = useRef<((ev: MouseEvent) => void) | null>(null);
+  const upHandlerRef = useRef<(() => void) | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (moveHandlerRef.current) {
+        document.removeEventListener('mousemove', moveHandlerRef.current);
+      }
+      if (upHandlerRef.current) {
+        document.removeEventListener('mouseup', upHandlerRef.current);
+      }
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -31,9 +46,12 @@ const ResizeHandle: React.FC<ResizeHandleProps> = ({ onResize }) => {
         document.body.style.userSelect = '';
         document.removeEventListener('mousemove', handleMove);
         document.removeEventListener('mouseup', handleUp);
+        moveHandlerRef.current = null;
+        upHandlerRef.current = null;
       };
 
-      // 拖拽时禁止文本选择并显示调整光标
+      moveHandlerRef.current = handleMove;
+      upHandlerRef.current = handleUp;
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       document.addEventListener('mousemove', handleMove);
