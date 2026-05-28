@@ -7,6 +7,7 @@ interface ConversationState {
   activeConversationId: string | null;
   memberPanelOpen: boolean;
   loading: boolean;
+  _fetching: boolean;
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
   archiveConversationLocal: (id: string) => void;
@@ -30,14 +31,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   activeConversationId: localStorage.getItem('agenthub_active_conv'),
   memberPanelOpen: false,
   loading: false,
+  _fetching: false,
 
   fetchConversations: async () => {
-    set({ loading: true });
+    if (get()._fetching) return;
+    set({ _fetching: true, loading: true });
     try {
       const list = await convApi.getConversations();
       set({ conversations: sortConversations(list) });
     } finally {
-      set({ loading: false });
+      set({ loading: false, _fetching: false });
     }
   },
 
