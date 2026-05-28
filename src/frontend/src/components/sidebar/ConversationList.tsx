@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Skeleton, Button, Input } from 'antd';
+import { Skeleton, Button, Input, message as antMessage } from 'antd';
 import { MessageOutlined, TeamOutlined, SearchOutlined } from '@ant-design/icons';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
@@ -95,8 +95,12 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateFr
               onTogglePin={() => togglePin(conv.id)}
               onRename={conv.type === 'group' ? (newTitle: string) => rename(conv.id, newTitle) : undefined}
               onArchive={async () => {
-                await convApi.archiveConversation(conv.id);
-                archiveConversationLocal(conv.id);
+                try {
+                  await convApi.archiveConversation(conv.id);
+                  archiveConversationLocal(conv.id);
+                } catch {
+                  antMessage.error('归档失败');
+                }
               }}
               onInviteMembers={
                 conv.type === 'group'

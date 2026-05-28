@@ -139,7 +139,7 @@
 | B106 | messageStore recall 本地乐观更新与 WebSocket 推送竞态 | P1 | [x] |
 | B107 | ArchiveConversation handler 无成员身份校验 | P2 | [ ] |
 | B108 | MessageAttachmentView 不支持非图片/PDF 附件——静默丢弃 | P3 | [ ] |
-| B109 | ConversationItem archive 错误无用户反馈 | P2 | [ ] |
+| B109 | ConversationItem archive 错误无用户反馈 | P2 | [x] |
 | B110 | ChatInput handleSubmit 发送失败不清空输入框但清空了 pendingFiles | P2 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
