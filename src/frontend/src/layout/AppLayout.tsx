@@ -56,9 +56,9 @@ const AppLayout: React.FC = () => {
     }
   }, [navigate, location.pathname]);
 
-  // 切换到好友页时自动拉取数据
+  // 切换到联系人页时自动拉取数据
   useEffect(() => {
-    if (activeNav === 'friends') {
+    if (activeNav === 'contacts') {
       fetchFriends();
       fetchPending();
     }
@@ -139,6 +139,14 @@ const AppLayout: React.FC = () => {
   const handleCreate = () => {
     setNewConvModalOpen(true);
   };
+
+  const handleRefreshContacts = useCallback(async () => {
+    await Promise.all([
+      fetchFriends(),
+      fetchPending(),
+      fetchConversations(),
+    ]);
+  }, [fetchFriends, fetchPending, fetchConversations]);
 
   const handleUpload = () => {
     antMessage.info('请在当前对话输入框左侧添加附件');
@@ -224,7 +232,8 @@ const AppLayout: React.FC = () => {
           onShowArchived={showArchived}
           onStartChat={handleStartChat}
           onSwitchChat={() => setActiveNav('chat')}
-          onSwitchFriends={() => setActiveNav('friends')}
+          onSwitchContacts={() => setActiveNav('contacts')}
+          onRefreshContacts={handleRefreshContacts}
         />
       </div>
 

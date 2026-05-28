@@ -1,0 +1,40 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.searchBar {
+  padding: 8px 8px 0;
+}
+
+.section {
+  padding: 0 8px;
+}
+
+.sectionHeader {
+  margin: 6px 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.managerCard {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(22, 163, 101, 0.04);
+  border: 1px solid rgba(22, 163, 101, 0.12);
+}
+
+
+.tabs {
+  padding: 0 4px;
+}
+
+.friendAvatar {
+  background-color: #1677ff;
+}
+
+.empty {
+  padding: 12px 0 8px;
+}

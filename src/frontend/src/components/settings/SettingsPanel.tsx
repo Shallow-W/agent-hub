@@ -11,7 +11,6 @@ import {
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
-  UserAddOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -41,9 +40,8 @@ const wsDotColor: Record<WsStatus, string> = {
 
 const navItems = [
   { key: 'chat', label: '消息', icon: <MessageOutlined /> },
-  { key: 'friends', label: '好友', icon: <UserAddOutlined /> },
-  { key: 'groups', label: '群聊', icon: <TeamOutlined /> },
-  { key: 'models', label: '模型', icon: <RobotOutlined /> },
+  { key: 'contacts', label: '联系人', icon: <TeamOutlined /> },
+  { key: 'models', label: '智能体', icon: <RobotOutlined /> },
   { key: 'skills', label: '技能', icon: <CodeOutlined /> },
   { key: 'workspace', label: '任务', icon: <AppstoreOutlined /> },
   { key: 'knowledge', label: '知识', icon: <DatabaseOutlined /> },

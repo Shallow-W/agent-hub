@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
-import { Input, Button, List, Avatar, message, Empty } from 'antd';
-import { SendOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import React, { useMemo, useState } from 'react';
+import { Avatar, Badge, Button, Empty, Input, List, Modal, Tabs, message } from 'antd';
+import { CheckOutlined, CloseOutlined, SendOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
+import styles from './FriendRequest.module.css';
 
 const FriendRequest: React.FC = () => {
   const { pendingRequests, sendRequest, acceptRequest, rejectRequest, actionLoading } =
     useFriendStore();
+  const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [sending, setSending] = useState(false);
+
+  const pendingCount = pendingRequests.length;
 
   const handleSend = async () => {
     const trimmed = username.trim();
@@ -52,74 +56,109 @@ const FriendRequest: React.FC = () => {
     return `${month}-${day} ${hh}:${mm}`;
   };
 
-  return (
-    <div>
-      <Input.Search
-        placeholder="输入用户名添加好友"
-        enterButton={
-          <Button type="primary" icon={<SendOutlined />} loading={sending}>
-            添加
-          </Button>
-        }
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        onSearch={handleSend}
-        style={{ marginBottom: 16 }}
-      />
+  const requestList = useMemo(() => {
+    if (pendingRequests.length === 0) {
+      return (
+        <div className={styles.empty}>
+          <Empty description="暂无好友申请" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        </div>
+      );
+    }
 
-      {pendingRequests.length === 0 ? (
-        <Empty
-          description="暂无好友申请"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
+    return (
+      <List
+        header={<span className={styles.pendingHeader}>待处理请求</span>}
+        dataSource={pendingRequests}
+        renderItem={(req) => (
+          <List.Item
+            actions={[
+              <Button
+                key="accept"
+                type="primary"
+                size="small"
+                icon={<CheckOutlined />}
+                loading={actionLoading === req.id}
+                disabled={!!actionLoading && actionLoading !== req.id}
+                onClick={() => handleAccept(req.id)}
+              >
+                接受
+              </Button>,
+              <Button
+                key="reject"
+                size="small"
+                danger
+                icon={<CloseOutlined />}
+                loading={actionLoading === req.id}
+                disabled={!!actionLoading}
+                onClick={() => handleReject(req.id)}
+              >
+                拒绝
+              </Button>,
+            ]}
+          >
+            <List.Item.Meta
+              avatar={
+                <Avatar size="small" className={styles.requestAvatar}>
+                  {(req.friend_name ?? '?').charAt(0).toUpperCase()}
+                </Avatar>
+              }
+              title={req.friend_name ?? '未知用户'}
+              description={formatTime(req.created_at)}
+            />
+          </List.Item>
+        )}
+      />
+    );
+  }, [pendingRequests, actionLoading]);
+
+  return (
+    <div className={styles.manager}>
+      <Badge count={pendingCount} size="small">
+        <Button className={styles.managerButton} onClick={() => setOpen(true)}>
+          好友申请管理
+        </Button>
+      </Badge>
+      <Modal
+        open={open}
+        title="好友管理"
+        onCancel={() => setOpen(false)}
+        footer={null}
+      >
+        <Tabs
+          size="small"
+          items={[
+            {
+              key: 'search',
+              label: '搜索好友',
+              children: (
+                <div className={styles.tabBody}>
+                  <Input.Search
+                    className={styles.searchRow}
+                    placeholder="输入用户名添加好友"
+                    enterButton={
+                      <Button type="primary" icon={<SendOutlined />} loading={sending}>
+                        添加
+                      </Button>
+                    }
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    onSearch={handleSend}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'requests',
+              label: (
+                <Badge count={pendingCount} size="small" offset={[6, -2]}>
+                  好友申请
+                </Badge>
+              ),
+              children: requestList,
+            },
+          ]}
         />
-      ) : (
-        <List
-          header={<span style={{ fontSize: 13, color: '#666' }}>待处理请求</span>}
-          dataSource={pendingRequests}
-          renderItem={(req) => (
-            <List.Item
-              actions={[
-                <Button
-                  key="accept"
-                  type="primary"
-                  size="small"
-                  icon={<CheckOutlined />}
-                  loading={actionLoading === req.id}
-                  disabled={!!actionLoading && actionLoading !== req.id}
-                  onClick={() => handleAccept(req.id)}
-                >
-                  接受
-                </Button>,
-                <Button
-                  key="reject"
-                  size="small"
-                  danger
-                  icon={<CloseOutlined />}
-                  loading={actionLoading === req.id}
-                  disabled={!!actionLoading}
-                  onClick={() => handleReject(req.id)}
-                >
-                  拒绝
-                </Button>,
-              ]}
-            >
-              <List.Item.Meta
-                avatar={
-                  <Avatar size="small" style={{ backgroundColor: '#1677ff' }}>
-                    {(req.friend_name ?? '?').charAt(0).toUpperCase()}
-                  </Avatar>
-                }
-                title={req.friend_name ?? '未知用户'}
-                description={
-                  <span style={{ fontSize: 11, color: '#999' }}>
-                    {formatTime(req.created_at)}
-                  </span>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      )}
+      </Modal>
     </div>
   );
 };

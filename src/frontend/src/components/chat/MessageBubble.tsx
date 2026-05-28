@@ -169,7 +169,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             type="text"
             size="small"
             icon={<RollbackOutlined />}
-            className={styles.replyBtn}
+            className={`${styles.replyBtn} ${styles.recallBtn}`}
             onClick={() => onRecall!(message.id)}
           />
         </Tooltip>

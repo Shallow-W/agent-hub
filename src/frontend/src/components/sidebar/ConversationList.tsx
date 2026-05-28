@@ -12,10 +12,10 @@ import styles from './ConversationList.module.css';
 const EMPTY_MESSAGES: Message[] = [];
 
 interface ConversationListProps {
-  onNavigateFriends?: () => void;
+  onNavigateContacts?: () => void;
 }
 
-export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateFriends }) => {
+export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateContacts }) => {
   const { conversations, activeId, loading, setActive, remove, togglePin, rename, create } =
     useConversation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,7 +58,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateFr
             </Button>
             <Button
               icon={<TeamOutlined />}
-              onClick={onNavigateFriends}
+              onClick={onNavigateContacts}
             >
               添加好友
             </Button>

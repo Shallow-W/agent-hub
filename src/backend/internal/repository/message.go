@@ -78,6 +78,11 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 		}
 	}
 
+	// 发送后补齐附件与回复引用预览（失败不影响消息发送）
+	if filled, err := r.fillAttachmentsAndReply(ctx, []model.Message{m}); err == nil && len(filled) > 0 {
+		m = filled[0]
+	}
+
 	return &m, nil
 }
 

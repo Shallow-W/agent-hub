@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { message as antdMessage } from 'antd';
-import type { Message } from '@/types/message';
-import type { OptimisticMessage } from '@/types/message';
+import type { Message, OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
 
@@ -22,7 +21,13 @@ interface MessageState {
   readConversations: Record<string, boolean>;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string, attachments?: AttachmentPayload[], replyTo?: string) => Promise<void>;
+  sendMessage: (
+    conversationId: string,
+    content: string,
+    attachments?: AttachmentPayload[],
+    replyTo?: string,
+    replyPreview?: ReplyToPreview,
+  ) => Promise<void>;
   recall: (conversationId: string, messageId: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
@@ -92,7 +97,21 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content, attachments?, replyTo?) => {
+  sendMessage: async (conversationId, content, attachments?, replyTo?, replyPreview?) => {
+    const resolveReplyPreview = (replyToId?: string): ReplyToPreview | null => {
+      if (!replyToId) return null;
+      const existing = get().messages[conversationId] ?? [];
+      const target = existing.find((m) => m.id === replyToId);
+      if (!target) return null;
+      return {
+        id: target.id,
+        content: target.content ?? '',
+        sender_id: target.sender_id,
+        username: target.username,
+        deleted_at: null,
+      };
+    };
+    const resolvedReplyPreview = replyPreview ?? resolveReplyPreview(replyTo ?? undefined);
     const tempId = generateTempId();
     const optimistic: OptimisticMessage = {
       id: tempId,
@@ -101,6 +120,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       content,
       artifacts_json: null,
       created_at: new Date().toISOString(),
+      reply_to: replyTo ?? null,
+      reply_to_message: resolvedReplyPreview ?? undefined,
       optimistic: true,
       optimisticStatus: 'sending',
       pendingAttachments: attachments,
@@ -119,7 +140,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
     try {
       const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo);
-      get().addMessage(conversationId, msg);
+      const patchedMsg = resolvedReplyPreview && !msg.reply_to_message
+        ? {
+            ...msg,
+            reply_to: msg.reply_to ?? replyTo ?? null,
+            reply_to_message: resolvedReplyPreview,
+          }
+        : msg;
+      get().addMessage(conversationId, patchedMsg);
       // Remove optimistic message on success
       set((state) => {
         const remaining = (state.optimisticMessages[conversationId] ?? [])
@@ -169,8 +197,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   addMessage: (conversationId, message) => {
     set((state) => {
       const existing = state.messages[conversationId] ?? [];
-      // 按 ID 去重，防止乐观消息与服务端推送重复
-      if (existing.some((m) => m.id === message.id)) {
+      const dupIdx = existing.findIndex((m) => m.id === message.id);
+      if (dupIdx !== -1) {
+        const dup = existing[dupIdx]!;
+        if (message.reply_to_message && !dup.reply_to_message) {
+          const merged = [...existing];
+          merged[dupIdx] = { ...dup, reply_to_message: message.reply_to_message } as Message;
+          return { messages: { ...state.messages, [conversationId]: merged } };
+        }
         return state;
       }
       const next = [...existing, message];

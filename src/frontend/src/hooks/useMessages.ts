@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { getUnreadMessages } from '@/api/message';
 import { markConversationRead } from '@/api/conversation';
-import type { OptimisticMessage } from '@/types/message';
+import type { OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
 /** Cache duration: skip re-fetch if loaded within last 30 seconds */
@@ -90,20 +90,21 @@ export function useMessages(conversationId: string | null) {
     }).catch(() => {});
   }, [conversationId, fetchMessages]);
 
-  const loadMore = useCallback(() => {
-    if (!conversationId || !hasMore || loadingEntry) return;
+  const loadMore = useCallback((): Promise<void> => {
+    if (!conversationId || !hasMore || loadingEntry) return Promise.resolve();
     const oldest = messages[0];
     if (oldest) {
-      fetchMessages(conversationId, oldest.created_at);
+      return fetchMessages(conversationId, oldest.created_at);
     }
+    return Promise.resolve();
   }, [conversationId, hasMore, loadingEntry, messages, fetchMessages]);
 
   const send = useCallback(
-    async (content: string, attachments?: AttachmentPayload[], replyTo?: string) => {
+    async (content: string, attachments?: AttachmentPayload[], replyTo?: string, replyPreview?: ReplyToPreview) => {
       if (!conversationId) return;
       // Invalidate cache so next switch re-fetches
       delete lastFetchedAt[conversationId];
-      await sendMessage(conversationId, content, attachments, replyTo);
+      await sendMessage(conversationId, content, attachments, replyTo, replyPreview);
     },
     [conversationId, sendMessage],
   );

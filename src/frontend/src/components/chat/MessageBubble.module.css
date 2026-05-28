@@ -6,8 +6,14 @@
   position: relative;
 }
 
-.bubbleUser { flex-direction: row-reverse; }
-.bubbleAssistant { flex-direction: row; }
+.bubbleUser {
+  flex-direction: row-reverse;
+  margin-right: -10px;
+}
+.bubbleAssistant {
+  flex-direction: row;
+  margin-left: -30px;
+}
 .bubbleGrouped { padding-top: 3px; }
 
 .chatAvatar {
@@ -27,8 +33,9 @@
 
 .content {
   display: flex;
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: min(440px, 70%);
   flex-direction: column;
   align-items: flex-start;
 }
@@ -60,7 +67,8 @@
 
 .inner {
   position: relative;
-  max-width: min(440px, 70%);
+  display: inline-block;
+  max-width: 100%;
   padding: 10px 14px;
   color: var(--color-text);
   font-size: 13px;
@@ -239,20 +247,30 @@
 .removeBtn { color: var(--color-text-tertiary) !important; }
 
 .replyBtn {
-  position: absolute;
-  top: 9px;
-  right: 8px;
+  position: static;
+  align-self: center;
+  margin: 0 4px;
   opacity: 0;
   color: var(--color-text-secondary);
+  flex-shrink: 0;
+  pointer-events: none;
   transition: opacity var(--transition-fast);
 }
 
-.bubbleUser .replyBtn {
-  right: auto;
-  left: 8px;
-}
+.bubbleAssistant .chatAvatar { order: 1; }
+.bubbleAssistant .content { order: 2; }
+.bubbleAssistant .replyBtn { order: 3; }
+.bubbleAssistant .recallBtn { order: 4; }
 
-.bubble:hover .replyBtn { opacity: 1; }
+.bubbleUser .chatAvatar { order: 0; }
+.bubbleUser .content { order: 1; }
+.bubbleUser .replyBtn { order: 2; }
+.bubbleUser .recallBtn { order: 3; }
+
+.bubble:hover .replyBtn {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .expandToggle {
   display: inline-flex;
@@ -276,17 +294,21 @@
 }
 
 .replyQuote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 5px 8px;
   margin-bottom: 6px;
   border-left: 2px solid var(--color-primary);
-  background: rgba(22, 163, 101, 0.06);
-  color: var(--color-text-secondary);
+  background: rgba(210, 222, 214, 0.55);
+  border-radius: 8px;
+  color: var(--color-text);
   font-size: 12px;
 }
 
 .replyQuoteSender {
-  margin-right: 4px;
-  color: var(--color-primary);
+  margin-right: 0;
+  color: var(--color-text);
   font-weight: 600;
 }
 

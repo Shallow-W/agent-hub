@@ -1,10 +1,8 @@
 import React from 'react';
-import { Avatar, Button } from 'antd';
+import { Button } from 'antd';
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
-import FriendList from '@/components/friends/FriendList';
-import FriendRequest from '@/components/friends/FriendRequest';
-import { useConversationStore } from '@/store/conversationStore';
+import ContactsPanel from '@/components/contacts/ContactsPanel';
 import type { Conversation } from '@/types/conversation';
 import styles from './AppLayout.module.css';
 
@@ -18,7 +16,8 @@ interface MiddlePanelProps {
   onShowArchived: () => void;
   onStartChat: (friendId: string) => void;
   onSwitchChat: () => void;
-  onSwitchFriends: () => void;
+  onSwitchContacts: () => void;
+  onRefreshContacts: () => void;
 }
 
 const MiddlePanel: React.FC<MiddlePanelProps> = ({
@@ -31,7 +30,8 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   onShowArchived,
   onStartChat,
   onSwitchChat,
-  onSwitchFriends,
+  onSwitchContacts,
+  onRefreshContacts,
 }) => {
   const renderPanelTools = (onAdd: () => void) => (
     <div className={styles.convPanelTools}>
@@ -41,57 +41,23 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
     </div>
   );
 
-  if (activeNav === 'friends') {
+  if (activeNav === 'contacts') {
     return (
       <>
         <div className={styles.convPanelHeader}>
-          <span className={styles.convPanelTitle}>好友</span>
-          {renderPanelTools(onCreate)}
+          <span className={styles.convPanelTitle}>联系人</span>
+          <div className={styles.convPanelTools}>
+            <Button type="text" icon={<PlusOutlined />} aria-label="新建群聊" onClick={onCreateGroup} />
+            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={onRefreshContacts} />
+          </div>
         </div>
         <div className={styles.middleScroll}>
-          <FriendRequest />
-          <div className={styles.middleSection}>
-            <FriendList onStartChat={onStartChat} />
-          </div>
+          <ContactsPanel
+            conversations={conversations}
+            onStartChat={onStartChat}
+            onSwitchChat={onSwitchChat}
+          />
         </div>
-      </>
-    );
-  }
-
-  if (activeNav === 'groups') {
-    const groupConvs = conversations.filter((c) => c.type === 'group');
-    return (
-      <>
-        <div className={styles.convPanelHeader}>
-          <span className={styles.convPanelTitle}>群聊</span>
-          {renderPanelTools(onCreateGroup)}
-        </div>
-        {groupConvs.length === 0 ? (
-          <div className={styles.emptyState}>暂无群聊</div>
-        ) : (
-          <div className={styles.groupList}>
-            {groupConvs.map((conv) => (
-              <div
-                key={conv.id}
-                className={styles.groupItem}
-                onClick={() => {
-                  useConversationStore.getState().setActive(conv.id);
-                  onSwitchChat();
-                }}
-              >
-                <Avatar className={styles.groupAvatar} shape="square">
-                  {conv.title.charAt(0).toUpperCase()}
-                </Avatar>
-                <div className={styles.groupMeta}>
-                  <div className={styles.groupTitle}>{conv.title}</div>
-                  <div className={styles.groupTime}>
-                    创建于 {new Date(conv.created_at).toLocaleDateString('zh-CN')}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </>
     );
   }
@@ -102,7 +68,7 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
         <span className={styles.convPanelTitle}>消息</span>
         {renderPanelTools(onCreate)}
       </div>
-      <ConversationList onNavigateFriends={onSwitchFriends} />
+      <ConversationList onNavigateContacts={onSwitchContacts} />
       <button className={styles.archivedLink} onClick={onShowArchived} type="button">
         查看归档对话
       </button>

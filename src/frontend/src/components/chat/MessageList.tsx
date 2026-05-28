@@ -80,7 +80,20 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
       setShowNewMsgBtn(false);
       setUnreadSinceScroll(0);
     }
-  }, []);
+    // Auto-load older messages when scrolled to top
+    if (el.scrollTop < 50 && hasMore && !loading) {
+      const prevHeight = el.scrollHeight;
+      loadMore().then(() => {
+        // Preserve scroll position after prepending older messages
+        requestAnimationFrame(() => {
+          const newHeight = containerRef.current?.scrollHeight ?? 0;
+          if (containerRef.current) {
+            containerRef.current.scrollTop = newHeight - prevHeight;
+          }
+        });
+      });
+    }
+  }, [hasMore, loading, loadMore]);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,14 +101,17 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
     setUnreadSinceScroll(0);
   }, []);
 
+  const prevMsgCountRef = useRef(messages.length);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    if (nearBottomRef.current) {
-      // Use instant scroll during streaming to avoid jitter; smooth for new messages
+    const msgCountIncreased = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    // Always scroll to bottom when a new message is added (user sent or received)
+    if (msgCountIncreased || nearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' });
     } else {
-      // User scrolled up — show indicator for new messages
       setShowNewMsgBtn(true);
       setUnreadSinceScroll((n) => n + 1);
     }

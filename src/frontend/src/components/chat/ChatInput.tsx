@@ -11,7 +11,7 @@ import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
-import type { Message } from '@/types/message';
+import type { Message, ReplyToPreview } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
 import styles from './ChatInput.module.css';
 import replyStyles from './ChatInput.module.css';
@@ -128,13 +128,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
     try {
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id);
+      const replyPreview: ReplyToPreview | undefined = replyTo
+        ? {
+            id: replyTo.id,
+            content: replyTo.content ?? '',
+            sender_id: replyTo.sender_id,
+            username: replyTo.username,
+            deleted_at: null,
+          }
+        : undefined;
+      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview);
       setValue('');
       setPendingFiles([]);
+      onCancelReply?.();
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

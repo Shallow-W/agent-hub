@@ -1,0 +1,29 @@
+.manager {
+  display: flex;
+  justify-content: center;
+}
+
+.managerButton {
+  width: 100%;
+}
+
+.tabBody {
+  padding-top: 8px;
+}
+
+.searchRow {
+  margin-bottom: 12px;
+}
+
+.pendingHeader {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.empty {
+  padding: 8px 0;
+}
+
+.requestAvatar {
+  background-color: #1677ff;
+}
