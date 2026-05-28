@@ -62,6 +62,10 @@ type Config struct {
 	Log struct {
 		Level string `koanf:"level"`
 	} `koanf:"log"`
+	RateLimit struct {
+		RPS   float64 `koanf:"rps"`
+		Burst int     `koanf:"burst"`
+	} `koanf:"rate_limit"`
 }
 
 func parseLogLevel(level string) slog.Level {
@@ -154,7 +158,7 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 	router.Use(middleware.RequestLogger(logger))
-	router.Use(middleware.RateLimit(100, 200))
+	router.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
 	// 健康检查（无需鉴权）
 	router.GET("/health", func(c *gin.Context) {

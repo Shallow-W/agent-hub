@@ -257,10 +257,10 @@
 | DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [x] |
 | DEPLOY-08 | 无 metrics/Prometheus 端点 | P2 | [ ] |
 | DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [x] |
-| DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [ ] |
+| DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [x] |
 | DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [ ] |
 | DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [ ] |
-| DEPLOY-13 | 健康检查不验证 DB/Redis 连接状态 | P3 | [ ] |
+| DEPLOY-13 | 健康检查不验证 DB/Redis 连接状态 | P3 | [x] |
 
 ---
 
