@@ -1099,3 +1099,288 @@
 - **文件**: `src/frontend/src/components/chat/EmojiPicker.tsx`
 - **现象**: Emoji 面板无历史记录，每次从分类中翻找
 - **修复**: 添加"最近使用"分类，localStorage 持久化
+
+---
+
+## 第十一轮：未提交代码审查
+
+### B53 [P1] user.stop_stream 前端发送但后端无处理
+
+- **文件**: `src/frontend/src/components/chat/ChatWindow.tsx` — handleStopTask
+- **现象**: 前端发送 `{ type: "user.stop_stream", data: { conversation_id } }` 但后端 WebSocket handler 无对应 case，消息被静默丢弃。用户点击"停止生成"按钮后本地清空流式内容，但后端 Agent 继续执行
+- **修复**: 后端添加 `user.stop_stream` 消息处理，取消对应 conversation 的 agent 执行
+
+### B54 [P1] friendStore actionLoading 值不匹配（loading 永远不显示）
+
+- **文件**: `src/frontend/src/store/friendStore.ts:76,94` vs `src/frontend/src/components/friends/FriendRequest.tsx:82,92`
+- **现象**: store 设置 `actionLoading: id`（纯 ID），但 UI 检查 `actionLoading === req.id + '-accept'` 和 `actionLoading === req.id + '-reject'`（ID+后缀）。值永远不匹配，accept/reject 按钮永远不显示 loading 状态
+- **复现**: 点击"接受"好友请求，按钮无 loading spinner
+- **修复**: 统一格式——store 改为 `actionLoading: id + '-accept'` / `'-reject'`，或 UI 去掉后缀
+
+### B55 [P1] ChatWindow 文件上传后不发送附件消息（上传结果丢失）
+
+- **文件**: `src/frontend/src/components/chat/ChatWindow.tsx` — handleFileSelect
+- **现象**: `uploadFile(f)` 上传成功后返回值被 `.catch` 消费，未将返回的 attachment URL 作为消息发送。文件上传到服务器后，用户看不到任何消息或附件
+- **修复**: 收集所有上传成功的 attachment，调用 `sendMessage(content, attachments)` 发送附件消息
+
+### B56 [P2] friendStore accept/reject 成功后不清除 error 状态
+
+- **文件**: `src/frontend/src/store/friendStore.ts:73-90`
+- **现象**: catch 中 `set({ error: msg })` 设置错误，但 try 块成功路径不清理 error。连续操作时，上次的错误消息在成功后仍然显示
+- **修复**: try 块成功路径添加 `set({ friends, pending, error: null })`
+
+### B57 [P2] useMessages 30s 缓存不感知 WS 断连期间丢失的消息
+
+- **文件**: `src/frontend/src/hooks/useMessages.ts` — CACHE_TTL_MS
+- **现象**: 如果 WebSocket 断连 30s 内有新消息，缓存跳过 re-fetch 导致用户看到旧数据。虽然 WS 重连后通常会收到补偿消息，但存在窗口期不一致
+- **修复**: WS 重连成功时清除所有 lastFetchedAt 缓存
+
+---
+
+## 第十二轮：WebSocket/Auth/Repository/RateLimiter/Upload 深度审计
+
+### B58 [P1] Hub shutdown 关闭 sendCh 后 WritePump 仍写入已关闭 channel——panic
+
+- **文件**: `src/backend/pkg/ws/hub.go:310-312` — handleUnregister, `hub.go:444-446` — shutdown
+- **现象**: `handleUnregister` 调用 `close(client.sendCh)` (line 311)，但 `shutdown` 方法 (line 445) 也对同一 client 调用 `close(c.sendCh)`。如果 client 先通过 Unregister 关闭了 sendCh，然后 shutdown 再次关闭同一 sendCh，触发 `close of closed channel` panic。反之 shutdown 关闭后 Unregister 触发同样问题
+- **根因**: shutdown 和 handleUnregister 都执行 `close(sendCh)` 且无幂等保护。shutdown 直接遍历 clients 关闭连接，但 Unregister 也在 bus 中排队，两者可同时操作同一 client
+- **修复**: 在 Client 中增加 `closeOnce sync.Once`，将 `close(client.sendCh)` 替换为 `client.closeOnce.Do(func() { close(client.sendCh) })`
+
+### B59 [P1] Hub shutdown 后 bus 满载时 Unregister 静默丢弃连接——goroutine+连接泄漏
+
+- **文件**: `src/backend/pkg/ws/hub.go:484-489` — Unregister
+- **现象**: Unregister 使用 `select/default` 非阻塞发送到 bus。若 shutdown 已开始排空 bus（2秒窗口内新消息不断填充），新 Unregister 消息被丢弃。连接未关闭、sendCh 未 close、wg 未 Done，导致 goroutine 泄漏和连接泄漏
+- **修复**: Unregister 可考虑使用带超时的阻塞发送（如 1s context timeout），或在 shutdown 中增加对 clients 的二次清理
+
+### B60 [P1] Hub shutdown 期间新 Register 成功后连接被二次 wg.Done——panic
+
+- **文件**: `src/backend/pkg/ws/hub.go:425-461` — shutdown
+- **现象**: shutdown 排空 bus 时处理了所有 pending 消息（包括 Register），此时 `h.wg.Add(1)` 已执行但 `h.wg.Done()` 未执行。随后 shutdown 遍历 `h.clients` 对所有 client 调用 `h.wg.Done()`。如果 Register 消息在排空窗口内被处理，client 被加入 clients 并被 shutdown 遍历到，正常。但若排空窗口之后有一个 Register 消息因 bus 丢弃（已超出 drain 窗口）而被 Unregister 的 default 分支丢弃，则 `wg.Add(1)` 执行但无对应 `wg.Done()`
+- **修复**: Register 失败时已有 `h.wg.Done()`（line 478），但 bus 满时丢弃的 Register 未触发。确保所有 wg.Add 都有配对的 wg.Done
+
+### B61 [P2] Client.enqueue 背压二次写入可能永久阻塞
+
+- **文件**: `src/backend/pkg/ws/hub.go:114-131` — enqueue
+- **现象**: 背压场景中，第一次 `select/default` 从 sendCh 取出一条旧消息后，第二次 `c.sendCh <- data`（line 123）是无 select 保护的阻塞写入。如果在这两行之间有另一个 goroutine 填满了 sendCh（如 heartbeat goroutine 并发 Send），写入会永久阻塞，进而阻塞整个 bus dispatch 循环
+- **根因**: `default` 分支取出旧消息后未用 select 保护新写入
+- **修复**: 改为用 select/default 保护第二次写入：`select { case c.sendCh <- data: default: slog.Warn(...) }`
+
+### B62 [P2] WS chat 发送跳过 join_room 校验——未加入房间也可发送消息
+
+- **文件**: `src/backend/internal/handler/websocket.go:138-171` — chat case
+- **现象**: WS chat 消息只调用 `IsConversationMember` 检查用户是否为会话成员（DB 层面），不检查用户是否通过 join_room 加入了该会话的 WS 房间。这意味着用户可以不先发 join_room 直接发 chat 消息。虽然消息通过 `msgSender.SendMessage` 持久化后由 Hub 推送（走 PushToConversation 按成员列表推），但跳过了房间级别的消息路由
+- **影响**: 功能层面不影响正确性（消息仍会被推送），但违背了 join_room 的设计意图。如果后续依赖房间做 typing 等实时状态过滤，会出现不一致
+- **注**: 这是设计选择而非严格 bug，但应文档化或统一校验逻辑
+
+### B63 [P2] JWT 无 Token Refresh 机制——用户在线时 Token 过期即断连
+
+- **文件**: `src/backend/internal/service/auth.go` — generateToken, ValidateToken
+- **现象**: JWT 只有 `iat` 和 `exp` 两个时间声明，无 refresh token 机制。Token 过期后：
+  1. REST API 返回 401，前端需重新登录（已由 B14 记录）
+  2. WebSocket 心跳仍正常但业务消息发送可能失败，且无自动重认证
+  3. 长时间在线用户被迫频繁重新登录
+- **修复**: 添加 refresh token 端点 `POST /api/auth/refresh`，返回新 JWT。WS 在 token 接近过期时通过特殊消息类型触发刷新
+
+### B64 [P2] ValidateToken 不验证 user_id 对应的用户是否存在
+
+- **文件**: `src/backend/internal/service/auth.go:129-148` — ValidateToken
+- **现象**: ValidateToken 只检查 JWT 签名和过期时间，提取 `user_id` 后直接返回，不验证该 user_id 对应的用户在 DB 中是否存在。如果用户被删除（或从未存在过），使用包含该 user_id 的有效 JWT 仍可通过所有鉴权
+- **修复**: ValidateToken 中增加一次 DB 查询确认用户存在（可接受性能开销），或使用 token 黑名单机制
+
+### B65 [P2] Auth middleware 和 AuthService 重复 JWT 解析逻辑
+
+- **文件**: `src/backend/internal/middleware/auth.go:37-61` vs `src/backend/internal/service/auth.go:129-148`
+- **现象**: 两处代码都独立执行 `jwt.Parse` + claims 提取 + user_id 读取，但实现略有不同：
+  - middleware 检查 `claims["user_id"]`
+  - service 也检查 `claims["user_id"]`
+  - 两者都缺少 `exp`/`iat` 的显式校验（依赖 jwt 库默认行为）
+  - middleware 还将 `username` 注入 context，但 service 的 ValidateToken 不返回 username
+- **风险**: 若其中一处修改但另一处未同步，会导致行为不一致
+- **修复**: 统一使用 AuthService.ValidateToken，middleware 调用 service 而非重复实现
+
+### B66 [P3] message.go SearchByContent 未复用 escapeLike 函数
+
+- **文件**: `src/backend/internal/repository/message.go:220-222`
+- **现象**: `SearchByContent` 内联了转义逻辑（`strings.ReplaceAll(keyword, ...)` 三行），与 `friend.go:escapeLike` 完全相同。违反 DRY 原则
+- **修复**: 统一调用 `escapeLike(keyword)`
+
+### B67 [P2] message.go SearchByContent 用 ILIKE 拼 '%' || $2 || '%' 可绕过转义
+
+- **文件**: `src/backend/internal/repository/message.go:227`
+- **现象**: SQL 为 `content ILIKE '%' || $2 || '%' ESCAPE '\'`。虽然 `keyword` 已做了 `\%` `_` 转义，但 PostgreSQL 的 `||` 操作符会将 `$2` 作为字符串拼接。转义使用 `ESCAPE '\'` 单反斜杠，在某些 PostgreSQL 配置（`standard_conforming_strings = off`）下反斜杠被解释为转义字符，导致 ESCAPE 子句语法错误
+- **修复**: 使用 PostgreSQL 的 `concat('%', $2, '%')` 或确保连接字符串使用 `E'...'` 前缀
+
+### B68 [P2] 所有 repository 查询使用参数化——无 SQL 注入风险（确认安全）
+
+- **文件**: `conversation.go`, `message.go`, `user.go`, `friend.go`, `group.go`
+- **现象**: 全面审查所有 5 个 repository 文件，所有 SQL 查询均使用 `$1, $2, ...` 参数化占位符，`messageCols` 和 `messageFrom` 为编译时常量。LIKE 查询使用 `escapeLike` + `$1 ESCAPE '\'` 模式。无任何字符串拼接用户输入到 SQL
+- **结论**: Repository 层 SQL 注入安全，无需修复
+
+### B69 [P1] RateLimiter 全局 state 无 shutdown 退出机制——goroutine 永久泄漏
+
+- **文件**: `src/backend/internal/middleware/ratelimit.go:36-59`
+- **现象**: 每次 `RateLimit()` 调用创建一个 `rateLimiterState` 并启动清理 goroutine（line 42），但 `state.done` channel 永远不被关闭。`StopRateLimiters()` 函数为空（line 86-89）。`globalCleanupOnce`/`globalCleanupDone` 声明但 `startGlobalCleanup()` 从未被调用
+- **影响**:
+  1. 每个路由组创建独立的清理 goroutine，永不退出
+  2. 进程关闭时 goroutine 泄漏（虽不影响功能，但在测试或热重载场景下累积）
+  3. `globalCleanupDone` channel 泄漏
+- **修复**: 在 `RateLimit` 中接受 `context.Context`，或由 main.go 在 shutdown 时关闭 done channel
+
+### B70 [P2] RateLimiter 仅限 IP 粒度——NAT 后多用户共享限流配额
+
+- **文件**: `src/backend/internal/middleware/ratelimit.go:61-71` — getLimiter
+- **现象**: 限流器以 `c.ClientIP()` 为 key。在企业 NAT/代理环境下，数百用户共享同一出口 IP，共享 100 rps 配额。正常用户可能因其他用户的高频请求被限流
+- **修复**: 对已认证用户使用 `user_id` 作为限流 key（可从 context 获取），未认证请求降级为 IP 粒度
+
+### B71 [P2] Upload handler MaxBytesReader 硬编码 50MB 不匹配 Image 限制
+
+- **文件**: `src/backend/internal/handler/upload.go:11,26` vs `src/backend/internal/service/upload.go:159-162`
+- **现象**: handler 层 `MaxBytesReader` 硬编码为 `50 << 20`（50MB），但 service 层根据 MIME 类型区分：图片最大 `MaxImageMB`（默认 20MB），PDF 最大 `MaxPDFMB`（默认 50MB）。上传 20MB+ 的图片文件时：
+  1. handler 层 `MaxBytesReader` 允许通过（<= 50MB）
+  2. 文件被完整保存到磁盘
+  3. service 层检测 MIME 后判断超过 20MB 限制
+  4. 删除文件返回错误
+- **影响**: 大文件先被完整接收并写入磁盘再被拒绝，浪费磁盘 I/O 和带宽
+- **修复**: handler 层 `MaxBytesReader` 保持 50MB 作为安全上限即可（当前行为已足够安全），但文档应说明此设计
+
+### B72 [P2] Upload 静态文件服务 filepath.Clean 不足——路径穿越风险
+
+- **文件**: `src/backend/cmd/server/main.go:164-168`
+- **现象**: `c.Param("filepath")` 获取路径后，`filepath.Join(uploadDir, filepath.Clean(filePath))` 处理。`filepath.Clean` 会清理 `../` 但 `filepath.Join` 后结果可能仍在 uploadDir 之外。例如 `filepath.Join("./uploads", filepath.Clean("/../../etc/passwd"))` = `etc/passwd`（Clean 先变成 `/etc/passwd`，Join 忽略基路径）
+- **修复**: 添加边界检查：`absPath := filepath.Join(uploadDir, filepath.Clean(filePath)); if !strings.HasPrefix(absPath, uploadDirAbs+"/") && absPath != uploadDirAbs { return 403 }`
+
+### B73 [P3] Upload MIME 检测基于 512 字节——可被精心构造的文件绕过
+
+- **文件**: `src/backend/internal/service/upload.go:236-248` — detectMIME
+- **现象**: `http.DetectContentType` 仅读取文件前 512 字节判断 MIME 类型。攻击者可在合法图片头部后嵌入恶意代码（如 polyglot 文件），MIME 检测通过但实际内容为恶意载荷
+- **影响**: 在仅图片展示场景下风险较低（浏览器不执行图片中的脚本），但若文件被其他系统消费则可能被利用
+- **修复**: 对于图片类型，在保存后尝试用 `imaging.Open` 或 `image.DecodeConfig` 二次验证（当前缩略图生成已在做此验证，但仅在 isImageMIME 时执行）
+
+---
+
+## 第十一轮补充：Auth/RateLimiter/Upload 审查
+
+### B74 [P1] StopRateLimiters 空实现——限流器清理 goroutine 仍在 shutdown 后泄漏
+
+- **文件**: `src/backend/internal/middleware/ratelimit.go:86-89` — StopRateLimiters
+- **现象**: CODE-01 标记 [x] 但修复不完整。`StopRateLimiters()` 是空函数，每个 `RateLimit()` 创建的清理 goroutine 持有 `done` channel 但永远不被关闭。进程退出前这些 goroutine 持续运行。`globalCleanupDone` 被 `sync.Once` 初始化但从未使用
+- **修复**: 维护全局 `[]*rateLimiterState` 列表，`StopRateLimiters` 遍历关闭所有 `done` channel
+
+### B75 [P1] 限流器 c.ClientIP() 信任 X-Forwarded-For——可被伪造绕过
+
+- **文件**: `src/backend/internal/middleware/ratelimit.go:74`
+- **现象**: `c.ClientIP()` 默认信任 Gin 的 `RemoteIPHeaders`（含 X-Forwarded-For）。若部署在反向代理后且未配置 `TrustedProxies`，攻击者可通过伪造 X-Forwarded-For 头绕过限流
+- **修复**: 配置 `router.SetTrustedProxies()` 或在限流器中使用 `c.RemoteIP()` 替代 `c.ClientIP()`
+
+### B76 [P2] 无 Token 刷新机制——JWT 过期强制重新登录
+
+- **文件**: `src/backend/internal/service/auth.go:116-126`
+- **现象**: 仅生成 access token，无 refresh token。token 过期后前端直接跳转登录页，用户操作中断。对于 IM 应用，频繁掉线体验极差
+- **修复**: 引入 refresh token 机制，前端在 401 前用 refresh token 静默续期
+
+### B77 [P2] Auth middleware username claim 未做类型断言——可能存入 nil
+
+- **文件**: `src/backend/internal/middleware/auth.go:65`
+- **现象**: `c.Set("username", claims["username"])` 不检查 claims["username"] 是否存在或为 string。若 JWT 被手动构造缺少 username 字段，context 中存入 nil
+- **修复**: 添加类型断言 `if username, ok := claims["username"].(string); ok { c.Set("username", username) }`
+
+### B78 [P2] Upload 返回的 FileSize 用客户端值而非实际磁盘大小
+
+- **文件**: `src/backend/internal/service/upload.go:171`
+- **现象**: `result.FileSize = fileHeader.Size` 使用 multipart 头中客户端报告的大小，而下方 line 154 用 `fi.Size()` 做实际大小校验。两者可能不一致（如代理修改 body），返回给前端的数据不准
+- **修复**: 改为 `result.FileSize = fi.Size()`
+
+---
+
+## 第十三轮：组件级深度审查（GroupMemberPanel / FriendPanel / Settings / WS / 类型 / CSS）
+
+### B79 [P1] authStore login/register 不调用 setToken，刷新后 token 丢失
+
+- **文件**: `src/frontend/src/store/authStore.ts:32,47` vs `src/frontend/src/api/client.ts:15-16`
+- **现象**: login 和 register 仅 `localStorage.setItem(USER_KEY, ...)` 保存用户信息，但未调用 `setToken(token)` 将 JWT 持久化到 `localStorage`（`setToken` 由 `client.ts` 导出，写入 `agenthub_token`）。`loadFromStorage` 第 66 行通过 `localStorage.getItem(TOKEN_KEY)` 恢复 token，但 login/register 从未写入该 key。页面刷新后 token 丢失，用户被踢回登录页
+- **复现**: 登录成功 → 刷新页面 → 自动 logout（token 为 null）
+- **修复**: login 和 register 成功后添加 `setToken(data.token)`
+
+### B80 [P1] WebSocket 重连后不恢复房间订阅，断线期间消息静默丢失
+
+- **文件**: `src/frontend/src/api/websocket.ts:67-72` (doConnect onopen)
+- **现象**: WS 重连后仅调用 `flushQueue()` 发送缓存消息，不重新发送 `join_room` 订阅之前加入的对话房间。断线期间该用户在服务端被标记离线，重连后不在任何房间中，群聊/私聊消息不再推送到该客户端
+- **修复**: WebSocketClient 维护已加入的房间列表 `joinedRooms: Set<string>`，`joinRoom` 时记录，`onopen` 时重放所有 `join_room` 消息
+
+### B81 [P1] GroupMemberPanel handleAddUser 无防重复点击，可多次添加同一用户
+
+- **文件**: `src/frontend/src/components/groups/GroupMemberPanel.tsx:143-151`
+- **现象**: "添加"按钮 onClick 直接调用 `handleAddUser(user.id)`，无 loading 状态保护。用户快速点击可触发多个并发 `addGroupMember` 请求。虽然后端可能有唯一约束，但前端无反馈（无 loading spinner、无 disabled 状态）
+- **修复**: 添加 `addUserLoading` 状态，按钮添加 `loading` 和 `disabled` 属性
+
+### B82 [P1] FriendList handleAddFriend 无防重复点击，可重复发送好友请求
+
+- **文件**: `src/frontend/src/components/friends/FriendList.tsx:48-54,97-105`
+- **现象**: 搜索结果中的"添加"按钮使用原生 `<button className="ant-btn">` 而非 Ant Design `<Button>` 组件，无 `loading` 属性。点击后调用 `sendRequest`，按钮无任何状态变化。用户可快速连续点击发送多条重复请求
+- **修复**: 改用 `<Button loading={...} disabled={...}>`，添加 per-user 的 loading 追踪
+
+### B83 [P1] SettingsPanel 主题切换按钮无实际功能
+
+- **文件**: `src/frontend/src/components/settings/SettingsPanel.tsx:108-116`
+- **现象**: "调色板"（BgColorsOutlined）和"主题"（BulbOutlined）两个按钮均无 onClick 事件处理，纯装饰。用户点击无任何反应，无法切换亮/暗主题
+- **修复**: 绑定主题切换逻辑，至少实现亮/暗切换并持久化到 localStorage
+
+### B84 [P2] GroupInfoDrawer info.conversation 可能 undefined 导致渲染崩溃
+
+- **文件**: `src/frontend/src/components/groups/GroupInfoDrawer.tsx:73-78`
+- **现象**: 渲染时直接访问 `info.conversation.title`、`info.conversation.created_at`、`info.members.length`。如果后端返回的 GroupInfo 数据不完整（如 `conversation` 字段缺失），将抛出 `Cannot read properties of undefined` 导致整个 Drawer 白屏
+- **修复**: 添加可选链 `info.conversation?.title`，或对数据完整性做校验
+
+### B85 [P2] GroupMemberPanel ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined
+
+- **文件**: `src/frontend/src/components/groups/GroupMemberPanel.tsx:258-259`, `src/frontend/src/components/groups/GroupInfoDrawer.tsx:106-107`
+- **现象**: `ROLE_LABELS` 和 `ROLE_COLORS` 是 `Record<string, string>`，若后端新增角色（如 `moderator`）或数据异常，`ROLE_LABELS[member.role]` 返回 `undefined`，Tag 内显示空白文本，颜色为 `undefined`（Ant Design Tag 不识别，回退默认样式）
+- **修复**: 使用 `ROLE_LABELS[member.role] ?? member.role` 兜底显示原始值
+
+### B86 [P2] GroupMemberPanel handleUserSearch 的 memberIds 闭包每次渲染重建导致 debounce 失效
+
+- **文件**: `src/frontend/src/components/groups/GroupMemberPanel.tsx:154,162-180`
+- **现象**: `memberIds` 在每次渲染时通过 `new Set(members.map(...))` 创建新对象，被放入 `handleUserSearch` 的 `useCallback` 依赖数组。每次 members 变化 → memberIds 新引用 → handleUserSearch 重建 → 但 setTimeout 闭包中的 memberIds 捕获的是创建时的值。如果搜索发起后成员列表变化（如添加了新成员），搜索结果过滤用的 memberIds 是旧值
+- **修复**: 将 memberIds 提取为 ref（`useRef`），或在 setTimeout 回调中使用 `setUserSearchResults` 的函数式更新 + 从最新 members 计算
+
+### B87 [P2] FriendRequest formatTime 对无效日期返回 "NaN-NaN-NaN NaN:NaN"
+
+- **文件**: `src/frontend/src/components/friends/FriendRequest.tsx:41-47`
+- **现象**: `new Date(dateStr)` 若 `dateStr` 为空字符串、null（类型不匹配）、或非法格式，`d.getHours()` 等返回 NaN，最终显示 "NaN-NaN-NaN NaN:NaN"
+- **修复**: 添加日期有效性检查 `if (isNaN(d.getTime())) return '未知时间'`
+
+### B88 [P2] FriendRequest sendRequest 的 loading 状态复用全局 loading 导致 UI 误判
+
+- **文件**: `src/frontend/src/components/friends/FriendRequest.tsx:55` + `src/frontend/src/store/friendStore.ts:57-72`
+- **现象**: Input.Search 的 `loading` 属性绑定的是 store 的全局 `loading`（用于好友列表加载），而 `sendRequest` 也设置 `loading: true`。发送请求时搜索按钮显示 loading 是正确的，但如果有其他操作（如 fetchFriends）正在进行，也会影响此按钮状态
+- **修复**: 为 sendRequest 使用独立的 `sendingRequest` 状态
+
+### B89 [P2] WebSocket flushQueue 期间连接断开导致消息顺序错乱
+
+- **文件**: `src/frontend/src/api/websocket.ts:112-117`
+- **现象**: `flushQueue` 用 `while` 循环逐条 `this.ws?.send(msg)`。如果队列较长，发送过程中连接再次断开，后续消息的 `send()` 走 `else` 分支重新入队。但 `shift()` 已执行，消息从队列头部移除后又 push 到尾部，顺序错乱
+- **修复**: 先复制队列再清空，逐条发送，失败的重新入队到头部而非尾部
+
+### B90 [P3] GroupMemberPanel 多 tab 打开时 WebSocket 状态不同步
+
+- **文件**: `src/frontend/src/hooks/useWebSocket.ts:54-58`
+- **现象**: 每个浏览器 tab 独立创建 WebSocketClient 实例（useEffect 中 `connect(token)`）。服务端无单用户连接数限制（CODE-16），多个 tab 各自独立连接，各自维护消息回调。一个 tab 中发送操作（如移除成员），另一个 tab 不会实时更新成员列表，除非手动刷新
+- **修复**: 使用 `BroadcastChannel` API 跨 tab 同步状态，或依赖 WS 推送更新 store
+
+### B91 [P3] globals.css `* { scrollbar-width }` 选择器覆盖所有元素
+
+- **文件**: `src/frontend/src/styles/globals.css:108-111`
+- **现象**: `* { scrollbar-width: thin; scrollbar-color: ... }` 应用于所有元素，但前面已用 `::-webkit-scrollbar` 设置了自定义滚动条。两个声明分别作用于不同浏览器引擎，但 `*` 选择器优先级高于预期，可能覆盖组件内部的自定义滚动条样式
+- **修复**: 改为 `html { scrollbar-width: thin }`，仅在根元素设置
+
+### B92 [P3] GroupMemberPanel 退出群聊后不清除成员列表
+
+- **文件**: `src/frontend/src/components/groups/GroupMemberPanel.tsx:102-114`
+- **现象**: `handleLeave` 成功后调用 `onClose()` 关闭 Drawer，但不 `setMembers([])` 清空成员列表。下次打开同一群聊的成员面板时，`useEffect` 依赖 `[open, conversationId, fetchMembers]`，若 conversationId 未变，open 从 false→true 会触发 fetchMembers，但在加载完成前短暂显示旧成员数据
+- **修复**: `handleLeave` 成功后添加 `setMembers([])`，或在 Drawer `afterOpenChange` 中重置状态
+
+### B93 [P3] Friend 类型与 FriendRequest 类型字段完全重复
+
+- **文件**: `src/frontend/src/types/friend.ts:3-11,13-20`
+- **现象**: `Friend` 和 `FriendRequest` 两个接口字段完全相同（id, user_id, friend_id, status, friend_name?, created_at, updated_at），作为两个独立接口维护，增加不一致风险
+- **修复**: 使用 `type FriendRequest = Friend` 消除重复
