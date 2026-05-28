@@ -14,6 +14,7 @@ export function getAuthHeaders(): Record<string, string> {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  handling401 = false;
 }
 
 export function clearToken(): void {

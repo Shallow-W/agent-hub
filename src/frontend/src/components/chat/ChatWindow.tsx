@@ -38,7 +38,7 @@ export const ChatWindow: React.FC = () => {
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
-  const typingUsersMap = useWsStore((s) => s.typingUsers);
+  const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? []) : []);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
@@ -133,8 +133,7 @@ export const ChatWindow: React.FC = () => {
     ? activeConv.title
     : (activeConv.peer_name || activeConv.title);
   const avatarText = displayName.charAt(0).toUpperCase();
-  const typingUsers = typingUsersMap[activeConv.id] ?? [];
-  const otherTyping = typingUsers.filter((u) => u.userId !== currentUserId);
+  const otherTyping = typingUsersMap.filter((u: { userId: string }) => u.userId !== currentUserId);
 
   const menuItems: MenuProps['items'] = [
     {

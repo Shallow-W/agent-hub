@@ -201,13 +201,17 @@ func (r *MessageRepo) GetMessageSender(ctx context.Context, messageID string) (s
 	}
 
 	if role == "user" {
-		var ownerID string
+		var ownerID, convType string
 		err = r.db.QueryRowxContext(ctx,
-			`SELECT user_id FROM conversations WHERE id = $1`,
+			`SELECT user_id, type FROM conversations WHERE id = $1`,
 			convID,
-		).Scan(&ownerID)
+		).Scan(&ownerID, &convType)
 		if err != nil {
 			return "", fmt.Errorf("get conversation owner: %w", err)
+		}
+		// 群聊中 sender_id 为空时无法确定发送者，不允许撤回
+		if convType == "group" {
+			return "", nil
 		}
 		return ownerID, nil
 	}
