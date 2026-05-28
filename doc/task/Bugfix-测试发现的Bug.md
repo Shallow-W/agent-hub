@@ -1384,3 +1384,114 @@
 - **文件**: `src/frontend/src/types/friend.ts:3-11,13-20`
 - **现象**: `Friend` 和 `FriendRequest` 两个接口字段完全相同（id, user_id, friend_id, status, friend_name?, created_at, updated_at），作为两个独立接口维护，增加不一致风险
 - **修复**: 使用 `type FriendRequest = Friend` 消除重复
+
+---
+
+## 后端+前端 Bug（第三轮深度测试——路由/消息渲染/API边界/Store竞态）
+
+### B94 [P2] ChatView 仅首次挂载读取 URL 参数，浏览器前进/后退无法切换对话
+
+- **文件**: `src/frontend/src/views/ChatView.tsx:12-18`
+- **现象**: `useEffect` 读取 `searchParams.get('conv')` 的依赖数组为空 `[]`（有意只在 mount 时执行），导致：
+  1. 用户在浏览器地址栏手动修改 `?conv=xxx` 后按回车，不会切换对话
+  2. 浏览器前进/后退按钮改变 URL 的 `conv` 参数后，不会切换对话
+  3. 从收藏夹/外部链接直接打开 `/?conv=xxx` 时，如果组件已经 mount（React Router 不卸载 ChatView），URL 参数被忽略
+- **修复**: 将 `searchParams` 加入依赖数组 `[searchParams]`，或在 `searchParams` 变化时检查并 `setActive`
+
+### B95 [P2] ChatView URL 同步 `setSearchParams` 无限循环风险
+
+- **文件**: `src/frontend/src/views/ChatView.tsx:21-33`
+- **现象**: `useEffect` 在 `activeId` 变化时调用 `setSearchParams`。如果外部组件（如 ConversationList）调用 `setActive`，会触发 `activeId` 变化 → `setSearchParams` → URL 变化。如果 B94 修复后将 `searchParams` 加为依赖，则会形成：URL 变化 → `setActive` → `activeId` 变化 → `setSearchParams` → URL 变化的循环。
+- **修复**: 在两个 effect 中都加判等保护——仅当 `searchParams.get('conv') !== activeId` 时才执行 `setActive` 或 `setSearchParams`；且 `setSearchParams` 的 callback 已经做了判等（`current !== activeId`），但 `setActive` 侧缺少反向判等（`convId !== activeId` 已有，需确保与 B94 修复协调）
+
+### B96 [P1] 归档对话列表无取消归档操作，归档操作不可逆
+
+- **文件**: `src/frontend/src/layout/AppLayout.tsx:273-293`
+- **现象**: 归档对话弹窗只展示归档列表，无"取消归档"按钮。后端有 `Unarchive` repository 方法，但前端归档弹窗中完全没有操作入口。用户一旦归档对话，无法恢复到正常列表。
+- **修复**: 在归档弹窗的每个对话项旁添加"取消归档"按钮，调用后端 unarchive API（需确认路由是否存在，如不存在则需新增）
+
+### B97 [P2] SettingsView logout 后 navigate('/login', { replace: true }) 但路由守卫未阻止
+
+- **文件**: `src/frontend/src/views/SettingsView.tsx:13-15`
+- **现象**: `handleLogout` 调用 `logout()`（清除 token + 设置 `isAuthenticated: false`），然后 `navigate('/login', { replace: true })`。但 SettingsView 在 `<ProtectedRoute>` 内，logout 后 `isAuthenticated` 变为 false，ProtectedRoute 应立即重定向到 `/login`。这会导致双重导航（navigate + ProtectedRoute 重定向），虽然功能上不影响，但 replace 语义被 ProtectedRoute 的 Navigate 覆盖，浏览器历史栈可能出现不一致。
+- **修复**: 移除 SettingsView 中的 `navigate('/login')`，依赖 ProtectedRoute 自动重定向；或在 AppLayout 的 `handleLogout` 中统一处理导航
+
+### B98 [P2] wsStore connect() 断开旧连接但不清理 joinedRooms 和 queue
+
+- **文件**: `src/frontend/src/store/wsStore.ts:27-29`, `src/frontend/src/api/websocket.ts:62-69`
+- **现象**: `connect()` 调用 `existing.disconnect()` 断开旧连接，但 `WebSocketClient.disconnect()` 只设置 `intentionalClose=true`、关闭 ws、清理 retryTimer。它不清理 `joinedRooms`（Set）和 `queue`（消息缓存数组）。新连接创建后，`rejoinRooms()` 会重发所有旧的 room 订阅——如果某些 room 已过期或不相关，会产生不必要的订阅。旧的 queue 消息也会在新连接上重发。
+- **修复**: 在 `connect()` 中创建新 client 前，或在 `disconnect()` 中清理 `joinedRooms` 和 `queue`
+
+### B99 [P2] conversationStore fetchConversations 无并发锁，双重调用覆盖数据
+
+- **文件**: `src/frontend/src/store/conversationStore.ts:34-41`
+- **现象**: `fetchConversations` 只设置 `loading: true`，无并发锁。如果两个组件（如 AppLayout 和 ConversationList）几乎同时调用 `fetchConversations`，两个并发请求都会执行。第一个返回后设置 `conversations`，第二个返回后覆盖第一次的结果。如果两个响应的排序不同或数据有差异（恰好有新对话创建），可能导致短暂的列表闪烁。
+- **修复**: 在 `fetchConversations` 开头检查 `get().loading`，如果已经在加载中则跳过（`if (get().loading) return`）
+
+### B100 [P1] useWebSocket disconnect 在组件卸载时断开全局 WebSocket
+
+- **文件**: `src/frontend/src/hooks/useWebSocket.ts:150-152`
+- **现象**: `useWebSocket` 的 cleanup 函数调用 `disconnect()`，但 `useWebSocket` 只在 `AppLayout` 中使用一次（因为 AppLayout 是 layout 组件）。如果将来有其他组件也调用 `useWebSocket`，或者 AppLayout 因路由变化被卸载/重新挂载（在当前路由结构下不会），cleanup 会断开 WebSocket。更重要的是，`connect` 在 `useEffect([isAuthenticated, token])` 中每次都创建新的 `WebSocketClient`（因为 cleanup 断开了旧的），StrictMode 下双次渲染会导致 connect → disconnect → connect 的闪断。
+- **修复**: `disconnect` 改为仅在 `isAuthenticated` 变为 false 时断开；或使用 ref 追踪是否是自己创建的连接，只断开自己创建的
+
+### B101 [P2] useMessages 中 getUnreadMessages 的 stale check 不覆盖 fetchMessages 竞态
+
+- **文件**: `src/frontend/src/hooks/useMessages.ts:69-87`
+- **现象**: `useMessages` 在 `conversationId` 变化时先调 `fetchMessages`，然后调 `getUnreadMessages`。`getUnreadMessages` 的 `.then` 中有 `activeIdRef.current !== currentId` 的 stale check，但 `fetchMessages` 没有。如果用户快速切换对话 A → B → C，三个 `fetchMessages` 并发执行，C 的响应可能先到，然后 B 的响应后到覆盖 C 的数据。
+- **修复**: 在 `fetchMessages` 的 store 更新中也加入 stale check，或使用 AbortController 取消旧的 fetch
+
+### B102 [P2] MessageBubble canRecall 使用客户端 Date.now() 与服务端时间不一致
+
+- **文件**: `src/frontend/src/components/chat/MessageBubble.tsx:131`
+- **现象**: `canRecall` 判断条件 `Date.now() - new Date(message.created_at).getTime()) < 2 * 60 * 1000` 使用客户端 `Date.now()` 与服务端 `created_at` 时间戳比较。如果用户设备时钟偏移（快或慢几分钟），可能导致：
+  1. 撤回按钮显示但服务端拒绝（客户端认为未超时但服务端已超时）
+  2. 撤回按钮不显示但服务端实际允许（客户端认为已超时但服务端未超时）
+- **修复**: 使用服务端返回的相对时间或计算服务端-客户端时间偏移量；或在客户端使用比 2 分钟更保守的阈值（如 1 分 50 秒）
+
+### B103 [P2] MessageList 中 streaming message 的 id 硬编码为 'streaming'，去重失效
+
+- **文件**: `src/frontend/src/components/chat/MessageList.tsx:196-208`
+- **现象**: streaming 消息的临时 id 固定为 `'streaming'`。如果用户快速发送第二条消息触发新的 stream，旧 stream 未完成时新 stream 的 id 也是 `'streaming'`，React 的 `key` 相同导致组件复用而非重新挂载。虽然 `streamingContent` 变化会触发重渲染，但如果两个 stream 切换时内容恰好有重叠，可能出现显示残留。
+- **修复**: 使用唯一 key 如 `streaming-${conversationId}` 或 `useId()`
+
+### B104 [P2] ChatWindow 搜索结果点击滚动使用 querySelector，消息可能未加载
+
+- **文件**: `src/frontend/src/components/chat/ChatWindow.tsx:269-280`
+- **现象**: 搜索结果点击后用 `document.querySelector([data-message-id="${msg.id}"])` 滚动到目标消息。如果目标消息不在当前加载的消息列表中（已滚动到很早的位置，或消息很多未全部加载），`querySelector` 返回 null，无任何反馈给用户。
+- **修复**: 检查 el 是否为 null，如果未找到则先 loadMore 或 fetchMessages 加载包含该消息的页面
+
+### B105 [P2] MessageBubble replyQuote 未转义 HTML 内容
+
+- **文件**: `src/frontend/src/components/chat/MessageBubble.tsx:210-212`
+- **现象**: `replyQuote` 区域直接渲染 `message.reply_to_message.content`，使用 JSX 文本节点（`{content.slice(0, 50)}`），这本身是安全的——React JSX 文本节点会自动转义。但如果 `content` 为 `undefined`（如 `reply_to_message` 存在但 `content` 字段缺失），`content.length` 会抛 TypeError。
+- **修复**: 添加 nullish 保护：`(message.reply_to_message.content ?? '').slice(0, 50)`
+
+### B106 [P1] messageStore recall 本地乐观更新与 WebSocket 推送竞态
+
+- **文件**: `src/frontend/src/store/messageStore.ts:147-161`, `src/frontend/src/hooks/useWebSocket.ts:131-137`
+- **现象**: 用户撤回消息时，`recall` action 先在本地将消息 content 改为"你撤回了一条消息"（乐观更新），然后发 API 请求。服务端成功后通过 WS 推送 `message.recall` 事件，`handleRecallPush` 又会将同一消息 content 改为"一条消息被撤回"。两次更新导致文本不一致——自己撤回时先显示"你撤回了一条消息"，WS 推送到达后变为"一条消息被撤回"（无"你"前缀，措辞不同）。
+- **修复**: 统一两处文案；或 `handleRecallPush` 检查消息是否已经是撤回状态，跳过已撤回的消息；或撤回 API 成功后等待 WS 推送，不做本地乐观更新
+
+### B107 [P2] ArchiveConversation handler 无成员身份校验
+
+- **文件**: `src/backend/internal/handler/conversation.go:216-239`
+- **现象**: `ArchiveConversation` 调用 `h.svc.ArchiveConversation`，该 service 方法内部可能只检查了 `conv.user_id == userID`（仓库层 Archive 直接按 ID 更新）。对于群聊，非创建者成员无法归档（因为只比较 `conv.user_id`，即 B47 的群聊维度问题）。但对于私聊，如果用户 B 的 `user_id` 不是对话的 `user_id`（创建者是 A），用户 B 也无法归档。这与 B47 部分重叠，但本条聚焦在 archive 场景下非创建者的私聊归档问题。
+- **修复**: ArchiveConversation service 应检查当前用户是对话的创建者或成员（通过 conversation_members 表）
+
+### B108 [P3] MessageAttachmentView 不支持非图片/PDF 附件——静默丢弃
+
+- **文件**: `src/frontend/src/components/chat/MessageAttachmentView.tsx:16-24`
+- **现象**: `MessageAttachmentView` 只渲染 `isImageAttachment` 和 `isPDFAttachment` 两种类型，其他 MIME 类型（如 `.txt`, `.docx`, `.mp4`）的附件完全不可见。用户发送了附件，消息中不会显示任何附件标识。
+- **修复**: 添加 fallback 渲染：对非图片/PDF 附件显示通用文件图标 + 文件名 + 文件大小 + 下载链接
+
+### B109 [P2] ConversationItem archive 错误无用户反馈
+
+- **文件**: `src/frontend/src/components/sidebar/ConversationList.tsx:62-65`
+- **现象**: `onArchive` 回调是 `async () => { await convApi.archiveConversation(conv.id); archiveConversationLocal(conv.id); }`，无 try/catch。如果归档 API 失败（网络错误、服务端错误），Promise rejection 不会被处理，用户看不到任何错误提示，对话列表也不会回滚。
+- **修复**: 添加 try/catch，失败时 `antMessage.error('归档失败')`
+
+### B110 [P2] ChatInput handleSubmit 发送失败不清空输入框但清空了 pendingFiles
+
+- **文件**: `src/frontend/src/components/chat/ChatInput.tsx:118-136`
+- **现象**: `handleSubmit` 先 `setValue('')` 和 `setPendingFiles([])` 清空输入，然后 `await send()`。如果 `send` 抛异常（网络错误），`finally` 只设置 `setSending(false)`。结果是用户输入的内容和附件都丢失了，无法重试。虽然 messageStore 的 optimistic message 会标记为 failed 显示重试按钮，但那只是纯文本内容——附件信息已在 `setPendingFiles([])` 中丢失。
+- **修复**: 将 `setValue('')` 和 `setPendingFiles([])` 移到 `send` 成功后执行；或在 catch 中恢复输入内容和附件
