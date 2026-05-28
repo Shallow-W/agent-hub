@@ -181,7 +181,7 @@
 | CODE-05 | config.yaml 缺 upload 和 redis.db 字段 | P1 | [x] |
 | CODE-06 | Client.LastActive 无同步并发读写 | P1 | [x] |
 | CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [x] |
-| CODE-08 | 多语句迁移无事务包裹 | P2 | [ ] |
+| CODE-08 | 多语句迁移无事务包裹 | P2 | [x] |
 | CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [ ] |
 | CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [x] |
 | CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
@@ -270,9 +270,9 @@
 |---|------|--------|------|
 | DB-01 | messages.sender_id 可空，部分消息无发送者 | P2 | [ ] |
 | DB-02 | 迁移 006 创建重复索引(002/004/005 已创建) | P3 | [ ] |
-| DB-03 | conversation_members.last_read_at 无索引 | P2 | [ ] |
+| DB-03 | conversation_members.last_read_at 无索引 | P2 | [x] |
 | DB-04 | 迁移 012 sender_id backfill 仅覆盖 user 角色 | P2 | [ ] |
-| DB-05 | ListByUserID 热查询缺 archived_at 索引 | P2 | [ ] |
+| DB-05 | ListByUserID 热查询缺 archived_at 索引 | P2 | [x] |
 | DB-06 | conversations.type 无 CHECK 约束 | P2 | [x] |
 | DB-07 | friends.status 无 CHECK 约束 | P2 | [x] |
 | DB-08 | CASCADE 删除用户时销毁群聊(应 SET NULL) | P1 | [ ] |
@@ -391,13 +391,13 @@
 |---|------|--------|------|
 | UX-01 | 删除对话无二次确认弹窗，误点即删 | P1 | [x] |
 | UX-02 | 创建群组后群不自动激活，需手动点击 | P1 | [x] |
-| UX-03 | 切换对话无"新消息"指示器/跳转按钮 | P1 | [ ] |
+| UX-03 | 切换对话无"新消息"指示器/跳转按钮 | P1 | [x] |
 | UX-04 | 无响应式设计，移动端布局不可用 | P1 | [ ] |
-| UX-05 | 快速切换对话时 fetchMessages 竞态（旧请求覆盖新数据） | P1 | [ ] |
+| UX-05 | 快速切换对话时 fetchMessages 竞态（旧请求覆盖新数据） | P1 | [x] |
 | UX-06 | 新建对话默认标题"新对话"硬编码，无输入框 | P2 | [ ] |
 | UX-07 | 对话列表无空状态引导（新用户不知如何开始） | P2 | [ ] |
 | UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [x] |
-| UX-09 | 群聊创建后不自动打开成员面板 | P2 | [ ] |
+| UX-09 | 群聊创建后不自动打开成员面板 | P2 | [x] |
 | UX-10 | 好友申请无备注/留言字段 | P2 | [ ] |
 | UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [ ] |
 | UX-12 | 输入框不支持 Shift+Enter 换行 | P2 | [x] |

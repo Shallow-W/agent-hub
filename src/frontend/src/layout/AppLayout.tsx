@@ -104,6 +104,8 @@ const AppLayout: React.FC = () => {
       // UX-02: 自动激活新创建的群聊
       if (conv?.id) {
         setActive(conv.id);
+        // UX-09: 群聊创建后自动打开成员面板
+        useConversationStore.getState().setMemberPanelOpen(true);
       }
     } catch {
       antMessage.error('创建群聊失败');
