@@ -85,6 +85,11 @@
 | B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [ ] |
 | B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
 | B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [ ] |
+| B53 | user.stop_stream 前端发送但后端无处理(stop按钮无效) | P1 | [ ] |
+| B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [ ] |
+| B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
+| B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [ ] |
+| B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 

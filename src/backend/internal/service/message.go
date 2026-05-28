@@ -165,6 +165,12 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 // postPersist 持久化后的推送和缓存操作
 func (s *MessageService) postPersist(conversationID, senderID string, msg *model.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("postPersist recovered from panic", "conversation_id", conversationID, "panic", r)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -384,6 +390,12 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 
 	// 撤回成功后异步推送通知给其他成员（排除发送者）
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("recall push recovered from panic", "conversation_id", convID, "panic", r)
+			}
+		}()
+
 		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 

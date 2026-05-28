@@ -72,8 +72,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         // before 有值表示翻页加载更多，拼在前面；否则是首次加载，覆盖旧数据
         const existing = before ? (state.messages[conversationId] ?? []) : [];
         const merged = [...list, ...existing];
-        // Trim oldest messages if exceeding cap
-        const trimmed = merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
+        // 只在首次加载时裁剪；加载更多时保留历史消息
+        const trimmed = (!before && merged.length > MAX_MESSAGES) ? merged.slice(merged.length - MAX_MESSAGES) : merged;
         return {
           messages: { ...state.messages, [conversationId]: trimmed },
           hasMore: {

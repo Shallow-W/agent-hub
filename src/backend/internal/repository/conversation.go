@@ -143,6 +143,18 @@ func (r *ConversationRepo) Archive(ctx context.Context, id string) error {
 	return nil
 }
 
+// Unarchive 取消归档会话
+func (r *ConversationRepo) Unarchive(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversations SET archived_at = NULL WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("unarchive conversation: %w", err)
+	}
+	return nil
+}
+
 // ListArchivedByUserID 分页查询用户已归档的对话列表，按 archived_at 降序
 func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
@@ -241,7 +253,7 @@ func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID
 		 ''::text AS peer_name, ''::text AS last_message
 		 FROM conversations c
 		 INNER JOIN conversation_members cm ON cm.conversation_id = c.id
-		 WHERE c.type = 'single' AND c.archived_at IS NULL
+		 WHERE c.type = 'single'
 		   AND (
 		     (c.user_id = $1 AND cm.user_id = $2)
 		     OR

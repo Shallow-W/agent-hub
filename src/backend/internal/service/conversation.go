@@ -212,8 +212,18 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	// 私聊会话 owner 可操作
-	if conv.Type == "single" && conv.UserID == userID {
+	// 私聊会话：任何成员都可归档
+	if conv.Type == "single" {
+		if conv.UserID == userID {
+			return s.repo.Archive(ctx, conversationID)
+		}
+		member, err := s.repo.GetMember(ctx, conversationID, userID)
+		if err != nil {
+			return fmt.Errorf("check member: %w", err)
+		}
+		if member == nil {
+			return ErrConvNotMember
+		}
 		return s.repo.Archive(ctx, conversationID)
 	}
 	// 群聊需要 owner/admin 权限

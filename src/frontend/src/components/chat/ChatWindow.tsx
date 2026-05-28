@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, Input, List } from 'antd';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Avatar, Tooltip, Button, Dropdown, Input, List, message as antMessage } from 'antd';
 import {
   FolderOpenOutlined,
   MoreOutlined,
@@ -23,7 +23,11 @@ import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
+import { uploadFile } from '@/api/upload';
 import styles from './ChatWindow.module.css';
+
+const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -41,6 +45,44 @@ export const ChatWindow: React.FC = () => {
   const [searchLoading, setSearchLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const wsClient = useWsStore((s) => s.wsClient);
+  const streamingContent = useMessageStore(
+    (s) => (activeId ? s.streamingContent[activeId] : undefined),
+  );
+  const isStreaming = (streamingContent ?? '').length > 0;
+
+  // File upload handler for header "文件" button
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!;
+      if (f.size > MAX_FILE_SIZE) {
+        antMessage.error(`${f.name} 超过 50MB 限制`);
+        continue;
+      }
+      uploadFile(f).catch(() => {
+        antMessage.error(`${f.name} 上传失败`);
+      });
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleStopTask = useCallback(() => {
+    if (!wsClient || !activeId) return;
+    wsClient.send(JSON.stringify({
+      type: 'user.stop_stream',
+      data: { conversation_id: activeId },
+    }));
+    // Clear streaming content locally
+    useMessageStore.setState((s) => {
+      const next = { ...s.streamingContent };
+      delete next[activeId];
+      return { streamingContent: next };
+    });
+    antMessage.info('已停止生成');
+  }, [wsClient, activeId]);
 
   // Mark conversation as read when switching to it
   useEffect(() => {
@@ -133,8 +175,16 @@ export const ChatWindow: React.FC = () => {
         </div>
         <div className={styles.headerActions}>
           <Tooltip title="文件">
-            <Button type="text" icon={<FolderOpenOutlined />} size="small" />
+            <Button type="text" icon={<FolderOpenOutlined />} size="small" onClick={() => fileInputRef.current?.click()} />
           </Tooltip>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_TYPES}
+            multiple
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
           {isGroup && (
             <Tooltip title="邀请成员">
               <Button
@@ -149,7 +199,7 @@ export const ChatWindow: React.FC = () => {
             <Button type="text" icon={<SearchOutlined />} size="small" onClick={toggleSearch} />
           </Tooltip>
           <Tooltip title="停止任务">
-            <Button type="text" icon={<StopOutlined />} size="small" />
+            <Button type="text" icon={<StopOutlined />} size="small" disabled={!isStreaming} onClick={handleStopTask} />
           </Tooltip>
           <Tooltip title={isGroup ? '群聊设置' : '对话设置'}>
             <Button

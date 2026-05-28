@@ -40,7 +40,8 @@ func (r *GroupRepo) CreateGroup(ctx context.Context, ownerID, name string, membe
 
 	// 插入 owner
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'owner')
+			 ON CONFLICT (conversation_id, user_id) DO NOTHING`,
 		conv.ID, ownerID,
 	)
 	if err != nil {
@@ -50,7 +51,8 @@ func (r *GroupRepo) CreateGroup(ctx context.Context, ownerID, name string, membe
 	// 插入普通成员
 	for _, mid := range memberIDs {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')`,
+			`INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')
+			 ON CONFLICT (conversation_id, user_id) DO NOTHING`,
 			conv.ID, mid,
 		)
 		if err != nil {

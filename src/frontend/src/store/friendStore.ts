@@ -10,6 +10,8 @@ interface FriendState {
   error: string | null;
   searchResults: User[];
   isSearching: boolean;
+  /** Tracks which request ID is currently being accepted/rejected */
+  actionLoading: string | null;
 
   fetchFriends: () => Promise<void>;
   fetchPending: () => Promise<void>;
@@ -27,6 +29,7 @@ export const useFriendStore = create<FriendState>((set) => ({
   error: null,
   searchResults: [],
   isSearching: false,
+  actionLoading: null,
 
   fetchFriends: async () => {
     set({ loading: true, error: null });
@@ -70,6 +73,7 @@ export const useFriendStore = create<FriendState>((set) => ({
   },
 
   acceptRequest: async (id: string) => {
+    set({ actionLoading: id, error: null });
     try {
       await friendApi.acceptFriendRequest(id);
       // 刷新列表
@@ -81,10 +85,13 @@ export const useFriendStore = create<FriendState>((set) => ({
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
+    } finally {
+      set({ actionLoading: null });
     }
   },
 
   rejectRequest: async (id: string) => {
+    set({ actionLoading: id, error: null });
     try {
       await friendApi.rejectFriendRequest(id);
       const pending = await friendApi.listPendingRequests();
@@ -92,6 +99,8 @@ export const useFriendStore = create<FriendState>((set) => ({
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
+    } finally {
+      set({ actionLoading: null });
     }
   },
 

@@ -5,6 +5,13 @@ import { markConversationRead } from '@/api/conversation';
 import type { OptimisticMessage } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
+/** Cache duration: skip re-fetch if loaded within last 30 seconds */
+const CACHE_TTL_MS = 30_000;
+/** Max messages kept per conversation */
+const MAX_MESSAGES = 200;
+/** Per-conversation last fetch timestamp */
+const lastFetchedAt: Record<string, number> = {};
+
 export function useMessages(conversationId: string | null) {
   const conversationMessages = useMessageStore(
     (s) => (conversationId ? s.messages[conversationId] : undefined),
@@ -37,6 +44,17 @@ export function useMessages(conversationId: string | null) {
     activeIdRef.current = conversationId;
     const currentId = conversationId;
 
+    // Skip re-fetch if messages were loaded within CACHE_TTL_MS
+    const now = Date.now();
+    const lastFetch = lastFetchedAt[currentId];
+    const existingMessages = useMessageStore.getState().messages[currentId];
+    if (lastFetch && now - lastFetch < CACHE_TTL_MS && existingMessages && existingMessages.length > 0) {
+      // Still mark as read even when using cache
+      markConversationRead(currentId).catch(() => {});
+      return;
+    }
+
+    lastFetchedAt[currentId] = now;
     fetchMessages(currentId);
 
     // 标记已读
@@ -55,8 +73,9 @@ export function useMessages(conversationId: string | null) {
           const merged = [...existing, ...newMsgs].sort(
             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
           );
+          const trimmed = merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
           useMessageStore.setState((s) => ({
-            messages: { ...s.messages, [currentId]: merged },
+            messages: { ...s.messages, [currentId]: trimmed },
           }));
         }
       }
@@ -74,6 +93,8 @@ export function useMessages(conversationId: string | null) {
   const send = useCallback(
     async (content: string, attachments?: AttachmentPayload[], replyTo?: string) => {
       if (!conversationId) return;
+      // Invalidate cache so next switch re-fetches
+      delete lastFetchedAt[conversationId];
       await sendMessage(conversationId, content, attachments, replyTo);
     },
     [conversationId, sendMessage],

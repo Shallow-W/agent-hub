@@ -55,10 +55,17 @@ func (s *FriendService) SendFriendRequest(ctx context.Context, userID, friendID 
 		return nil, ErrUserNotFound
 	}
 
-	// 检查是否已有好友关系（双向检查）
+	// 双向检查：任一方向存在关系均拒绝
 	existing, err := s.repo.GetFriendship(ctx, userID, friendID)
 	if err != nil {
 		return nil, fmt.Errorf("check existing friendship: %w", err)
+	}
+	if existing != nil {
+		return nil, ErrFriendExists
+	}
+	existing, err = s.repo.GetFriendship(ctx, friendID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check reverse friendship: %w", err)
 	}
 	if existing != nil {
 		return nil, ErrFriendExists

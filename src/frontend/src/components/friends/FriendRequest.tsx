@@ -4,10 +4,9 @@ import { SendOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 
 const FriendRequest: React.FC = () => {
-  const { pendingRequests, sendRequest, acceptRequest, rejectRequest, loading } =
+  const { pendingRequests, sendRequest, acceptRequest, rejectRequest, loading, actionLoading } =
     useFriendStore();
   const [username, setUsername] = useState('');
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const handleSend = async () => {
     const trimmed = username.trim();
@@ -22,26 +21,20 @@ const FriendRequest: React.FC = () => {
   };
 
   const handleAccept = async (id: string) => {
-    setActionLoading(id + '-accept');
     try {
       await acceptRequest(id);
       message.success('已接受好友请求');
     } catch {
       message.error('操作失败');
-    } finally {
-      setActionLoading(null);
     }
   };
 
   const handleReject = async (id: string) => {
-    setActionLoading(id + '-reject');
     try {
       await rejectRequest(id);
       message.success('已拒绝好友请求');
     } catch {
       message.error('操作失败');
-    } finally {
-      setActionLoading(null);
     }
   };
 
@@ -86,7 +79,8 @@ const FriendRequest: React.FC = () => {
                   type="primary"
                   size="small"
                   icon={<CheckOutlined />}
-                  loading={actionLoading === req.id + '-accept'}
+                  loading={actionLoading === req.id}
+                  disabled={!!actionLoading && actionLoading !== req.id}
                   onClick={() => handleAccept(req.id)}
                 >
                   接受
@@ -96,7 +90,8 @@ const FriendRequest: React.FC = () => {
                   size="small"
                   danger
                   icon={<CloseOutlined />}
-                  loading={actionLoading === req.id + '-reject'}
+                  loading={false}
+                  disabled={!!actionLoading}
                   onClick={() => handleReject(req.id)}
                 >
                   拒绝

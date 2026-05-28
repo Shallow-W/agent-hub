@@ -335,10 +335,12 @@ func createDatabase(cfg *Config) error {
 // runMigrations 从 migrations/ 目录读取 SQL 文件并执行（幂等）
 func runMigrations(db *sqlx.DB, logger *slog.Logger) error {
 	// 创建迁移追踪表
-	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version VARCHAR PRIMARY KEY,
 		applied_at TIMESTAMPTZ DEFAULT NOW()
-	)`)
+	)`); err != nil {
+		return fmt.Errorf("create schema_migrations table: %w", err)
+	}
 
 	files, err := filepath.Glob("migrations/*.sql")
 	if err != nil {
