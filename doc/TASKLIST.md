@@ -89,7 +89,7 @@
 | B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [x] |
 | B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
 | B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [x] |
-| B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [ ] |
+| B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [x] |
 | B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [x] |
 | B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [x] |
 | B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [ ] |

@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
+import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import type { StreamMessage } from '@/types/message';
@@ -159,6 +160,13 @@ export function useWebSocket() {
     },
     [wsClient],
   );
+
+  // Invalidate message cache when WS reconnects (picks up missed messages)
+  useEffect(() => {
+    if (status === 'connected') {
+      invalidateMessageCache();
+    }
+  }, [status]);
 
   return { status, send };
 }

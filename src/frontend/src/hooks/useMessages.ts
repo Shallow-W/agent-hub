@@ -12,6 +12,11 @@ const MAX_MESSAGES = 200;
 /** Per-conversation last fetch timestamp */
 const lastFetchedAt: Record<string, number> = {};
 
+/** Invalidate cache on WS reconnect so missed messages are re-fetched */
+export function invalidateMessageCache() {
+  Object.keys(lastFetchedAt).forEach((k) => delete lastFetchedAt[k]);
+}
+
 export function useMessages(conversationId: string | null) {
   const conversationMessages = useMessageStore(
     (s) => (conversationId ? s.messages[conversationId] : undefined),
