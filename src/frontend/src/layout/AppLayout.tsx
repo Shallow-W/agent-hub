@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Button, Alert, Avatar, Modal } from 'antd';
+import { Button, Alert, Avatar, Input, Modal, message as antMessage } from 'antd';
 import {
   PlusOutlined,
   LeftOutlined,
@@ -24,7 +24,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { getOrCreatePrivateChat } from '@/api/conversation';
-import { message as antMessage } from 'antd';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import styles from './AppLayout.module.css';
 
@@ -47,6 +46,8 @@ const AppLayout: React.FC = () => {
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [convPanelWidth, setConvPanelWidth] = useState(166);
+  const [newConvModalOpen, setNewConvModalOpen] = useState(false);
+  const [newConvTitle, setNewConvTitle] = useState('');
 
   /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
@@ -93,6 +94,7 @@ const AppLayout: React.FC = () => {
           useConversationStore.getState().setMemberPanelOpen(false);
           return;
         }
+        if (newConvModalOpen) { setNewConvModalOpen(false); return; }
         if (archivedModalOpen) { setArchivedModalOpen(false); return; }
         if (groupModalOpen) { setGroupModalOpen(false); return; }
         return;
@@ -117,7 +119,7 @@ const AppLayout: React.FC = () => {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [archivedModalOpen, groupModalOpen]);
+  }, [archivedModalOpen, groupModalOpen, newConvModalOpen]);
 
   const showArchived = async () => {
     try {
@@ -140,8 +142,9 @@ const AppLayout: React.FC = () => {
     }
   };
 
-  const handleCreate = async () => {
-    await create('single', `新对话`);
+  const handleCreate = () => {
+    setNewConvTitle('');
+    setNewConvModalOpen(true);
   };
 
   const handleGroupCreate = async (name: string, memberIds: string[]) => {
@@ -319,6 +322,32 @@ const AppLayout: React.FC = () => {
         onCancel={() => setGroupModalOpen(false)}
         onOk={handleGroupCreate}
       />
+      <Modal
+        title="新建对话"
+        open={newConvModalOpen}
+        onOk={async () => {
+          const title = newConvTitle.trim() || '新对话';
+          await create('single', title);
+          setNewConvModalOpen(false);
+        }}
+        onCancel={() => setNewConvModalOpen(false)}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Input
+          placeholder="对话标题（可选）"
+          value={newConvTitle}
+          onChange={(e) => setNewConvTitle(e.target.value)}
+          onPressEnter={async () => {
+            const title = newConvTitle.trim() || '新对话';
+            await create('single', title);
+            setNewConvModalOpen(false);
+          }}
+          maxLength={50}
+          autoFocus
+        />
+      </Modal>
       <Modal
         title="归档对话"
         open={archivedModalOpen}

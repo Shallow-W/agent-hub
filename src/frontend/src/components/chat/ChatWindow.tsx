@@ -275,6 +275,8 @@ export const ChatWindow: React.FC = () => {
                           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                           el.classList.add(styles.highlightFlash!);
                           el.addEventListener('animationend', () => el.classList.remove(styles.highlightFlash!), { once: true });
+                        } else {
+                          antMessage.info('消息不在当前视图');
                         }
                       });
                     });

@@ -43,11 +43,13 @@ export function useMessages(conversationId: string | null) {
 
   // 追踪当前活跃的 conversationId，用于 stale check
   const activeIdRef = useRef<string | null>(null);
+  const fetchIdRef = useRef(0);
 
   useEffect(() => {
     if (!conversationId) return;
     activeIdRef.current = conversationId;
     const currentId = conversationId;
+    const currentFetchId = ++fetchIdRef.current;
 
     // Skip re-fetch if messages were loaded within CACHE_TTL_MS
     const now = Date.now();
@@ -68,7 +70,7 @@ export function useMessages(conversationId: string | null) {
     // 拉取离线/未读消息并合并
     getUnreadMessages(currentId, 100).then((unread) => {
       // stale check：如果用户已切换到其他对话，丢弃结果
-      if (activeIdRef.current !== currentId) return;
+      if (currentFetchId !== fetchIdRef.current) return;
       if (unread && unread.length > 0) {
         const store = useMessageStore.getState();
         const existing = store.messages[currentId] ?? [];
