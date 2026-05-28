@@ -131,14 +131,14 @@
 | B98 | wsStore connect() 断开旧连接但不清理 joinedRooms 和 queue | P2 | [x] |
 | B99 | conversationStore fetchConversations 无并发锁，双重调用覆盖数据 | P2 | [x] |
 | B100 | useWebSocket disconnect 在组件卸载时断开全局 WebSocket | P1 | [x] |
-| B101 | useMessages getUnreadMessages stale check 不覆盖 fetchMessages 竞态 | P2 | [ ] |
+| B101 | useMessages getUnreadMessages stale check 不覆盖 fetchMessages 竞态 | P2 | [-] |
 | B102 | MessageBubble canRecall 使用客户端 Date.now() 与服务端时间不一致 | P2 | [x] |
 | B103 | MessageList streaming message id 硬编码为 'streaming'，去重失效 | P2 | [x] |
 | B104 | ChatWindow 搜索结果点击滚动用 querySelector，消息可能未加载 | P2 | [ ] |
 | B105 | MessageBubble replyQuote 未转义 HTML 内容 | P2 | [x] |
 | B106 | messageStore recall 本地乐观更新与 WebSocket 推送竞态 | P1 | [x] |
 | B107 | ArchiveConversation handler 无成员身份校验 | P2 | [-] |
-| B108 | MessageAttachmentView 不支持非图片/PDF 附件——静默丢弃 | P3 | [ ] |
+| B108 | MessageAttachmentView 不支持非图片/PDF 附件——静默丢弃 | P3 | [x] |
 | B109 | ConversationItem archive 错误无用户反馈 | P2 | [x] |
 | B110 | ChatInput handleSubmit 发送失败不清空输入框但清空了 pendingFiles | P2 | [x] |
 
