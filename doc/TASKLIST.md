@@ -218,7 +218,7 @@
 | BUILD-02 | vendor-antd chunk 超 500 kB | P2 | [ ] |
 | BUILD-03 | 多个依赖有 Major 版本更新 | P3 | [ ] |
 | BUILD-04 | screenshot.mjs 幽灵 playwright 依赖 | P3 | [-] |
-| BUILD-05 | 无 .env 环境文件 | P3 | [ ] |
+| BUILD-05 | 无 .env 环境文件 | P3 | [-] |
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [x] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
 | BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [-] |
@@ -249,16 +249,16 @@
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
 | DEPLOY-01 | 无 CI/CD 配置 | P1 | [ ] |
-| DEPLOY-02 | 无 Dockerfile | P1 | [ ] |
-| DEPLOY-03 | 无 README.md | P1 | [ ] |
+| DEPLOY-02 | 无 Dockerfile | P1 | [x] |
+| DEPLOY-03 | 无 README.md | P1 | [x] |
 | DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [x] |
-| DEPLOY-05 | docker-compose 缺 Redis 服务 | P2 | [ ] |
+| DEPLOY-05 | docker-compose 缺 Redis 服务 | P2 | [x] |
 | DEPLOY-06 | config.example 与实际 config 不同步 | P2 | [x] |
 | DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [x] |
-| DEPLOY-08 | 无 metrics/Prometheus 端点 | P2 | [ ] |
+| DEPLOY-08 | 无 metrics/Prometheus 端点 | P2 | [-] |
 | DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [x] |
 | DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [x] |
-| DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [ ] |
+| DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [-] |
 | DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [ ] |
 | DEPLOY-13 | 健康检查不验证 DB/Redis 连接状态 | P3 | [x] |
 
