@@ -1,12 +1,20 @@
 -- DB-06: conversations.type CHECK constraint
+-- Normalize legacy types and ensure all existing rows conform
+UPDATE conversations SET type = 'single' WHERE type = 'private';
+UPDATE conversations SET type = 'single' WHERE type NOT IN ('single', 'group');
 ALTER TABLE conversations ADD CONSTRAINT chk_conversations_type
   CHECK (type IN ('single', 'group'));
 
 -- DB-07: friends.status CHECK constraint
+UPDATE friends SET status = 'pending' WHERE status NOT IN ('pending', 'accepted', 'rejected');
 ALTER TABLE friends ADD CONSTRAINT chk_friends_status
   CHECK (status IN ('pending', 'accepted', 'rejected'));
 
--- DB-11: GroupRepo.AddMember 幂等保护 (补 ON CONFLICT)
--- 已在 Go 代码层通过 AddMember 的 ON CONFLICT DO NOTHING 处理，此处确保唯一约束存在
+-- DB-11: conversation_members unique index for idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_members_unique
   ON conversation_members (conversation_id, user_id);
+
+---- DOWN
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS chk_conversations_type;
+ALTER TABLE friends DROP CONSTRAINT IF EXISTS chk_friends_status;
+DROP INDEX IF EXISTS idx_conv_members_unique;
