@@ -34,9 +34,9 @@ export function useMessages(conversationId: string | null) {
   }, [conversationId, hasMore, loading, messages, fetchMessages]);
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, agentId?: string) => {
       if (!conversationId) return;
-      await sendMessage(conversationId, content);
+      await sendMessage(conversationId, content, agentId);
     },
     [conversationId, sendMessage],
   );

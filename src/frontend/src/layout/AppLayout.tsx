@@ -7,17 +7,23 @@ import SettingsPanel from '@/components/settings/SettingsPanel';
 import FriendList from '@/components/friends/FriendList';
 import FriendRequest from '@/components/friends/FriendRequest';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
+import { AgentList } from '@/components/agent/AgentList';
+import { AgentProfile } from '@/components/agent/AgentProfile';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
+import { useAgents } from '@/hooks/useAgents';
+import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
   const { create } = useConversation();
   const { status } = useWebSocket();
   const { user, logout: handleLogout } = useAuth();
+  const { agents } = useAgents();
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const handleCreate = async () => {
     await create('single', `新对话`);
@@ -29,6 +35,13 @@ const AppLayout: React.FC = () => {
     setGroupModalOpen(false);
   };
 
+  const selectedAgent =
+    agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
+
+  const handleSelectAgent = (agent: Agent) => {
+    setSelectedAgentId(agent.id);
+  };
+
   /** 中间面板内容：根据左侧导航切换 */
   const renderMiddlePanel = () => {
     if (activeNav === 'friends') {
@@ -37,12 +50,26 @@ const AppLayout: React.FC = () => {
           <div className={styles.convPanelHeader}>
             <span className={styles.convPanelTitle}>好友</span>
           </div>
-          <div style={{ padding: 12, overflow: 'auto', flex: 1 }}>
+          <div className={styles.middleContent}>
             <FriendRequest />
-            <div style={{ marginTop: 16, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
+            <div className={styles.friendListSection}>
               <FriendList onStartChat={() => setActiveNav('chat')} />
             </div>
           </div>
+        </>
+      );
+    }
+
+    if (activeNav === 'agents') {
+      return (
+        <>
+          <div className={styles.convPanelHeader}>
+            <span className={styles.convPanelTitle}>Agent</span>
+          </div>
+          <AgentList
+            selectedAgentId={selectedAgent?.id ?? null}
+            onSelect={handleSelectAgent}
+          />
         </>
       );
     }
@@ -60,7 +87,7 @@ const AppLayout: React.FC = () => {
               新建群聊
             </Button>
           </div>
-          <div style={{ padding: 16, color: 'var(--color-text-secondary)' }}>
+          <div className={styles.emptyPanel}>
             暂无群聊
           </div>
         </>
@@ -104,7 +131,11 @@ const AppLayout: React.FC = () => {
 
       {/* 右侧：聊天区域 */}
       <div className={styles.chatPanel}>
-        <Outlet />
+        {activeNav === 'agents' ? (
+          <AgentProfile agent={selectedAgent} />
+        ) : (
+          <Outlet />
+        )}
       </div>
 
       {/* 群聊创建弹窗 */}

@@ -10,6 +10,8 @@ database:
 jwt:
   secret: dev-secret-change-in-prod
   expiry_hours: 24
+daemon:
+  token: dev-daemon-token-change-in-prod
 cors:
   allowed_origins:
     - http://localhost:5173

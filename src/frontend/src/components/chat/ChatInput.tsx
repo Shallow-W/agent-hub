@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { Input, Button, Tooltip, Spin } from 'antd';
-import { SendOutlined, PaperClipOutlined } from '@ant-design/icons';
+import { Input, Button, Tooltip, Spin, Select } from 'antd';
+import { SendOutlined, PaperClipOutlined, RobotOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
+import { useAgents } from '@/hooks/useAgents';
 import styles from './ChatInput.module.css';
 
 const { TextArea } = Input;
@@ -12,20 +13,23 @@ interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
   const [value, setValue] = useState('');
+  const [agentId, setAgentId] = useState<string | undefined>();
   const { send, streamingContent } = useMessages(conversationId);
+  const { agents } = useAgents();
   const isStreaming = (streamingContent ?? '').length > 0;
+  const selectedAgent = agents.find((agent) => agent.id === agentId);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed || isStreaming) return;
     setValue('');
     try {
-      await send(trimmed);
+      await send(trimmed, agentId);
     } catch {
       // 发送失败时恢复输入内容
       setValue(trimmed);
     }
-  }, [value, isStreaming, send]);
+  }, [value, isStreaming, send, agentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -47,6 +51,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
           <span>Agent 正在输入</span>
         </div>
       )}
+      <div className={styles.agentRow}>
+        <RobotOutlined />
+        <Select
+          allowClear
+          aria-label="选择 Agent"
+          className={styles.agentSelect}
+          optionFilterProp="label"
+          options={agents.map((agent) => ({
+            label: `${agent.name} · ${agent.cli_tool}`,
+            value: agent.id,
+          }))}
+          placeholder={agents.length === 0 ? '暂无可用 Agent' : '选择 Agent 接入本次消息'}
+          showSearch
+          size="small"
+          value={agentId}
+          onChange={setAgentId}
+        />
+        {selectedAgent ? (
+          <span className={styles.agentHint}>
+            {selectedAgent.machine_name || selectedAgent.source}
+          </span>
+        ) : null}
+      </div>
       <div className={styles.inputRow}>
         <TextArea
           value={value}

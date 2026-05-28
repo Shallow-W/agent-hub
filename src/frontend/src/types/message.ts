@@ -9,6 +9,17 @@ export interface Message {
   created_at: string;
 }
 
+export interface SendMessageResult {
+  user_message: Message;
+  agent_message?: Message;
+}
+
+export interface MessageArtifacts {
+  agent_id?: string;
+  agent_name?: string;
+  cli_tool?: string;
+}
+
 export interface StreamMessage {
   type: 'message.streaming' | 'message.complete' | 'agent.status' | 'error';
   data: {

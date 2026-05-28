@@ -1,0 +1,13 @@
+{
+  "name": "@agenthub/daemon",
+  "version": "0.1.0",
+  "bin": {
+    "agenthub-daemon": "./bin/agenthub-daemon.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

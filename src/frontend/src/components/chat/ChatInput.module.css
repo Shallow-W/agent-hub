@@ -15,6 +15,26 @@
   color: var(--color-text-secondary);
 }
 
+.agentRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 260px) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agentSelect {
+  min-width: 0;
+}
+
+.agentHint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inputRow {
   display: flex;
   gap: 10px;
@@ -42,4 +62,14 @@
 
 .charCountVisible {
   opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .agentRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .agentHint {
+    display: none;
+  }
 }

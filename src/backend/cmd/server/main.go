@@ -19,11 +19,11 @@ import (
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
-	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/knadh/koanf/v2"
+	"github.com/jmoiron/sqlx"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
 )
 
 // Config 应用配置结构
@@ -40,9 +40,12 @@ type Config struct {
 		SSLMode  string `koanf:"sslmode"`
 	} `koanf:"database"`
 	JWT struct {
-		Secret        string `koanf:"secret"`
-		ExpiryHours   int    `koanf:"expiry_hours"`
+		Secret      string `koanf:"secret"`
+		ExpiryHours int    `koanf:"expiry_hours"`
 	} `koanf:"jwt"`
+	Daemon struct {
+		Token string `koanf:"token"`
+	} `koanf:"daemon"`
 	CORS struct {
 		AllowedOrigins []string `koanf:"allowed_origins"`
 	} `koanf:"cors"`
@@ -72,20 +75,24 @@ func main() {
 	convRepo := repository.NewConversationRepo(db)
 	msgRepo := repository.NewMessageRepo(db)
 	friendRepo := repository.NewFriendRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
 		JWTExpiryHours: cfg.JWT.ExpiryHours,
 	})
 	convSvc := service.NewConversationService(convRepo)
-	msgSvc := service.NewMessageService(msgRepo, convRepo)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, agentRepo)
 	friendSvc := service.NewFriendService(friendRepo)
+	agentSvc := service.NewAgentService(agentRepo)
 
 	hub := ws.NewHub(logger)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
+	agentHandler := handler.NewAgentHandler(agentSvc)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
@@ -119,6 +126,16 @@ func main() {
 
 		apiGroup.POST("/conversations/:id/messages", msgHandler.Send)
 		apiGroup.GET("/conversations/:id/messages", msgHandler.History)
+
+		apiGroup.GET("/agents", agentHandler.List)
+		apiGroup.POST("/agents", agentHandler.Create)
+		apiGroup.PUT("/agents/:id", agentHandler.Update)
+		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
+		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
+		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
+		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
+		apiGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		apiGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
 	}
 
 	// 好友路由（需要鉴权）
@@ -134,6 +151,10 @@ func main() {
 
 	// WebSocket 路由（通过 query 参数鉴权）
 	router.GET("/ws", wsHandler.Handle)
+	router.GET("/daemon/ws", daemonHandler.Handle)
+	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
+	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
+	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,7 +167,7 @@ func main() {
 		Addr:         addr,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 180 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

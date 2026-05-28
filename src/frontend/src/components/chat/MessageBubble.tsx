@@ -1,7 +1,7 @@
 import React from 'react';
 import { Avatar, Typography } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
-import type { Message } from '@/types/message';
+import type { Message, MessageArtifacts } from '@/types/message';
 import styles from './MessageBubble.module.css';
 
 const { Paragraph, Text } = Typography;
@@ -59,11 +59,24 @@ function formatTimestamp(dateStr: string): string {
   return `${hh}:${mm}`;
 }
 
+function parseArtifacts(value: string | null): MessageArtifacts {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return {};
+    return parsed as MessageArtifacts;
+  } catch {
+    return {};
+  }
+}
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
 }) => {
   const isUser = message.role === 'user';
+  const artifacts = parseArtifacts(message.artifacts_json);
+  const assistantName = artifacts.agent_name || 'Agent';
 
   return (
     <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
@@ -77,7 +90,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
         {!isUser && (
           <div className={styles.meta}>
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>Agent</Text>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>
+              {assistantName}
+              {artifacts.cli_tool ? ` · ${artifacts.cli_tool}` : ''}
+            </Text>
           </div>
         )}
         <div

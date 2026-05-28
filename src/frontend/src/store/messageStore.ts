@@ -12,7 +12,7 @@ interface MessageState {
   loading: boolean;
 
   fetchMessages: (conversationId: string, before?: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string) => Promise<void>;
+  sendMessage: (conversationId: string, content: string, agentId?: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
     conversationId: string,
@@ -59,9 +59,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content) => {
-    const msg = await msgApi.sendMessage(conversationId, content, 'user');
-    get().addMessage(conversationId, msg);
+  sendMessage: async (conversationId, content, agentId) => {
+    const result = await msgApi.sendMessage(conversationId, content, 'user', agentId);
+    get().addMessage(conversationId, result.user_message);
+    if (result.agent_message) {
+      get().addMessage(conversationId, result.agent_message);
+    }
   },
 
   addMessage: (conversationId, message) => {

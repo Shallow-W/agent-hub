@@ -37,6 +37,23 @@
   font-weight: 600;
 }
 
+.middleContent {
+  padding: 12px;
+  overflow: auto;
+  flex: 1;
+}
+
+.friendListSection {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.emptyPanel {
+  padding: 16px;
+  color: var(--color-text-secondary);
+}
+
 .chatPanel {
   flex: 1;
   display: flex;

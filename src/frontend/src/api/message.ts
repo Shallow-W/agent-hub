@@ -1,14 +1,16 @@
 import { get, post } from './client';
-import type { Message, MessageRole } from '@/types/message';
+import type { Message, MessageRole, SendMessageResult } from '@/types/message';
 
 export async function sendMessage(
   conversationId: string,
   content: string,
   role: MessageRole,
-): Promise<Message> {
-  return post<Message>(`/api/conversations/${conversationId}/messages`, {
+  agentId?: string,
+): Promise<SendMessageResult> {
+  return post<SendMessageResult>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
+    agent_id: agentId,
   });
 }
 

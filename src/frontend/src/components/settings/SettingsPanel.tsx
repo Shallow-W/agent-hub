@@ -7,6 +7,7 @@ import {
   UserAddOutlined,
   LogoutOutlined,
   TeamOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
@@ -72,6 +73,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         style={{ border: 'none', flex: 1 }}
         items={[
           { key: 'chat', icon: <MessageOutlined />, label: '对话' },
+          { key: 'agents', icon: <RobotOutlined />, label: 'Agent' },
           { key: 'friends', icon: <UserAddOutlined />, label: '好友' },
           { key: 'groups', icon: <TeamOutlined />, label: '群聊' },
           { key: 'settings', icon: <SettingOutlined />, label: '设置' },
