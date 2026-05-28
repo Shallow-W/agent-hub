@@ -7,6 +7,7 @@ interface FriendState {
   friends: Friend[];
   pendingRequests: FriendRequest[];
   loading: boolean;
+  sending: boolean;
   error: string | null;
   searchResults: User[];
   isSearching: boolean;
@@ -26,6 +27,7 @@ export const useFriendStore = create<FriendState>((set) => ({
   friends: [],
   pendingRequests: [],
   loading: false,
+  sending: false,
   error: null,
   searchResults: [],
   isSearching: false,
@@ -54,7 +56,7 @@ export const useFriendStore = create<FriendState>((set) => ({
   },
 
   sendRequest: async (username: string) => {
-    set({ loading: true, error: null });
+    set({ sending: true, error: null });
     try {
       await friendApi.sendFriendRequest(username);
       await Promise.all([
@@ -68,7 +70,7 @@ export const useFriendStore = create<FriendState>((set) => ({
       set({ error: msg });
       throw err;
     } finally {
-      set({ loading: false });
+      set({ sending: false });
     }
   },
 

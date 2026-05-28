@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { message as antdMessage } from 'antd';
 import type { Message } from '@/types/message';
 import type { OptimisticMessage } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
@@ -154,9 +155,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         );
         return { messages: { ...state.messages, [conversationId]: list } };
       });
-    } catch {
-      const { message } = await import('antd');
-      message.error('撤回失败，请重试');
+    } catch (err) {
+      console.error('recall failed:', err);
+      antdMessage.error('撤回失败，请重试');
     }
   },
 

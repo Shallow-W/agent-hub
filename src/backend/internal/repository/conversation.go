@@ -25,7 +25,7 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, $2, $3)
-		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
+		 RETURNING id, user_id, type, COALESCE(title, '') AS title, pinned, archived_at, created_at, updated_at,
 		 ''::text AS peer_id, ''::text AS peer_name, ''::text AS last_message`,
 		userID, convType, title,
 	).StructScan(&c)
@@ -296,7 +296,7 @@ func (r *ConversationRepo) CreatePrivateChat(ctx context.Context, userID, friend
 	var c model.Conversation
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO conversations (user_id, type, title) VALUES ($1, 'single', $2)
-		 RETURNING id, user_id, type, title, pinned, archived_at, created_at, updated_at,
+		 RETURNING id, user_id, type, COALESCE(title, '') AS title, pinned, archived_at, created_at, updated_at,
 		 ''::text AS peer_id, ''::text AS peer_name, ''::text AS last_message`,
 		userID, title,
 	).StructScan(&c)

@@ -221,7 +221,7 @@
 | BUILD-05 | 无 .env 环境文件 | P3 | [ ] |
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [x] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
-| BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [ ] |
+| BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [-] |
 | BUILD-09 | ChatInput 跨组件导入 EmojiPicker.module.css | P3 | [ ] |
 | BUILD-10 | package.json 含冗余 playwright 依赖 | P3 | [ ] |
 
@@ -379,9 +379,9 @@
 | FE-06 | useConversation 每次挂载触发重复 API 调用(无去重) | P2 | [x] |
 | FE-07 | 无 AbortController 取消机制，请求不可中断 | P2 | [ ] |
 | FE-08 | SettingsPanel 内部 selectedKey 不同步外部导航变化 | P3 | [ ] |
-| FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [ ] |
+| FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [x] |
 | FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [x] |
-| FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [ ] |
+| FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [x] |
 
 ---
 
