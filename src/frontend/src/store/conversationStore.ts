@@ -25,7 +25,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
   });
 }
 
-export const useConversationStore = create<ConversationState>((set) => ({
+export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
   activeConversationId: localStorage.getItem('agenthub_active_conv'),
   memberPanelOpen: false,
@@ -101,16 +101,18 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   renameConversation: async (id, title) => {
+    const prev = get().conversations;
+    set((state) => ({
+      conversations: sortConversations(
+        state.conversations.map((c) =>
+          c.id === id ? { ...c, title } : c,
+        ),
+      ),
+    }));
     try {
       await convApi.renameConversation(id, title);
-      set((state) => ({
-        conversations: sortConversations(
-          state.conversations.map((c) =>
-            c.id === id ? { ...c, title } : c,
-          ),
-        ),
-      }));
     } catch {
+      set({ conversations: prev });
       const { message } = await import('antd');
       message.error('重命名失败');
     }

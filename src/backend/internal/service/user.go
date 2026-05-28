@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -44,9 +45,15 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID, username string
 	if username == "" {
 		return nil, ErrUsernameEmpty
 	}
+	if !usernamePattern.MatchString(username) {
+		return nil, fmt.Errorf("%w: 用户名只能包含字母、数字、下划线或中文", ErrInvalidInput)
+	}
 	user, err := s.repo.UpdateUsername(ctx, userID, username)
 	if err != nil {
 		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
 	}
 	return user, nil
 }
