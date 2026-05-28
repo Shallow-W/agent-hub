@@ -76,6 +76,15 @@
 | B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [ ] |
 | B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [ ] |
 | B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
+| B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [ ] |
+| B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [ ] |
+| B46 | ListMemberIDs UNION 返回重复 userID，群主收到重复消息 | P1 | [ ] |
+| B47 | 私聊非创建者无法归档(只检查 conv.UserID) | P1 | [ ] |
+| B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [ ] |
+| B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [ ] |
+| B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [ ] |
+| B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
+| B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
@@ -335,6 +344,35 @@
 | FE-09 | friendStore 共享 loading 标志导致状态不一致 | P3 | [ ] |
 | FE-10 | ResizeHandle 组件卸载时拖拽事件监听泄漏 | P3 | [ ] |
 | FE-11 | messageStore.recall 动态 import antd 可掩盖原始错误 | P3 | [ ] |
+
+---
+
+## 前端 UX 问题（第十轮）
+
+| # | 问题 | 严重度 | 状态 |
+|---|------|--------|------|
+| UX-01 | 删除对话无二次确认弹窗，误点即删 | P1 | [ ] |
+| UX-02 | 创建群组后群不自动激活，需手动点击 | P1 | [ ] |
+| UX-03 | 切换对话无"新消息"指示器/跳转按钮 | P1 | [ ] |
+| UX-04 | 无响应式设计，移动端布局不可用 | P1 | [ ] |
+| UX-05 | 快速切换对话时 fetchMessages 竞态（旧请求覆盖新数据） | P1 | [ ] |
+| UX-06 | 新建对话默认标题"新对话"硬编码，无输入框 | P2 | [ ] |
+| UX-07 | 对话列表无空状态引导（新用户不知如何开始） | P2 | [ ] |
+| UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [ ] |
+| UX-09 | 群聊创建后不自动打开成员面板 | P2 | [ ] |
+| UX-10 | 好友申请无备注/留言字段 | P2 | [ ] |
+| UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [ ] |
+| UX-12 | 输入框不支持 Shift+Enter 换行 | P2 | [ ] |
+| UX-13 | 消息列表不支持键盘快捷键（Esc关闭面板等） | P2 | [ ] |
+| UX-14 | 长消息无折叠/展开功能 | P2 | [ ] |
+| UX-15 | 无消息搜索功能（对话内搜索） | P2 | [ ] |
+| UX-16 | 右键菜单仅显示"撤回"，缺少"复制""转发"等常见操作 | P3 | [ ] |
+| UX-17 | 未读消息数 badge 超 99 无特殊显示（如 99+） | P3 | [ ] |
+| UX-18 | 对话列表项无 hover 预览（最后一条消息摘要） | P3 | [ ] |
+| UX-19 | 无消息发送失败的全局重试提示 | P3 | [ ] |
+| UX-20 | Emoji 选择器无最近使用/常用分类 | P3 | [ ] |
+
+> 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 
 ---
 
