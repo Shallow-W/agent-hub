@@ -144,6 +144,15 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 	if !ok {
 		return "", errors.New("missing user_id in token")
 	}
+	// 确认用户仍存在于 DB（防止已删除用户的 token 继续有效）
+	user, err := s.repo.GetUserByID(context.Background(), userID)
+	if err != nil {
+		return "", fmt.Errorf("verify user: %w", err)
+	}
+	if user == nil {
+		return "", errors.New("user not found")
+	}
+
 	return userID, nil
 }
 

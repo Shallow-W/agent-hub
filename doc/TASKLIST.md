@@ -96,13 +96,13 @@
 | B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [x] |
 | B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [ ] |
 | B63 | 无 refresh token——JWT 过期强制重新登录 | P2 | [ ] |
-| B64 | ValidateToken 不校验 user_id 是否存在于 DB——删除用户 token 仍有效 | P2 | [ ] |
+| B64 | ValidateToken 不校验 user_id 是否存在于 DB——删除用户 token 仍有效 | P2 | [x] |
 | B65 | middleware+service 重复 JWT 解析逻辑——有分歧风险 | P2 | [ ] |
-| B66 | SearchByContent 内联 escapeLike 未复用共享函数 | P3 | [ ] |
-| B67 | ILIKE ESCAPE 在部分 PostgreSQL 配置下可能失败 | P2 | [ ] |
+| B66 | SearchByContent 内联 escapeLike 未复用共享函数 | P3 | [x] |
+| B67 | ILIKE ESCAPE 在部分 PostgreSQL 配置下可能失败 | P2 | [x] |
 | B68 | 限流器 c.ClientIP() 信任 X-Forwarded-For——可伪造绕过+StopRateLimiters空实现 | P1 | [x] |
 | B69 | 限流仅 IP 粒度——NAT 后多用户共享配额 | P2 | [ ] |
-| B70 | MaxBytesReader 硬编码 50MB——超过 20MB 的图片仍完整写入磁盘 | P2 | [ ] |
+| B70 | MaxBytesReader 硬编码 50MB——超过 20MB 的图片仍完整写入磁盘 | P2 | [x] |
 | B71 | 静态文件 filepath.Clean 不充分——路径穿越 | P2 | [ ] |
 | B72 | MIME 检测基于 512 字节——polyglot 文件绕过 | P3 | [ ] |
 | B73 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [x] |
@@ -117,7 +117,7 @@
 | B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [x] |
 | B83 | FriendRequest formatTime 对无效日期返回 NaN | P2 | [x] |
 | B84 | FriendRequest sendRequest loading 复用全局 loading——UI 误判 | P2 | [x] |
-| B85 | WS flushQueue 期间断开——消息顺序错乱 | P2 | [ ] |
+| B85 | WS flushQueue 期间断开——消息顺序错乱 | P2 | [x] |
 | B86 | 多 tab 打开 WS 状态不同步 | P3 | [ ] |
 | B87 | globals.css * 选择器覆盖所有元素滚动条样式 | P3 | [ ] |
 | B88 | GroupMemberPanel 退出群聊后不清除成员列表 | P3 | [x] |
@@ -182,7 +182,7 @@
 | CODE-06 | Client.LastActive 无同步并发读写 | P1 | [x] |
 | CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [x] |
 | CODE-08 | 多语句迁移无事务包裹 | P2 | [x] |
-| CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [ ] |
+| CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [x] |
 | CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [x] |
 | CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
 | CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [-] |
@@ -204,7 +204,7 @@
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
 | CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
-| CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [ ] |
+| CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [x] |
 | CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [ ] |
 | CODE-33 | 整个项目零测试覆盖——后端无 _test.go、前端无 .test/.spec 文件 | P0 | [ ] |
 

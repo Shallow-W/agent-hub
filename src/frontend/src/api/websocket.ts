@@ -124,7 +124,7 @@ export class WebSocketClient {
   }
 
   private flushQueue(): void {
-    while (this.queue.length > 0) {
+    while (this.queue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
       const msg = this.queue.shift();
       if (msg) this.ws?.send(msg);
     }
