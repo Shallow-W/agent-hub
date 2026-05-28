@@ -83,6 +83,7 @@ interface MessageBubbleProps {
   onRetry?: () => void;
   onRemove?: () => void;
   isOwn?: boolean;
+  isRead?: boolean;
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
 }
@@ -112,6 +113,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onRetry,
   onRemove,
   isOwn = false,
+  isRead = false,
   onReply,
   onRecall,
 }) => {
@@ -182,6 +184,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             <Text type="secondary" className={styles.metaTime}>
               {formatTimestamp(message.created_at)}
             </Text>
+            {isOwn && !isOptimisticSending && !isOptimisticFailed && (
+              <span className={`${styles.readReceipt} ${isRead ? styles.readReceiptRead : styles.readReceiptSent}`}>
+                {isRead ? '✓✓' : '✓'}
+              </span>
+            )}
           </div>
         )}
         <div

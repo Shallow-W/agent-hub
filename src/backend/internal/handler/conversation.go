@@ -196,6 +196,22 @@ func (h *ConversationHandler) RenameConversation(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// ListArchived 查询已归档的对话列表
+func (h *ConversationHandler) ListArchived(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	list, err := h.svc.ListArchivedConversations(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50017, "查询归档对话失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, list)
+}
+
 // ArchiveConversation 归档会话（软删除）
 func (h *ConversationHandler) ArchiveConversation(c *gin.Context) {
 	convID := c.Param("id")

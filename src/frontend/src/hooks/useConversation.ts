@@ -9,6 +9,7 @@ export function useConversation() {
   const createConversation = useConversationStore((s) => s.createConversation);
   const deleteConversation = useConversationStore((s) => s.deleteConversation);
   const togglePin = useConversationStore((s) => s.togglePin);
+  const renameConversation = useConversationStore((s) => s.renameConversation);
   const setActive = useConversationStore((s) => s.setActive);
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export function useConversation() {
     create: createConversation,
     remove: deleteConversation,
     togglePin,
+    rename: renameConversation,
     setActive,
   };
 }

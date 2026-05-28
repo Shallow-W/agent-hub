@@ -12,7 +12,7 @@ import styles from './ConversationList.module.css';
 const EMPTY_MESSAGES: Message[] = [];
 
 export const ConversationList: React.FC = () => {
-  const { conversations, activeId, loading, setActive, remove, togglePin } =
+  const { conversations, activeId, loading, setActive, remove, togglePin, rename } =
     useConversation();
   const archiveConversationLocal = useConversationStore((s) => s.archiveConversationLocal);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
@@ -61,6 +61,7 @@ export const ConversationList: React.FC = () => {
               onSelect={() => setActive(conv.id)}
               onDelete={() => remove(conv.id)}
               onTogglePin={() => togglePin(conv.id)}
+              onRename={conv.type === 'group' ? (newTitle: string) => rename(conv.id, newTitle) : undefined}
               onArchive={async () => {
                 await convApi.archiveConversation(conv.id);
                 archiveConversationLocal(conv.id);
@@ -88,9 +89,10 @@ const ConversationItemWrapper: React.FC<{
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onRename?: (newTitle: string) => void;
   onArchive: () => void;
   onInviteMembers?: () => void;
-}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onArchive, onInviteMembers }) => {
+}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onRename, onArchive, onInviteMembers }) => {
   const messages = useMessageStore(
     (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
   );
@@ -109,6 +111,7 @@ const ConversationItemWrapper: React.FC<{
       onSelect={onSelect}
       onDelete={onDelete}
       onTogglePin={onTogglePin}
+      onRename={onRename}
       onArchive={onArchive}
       onInviteMembers={onInviteMembers}
       lastMessage={lastMessage}

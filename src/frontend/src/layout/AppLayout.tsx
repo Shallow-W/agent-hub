@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Button, Alert, Avatar } from 'antd';
 import {
   PlusOutlined,
@@ -29,6 +29,8 @@ const SETTINGS_COLLAPSED_WIDTH = 44;
 const SETTINGS_EXPANDED_WIDTH = 184;
 
 const AppLayout: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const setActive = useConversationStore((s) => s.setActive);
@@ -40,6 +42,18 @@ const AppLayout: React.FC = () => {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [convPanelWidth, setConvPanelWidth] = useState(166);
+
+  /** 导航切换：设置页使用路由跳转 */
+  const handleNavChange = useCallback((key: string) => {
+    if (key === 'settings') {
+      navigate('/settings');
+      return;
+    }
+    setActiveNav(key);
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
+  }, [navigate, location.pathname]);
 
   // 切换到好友页时自动拉取数据
   useEffect(() => {
@@ -195,7 +209,7 @@ const AppLayout: React.FC = () => {
           username={user?.username ?? ''}
           onLogout={handleLogout}
           wsStatus={status}
-          onNavChange={setActiveNav}
+          onNavChange={handleNavChange}
           collapsed={settingsCollapsed}
         />
       </div>

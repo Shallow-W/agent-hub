@@ -10,6 +10,7 @@ import LoginView from '@/views/LoginView';
 import RegisterView from '@/views/RegisterView';
 import ChatView from '@/views/ChatView';
 import NotFoundView from '@/views/NotFoundView';
+import SettingsView from '@/views/SettingsView';
 
 /** 检查是否已登录，未登录则重定向到登录页 */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -49,6 +50,10 @@ const routes: RouteObject[] = [
       {
         index: true,
         element: <ChatView />,
+      },
+      {
+        path: 'settings',
+        element: <SettingsView />,
       },
     ],
   },

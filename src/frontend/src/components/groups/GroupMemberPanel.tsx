@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Drawer,
   List,
@@ -11,6 +11,7 @@ import {
   Spin,
   Tag,
   Input,
+  Tabs,
 } from 'antd';
 import {
   UserAddOutlined,
@@ -20,6 +21,8 @@ import {
 import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember } from '@/api/group';
 import type { GroupMember } from '@/types/group';
 import { useFriendStore } from '@/store/friendStore';
+import { searchUsers as searchUsersApi } from '@/api/friend';
+import type { User } from '@/types/auth';
 import { Checkbox } from 'antd';
 
 interface GroupMemberPanelProps {
@@ -56,6 +59,10 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const [inviteSearch, setInviteSearch] = useState('');
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [userSearchResults, setUserSearchResults] = useState<User[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { friends } = useFriendStore();
 
   const fetchMembers = useCallback(async () => {
@@ -133,6 +140,17 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     }
   };
 
+  const handleAddUser = async (userId: string) => {
+    try {
+      await addGroupMember(conversationId, { user_id: userId, role: 'member' });
+      message.success('已添加成员');
+      setUserSearchResults((prev) => prev.filter((u) => u.id !== userId));
+      await fetchMembers();
+    } catch {
+      message.error('添加成员失败');
+    }
+  };
+
   const memberIds = new Set(members.map((m) => m.user_id));
   const availableFriends = friends.filter((f) => !memberIds.has(f.friend_id));
   const filteredInviteFriends = inviteSearch
@@ -140,6 +158,32 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
         (f.friend_name ?? '').toLowerCase().includes(inviteSearch.toLowerCase()),
       )
     : availableFriends;
+
+  const handleUserSearch = useCallback((value: string) => {
+    setUserSearchQuery(value);
+    if (userSearchTimer.current !== null) clearTimeout(userSearchTimer.current);
+    if (!value.trim()) {
+      setUserSearchResults([]);
+      return;
+    }
+    userSearchTimer.current = setTimeout(async () => {
+      setUserSearchLoading(true);
+      try {
+        const results = await searchUsersApi(value.trim());
+        setUserSearchResults((results ?? []).filter((u) => !memberIds.has(u.id)));
+      } catch {
+        setUserSearchResults([]);
+      } finally {
+        setUserSearchLoading(false);
+      }
+    }, 300);
+  }, [memberIds]);
+
+  useEffect(() => {
+    return () => {
+      if (userSearchTimer.current !== null) clearTimeout(userSearchTimer.current);
+    };
+  }, []);
 
   return (
     <Drawer
@@ -245,43 +289,114 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
           setInviteOpen(false);
           setSelectedFriends([]);
           setInviteSearch('');
+          setUserSearchQuery('');
+          setUserSearchResults([]);
         }}
         width={280}
       >
-        <Input.Search
-          placeholder="搜索好友..."
-          allowClear
-          value={inviteSearch}
-          onChange={(e) => setInviteSearch(e.target.value)}
-          onClear={() => setInviteSearch('')}
-          style={{ marginBottom: 12 }}
+        <Tabs
+          size="small"
+          items={[
+            {
+              key: 'friends',
+              label: '好友',
+              children: (
+                <>
+                  <Input.Search
+                    placeholder="搜索好友..."
+                    allowClear
+                    value={inviteSearch}
+                    onChange={(e) => setInviteSearch(e.target.value)}
+                    onClear={() => setInviteSearch('')}
+                    style={{ marginBottom: 12 }}
+                  />
+                  {filteredInviteFriends.length === 0 ? (
+                    <Empty description="没有可邀请的好友" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    <Checkbox.Group
+                      value={selectedFriends}
+                      onChange={(vals) => setSelectedFriends(vals as string[])}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                    >
+                      {filteredInviteFriends.map((f) => (
+                        <Checkbox key={f.friend_id} value={f.friend_id}>
+                          {f.friend_name ?? '未知用户'}
+                        </Checkbox>
+                      ))}
+                    </Checkbox.Group>
+                  )}
+                  {selectedFriends.length > 0 && (
+                    <Button
+                      type="primary"
+                      block
+                      loading={inviteLoading}
+                      onClick={handleInvite}
+                      style={{ marginTop: 16 }}
+                    >
+                      邀请 ({selectedFriends.length})
+                    </Button>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: 'search',
+              label: '搜索用户',
+              children: (
+                <>
+                  <Input.Search
+                    placeholder="输入用户名搜索..."
+                    allowClear
+                    value={userSearchQuery}
+                    onChange={(e) => handleUserSearch(e.target.value)}
+                    onClear={() => {
+                      setUserSearchQuery('');
+                      setUserSearchResults([]);
+                    }}
+                    style={{ marginBottom: 12 }}
+                  />
+                  {userSearchLoading && (
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <Spin size="small" />
+                    </div>
+                  )}
+                  {!userSearchLoading && userSearchQuery.trim() && userSearchResults.length === 0 && (
+                    <Empty description="未找到用户" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  )}
+                  {!userSearchLoading && userSearchResults.length > 0 && (
+                    <List
+                      dataSource={userSearchResults}
+                      renderItem={(user) => (
+                        <List.Item
+                          actions={[
+                            <Button
+                              key="add"
+                              type="primary"
+                              size="small"
+                              icon={<UserAddOutlined />}
+                              onClick={() => handleAddUser(user.id)}
+                            >
+                              添加
+                            </Button>,
+                          ]}
+                        >
+                          <List.Item.Meta
+                            avatar={
+                              <Avatar size="small" style={{ backgroundColor: '#1677ff' }}>
+                                {user.username.charAt(0).toUpperCase()}
+                              </Avatar>
+                            }
+                            title={user.username}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  )}
+                </>
+              ),
+            },
+          ]}
         />
-        {filteredInviteFriends.length === 0 ? (
-          <Empty description="没有可邀请的好友" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        ) : (
-          <Checkbox.Group
-            value={selectedFriends}
-            onChange={(vals) => setSelectedFriends(vals as string[])}
-            style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-          >
-            {filteredInviteFriends.map((f) => (
-              <Checkbox key={f.friend_id} value={f.friend_id}>
-                {f.friend_name ?? '未知用户'}
-              </Checkbox>
-            ))}
-          </Checkbox.Group>
-        )}
-        {selectedFriends.length > 0 && (
-          <Button
-            type="primary"
-            block
-            loading={inviteLoading}
-            onClick={handleInvite}
-            style={{ marginTop: 16 }}
-          >
-            邀请 ({selectedFriends.length})
-          </Button>
-        )}
       </Drawer>
     </Drawer>
   );

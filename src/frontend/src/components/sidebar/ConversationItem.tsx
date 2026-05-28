@@ -1,5 +1,5 @@
-import React from 'react';
-import { Avatar, Dropdown } from 'antd';
+import React, { useState } from 'react';
+import { Avatar, Dropdown, Modal, Input } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   PushpinOutlined,
@@ -8,6 +8,7 @@ import {
   UserOutlined,
   TeamOutlined,
   UserAddOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
@@ -20,6 +21,7 @@ interface ConversationItemProps {
   onTogglePin: () => void;
   onArchive: () => void;
   onInviteMembers?: () => void;
+  onRename?: (newTitle: string) => void;
   lastMessage?: string;
   unreadCount?: number;
   online?: boolean;
@@ -75,10 +77,13 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onTogglePin,
   onArchive,
   onInviteMembers,
+  onRename,
   lastMessage,
   unreadCount = 0,
   online = false,
 }) => {
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const isGroup = conversation.type === 'group';
   // 显示名称：私聊用对方用户名，群聊用标题
   const displayName = isGroup
@@ -95,6 +100,16 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       onClick: (info) => {
         info.domEvent.stopPropagation();
         onTogglePin();
+      },
+    },
+    {
+      key: 'rename',
+      icon: <EditOutlined />,
+      label: '重命名',
+      onClick: (info) => {
+        info.domEvent.stopPropagation();
+        setRenameValue(displayName);
+        setRenameOpen(true);
       },
     },
     ...(isGroup && onInviteMembers
@@ -200,6 +215,36 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           </button>
         </Dropdown>
       </div>
+
+      <Modal
+        title="重命名"
+        open={renameOpen}
+        okText="确定"
+        cancelText="取消"
+        onOk={() => {
+          const trimmed = renameValue.trim();
+          if (trimmed && trimmed !== displayName && onRename) {
+            onRename(trimmed);
+          }
+          setRenameOpen(false);
+        }}
+        onCancel={() => setRenameOpen(false)}
+        destroyOnClose
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={() => {
+            const trimmed = renameValue.trim();
+            if (trimmed && trimmed !== displayName && onRename) {
+              onRename(trimmed);
+            }
+            setRenameOpen(false);
+          }}
+          maxLength={50}
+          autoFocus
+        />
+      </Modal>
     </div>
   );
 };

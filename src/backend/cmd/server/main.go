@@ -92,6 +92,7 @@ func main() {
 	})
 	convSvc := service.NewConversationService(convRepo, friendRepo)
 	msgSvc := service.NewMessageService(msgRepo, convRepo)
+	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 
@@ -124,7 +125,7 @@ func main() {
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
-	userHandler := handler.NewUserHandler(friendSvc)
+	userHandler := handler.NewUserHandler(friendSvc, userSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 
@@ -175,6 +176,7 @@ func main() {
 			convRoutes.POST("", convHandler.Create)
 			convRoutes.POST("/private", convHandler.GetOrCreatePrivate)
 			convRoutes.GET("", convHandler.List)
+		convRoutes.GET("/archived", convHandler.ListArchived)
 			convRoutes.PUT("/:id", convHandler.RenameConversation)
 			convRoutes.DELETE("/:id", convHandler.Delete)
 			convRoutes.POST("/:id/archive", convHandler.ArchiveConversation)
@@ -217,6 +219,8 @@ func main() {
 	userGroup.Use(authMiddleware)
 	{
 		userGroup.GET("/search", middleware.RateLimit(10, 20), userHandler.Search)
+		userGroup.GET("/me", userHandler.GetProfile)
+		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 
 	// WebSocket 路由（通过 query 参数鉴权）

@@ -8,6 +8,7 @@ import {
   StopOutlined,
   UserAddOutlined,
   CloseOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -20,6 +21,7 @@ import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
+import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import styles from './ChatWindow.module.css';
 
@@ -38,6 +40,7 @@ export const ChatWindow: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false);
 
   // Mark conversation as read when switching to it
   useEffect(() => {
@@ -100,6 +103,12 @@ export const ChatWindow: React.FC = () => {
     },
     ...(isGroup
       ? [
+          {
+            key: 'info' as const,
+            icon: <InfoCircleOutlined />,
+            label: '群聊信息',
+            onClick: () => setGroupInfoOpen(true),
+          },
           {
             key: 'settings' as const,
             icon: <SettingOutlined />,
@@ -247,6 +256,13 @@ export const ChatWindow: React.FC = () => {
           conversationId={activeId}
           currentUserId={user?.id ?? ''}
           onGroupLeft={() => fetchConversations()}
+        />
+      )}
+      {isGroup && activeId && (
+        <GroupInfoDrawer
+          open={groupInfoOpen}
+          onClose={() => setGroupInfoOpen(false)}
+          conversationId={activeId}
         />
       )}
     </div>

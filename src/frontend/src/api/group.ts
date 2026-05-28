@@ -14,5 +14,20 @@ export const removeGroupMember = (groupId: string, userId: string) =>
 export const getGroupMembers = (groupId: string) =>
   get<GroupMember[]>(`/api/groups/${groupId}/members`);
 
+export interface GroupInfo {
+  conversation: {
+    id: string;
+    title: string;
+    type: string;
+    created_at: string;
+    updated_at: string;
+    member_count?: number;
+  };
+  members: GroupMember[];
+}
+
+export const getGroupInfo = (groupId: string) =>
+  get<GroupInfo>(`/api/groups/${groupId}`);
+
 export const leaveGroup = (groupId: string) =>
   post<void>(`/api/groups/${groupId}/leave`);

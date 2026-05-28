@@ -12,6 +12,7 @@ interface ConversationState {
   archiveConversationLocal: (id: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
+  renameConversation: (id: string, title: string) => Promise<void>;
   setActive: (id: string | null) => void;
   setMemberPanelOpen: (open: boolean) => void;
 }
@@ -96,6 +97,22 @@ export const useConversationStore = create<ConversationState>((set) => ({
     } catch {
       const { message } = await import('antd');
       message.error('置顶操作失败');
+    }
+  },
+
+  renameConversation: async (id, title) => {
+    try {
+      await convApi.renameConversation(id, title);
+      set((state) => ({
+        conversations: sortConversations(
+          state.conversations.map((c) =>
+            c.id === id ? { ...c, title } : c,
+          ),
+        ),
+      }));
+    } catch {
+      const { message } = await import('antd');
+      message.error('重命名失败');
     }
   },
 

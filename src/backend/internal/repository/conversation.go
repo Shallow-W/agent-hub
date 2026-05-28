@@ -143,6 +143,37 @@ func (r *ConversationRepo) Archive(ctx context.Context, id string) error {
 	return nil
 }
 
+// ListArchivedByUserID 分页查询用户已归档的对话列表，按 archived_at 降序
+func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
+	var list []model.Conversation
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT c.id, c.user_id, c.type, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		        COALESCE(peer_cm.user_id::text, '') AS peer_id,
+		        COALESCE(peer_u.username, creator_u.username, '') AS peer_name,
+		        COALESCE(latest_msg.content, '') AS last_message
+		 FROM conversations c
+		 LEFT JOIN conversation_members peer_cm ON c.type = 'single'
+		     AND peer_cm.conversation_id = c.id AND peer_cm.user_id != $1
+		 LEFT JOIN users peer_u ON peer_u.id = peer_cm.user_id
+		 LEFT JOIN users creator_u ON c.type = 'single' AND creator_u.id = c.user_id AND c.user_id != $1
+		 LEFT JOIN LATERAL (
+		     SELECT content FROM messages
+		     WHERE conversation_id = c.id AND deleted_at IS NULL
+		     ORDER BY created_at DESC LIMIT 1
+		 ) latest_msg ON true
+		 WHERE c.archived_at IS NOT NULL
+		   AND (c.user_id = $1
+		        OR EXISTS (SELECT 1 FROM conversation_members cm
+		                   WHERE cm.conversation_id = c.id AND cm.user_id = $1))
+		 ORDER BY c.archived_at DESC LIMIT $2 OFFSET $3`,
+		userID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list archived conversations: %w", err)
+	}
+	return list, nil
+}
+
 // GetMember 查询用户在某会话中的成员信息
 func (r *ConversationRepo) GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error) {
 	var m model.ConversationMember

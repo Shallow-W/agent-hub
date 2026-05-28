@@ -140,7 +140,7 @@
 | CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [x] |
 | CODE-14 | postPersist 异步推送无重试/死信队列 | P2 | [ ] |
 | CODE-15 | config.example 缺 upload 和 redis.db 字段 | P2 | [x] |
-| CODE-16 | 无单用户 WebSocket 连接数限制(DoS风险) | P2 | [ ] |
+| CODE-16 | 无单用户 WebSocket 连接数限制(DoS风险) | P2 | [x] |
 | CODE-17 | Hub Register/Unregister 异步竞态 | P2 | [-] |
 | CODE-18 | Client.enqueue 背压时可能阻塞 dispatch | P3 | [ ] |
 | CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [ ] |

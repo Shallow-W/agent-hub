@@ -25,6 +25,7 @@ var (
 type ConvRepo interface {
 	Create(ctx context.Context, userID, convType, title string) (*model.Conversation, error)
 	ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error)
+	ListArchivedByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error)
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	Delete(ctx context.Context, id string) error
 	UpdatePinned(ctx context.Context, id string, pinned bool) error
@@ -224,4 +225,25 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 		return ErrConvNotMember
 	}
 	return s.repo.Archive(ctx, conversationID)
+}
+
+// ListArchivedConversations 查询用户已归档的对话列表
+func (s *ConversationService) ListArchivedConversations(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	list, err := s.repo.ListArchivedByUserID(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list archived conversations: %w", err)
+	}
+	if list == nil {
+		list = []model.Conversation{}
+	}
+	return list, nil
 }
