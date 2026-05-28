@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -39,7 +40,7 @@ func (r *UserRepo) GetUserByUsername(ctx context.Context, username string) (*mod
 		`SELECT id, username, password_hash, created_at FROM users WHERE username = $1`,
 		username,
 	).StructScan(&u)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -55,7 +56,7 @@ func (r *UserRepo) GetUserByID(ctx context.Context, id string) (*model.User, err
 		`SELECT id, username, password_hash, created_at FROM users WHERE id = $1`,
 		id,
 	).StructScan(&u)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

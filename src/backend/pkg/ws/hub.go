@@ -69,6 +69,7 @@ type Client struct {
 
 	sendCh chan []byte // 独立写缓冲通道
 	mu     sync.Mutex  // 保护 Conn 的写操作（close 时排空用）
+	closeOnce sync.Once // 保证 sendCh 只关闭一次
 }
 
 // NewClient 创建 Client 实例（导出供 handler 调用）
@@ -262,7 +263,7 @@ func (h *Hub) handleRegister(msg BusMessage) {
 	if len(*list) >= maxConnsPerUser {
 		h.logger.Warn("max connections per user reached, closing",
 			"user_id", client.UserID, "current", len(*list), "max", maxConnsPerUser)
-		close(client.sendCh)
+		client.closeOnce.Do(func() { close(client.sendCh) })
 		client.Conn.Close(websocket.StatusPolicyViolation, "too many connections")
 		h.wg.Done()
 		return
@@ -308,7 +309,7 @@ func (h *Hub) handleUnregister(msg BusMessage) {
 	}
 	h.roomMu.Unlock()
 
-	close(client.sendCh)
+	client.closeOnce.Do(func() { close(client.sendCh) })
 	client.Conn.Close(websocket.StatusNormalClosure, "disconnect")
 	h.wg.Done()
 	h.logger.Info("websocket disconnected", "user_id", client.UserID)
@@ -375,6 +376,9 @@ func (h *Hub) handleRoomMsg(msg BusMessage) {
 	}
 	h.roomMu.RUnlock()
 	for _, c := range toSend {
+		if c == payload.Exclude {
+			continue
+		}
 		if err := c.Send(payload.Message); err != nil {
 			h.logger.Warn("send to room failed", "conversation_id", payload.ConversationID, "user_id", c.UserID, "error", err)
 		}
@@ -442,7 +446,7 @@ func (h *Hub) shutdown() {
 		h.clients.Range(func(key, value interface{}) bool {
 			list := value.(*[]*Client)
 			for _, c := range *list {
-				close(c.sendCh)
+				c.closeOnce.Do(func() { close(c.sendCh) })
 				c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
 				h.wg.Done()
 			}
@@ -484,7 +488,10 @@ func (h *Hub) Unregister(client *Client) {
 	select {
 	case h.bus <- BusMessage{Type: BusUnregister, Payload: client}:
 	default:
-		h.logger.Warn("hub bus full, dropping unregister", "user_id", client.UserID)
+		h.logger.Warn("hub bus full, force-closing connection", "user_id", client.UserID)
+		// bus 满时直接关闭连接，使 readLoop 退出并重试 Unregister
+		client.closeOnce.Do(func() { close(client.sendCh) })
+		client.Conn.Close(websocket.StatusNormalClosure, "disconnect")
 	}
 }
 
@@ -557,6 +564,19 @@ func (h *Hub) SendToRoom(conversationID string, msg WSMessage) {
 	}:
 	default:
 		h.logger.Warn("hub bus full, dropping send-to-room", "conversation_id", conversationID)
+	}
+}
+
+// SendToRoomExcept 向房间内除 exclude 外的所有连接发送消息
+func (h *Hub) SendToRoomExcept(conversationID string, exclude *Client, msg WSMessage) {
+	select {
+	case h.bus <- BusMessage{
+		Type:   BusRoomMsg,
+		Target: conversationID,
+		Payload: &roomMessage{ConversationID: conversationID, Message: msg, Exclude: exclude},
+	}:
+	default:
+		h.logger.Warn("hub bus full, dropping send-to-room-except", "conversation_id", conversationID)
 	}
 }
 

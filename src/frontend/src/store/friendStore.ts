@@ -81,7 +81,7 @@ export const useFriendStore = create<FriendState>((set) => ({
         friendApi.listFriends(),
         friendApi.listPendingRequests(),
       ]);
-      set({ friends: friends ?? [], pendingRequests: pending ?? [] });
+      set({ friends: friends ?? [], pendingRequests: pending ?? [], error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
@@ -95,7 +95,7 @@ export const useFriendStore = create<FriendState>((set) => ({
     try {
       await friendApi.rejectFriendRequest(id);
       const pending = await friendApi.listPendingRequests();
-      set({ pendingRequests: pending ?? [] });
+      set({ pendingRequests: pending ?? [], error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });

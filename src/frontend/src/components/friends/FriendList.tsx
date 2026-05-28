@@ -22,6 +22,7 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
 
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('friends');
+  const [addingUser, setAddingUser] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearchChange = useCallback(
@@ -46,11 +47,14 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
   }, []);
 
   const handleAddFriend = async (username: string) => {
+    setAddingUser(username);
     try {
       await sendRequest(username);
       message.success(`已向 ${username} 发送好友请求`);
     } catch {
       // error handled in store
+    } finally {
+      setAddingUser(null);
     }
   };
 
@@ -98,9 +102,10 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
                     <button
                       className="ant-btn ant-btn-primary ant-btn-sm"
                       onClick={() => handleAddFriend(user.username)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                      disabled={!!addingUser && addingUser !== user.username}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: addingUser && addingUser !== user.username ? 'not-allowed' : 'pointer', opacity: addingUser && addingUser !== user.username ? 0.5 : 1 }}
                     >
-                      <UserAddOutlined /> 添加
+                      {addingUser === user.username ? '...' : <><UserAddOutlined /> 添加</>}
                     </button>
                   </Badge>,
                 ]}

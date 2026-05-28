@@ -29,7 +29,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.login(username, password);
+      localStorage.setItem(TOKEN_KEY, data.token);
       localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      setToken(data.token);
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '登录失败';
@@ -44,7 +46,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.register(username, password);
+      localStorage.setItem(TOKEN_KEY, data.token);
       localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      setToken(data.token);
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '注册失败';

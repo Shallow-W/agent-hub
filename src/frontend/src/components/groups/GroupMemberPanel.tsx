@@ -62,6 +62,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const [userSearchResults, setUserSearchResults] = useState<User[]>([]);
   const [userSearchLoading, setUserSearchLoading] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [addingUser, setAddingUser] = useState<string | null>(null);
   const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { friends } = useFriendStore();
 
@@ -141,6 +142,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   };
 
   const handleAddUser = async (userId: string) => {
+    setAddingUser(userId);
     try {
       await addGroupMember(conversationId, { user_id: userId, role: 'member' });
       message.success('已添加成员');
@@ -148,6 +150,8 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
       await fetchMembers();
     } catch {
       message.error('添加成员失败');
+    } finally {
+      setAddingUser(null);
     }
   };
 
@@ -374,6 +378,8 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                               type="primary"
                               size="small"
                               icon={<UserAddOutlined />}
+                              loading={addingUser === user.id}
+                              disabled={!!addingUser && addingUser !== user.id}
                               onClick={() => handleAddUser(user.id)}
                             >
                               添加

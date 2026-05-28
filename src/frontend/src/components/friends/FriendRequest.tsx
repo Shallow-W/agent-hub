@@ -40,6 +40,7 @@ const FriendRequest: React.FC = () => {
 
   const formatTime = (dateStr: string): string => {
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -90,7 +91,7 @@ const FriendRequest: React.FC = () => {
                   size="small"
                   danger
                   icon={<CloseOutlined />}
-                  loading={false}
+                  loading={actionLoading === req.id}
                   disabled={!!actionLoading}
                   onClick={() => handleReject(req.id)}
                 >
