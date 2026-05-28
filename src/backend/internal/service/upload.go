@@ -168,7 +168,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 	result := &UploadResult{
 		FileName: safeName,
 		MimeType: mimeType,
-		FileSize: fileHeader.Size,
+		FileSize: fi.Size(),
 		FilePath: filePath,
 	}
 

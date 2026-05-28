@@ -105,6 +105,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     try {
       await leaveGroup(conversationId);
       message.success('已退出群聊');
+      setMembers([]);
       onGroupLeft?.();
       onClose();
     } catch {

@@ -62,7 +62,8 @@ func Auth(cfg JWTConfig) gin.HandlerFunc {
 
 		// 将用户信息注入上下文
 		c.Set("user_id", userID)
-		c.Set("username", claims["username"])
+		username, _ := claims["username"].(string)
+	c.Set("username", username)
 		c.Next()
 	}
 }

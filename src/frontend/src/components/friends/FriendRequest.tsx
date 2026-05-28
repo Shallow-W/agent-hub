@@ -4,19 +4,23 @@ import { SendOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 
 const FriendRequest: React.FC = () => {
-  const { pendingRequests, sendRequest, acceptRequest, rejectRequest, loading, actionLoading } =
+  const { pendingRequests, sendRequest, acceptRequest, rejectRequest, actionLoading } =
     useFriendStore();
   const [username, setUsername] = useState('');
+  const [sending, setSending] = useState(false);
 
   const handleSend = async () => {
     const trimmed = username.trim();
     if (!trimmed) return;
+    setSending(true);
     try {
       await sendRequest(trimmed);
       message.success(`已向 ${trimmed} 发送好友请求`);
       setUsername('');
     } catch {
       // sendRequest handles error state
+    } finally {
+      setSending(false);
     }
   };
 
@@ -53,7 +57,7 @@ const FriendRequest: React.FC = () => {
       <Input.Search
         placeholder="输入用户名添加好友"
         enterButton={
-          <Button type="primary" icon={<SendOutlined />} loading={loading}>
+          <Button type="primary" icon={<SendOutlined />} loading={sending}>
             添加
           </Button>
         }
