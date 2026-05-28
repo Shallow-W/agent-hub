@@ -206,6 +206,7 @@
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
 | CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [ ] |
 | CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [ ] |
+| CODE-33 | 整个项目零测试覆盖——后端无 _test.go、前端无 .test/.spec 文件 | P0 | [ ] |
 
 ---
 
