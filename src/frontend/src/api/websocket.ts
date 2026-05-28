@@ -70,6 +70,8 @@ export class WebSocketClient {
       this.ws.close();
       this.ws = null;
     }
+    this.queue.length = 0;
+    this.joinedRooms.clear();
     this.setStatus('disconnected');
   }
 

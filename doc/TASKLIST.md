@@ -128,7 +128,7 @@
 | B95 | ChatView URL 同步 setSearchParams 无限循环风险 | P2 | [x] |
 | B96 | 归档对话列表无取消归档操作，归档操作不可逆 | P1 | [x] |
 | B97 | SettingsView logout 后 navigate('/login') 但路由守卫未阻止 | P2 | [x] |
-| B98 | wsStore connect() 断开旧连接但不清理 joinedRooms 和 queue | P2 | [ ] |
+| B98 | wsStore connect() 断开旧连接但不清理 joinedRooms 和 queue | P2 | [x] |
 | B99 | conversationStore fetchConversations 无并发锁，双重调用覆盖数据 | P2 | [ ] |
 | B100 | useWebSocket disconnect 在组件卸载时断开全局 WebSocket | P1 | [x] |
 | B101 | useMessages getUnreadMessages stale check 不覆盖 fetchMessages 竞态 | P2 | [ ] |
@@ -140,7 +140,7 @@
 | B107 | ArchiveConversation handler 无成员身份校验 | P2 | [ ] |
 | B108 | MessageAttachmentView 不支持非图片/PDF 附件——静默丢弃 | P3 | [ ] |
 | B109 | ConversationItem archive 错误无用户反馈 | P2 | [x] |
-| B110 | ChatInput handleSubmit 发送失败不清空输入框但清空了 pendingFiles | P2 | [ ] |
+| B110 | ChatInput handleSubmit 发送失败不清空输入框但清空了 pendingFiles | P2 | [x] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 

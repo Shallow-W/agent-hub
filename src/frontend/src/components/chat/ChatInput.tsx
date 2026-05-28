@@ -124,13 +124,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     if (!trimmed && !attachments.length) return;
     if (isStreaming) return;
 
-    setValue('');
-    setPendingFiles([]);
     setSending(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
     try {
       await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id);
+      setValue('');
+      setPendingFiles([]);
     } finally {
       setSending(false);
     }
