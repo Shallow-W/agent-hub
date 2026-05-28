@@ -181,7 +181,7 @@ func (r *GroupRepo) SearchUsers(ctx context.Context, query string, limit int) ([
 	var list []*model.User
 	escaped := escapeLike(query) + "%"
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, username, created_at FROM users WHERE username LIKE $1 ESCAPE '\' LIMIT $2`,
+		`SELECT id, username, created_at FROM users WHERE username LIKE $1 ESCAPE '=' LIMIT $2`,
 		escaped, limit,
 	)
 	if err != nil {

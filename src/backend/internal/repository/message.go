@@ -21,8 +21,8 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo) *MessageRepo {
 }
 
 // messageCols 通用消息查询列（含 JOIN users 获取 username）
-const messageCols = `m.id, m.conversation_id, m.role, m.content, m.artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
-u.username`
+const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
+COALESCE(u.username, '') AS username`
 
 // messageFrom 通用 FROM 子句
 const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
@@ -39,7 +39,7 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to, sender_id)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, conversation_id, role, content, artifacts_json, reply_to, deleted_at, created_at, sender_id`,
+		 RETURNING id, conversation_id, role, content, COALESCE(artifacts_json, '') AS artifacts_json, reply_to, deleted_at, created_at, sender_id`,
 		conversationID, role, content, artifactsJSON, replyTo, senderID,
 	).StructScan(&m)
 	if err != nil {
@@ -225,7 +225,7 @@ func (r *MessageRepo) SearchByContent(ctx context.Context, conversationID, keywo
 	var list []model.Message
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT `+messageCols+` FROM `+messageFrom+
-			` WHERE m.conversation_id = $1 AND m.content ILIKE '%' || $2 || '%' ESCAPE '\' AND m.deleted_at IS NULL`+
+			` WHERE m.conversation_id = $1 AND m.content ILIKE '%' || $2 || '%' ESCAPE '=' AND m.deleted_at IS NULL`+
 			` ORDER BY m.created_at DESC LIMIT $3`,
 		conversationID, keyword, limit,
 	)
@@ -303,7 +303,7 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	// 批量查询引用的消息，优先使用 messages.sender_id
 	query := `SELECT m.id, m.content, m.deleted_at,
 	          COALESCE(m.sender_id, c.user_id) AS sender_id,
-	          u.username
+	          COALESCE(u.username, '') AS username
 	          FROM messages m
 	          JOIN conversations c ON c.id = m.conversation_id
 	          LEFT JOIN users u ON u.id = COALESCE(m.sender_id, c.user_id)

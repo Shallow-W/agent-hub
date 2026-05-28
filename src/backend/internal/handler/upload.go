@@ -30,18 +30,18 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40030, "缺少上传文件")
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40050, "缺少上传文件")
 		return
 	}
 
 	result, err := h.uploadSvc.ProcessUpload(c.Request.Context(), file)
 	if err != nil {
 		if err == service.ErrUploadEmpty || err == service.ErrUploadTypeInvalid {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40031, err.Error())
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40051, err.Error())
 			return
 		}
 		if err == service.ErrUploadTooBig {
-			middleware.ErrorResponse(c, http.StatusRequestEntityTooLarge, 40032, err.Error())
+			middleware.ErrorResponse(c, http.StatusRequestEntityTooLarge, 40052, err.Error())
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50030, "文件上传失败")

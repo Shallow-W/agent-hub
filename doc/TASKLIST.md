@@ -97,7 +97,7 @@
 | B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [-] |
 | B63 | 无 refresh token——JWT 过期强制重新登录 | P2 | [-] |
 | B64 | ValidateToken 不校验 user_id 是否存在于 DB——删除用户 token 仍有效 | P2 | [x] |
-| B65 | middleware+service 重复 JWT 解析逻辑——有分歧风险 | P2 | [ ] |
+| B65 | middleware+service 重复 JWT 解析逻辑——有分歧风险 | P2 | [-] |
 | B66 | SearchByContent 内联 escapeLike 未复用共享函数 | P3 | [x] |
 | B67 | ILIKE ESCAPE 在部分 PostgreSQL 配置下可能失败 | P2 | [x] |
 | B68 | 限流器 c.ClientIP() 信任 X-Forwarded-For——可伪造绕过+StopRateLimiters空实现 | P1 | [x] |
@@ -202,7 +202,7 @@
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [x] |
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [-] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [-] |
-| CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [ ] |
+| CODE-29 | 错误码 40030/40031 跨 handler 重复(不同语义) | P3 | [x] |
 | CODE-30 | config 零值无校验(JWT secret 空/port=0 直接运行) | P1 | [x] |
 | CODE-31 | go-redis/imaging 标记为 indirect 但实际直接导入 | P2 | [x] |
 | CODE-32 | go.mod 含幽灵 mongo-driver 依赖 | P3 | [x] |
@@ -219,7 +219,7 @@
 | BUILD-03 | 多个依赖有 Major 版本更新 | P3 | [ ] |
 | BUILD-04 | screenshot.mjs 幽灵 playwright 依赖 | P3 | [ ] |
 | BUILD-05 | 无 .env 环境文件 | P3 | [ ] |
-| BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [ ] |
+| BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [x] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
 | BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [ ] |
 | BUILD-09 | ChatInput 跨组件导入 EmojiPicker.module.css | P3 | [ ] |
@@ -268,15 +268,15 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| DB-01 | messages.sender_id 可空，部分消息无发送者 | P2 | [ ] |
+| DB-01 | messages.sender_id 可空，部分消息无发送者 | P2 | [-] |
 | DB-02 | 迁移 006 创建重复索引(002/004/005 已创建) | P3 | [-] |
 | DB-03 | conversation_members.last_read_at 无索引 | P2 | [x] |
-| DB-04 | 迁移 012 sender_id backfill 仅覆盖 user 角色 | P2 | [ ] |
+| DB-04 | 迁移 012 sender_id backfill 仅覆盖 user 角色 | P2 | [-] |
 | DB-05 | ListByUserID 热查询缺 archived_at 索引 | P2 | [x] |
 | DB-06 | conversations.type 无 CHECK 约束 | P2 | [x] |
 | DB-07 | friends.status 无 CHECK 约束 | P2 | [x] |
 | DB-08 | CASCADE 删除用户时销毁群聊(应 SET NULL) | P1 | [-] |
-| DB-09 | 可空 DB 列映射为非指针 Go 类型(StructScan 崩溃) | P1 | [ ] |
+| DB-09 | 可空 DB 列映射为非指针 Go 类型(StructScan 崩溃) | P1 | [x] |
 | DB-10 | ANY($1)+[]string 在 sqlx 下可能运行时失败 | P2 | [x] |
 | DB-11 | GroupRepo.AddMember 缺 ON CONFLICT 幂等保护 | P2 | [x] |
 | DB-12 | 仓库方法重复且行为不一致(AddMember/GetUserByID) | P3 | [-] |
