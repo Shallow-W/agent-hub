@@ -105,7 +105,7 @@ button,
 }
 
 /* Firefox scrollbar */
-* {
+html {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }

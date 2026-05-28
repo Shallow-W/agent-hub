@@ -8,6 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// maxUploadSize 是 handler 层对请求体的硬上限（50MB），用于 MaxBytesReader 提前截断超大请求。
+// 实际业务级大小检查（图片 20MB / PDF 50MB）由 UploadService.ProcessUpload 执行，
+// 两层检查共同构成纵深防御：handler 层防止极端超大请求耗尽内存，service 层精确执行业务规则。
 const maxUploadSize = 50 << 20 // 50MB，与后端 MaxPDFMB 一致
 
 // UploadHandler 文件上传处理器

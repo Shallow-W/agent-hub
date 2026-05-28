@@ -124,9 +124,13 @@ export class WebSocketClient {
   }
 
   private flushQueue(): void {
-    while (this.queue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
-      const msg = this.queue.shift();
-      if (msg) this.ws?.send(msg);
+    const batch = this.queue.splice(0);
+    for (let i = 0; i < batch.length; i++) {
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        this.queue.unshift(...batch.slice(i));
+        break;
+      }
+      this.ws.send(batch[i]!);
     }
   }
 

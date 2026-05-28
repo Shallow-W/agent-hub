@@ -50,11 +50,8 @@ export const ConversationList: React.FC = () => {
   return (
     <div className={styles.list}>
       <div className={styles.items}>
-        {conversations.length === 0 ? (
-          <div className={styles.noResults}>未找到匹配的对话</div>
-        ) : (
-          conversations.map((conv) => (
-            <ConversationItemWrapper
+        {conversations.map((conv) => (
+          <ConversationItemWrapper
               key={conv.id}
               conversation={conv}
               active={conv.id === activeId}
@@ -76,7 +73,7 @@ export const ConversationList: React.FC = () => {
               }
             />
           ))
-        )}
+        }
       </div>
     </div>
   );

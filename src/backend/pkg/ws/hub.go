@@ -51,11 +51,11 @@ type WSMessage struct {
 }
 
 const (
-	writeBufSize       = 256
-	pingInterval       = 30 * time.Second
-	pongTimeout        = 60 * time.Second
-	cleanupInterval    = 15 * time.Second
-	maxConnsPerUser   = 5 // per-user max WS connections
+	writeBufSize     = 256
+	pingInterval     = 30 * time.Second
+	pongTimeout      = 60 * time.Second
+	cleanupInterval  = 15 * time.Second
+	maxConnsPerUser  = 5 // per-user max WS connections
 )
 
 // Client 封装单个 WebSocket 连接及其元数据
@@ -67,9 +67,9 @@ type Client struct {
 	lastPong    atomic.Int64 // unix nanos，原子操作避免数据竞争
 	lastActive  atomic.Int64 // unix timestamp，原子操作避免数据竞争
 
-	sendCh chan []byte // 独立写缓冲通道
-	mu     sync.Mutex  // 保护 Conn 的写操作（close 时排空用）
-	closeOnce sync.Once // 保证 sendCh 只关闭一次
+	sendCh    chan []byte   // 独立写缓冲通道
+	mu        sync.Mutex    // 保护 Conn 的写操作（close 时排空用）
+	closeOnce sync.Once     // 保证 sendCh 只关闭一次
 }
 
 // NewClient 创建 Client 实例（导出供 handler 调用）
@@ -179,6 +179,7 @@ type Hub struct {
 	roomMu sync.RWMutex
 
 	wg           sync.WaitGroup // 跟踪活跃连接数
+	draining     atomic.Bool    // shutdown drain 阶段为 true，阻止新 wg.Add
 	shutdownOnce sync.Once
 	logger       *slog.Logger
 }
@@ -268,7 +269,9 @@ func (h *Hub) handleRegister(msg BusMessage) {
 			"user_id", client.UserID, "current", len(*list), "max", maxConnsPerUser)
 		client.closeOnce.Do(func() { close(client.sendCh) })
 		client.Conn.Close(websocket.StatusPolicyViolation, "too many connections")
-		h.wg.Done()
+		if !h.draining.Load() {
+			h.wg.Done()
+		}
 		return
 	}
 	*list = append(*list, client)
@@ -314,7 +317,9 @@ func (h *Hub) handleUnregister(msg BusMessage) {
 
 	client.closeOnce.Do(func() { close(client.sendCh) })
 	client.Conn.Close(websocket.StatusNormalClosure, "disconnect")
-	h.wg.Done()
+	if !h.draining.Load() {
+		h.wg.Done()
+	}
 	h.logger.Info("websocket disconnected", "user_id", client.UserID)
 }
 
@@ -434,6 +439,8 @@ func (h *Hub) shutdown() {
 		h.logger.Info("hub shutting down, draining messages")
 
 		// 排空待发消息（最多等待 2 秒）
+		// 设置 draining 标志，阻止 drain 期间新连接进入 wg
+		h.draining.Store(true)
 		drainTimer := time.NewTimer(2 * time.Second)
 		drainDone := false
 		for !drainDone {
@@ -451,7 +458,9 @@ func (h *Hub) shutdown() {
 			for _, c := range *list {
 				c.closeOnce.Do(func() { close(c.sendCh) })
 				c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
-				h.wg.Done()
+				if !h.draining.Load() {
+					h.wg.Done()
+				}
 			}
 			return true
 		})
@@ -477,11 +486,15 @@ func (h *Hub) Shutdown(ctx context.Context) {
 
 // Register 注册连接
 func (h *Hub) Register(client *Client) {
-	h.wg.Add(1)
+	if !h.draining.Load() {
+		h.wg.Add(1)
+	}
 	select {
 	case h.bus <- BusMessage{Type: BusRegister, Payload: client}:
 	default:
-		h.wg.Done()
+		if !h.draining.Load() {
+			h.wg.Done()
+		}
 		h.logger.Warn("hub bus full, dropping register", "user_id", client.UserID)
 	}
 }
@@ -672,4 +685,3 @@ func (h *Hub) PushCustomEvent(conversationID string, memberIDs []string, eventTy
 		h.logger.Warn("hub bus full, dropping custom-event", "conversation_id", conversationID, "event_type", eventType)
 	}
 }
-

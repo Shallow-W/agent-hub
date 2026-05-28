@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
@@ -63,6 +63,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onNavChange(key);
   };
 
+  const toggleTheme = useCallback(() => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  }, []);
+
   return (
     <div className={`${styles.panel} ${collapsed ? styles.collapsed : ''}`}>
       <div className={styles.brand}>
@@ -106,12 +111,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
         </Tooltip>
         <Tooltip title="调色板" placement="right">
-          <button className={styles.footerIconBtn} type="button">
+          <button className={styles.footerIconBtn} type="button" onClick={toggleTheme}>
             <BgColorsOutlined />
           </button>
         </Tooltip>
         <Tooltip title="主题" placement="right">
-          <button className={styles.footerIconBtn} type="button">
+          <button className={styles.footerIconBtn} type="button" onClick={toggleTheme}>
             <BulbOutlined />
           </button>
         </Tooltip>

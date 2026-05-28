@@ -87,12 +87,12 @@
 | B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [x] |
 | B53 | user.stop_stream 前端发送但后端无处理(stop按钮无效) | P1 | [x] |
 | B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [x] |
-| B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
+| B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [x] |
 | B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [x] |
 | B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [x] |
 | B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [x] |
 | B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [x] |
-| B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [ ] |
+| B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [x] |
 | B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [x] |
 | B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [-] |
 | B63 | 无 refresh token——JWT 过期强制重新登录 | P2 | [-] |
@@ -111,7 +111,7 @@
 | B76 | WS 重连后不恢复房间订阅——断线期间消息静默丢失 | P1 | [x] |
 | B77 | GroupMemberPanel handleAddUser 无防重复点击 | P1 | [x] |
 | B78 | FriendList handleAddFriend 无防重复点击——重复好友请求 | P1 | [x] |
-| B79 | SettingsPanel 主题切换按钮无实际功能 | P1 | [ ] |
+| B79 | SettingsPanel 主题切换按钮无实际功能 | P1 | [x] |
 | B80 | GroupInfoDrawer info.conversation 可能 undefined 渲染崩溃 | P2 | [x] |
 | B81 | ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined | P2 | [x] |
 | B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [x] |
@@ -121,7 +121,7 @@
 | B86 | 多 tab 打开 WS 状态不同步 | P3 | [-] |
 | B87 | globals.css * 选择器覆盖所有元素滚动条样式 | P3 | [-] |
 | B88 | GroupMemberPanel 退出群聊后不清除成员列表 | P3 | [x] |
-| B89 | Friend 与 FriendRequest 类型字段完全重复 | P3 | [ ] |
+| B89 | Friend 与 FriendRequest 类型字段完全重复 | P3 | [x] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 

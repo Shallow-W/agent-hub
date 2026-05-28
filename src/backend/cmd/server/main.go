@@ -164,14 +164,15 @@ func main() {
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
 			filePath := c.Param("filepath")
-			cleaned := filepath.Clean(filePath)
-			if strings.HasPrefix(cleaned, "..") {
-				c.Status(http.StatusNotFound)
+			absPath, _ := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
+			uploadDirAbs, _ := filepath.Abs(uploadDir)
+			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
+				c.Status(http.StatusForbidden)
 				return
 			}
 			c.Header("Content-Disposition", "inline")
 			c.Header("X-Content-Type-Options", "nosniff")
-			c.File(filepath.Join(uploadDir, cleaned))
+			c.File(absPath)
 		})
 
 		// 文件上传

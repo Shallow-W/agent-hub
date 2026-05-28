@@ -20,10 +20,12 @@ import * as convApi from '@/api/conversation';
 import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
+import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { uploadFile } from '@/api/upload';
+import type { AttachmentPayload } from '@/types/attachment';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
@@ -52,22 +54,42 @@ export const ChatWindow: React.FC = () => {
   );
   const isStreaming = (streamingContent ?? '').length > 0;
 
+  const { send: sendMessage } = useMessages(activeId ?? null);
+
   // File upload handler for header "文件" button
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i]!;
+    if (!files || !activeId) return;
+    const fileArr = Array.from(files);
+    const validFiles = fileArr.filter((f) => {
       if (f.size > MAX_FILE_SIZE) {
         antMessage.error(`${f.name} 超过 50MB 限制`);
-        continue;
+        return false;
       }
-      uploadFile(f).catch(() => {
-        antMessage.error(`${f.name} 上传失败`);
-      });
+      return true;
+    });
+    if (!validFiles.length) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
     }
+    Promise.all(
+      validFiles.map(async (f) => {
+        try {
+          return await uploadFile(f);
+        } catch {
+          antMessage.error(`${f.name} 上传失败`);
+          return null;
+        }
+      }),
+    ).then((results) => {
+      const attachments = results.filter((r): r is AttachmentPayload => r !== null);
+      if (attachments.length > 0) {
+        const names = validFiles.map((f) => f.name).join(', ');
+        sendMessage(names, attachments);
+      }
+    });
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+  }, [activeId, sendMessage]);
 
   const handleStopTask = useCallback(() => {
     if (!wsClient || !activeId) return;
