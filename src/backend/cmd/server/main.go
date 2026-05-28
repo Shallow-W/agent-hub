@@ -164,9 +164,17 @@ func main() {
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
 			filePath := c.Param("filepath")
-			absPath, _ := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
+			absPath, err := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
 			uploadDirAbs, _ := filepath.Abs(uploadDir)
+			if err != nil {
+				c.Status(http.StatusForbidden)
+				return
+			}
 			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
+			if err != nil {
+				c.Status(http.StatusForbidden)
+				return
+			}
 				c.Status(http.StatusForbidden)
 				return
 			}

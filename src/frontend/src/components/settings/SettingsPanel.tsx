@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
@@ -66,6 +66,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const toggleTheme = useCallback(() => {
     const isDark = document.documentElement.classList.toggle('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  }, []);
+
+  // Load saved theme on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
   }, []);
 
   return (

@@ -458,9 +458,7 @@ func (h *Hub) shutdown() {
 			for _, c := range *list {
 				c.closeOnce.Do(func() { close(c.sendCh) })
 				c.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
-				if !h.draining.Load() {
 					h.wg.Done()
-				}
 			}
 			return true
 		})
