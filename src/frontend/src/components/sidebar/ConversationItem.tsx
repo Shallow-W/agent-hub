@@ -142,7 +142,14 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       danger: true,
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        onDelete();
+        Modal.confirm({
+          title: '确认删除',
+          content: `确定要删除「${displayName}」吗？`,
+          okText: '删除',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: onDelete,
+        });
       },
     },
   ];

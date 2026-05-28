@@ -54,7 +54,7 @@
 | B17 | deleteConversation 无错误处理 | P2 | [x] |
 | B18 | fetchMessages 竞态条件 | P2 | [x] |
 | B19 | ProtectedRoute 不响应式 | P3 | [x] |
-| B20 | 重复 token 管理 | P3 | [ ] |
+| B20 | 重复 token 管理 | P3 | [x] |
 | B21 | 无效 UUID 路径参数返回 500 | P1 | [x] |
 | B22 | 消息撤回后 Redis 缓存未失效 | P1 | [x] |
 | B23 | reply_to_message 字段始终为 null | P2 | [x] |
@@ -76,12 +76,12 @@
 | B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [ ] |
 | B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [ ] |
 | B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
-| B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [ ] |
-| B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [ ] |
-| B46 | ListMemberIDs UNION 返回重复 userID，群主收到重复消息 | P1 | [ ] |
-| B47 | 私聊非创建者无法归档(只检查 conv.UserID) | P1 | [ ] |
+| B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [x] |
+| B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [x] |
+| B46 | ListMemberIDs UNION 返回重复 userID，群主收到重复消息 | P1 | [x] |
+| B47 | 私聊非创建者无法归档(只检查 conv.UserID) | P1 | [x] |
 | B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [ ] |
-| B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [ ] |
+| B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [x] |
 | B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [ ] |
 | B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
 | B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [ ] |
@@ -90,6 +90,26 @@
 | B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
 | B56 | friendStore accept/reject 成功后不清除 error 状态(旧错误残留) | P2 | [ ] |
 | B57 | useMessages 缓存 30s 不感知 WS 断连期间丢失的消息 | P2 | [ ] |
+| B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [ ] |
+| B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [ ] |
+| B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [ ] |
+| B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [ ] |
+| B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [ ] |
+| B63 | 无 Token 刷新机制——JWT 过期强制重新登录 | P2 | [ ] |
+| B64 | ValidateToken 不校验 user_id 是否存在于 DB——删除用户 token 仍有效 | P2 | [ ] |
+| B65 | middleware+service 重复 JWT 解析逻辑——有分歧风险 | P2 | [ ] |
+| B66 | SearchByContent 内联 escapeLike 未复用共享函数 | P3 | [ ] |
+| B67 | ILIKE ESCAPE 在部分 PostgreSQL 配置下可能失败 | P2 | [ ] |
+| B69 | StopRateLimiters 空实现——限流器 goroutine 泄漏 | P1 | [ ] |
+| B70 | 限流仅 IP 粒度——NAT 后多用户共享配额 | P2 | [ ] |
+| B71 | MaxBytesReader 硬编码 50MB——超过 20MB 的图片仍完整写入磁盘 | P2 | [ ] |
+| B72 | 静态文件 filepath.Clean 不充分——路径穿越 | P2 | [ ] |
+| B73 | MIME 检测基于 512 字节——polyglot 文件绕过 | P3 | [ ] |
+| B74 | StopRateLimiters 空实现——清理 goroutine 泄漏(CODE-01修复不完整) | P1 | [ ] |
+| B75 | c.ClientIP() 信任 X-Forwarded-For——限流可被伪造绕过 | P1 | [ ] |
+| B76 | 无 refresh token——JWT 过期强制重新登录 | P2 | [ ] |
+| B77 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [ ] |
+| B78 | Upload FileSize 用客户端值 fileHeader.Size 而非实际磁盘大小 | P2 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
@@ -121,7 +141,7 @@
 | UI-02 | 已登录用户访问 /login 不跳转 | P1 | [x] |
 | UI-03 | 展开输入框按钮无功能 | P1 | [x] |
 | UI-04 | 搜索结果高亮效果不可见 | P1 | [x] |
-| UI-05 | 无对话级别 URL，刷新丢状态 | P2 | [ ] |
+| UI-05 | 无对话级别 URL，刷新丢状态 | P2 | [x] |
 | UI-06 | 页面刷新后恢复到空状态 | P2 | [x] |
 | UI-07 | 多处硬编码颜色不跟随主题 | P2 | [ ] |
 | UI-08 | AuthLayout 固定宽度窄屏溢出 | P2 | [x] |
@@ -130,8 +150,8 @@
 | UI-11 | 断线期间发送队列不持久化 | P2 | [ ] |
 | UI-12 | 无键盘 focus-visible 样式 | P3 | [x] |
 | UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [ ] |
-| UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [ ] |
-| UI-15 | friendStore accept/reject 缺少 loading | P3 | [ ] |
+| UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [x] |
+| UI-15 | friendStore accept/reject 缺少 loading | P3 | [x] |
 | UI-16 | hasMore 翻页边界判断不准 | P3 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
@@ -162,11 +182,11 @@
 | CODE-18 | Client.enqueue 背压时可能阻塞 dispatch | P3 | [ ] |
 | CODE-19 | 迁移 006 缺少 DOWN 部分 | P3 | [ ] |
 | CODE-20 | group handler 错误码 40300 被多个错误复用 | P3 | [x] |
-| CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [ ] |
+| CODE-21 | Redis 客户端未在 shutdown 时 Close | P3 | [x] |
 | CODE-22 | RecallMessage 将 DB 错误误报为"消息不存在" | P3 | [x] |
 | CODE-23 | RemoveMember 错误未包装为 sentinel，handler 降级 500 | P2 | [-] |
-| CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [ ] |
-| CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [ ] |
+| CODE-24 | schema_migrations 表创建错误被忽略(迁移全部跳过) | P2 | [x] |
+| CODE-25 | postPersist goroutine 与 Hub shutdown 竞态 | P2 | [x] |
 | CODE-26 | escape 逻辑在 message/friend repo 重复实现 | P3 | [ ] |
 | CODE-27 | SetNotifier/SetCacher 无同步保护 | P3 | [ ] |
 | CODE-28 | member_count 在 list 与 get-by-id 端点不一致 | P3 | [ ] |
@@ -319,13 +339,13 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| PERF-01 | messages store 无限增长，永不清理 | P1 | [ ] |
-| PERF-02 | AppLayout 订阅整个 unreadCounts 对象 | P1 | [ ] |
+| PERF-01 | messages store 无限增长，永不清理 | P1 | [x] |
+| PERF-02 | AppLayout 订阅整个 unreadCounts 对象 | P1 | [x] |
 | PERF-03 | ChatWindow 订阅全部 typingUsers | P1 | [ ] |
 | PERF-04 | MessageBubble 未使用 React.memo | P2 | [x] |
-| PERF-05 | smooth scroll 在流式消息时引起抖动 | P2 | [ ] |
-| PERF-06 | 对话切换重复 API 请求 | P2 | [ ] |
-| PERF-07 | transition:all 导致布局抖动 | P2 | [ ] |
+| PERF-05 | smooth scroll 在流式消息时引起抖动 | P2 | [x] |
+| PERF-06 | 对话切换重复 API 请求 | P2 | [x] |
+| PERF-07 | transition:all 导致布局抖动 | P2 | [x] |
 | PERF-08 | renderMarkdown 无缓存(useMemo) | P2 | [x] |
 | PERF-09 | conversationStore 订阅粒度过粗 | P3 | [ ] |
 | PERF-10 | friendStore 订阅全量 friends 数组 | P3 | [ ] |

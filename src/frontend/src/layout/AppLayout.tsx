@@ -83,10 +83,14 @@ const AppLayout: React.FC = () => {
 
   const handleGroupCreate = async (name: string, memberIds: string[]) => {
     try {
-      await createGroup({ name, member_ids: memberIds });
+      const conv = await createGroup({ name, member_ids: memberIds });
       antMessage.success('群聊创建成功');
       setGroupModalOpen(false);
       await fetchConversations();
+      // UX-02: 自动激活新创建的群聊
+      if (conv?.id) {
+        setActive(conv.id);
+      }
     } catch {
       antMessage.error('创建群聊失败');
     }
