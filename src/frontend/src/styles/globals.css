@@ -14,7 +14,13 @@
   --color-border-light: #f1f3f5;
   --color-danger: #ff4d4f;
   --color-danger-hover: #ff7875;
+  --color-danger-bg: #fff2f0;
+  --color-danger-border: #ffccc7;
   --color-success: #52c41a;
+  --color-user-bubble-from: #1d8f5a;
+  --color-user-bubble-to: #34c38f;
+  --color-user-bubble-link: #d1f5e3;
+  --color-user-bubble-code-bg: rgba(255, 255, 255, 0.2);
   --sidebar-width: 300px;
   --settings-width: 184px;
   --convlist-width: 300px;
@@ -37,6 +43,43 @@
   --gradient-agent: linear-gradient(135deg, #7ac46b 0%, #48b28a 100%);
   --gradient-avatar-group: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
   --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+html.dark {
+  --color-primary: #34d399;
+  --color-primary-hover: #6ee7b7;
+  --color-primary-active: #10b981;
+  --color-primary-light: #064e3b;
+  --color-primary-bg: rgba(52, 211, 153, 0.08);
+  --color-bg: #0f172a;
+  --color-bg-app: #1e293b;
+  --color-bg-white: #1e293b;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-tertiary: #64748b;
+  --color-border: #334155;
+  --color-border-light: #1e293b;
+  --color-danger: #f87171;
+  --color-danger-hover: #fca5a5;
+  --color-danger-bg: #451a1a;
+  --color-danger-border: #7f1d1d;
+  --color-success: #4ade80;
+  --color-user-bubble-from: #065f46;
+  --color-user-bubble-to: #059669;
+  --color-user-bubble-link: #a7f3d0;
+  --color-user-bubble-code-bg: rgba(255, 255, 255, 0.1);
+  --color-bg-settings: #1e293b;
+  --color-bg-convlist: #1a2332;
+  --color-bg-chat: #0f172a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.3);
+  --shadow-bubble-user: 0 3px 10px rgba(6, 95, 70, 0.3);
+  --shadow-bubble-assistant: 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-input-focus: 0 0 0 3px rgba(52, 211, 153, 0.2), 0 4px 16px rgba(52, 211, 153, 0.1);
+  --gradient-brand: linear-gradient(135deg, #065f46 0%, #059669 100%);
+  --gradient-agent: linear-gradient(135deg, #065f46 0%, #10b981 100%);
 }
 
 *,

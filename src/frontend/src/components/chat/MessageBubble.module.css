@@ -103,17 +103,17 @@
   max-width: 75%;
   padding: 8px 12px;
   color: var(--color-bg-white);
-  background: linear-gradient(135deg, #1d8f5a, #34c38f);
+  background: linear-gradient(135deg, var(--color-user-bubble-from), var(--color-user-bubble-to));
   border-radius: 12px 12px 2px 12px;
 }
 
 /* 自己的消息中链接和代码颜色适配 */
 .innerUser a {
-  color: #d1f5e3;
+  color: var(--color-user-bubble-link);
 }
 
 .innerUser code {
-  background: rgba(255, 255, 255, 0.2) !important;
+  background: var(--color-user-bubble-code-bg) !important;
 }
 
 .innerUser strong {
@@ -157,7 +157,7 @@
 }
 
 .innerUser .fadeMask {
-  background: linear-gradient(180deg, rgba(29, 143, 90, 0), #1d8f5a 74%);
+  background: linear-gradient(180deg, rgba(29, 143, 90, 0), var(--color-user-bubble-from) 74%);
 }
 
 .innerAssistant strong,
@@ -250,8 +250,8 @@
 
 .innerFailed {
   color: var(--color-danger);
-  background: #fff2f0;
-  border: 1px solid #ffccc7;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
 }
 
 .failedActions {
