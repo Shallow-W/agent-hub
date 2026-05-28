@@ -101,6 +101,10 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 		var msg ws.WSMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			h.logger.Warn("invalid ws message", "error", err)
+			h.hub.SendToUser(client.UserID, ws.WSMessage{
+				Type: ws.TypeError,
+				Data: map[string]string{"message": "消息格式错误"},
+			})
 			continue
 		}
 
@@ -140,9 +144,19 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 				Content        string `json:"content"`
 			}
 			if raw, err := json.Marshal(msg.Data); err == nil {
-				_ = json.Unmarshal(raw, &payload)
+				if err := json.Unmarshal(raw, &payload); err != nil {
+					h.hub.SendToUser(client.UserID, ws.WSMessage{
+						Type: ws.TypeError,
+						Data: map[string]string{"message": "chat 消息格式错误"},
+					})
+					continue
+				}
 			}
 			if payload.ConversationID == "" || payload.Content == "" {
+				h.hub.SendToUser(client.UserID, ws.WSMessage{
+					Type: ws.TypeError,
+					Data: map[string]string{"message": "缺少 conversation_id 或 content"},
+				})
 				continue
 			}
 			if len(payload.Content) > 10000 {
