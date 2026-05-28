@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Button, Alert, Avatar, Input, Modal, message as antMessage } from 'antd';
 import {
@@ -37,6 +37,11 @@ const AppLayout: React.FC = () => {
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const setActive = useConversationStore((s) => s.setActive);
   const { status } = useWebSocket();
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (status === 'connected') wasConnectedRef.current = true;
+  }, [status]);
+  const showDisconnectAlert = status === 'disconnected' && wasConnectedRef.current;
   const { user, logout: handleLogout } = useAuth();
   const fetchFriends = useFriendStore((s) => s.fetchFriends);
   const fetchPending = useFriendStore((s) => s.fetchPending);
@@ -267,8 +272,8 @@ const AppLayout: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      {/* WebSocket disconnect alert */}
-      {status === 'disconnected' && (
+      {/* WebSocket disconnect alert — 仅在连接建立后断开时显示 */}
+      {showDisconnectAlert && (
         <Alert
           message="连接已断开，正在重连..."
           type="warning"
