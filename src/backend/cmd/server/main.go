@@ -18,13 +18,14 @@ import (
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
-	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/knadh/koanf/v2"
+	"github.com/jmoiron/sqlx"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
 )
 
 // Config 应用配置结构
@@ -41,8 +42,8 @@ type Config struct {
 		SSLMode  string `koanf:"sslmode"`
 	} `koanf:"database"`
 	JWT struct {
-		Secret        string `koanf:"secret"`
-		ExpiryHours   int    `koanf:"expiry_hours"`
+		Secret      string `koanf:"secret"`
+		ExpiryHours int    `koanf:"expiry_hours"`
 	} `koanf:"jwt"`
 	CORS struct {
 		AllowedOrigins []string `koanf:"allowed_origins"`
@@ -104,7 +105,8 @@ func main() {
 	})
 
 	// Redis 初始化
-	rdb, err := pkgredis.NewClient(pkgredis.Config{
+	var rdb *goredis.Client
+	rdb, err = pkgredis.NewClient(pkgredis.Config{
 		Host:     cfg.Redis.Host,
 		Port:     cfg.Redis.Port,
 		Password: cfg.Redis.Password,
@@ -152,7 +154,7 @@ func main() {
 	// 需要鉴权的路由
 	authMiddleware := middleware.Auth(middleware.JWTConfig{Secret: cfg.JWT.Secret})
 	apiGroup := router.Group("/api")
-		apiGroup.Use(authMiddleware)
+	apiGroup.Use(authMiddleware)
 	{
 		// 静态文件服务（上传的文件，需要鉴权）
 		uploadDir := cfg.Upload.Dir
@@ -176,7 +178,7 @@ func main() {
 			convRoutes.POST("", convHandler.Create)
 			convRoutes.POST("/private", convHandler.GetOrCreatePrivate)
 			convRoutes.GET("", convHandler.List)
-		convRoutes.GET("/archived", convHandler.ListArchived)
+			convRoutes.GET("/archived", convHandler.ListArchived)
 			convRoutes.PUT("/:id", convHandler.RenameConversation)
 			convRoutes.DELETE("/:id", convHandler.Delete)
 			convRoutes.POST("/:id/archive", convHandler.ArchiveConversation)
@@ -185,7 +187,7 @@ func main() {
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.GET("/:id/messages/search", msgHandler.Search)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
-				convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
+			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 	}
@@ -259,7 +261,13 @@ func main() {
 	defer shutdownCancel()
 
 	cancel() // 停止 Hub
-		middleware.StopRateLimiters()
+	middleware.StopRateLimiters()
+
+	if rdb != nil {
+		if err := rdb.Close(); err != nil {
+			logger.Warn("redis close failed", "error", err)
+		}
+	}
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown failed", "error", err)

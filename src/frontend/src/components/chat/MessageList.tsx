@@ -72,7 +72,8 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
     if (nearBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Use instant scroll during streaming to avoid jitter; smooth for new messages
+      bottomRef.current?.scrollIntoView({ behavior: streamingContent ? 'instant' : 'smooth' });
     }
   }, [messages, streamingContent, optimisticMessages]);
 

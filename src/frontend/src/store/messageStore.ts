@@ -43,6 +43,8 @@ interface MessageState {
 }
 
 const PAGE_SIZE = 50;
+/** Max messages kept per conversation to prevent unbounded memory growth */
+const MAX_MESSAGES = 200;
 
 let tempIdCounter = 0;
 function generateTempId(): string {
@@ -70,8 +72,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         // before 有值表示翻页加载更多，拼在前面；否则是首次加载，覆盖旧数据
         const existing = before ? (state.messages[conversationId] ?? []) : [];
         const merged = [...list, ...existing];
+        // Trim oldest messages if exceeding cap
+        const trimmed = merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
         return {
-          messages: { ...state.messages, [conversationId]: merged },
+          messages: { ...state.messages, [conversationId]: trimmed },
           hasMore: {
             ...state.hasMore,
             [conversationId]: list.length >= PAGE_SIZE,
@@ -163,10 +167,13 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       if (existing.some((m) => m.id === message.id)) {
         return state;
       }
+      const next = [...existing, message];
+      // Trim oldest messages from the beginning if exceeding cap
+      const trimmed = next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
       return {
         messages: {
           ...state.messages,
-          [conversationId]: [...existing, message],
+          [conversationId]: trimmed,
         },
       };
     });
@@ -195,10 +202,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       }
       const next = { ...state.streamingContent };
       delete next[conversationId];
+      const appended = [...existing, fullMessage];
+      const trimmed = appended.length > MAX_MESSAGES ? appended.slice(appended.length - MAX_MESSAGES) : appended;
       return {
         messages: {
           ...state.messages,
-          [conversationId]: [...existing, fullMessage],
+          [conversationId]: trimmed,
         },
         streamingContent: next,
       };

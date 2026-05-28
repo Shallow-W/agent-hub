@@ -63,9 +63,11 @@ const AppLayout: React.FC = () => {
     }
   }, [activeNav, fetchFriends, fetchPending]);
 
-  // Update document.title with total unread count
-  const unreadCounts = useMessageStore((s) => s.unreadCounts);
-  const totalUnread = Object.values(unreadCounts).reduce((sum, c) => sum + c, 0);
+  // Derive total unread count without subscribing to the full unreadCounts object.
+  // This avoids re-rendering AppLayout on every individual count change.
+  const totalUnread = useMessageStore((s) =>
+    Object.values(s.unreadCounts).reduce((sum, c) => sum + c, 0),
+  );
 
   useEffect(() => {
     if (totalUnread > 0) {
