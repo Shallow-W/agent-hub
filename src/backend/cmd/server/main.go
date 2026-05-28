@@ -327,8 +327,8 @@ func createDatabase(cfg *Config) error {
 	}
 	defer db.Close()
 
-	// 防止 SQL 注入：数据库名来自配置文件，不接受用户输入
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE %s", cfg.Database.DBName))
+	// Quote identifier to prevent injection; name comes from config, not user input
+	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE \"%s\"", strings.ReplaceAll(cfg.Database.DBName, "\"", "")))
 	return err
 }
 

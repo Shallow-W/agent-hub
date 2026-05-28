@@ -73,7 +73,7 @@
 | B36 | GetUnreadMessages 降级查询返回全部消息而非未读 | P2 | [x] |
 | B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [x] |
 | B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [x] |
-| B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [ ] |
+| B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [x] |
 | B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [ ] |
 | B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
 | B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [x] |
@@ -82,9 +82,9 @@
 | B47 | 私聊非创建者无法归档(只检查 conv.UserID) | P1 | [x] |
 | B48 | WS join_room 用 GroupRepo.IsMember 但 REST checkMembership 有 fallback | P1 | [ ] |
 | B49 | 群创建 owner INSERT 无 ON CONFLICT 非幂等 | P1 | [x] |
-| B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [ ] |
+| B50 | username 校验 max 冲突：binding 50 vs regex 20 | P2 | [x] |
 | B51 | typing 通知广播包含发送者自己(多余流量) | P2 | [ ] |
-| B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [ ] |
+| B52 | RecallMessage 对无 sender_id 的群聊历史消息推断错误 | P2 | [x] |
 | B53 | user.stop_stream 前端发送但后端无处理(stop按钮无效) | P1 | [ ] |
 | B54 | friendStore actionLoading 值不匹配:id vs id+'-accept'(loading永远不显示) | P1 | [ ] |
 | B55 | ChatWindow 文件上传后不发送附件消息(上传结果丢失) | P1 | [ ] |
@@ -273,12 +273,12 @@
 | DB-03 | conversation_members.last_read_at 无索引 | P2 | [ ] |
 | DB-04 | 迁移 012 sender_id backfill 仅覆盖 user 角色 | P2 | [ ] |
 | DB-05 | ListByUserID 热查询缺 archived_at 索引 | P2 | [ ] |
-| DB-06 | conversations.type 无 CHECK 约束 | P2 | [ ] |
-| DB-07 | friends.status 无 CHECK 约束 | P2 | [ ] |
+| DB-06 | conversations.type 无 CHECK 约束 | P2 | [x] |
+| DB-07 | friends.status 无 CHECK 约束 | P2 | [x] |
 | DB-08 | CASCADE 删除用户时销毁群聊(应 SET NULL) | P1 | [ ] |
 | DB-09 | 可空 DB 列映射为非指针 Go 类型(StructScan 崩溃) | P1 | [ ] |
 | DB-10 | ANY($1)+[]string 在 sqlx 下可能运行时失败 | P2 | [ ] |
-| DB-11 | GroupRepo.AddMember 缺 ON CONFLICT 幂等保护 | P2 | [ ] |
+| DB-11 | GroupRepo.AddMember 缺 ON CONFLICT 幂等保护 | P2 | [x] |
 | DB-12 | 仓库方法重复且行为不一致(AddMember/GetUserByID) | P3 | [ ] |
 | DB-13 | user.go 用 err==sql.ErrNoRows 而非 errors.Is | P3 | [ ] |
 
@@ -354,7 +354,7 @@
 |---|------|--------|------|
 | PERF-01 | messages store 无限增长，永不清理 | P1 | [x] |
 | PERF-02 | AppLayout 订阅整个 unreadCounts 对象 | P1 | [x] |
-| PERF-03 | ChatWindow 订阅全部 typingUsers | P1 | [ ] |
+| PERF-03 | ChatWindow 订阅全部 typingUsers | P1 | [x] |
 | PERF-04 | MessageBubble 未使用 React.memo | P2 | [x] |
 | PERF-05 | smooth scroll 在流式消息时引起抖动 | P2 | [x] |
 | PERF-06 | 对话切换重复 API 请求 | P2 | [x] |
@@ -389,14 +389,14 @@
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| UX-01 | 删除对话无二次确认弹窗，误点即删 | P1 | [ ] |
-| UX-02 | 创建群组后群不自动激活，需手动点击 | P1 | [ ] |
+| UX-01 | 删除对话无二次确认弹窗，误点即删 | P1 | [x] |
+| UX-02 | 创建群组后群不自动激活，需手动点击 | P1 | [x] |
 | UX-03 | 切换对话无"新消息"指示器/跳转按钮 | P1 | [ ] |
 | UX-04 | 无响应式设计，移动端布局不可用 | P1 | [ ] |
 | UX-05 | 快速切换对话时 fetchMessages 竞态（旧请求覆盖新数据） | P1 | [ ] |
 | UX-06 | 新建对话默认标题"新对话"硬编码，无输入框 | P2 | [ ] |
 | UX-07 | 对话列表无空状态引导（新用户不知如何开始） | P2 | [ ] |
-| UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [ ] |
+| UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [x] |
 | UX-09 | 群聊创建后不自动打开成员面板 | P2 | [ ] |
 | UX-10 | 好友申请无备注/留言字段 | P2 | [ ] |
 | UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [ ] |
