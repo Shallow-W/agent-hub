@@ -131,10 +131,10 @@
 | B98 | wsStore connect() 断开旧连接但不清理 joinedRooms 和 queue | P2 | [x] |
 | B99 | conversationStore fetchConversations 无并发锁，双重调用覆盖数据 | P2 | [x] |
 | B100 | useWebSocket disconnect 在组件卸载时断开全局 WebSocket | P1 | [x] |
-| B101 | useMessages getUnreadMessages stale check 不覆盖 fetchMessages 竞态 | P2 | [-] |
+| B101 | useMessages getUnreadMessages stale check 不覆盖 fetchMessages 竞态 | P2 | [x] |
 | B102 | MessageBubble canRecall 使用客户端 Date.now() 与服务端时间不一致 | P2 | [x] |
 | B103 | MessageList streaming message id 硬编码为 'streaming'，去重失效 | P2 | [x] |
-| B104 | ChatWindow 搜索结果点击滚动用 querySelector，消息可能未加载 | P2 | [ ] |
+| B104 | ChatWindow 搜索结果点击滚动用 querySelector，消息可能未加载 | P2 | [x] |
 | B105 | MessageBubble replyQuote 未转义 HTML 内容 | P2 | [x] |
 | B106 | messageStore recall 本地乐观更新与 WebSocket 推送竞态 | P1 | [x] |
 | B107 | ArchiveConversation handler 无成员身份校验 | P2 | [-] |
@@ -318,7 +318,7 @@
 | ID | 功能 | 后端状态 | 状态 |
 |----|------|----------|------|
 | MISS-004 | 群成员角色管理 UI | 部分已有 | [ ] |
-| MISS-005 | 好友删除 | 需新增 API | [ ] |
+| MISS-005 | 好友删除 | 需新增 API | [x] |
 | MISS-006 | /api/users/search 对接 | 已有 API | [x] |
 | MISS-007 | 归档对话列表/查看 | 已有 API | [x] |
 | MISS-008 | GetGroupInfo 对接 | 已有 API | [x] |
@@ -411,7 +411,7 @@
 | UX-03 | 切换对话无"新消息"指示器/跳转按钮 | P1 | [x] |
 | UX-04 | 无响应式设计，移动端布局不可用 | P1 | [ ] |
 | UX-05 | 快速切换对话时 fetchMessages 竞态（旧请求覆盖新数据） | P1 | [x] |
-| UX-06 | 新建对话默认标题"新对话"硬编码，无输入框 | P2 | [ ] |
+| UX-06 | 新建对话默认标题"新对话"硬编码，无输入框 | P2 | [x] |
 | UX-07 | 对话列表无空状态引导（新用户不知如何开始） | P2 | [x] |
 | UX-08 | 发送按钮无 loading 状态，重复点击可触发多次发送 | P2 | [x] |
 | UX-09 | 群聊创建后不自动打开成员面板 | P2 | [x] |
@@ -428,6 +428,48 @@
 | UX-20 | Emoji 选择器无最近使用/常用分类 | P3 | [ ] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
+
+---
+
+## 即时通信功能增强
+
+> 基于产品经理视角分析的 IM 必要功能，与竞品（微信/飞书/Slack）对齐。去重已有 MISS-* 和 UX-* 项。
+
+### P0 — 核心体验差距
+
+| ID | 功能 | 后端状态 | 依赖 | 状态 |
+|----|------|----------|------|------|
+| IM-001 | 消息编辑（发送后可修改，显示"已编辑"标记） | 需新增 API | M3 | [ ] |
+| IM-002 | 消息表情回应（Reaction，用 emoji 快速回应） | 需新增 API | M3 | [ ] |
+
+### P1 — 重要功能
+
+| ID | 功能 | 后端状态 | 依赖 | 状态 |
+|----|------|----------|------|------|
+| IM-003 | 链接预览卡片（自动解析 URL 生成标题/摘要/缩略图） | 需新增后端解析 | M3 | [ ] |
+| IM-004 | 代码块语法高亮（检测语言 + highlight.js 渲染） | 纯前端 | M3 | [ ] |
+| IM-005 | 图片粘贴/拖拽上传（Ctrl+V 直接粘贴截图发送） | 纯前端 | B55 | [ ] |
+| IM-006 | 对话免打扰（单对话静音，不推送通知） | 需新增字段 | M3 | [ ] |
+| IM-007 | @提及通知（@all 或 @某人触发高亮+通知） | 需新增 API | MISS-010 | [ ] |
+| IM-008 | 消息状态细化（发送中→已送达→已读 三态图标） | 部分已有 | M3 | [ ] |
+| IM-009 | 群聊禁言控制（管理员可禁言单个/全员） | 需新增 API | M3 | [ ] |
+| IM-010 | 消息举报（举报不当内容，需管理后台审核） | 需新增 API | M3 | [ ] |
+
+### P2 — 次要功能
+
+| ID | 功能 | 后端状态 | 依赖 | 状态 |
+|----|------|----------|------|------|
+| IM-011 | 消息删除仅自己可见（删除后对方仍可见） | 需新增逻辑 | M3 | [ ] |
+| IM-012 | 撤回后重新编辑发送（撤回消息内容回填输入框） | 纯前端 | B13 | [ ] |
+| IM-013 | 群置顶公告（群内顶部常驻显示，支持多条） | 需新增模型 | MISS-012 | [ ] |
+| IM-014 | 聊天记录导出（选中消息导出为 txt/html） | 需新增 API | M3 | [ ] |
+| IM-015 | 多标签页 WS 同步（BroadcastChannel 跨 tab 状态一致） | 纯前端 | B86 | [ ] |
+| IM-016 | 关键词内容过滤（敏感词自动替换/拦截） | 需新增中间件 | M3 | [ ] |
+| IM-017 | 入群审核（群主/管理员审批入群申请） | 需新增 API | M3 | [ ] |
+| IM-018 | 定时发送（设定时间后自动发送消息） | 需新增后端 | M3 | [ ] |
+| IM-019 | 群成员容量限制（设置群最大人数上限） | 需新增字段 | M3 | [ ] |
+
+> 详情: [doc/task/IM-功能增强.md](task/IM-功能增强.md)
 
 ---
 
