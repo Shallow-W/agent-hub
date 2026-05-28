@@ -98,8 +98,8 @@ func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conver
 	if member != nil {
 		return nil
 	}
-	// Fallback: 群创建者可能尚未加入成员表
-	if conv.Type == "group" && conv.UserID == userID {
+	// Fallback: creator may not yet be in members table
+	if conv.UserID == userID {
 		return nil
 	}
 	return ErrMsgConvNoPerm

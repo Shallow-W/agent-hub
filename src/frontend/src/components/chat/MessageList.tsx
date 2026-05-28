@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Empty, Spin, Skeleton, Divider, Badge } from 'antd';
+import { Empty, Spin, Skeleton, Badge } from 'antd';
 import { ArrowDownOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useAuthStore } from '@/store/authStore';
@@ -93,7 +93,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
     if (!el) return;
     if (nearBottomRef.current) {
       // Use instant scroll during streaming to avoid jitter; smooth for new messages
-      bottomRef.current?.scrollIntoView({ behavior: streamingContent ? 'instant' : 'smooth' });
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' });
     } else {
       // User scrolled up — show indicator for new messages
       setShowNewMsgBtn(true);
@@ -105,16 +105,11 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   if (loading && messages.length === 0) {
     return (
       <div className={styles.container}>
-        <div style={{ padding: '16px 20px' }}>
+        <div className={styles.skeletonList}>
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
-              style={{
-                display: 'flex',
-                gap: 10,
-                marginBottom: 16,
-                flexDirection: i % 2 === 0 ? 'row' : 'row-reverse',
-              }}
+              className={`${styles.skeletonRow} ${i % 2 === 0 ? '' : styles.skeletonRowReverse}`}
             >
               <Skeleton.Avatar active size={32} />
               <Skeleton
@@ -165,9 +160,9 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
             return (
               <React.Fragment key={msg.id}>
                 {showDivider && (
-                  <Divider plain style={{ margin: '8px 0', fontSize: 12, color: '#999' }}>
+                  <div className={styles.timeDivider}>
                     {formatDividerTime(msg.created_at)}
-                  </Divider>
+                  </div>
                 )}
                 <MessageBubble
                   message={msg}
@@ -213,7 +208,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
           <Badge count={unreadSinceScroll > 1 ? unreadSinceScroll : 0} size="small">
             <ArrowDownOutlined />
           </Badge>
-          <span style={{ marginLeft: 4 }}>新消息</span>
+          <span className={styles.newMsgText}>新消息</span>
         </button>
       )}
       <div ref={bottomRef} />

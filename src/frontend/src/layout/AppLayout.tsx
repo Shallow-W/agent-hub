@@ -1,18 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Button, Alert, Avatar, Input, Modal, message as antMessage } from 'antd';
+import { Alert, message as antMessage } from 'antd';
 import {
-  PlusOutlined,
   LeftOutlined,
   RightOutlined,
-  ReloadOutlined,
-  UploadOutlined,
-  UndoOutlined,
 } from '@ant-design/icons';
-import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
-import FriendList from '@/components/friends/FriendList';
-import FriendRequest from '@/components/friends/FriendRequest';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
 import { getArchivedConversations, unarchiveConversation } from '@/api/conversation';
@@ -24,11 +17,10 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { getOrCreatePrivateChat } from '@/api/conversation';
-import ResizeHandle from '@/components/common/ResizeHandle';
+import ArchivedConversationsModal from './ArchivedConversationsModal';
+import MiddlePanel from './MiddlePanel';
+import NewConversationModal from './NewConversationModal';
 import styles from './AppLayout.module.css';
-
-const SETTINGS_COLLAPSED_WIDTH = 44;
-const SETTINGS_EXPANDED_WIDTH = 184;
 
 const AppLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -50,9 +42,7 @@ const AppLayout: React.FC = () => {
   const [archivedModalOpen, setArchivedModalOpen] = useState(false);
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
-  const [convPanelWidth, setConvPanelWidth] = useState(166);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
-  const [newConvTitle, setNewConvTitle] = useState('');
 
   /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
@@ -74,8 +64,7 @@ const AppLayout: React.FC = () => {
     }
   }, [activeNav, fetchFriends, fetchPending]);
 
-  // Derive total unread count without subscribing to the full unreadCounts object.
-  // This avoids re-rendering AppLayout on every individual count change.
+  // 只订阅未读总数，避免每个会话未读变化都触发布局重渲染。
   const totalUnread = useMessageStore((s) =>
     Object.values(s.unreadCounts).reduce((sum, c) => sum + c, 0),
   );
@@ -148,8 +137,11 @@ const AppLayout: React.FC = () => {
   };
 
   const handleCreate = () => {
-    setNewConvTitle('');
     setNewConvModalOpen(true);
+  };
+
+  const handleUpload = () => {
+    antMessage.info('请在当前对话输入框左侧添加附件');
   };
 
   const handleGroupCreate = async (name: string, memberIds: string[]) => {
@@ -169,11 +161,6 @@ const AppLayout: React.FC = () => {
     }
   };
 
-  /** 拖拽调整中间面板宽度 */
-  const handleResize = useCallback((deltaX: number) => {
-    setConvPanelWidth((prev) => Math.min(220, Math.max(150, prev + deltaX)));
-  }, []);
-
   /** 点击好友开始私聊 */
   const handleStartChat = useCallback(async (friendId: string) => {
     try {
@@ -186,90 +173,6 @@ const AppLayout: React.FC = () => {
     }
   }, [fetchConversations, setActive]);
 
-  /** 中间面板内容：根据左侧导航切换 */
-  const renderMiddlePanel = () => {
-    const renderPanelTools = (onAdd: () => void) => (
-      <div className={styles.convPanelTools}>
-        <Button type="text" icon={<UploadOutlined />} aria-label="上传" />
-        <Button type="text" icon={<PlusOutlined />} aria-label="添加" onClick={onAdd} />
-        <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchConversations()} />
-      </div>
-    );
-
-    if (activeNav === 'friends') {
-      return (
-        <>
-          <div className={styles.convPanelHeader}>
-            <span className={styles.convPanelTitle}>消息</span>
-            {renderPanelTools(handleCreate)}
-          </div>
-          <div className={styles.middleScroll}>
-            <FriendRequest />
-            <div className={styles.middleSection}>
-              <FriendList onStartChat={handleStartChat} />
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    if (activeNav === 'groups') {
-      const groupConvs = conversations.filter((c) => c.type === 'group');
-      return (
-        <>
-          <div className={styles.convPanelHeader}>
-            <span className={styles.convPanelTitle}>消息</span>
-            {renderPanelTools(() => setGroupModalOpen(true))}
-          </div>
-          {groupConvs.length === 0 ? (
-            <div className={styles.emptyState}>
-              暂无群聊
-            </div>
-          ) : (
-            <div className={styles.groupList}>
-              {groupConvs.map((conv) => (
-                <div
-                  key={conv.id}
-                  className={styles.groupItem}
-                  onClick={() => {
-                    useConversationStore.getState().setActive(conv.id);
-                    setActiveNav('chat');
-                  }}
-                >
-                  <Avatar className={styles.groupAvatar} shape="square">
-                    {conv.title.charAt(0).toUpperCase()}
-                  </Avatar>
-                  <div className={styles.groupMeta}>
-                    <div className={styles.groupTitle}>
-                      {conv.title}
-                    </div>
-                    <div className={styles.groupTime}>
-                      创建于 {new Date(conv.created_at).toLocaleDateString('zh-CN')}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      );
-    }
-
-    // 默认：对话列表
-    return (
-      <>
-        <div className={styles.convPanelHeader}>
-          <span className={styles.convPanelTitle}>消息</span>
-          {renderPanelTools(handleCreate)}
-        </div>
-        <ConversationList onNavigateFriends={() => setActiveNav('friends')} />
-        <div className={styles.archivedLink} onClick={showArchived} role="button" tabIndex={0}>
-          查看归档对话
-        </div>
-      </>
-    );
-  };
-
   return (
     <div className={styles.container}>
       {/* WebSocket disconnect alert — 仅在连接建立后断开时显示 */}
@@ -279,7 +182,7 @@ const AppLayout: React.FC = () => {
           type="warning"
           showIcon
           banner
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000 }}
+          className={styles.disconnectAlert}
         />
       )}
 
@@ -292,29 +195,38 @@ const AppLayout: React.FC = () => {
           onLogout={handleLogout}
           wsStatus={status}
           onNavChange={handleNavChange}
+          activeKey={activeNav}
+          onCreate={handleCreate}
           collapsed={settingsCollapsed}
         />
       </div>
 
       {/* 折叠/展开切换按钮 - 放在 settingsPanel 外部，避免 overflow 问题 */}
       <button
-        className={styles.toggleBtn}
+        className={`${styles.toggleBtn} ${
+          settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
+        }`}
         onClick={() => setSettingsCollapsed((c) => !c)}
         aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
-        style={{
-          left: (settingsCollapsed ? SETTINGS_COLLAPSED_WIDTH : SETTINGS_EXPANDED_WIDTH) - 11,
-        }}
       >
         {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
       </button>
 
       {/* 中间：对话/好友/群聊列表 */}
-      <div className={styles.convPanel} style={{ width: convPanelWidth }}>
-        {renderMiddlePanel()}
+      <div className={styles.convPanel}>
+        <MiddlePanel
+          activeNav={activeNav}
+          conversations={conversations}
+          onCreate={handleCreate}
+          onCreateGroup={() => setGroupModalOpen(true)}
+          onRefresh={() => fetchConversations()}
+          onUpload={handleUpload}
+          onShowArchived={showArchived}
+          onStartChat={handleStartChat}
+          onSwitchChat={() => setActiveNav('chat')}
+          onSwitchFriends={() => setActiveNav('friends')}
+        />
       </div>
-
-      {/* 拖拽分隔条 */}
-      <ResizeHandle onResize={handleResize} />
 
       {/* 右侧：聊天区域 */}
       <div className={styles.chatPanel}>
@@ -327,61 +239,20 @@ const AppLayout: React.FC = () => {
         onCancel={() => setGroupModalOpen(false)}
         onOk={handleGroupCreate}
       />
-      <Modal
-        title="新建对话"
+      <NewConversationModal
         open={newConvModalOpen}
-        onOk={async () => {
-          const title = newConvTitle.trim() || '新对话';
+        onCancel={() => setNewConvModalOpen(false)}
+        onCreate={async (title) => {
           await create('single', title);
           setNewConvModalOpen(false);
         }}
-        onCancel={() => setNewConvModalOpen(false)}
-        okText="创建"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <Input
-          placeholder="对话标题（可选）"
-          value={newConvTitle}
-          onChange={(e) => setNewConvTitle(e.target.value)}
-          onPressEnter={async () => {
-            const title = newConvTitle.trim() || '新对话';
-            await create('single', title);
-            setNewConvModalOpen(false);
-          }}
-          maxLength={50}
-          autoFocus
-        />
-      </Modal>
-      <Modal
-        title="归档对话"
+      />
+      <ArchivedConversationsModal
         open={archivedModalOpen}
         onCancel={() => setArchivedModalOpen(false)}
-        footer={null}
-        width={400}
-      >
-        {archivedConvs.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>暂无归档对话</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {archivedConvs.map((conv) => (
-              <div key={conv.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <Avatar size={28}>{(conv.title || '?').charAt(0).toUpperCase()}</Avatar>
-                <span style={{ flex: 1 }}>{conv.title || '未命名'}</span>
-                <span style={{ color: '#999', fontSize: 12 }}>{new Date(conv.created_at).toLocaleDateString('zh-CN')}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<UndoOutlined />}
-                  onClick={() => handleUnarchive(conv.id)}
-                >
-                  取消归档
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
+        conversations={archivedConvs}
+        onUnarchive={handleUnarchive}
+      />
     </div>
   );
 };

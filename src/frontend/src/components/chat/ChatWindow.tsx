@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, Input, List, message as antMessage } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown, message as antMessage } from 'antd';
 import {
   FolderOpenOutlined,
   MoreOutlined,
@@ -7,7 +7,6 @@ import {
   SettingOutlined,
   StopOutlined,
   UserAddOutlined,
-  CloseOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -20,6 +19,7 @@ import * as convApi from '@/api/conversation';
 import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
+import { ChatSearchPanel } from './ChatSearchPanel';
 import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
@@ -57,7 +57,6 @@ export const ChatWindow: React.FC = () => {
 
   const { send: sendMessage } = useMessages(activeId ?? null);
 
-  // File upload handler for header "文件" button
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !activeId) return;
@@ -98,7 +97,6 @@ export const ChatWindow: React.FC = () => {
       type: 'user.stop_stream',
       data: { conversation_id: activeId },
     }));
-    // Clear streaming content locally
     useMessageStore.setState((s) => {
       const next = { ...s.streamingContent };
       delete next[activeId];
@@ -107,7 +105,6 @@ export const ChatWindow: React.FC = () => {
     antMessage.info('已停止生成');
   }, [wsClient, activeId]);
 
-  // Mark conversation as read when switching to it
   useEffect(() => {
     if (!activeId) return;
     markAllRead(activeId);
@@ -147,9 +144,24 @@ export const ChatWindow: React.FC = () => {
     [activeConv],
   );
 
-  if (!activeConv) {
-    return null;
-  }
+  const handleSelectSearchResult = useCallback((msg: Message) => {
+    toggleSearch();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.querySelector(`[data-message-id="${msg.id}"]`);
+        if (el instanceof HTMLElement) {
+          const highlightClass = styles.highlightFlash ?? '';
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add(highlightClass);
+          el.addEventListener('animationend', () => el.classList.remove(highlightClass), { once: true });
+        } else {
+          antMessage.info('消息不在当前视图');
+        }
+      });
+    });
+  }, [toggleSearch]);
+
+  if (!activeConv) return null;
 
   const isGroup = activeConv.type === 'group';
   const displayName = isGroup
@@ -205,7 +217,7 @@ export const ChatWindow: React.FC = () => {
             accept={ACCEPTED_TYPES}
             multiple
             onChange={handleFileSelect}
-            style={{ display: 'none' }}
+            className={styles.hiddenFileInput}
           />
           {isGroup && (
             <Tooltip title="邀请成员">
@@ -243,72 +255,14 @@ export const ChatWindow: React.FC = () => {
         </div>
       </div>
       {searchOpen && (
-        <div className={styles.searchPanel}>
-          <div className={styles.searchBar}>
-            <Input.Search
-              placeholder="搜索消息"
-              allowClear
-              enterButton
-              loading={searchLoading}
-              onSearch={handleSearch}
-              style={{ flex: 1 }}
-            />
-            <Button
-              type="text"
-              icon={<CloseOutlined />}
-              size="small"
-              onClick={toggleSearch}
-            />
-          </div>
-          {searchResults.length > 0 && (
-            <List
-              className={styles.searchResults}
-              dataSource={searchResults}
-              renderItem={(msg) => (
-                <List.Item
-                  className={styles.searchResultItem}
-                  onClick={() => {
-                    toggleSearch();
-                    requestAnimationFrame(() => {
-                      requestAnimationFrame(() => {
-                        const el = document.querySelector(`[data-message-id="${msg.id}"]`);
-                        if (el instanceof HTMLElement) {
-                          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          el.classList.add(styles.highlightFlash!);
-                          el.addEventListener('animationend', () => el.classList.remove(styles.highlightFlash!), { once: true });
-                        } else {
-                          antMessage.info('消息不在当前视图');
-                        }
-                      });
-                    });
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <List.Item.Meta
-                    title={
-                      <span className={styles.searchResultSender}>
-                        {msg.username || msg.role}
-                      </span>
-                    }
-                    description={
-                      <span className={styles.searchResultContent}>
-                        {msg.content.length > 100 ? msg.content.slice(0, 100) + '...' : msg.content}
-                      </span>
-                    }
-                  />
-                  <span className={styles.searchResultTime}>
-                    {new Date(msg.created_at).toLocaleString()}
-                  </span>
-                </List.Item>
-              )}
-            />
-          )}
-          {hasSearched && searchResults.length === 0 && !searchLoading && (
-            <div style={{ padding: '16px', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>
-              未找到相关消息
-            </div>
-          )}
-        </div>
+        <ChatSearchPanel
+          searchLoading={searchLoading}
+          searchResults={searchResults}
+          hasSearched={hasSearched}
+          onSearch={handleSearch}
+          onClose={toggleSearch}
+          onSelectMessage={handleSelectSearchResult}
+        />
       )}
       <MessageList conversationId={activeConv.id} onReply={setReplyTo} />
       {otherTyping.length > 0 && (

@@ -9,7 +9,6 @@ import {
   UpOutlined,
 } from '@ant-design/icons';
 import type { Message } from '@/types/message';
-import { getAvatarColor } from '@/utils/avatarColor';
 import type { OptimisticStatus } from '@/types/message';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
@@ -28,7 +27,7 @@ function escapeHtml(text: string): string {
 }
 
 function renderMarkdown(text: string): string {
-  // 1. Extract code blocks and replace with placeholders
+  // 先抽出代码块，避免后续转义破坏格式。
   const codeBlocks: string[] = [];
   let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang, code) => {
     const idx = codeBlocks.length;
@@ -45,7 +44,7 @@ function renderMarkdown(text: string): string {
     return `\x00CODEBLOCK${idx}\x00`;
   });
 
-  // 2. Extract inline code and replace with placeholders
+  // 再抽出行内代码，和普通文本分开处理。
   const inlineCodes: string[] = [];
   result = result.replace(/`([^`]+)`/g, (_match, code) => {
     const idx = inlineCodes.length;
@@ -53,10 +52,10 @@ function renderMarkdown(text: string): string {
     return `\x00INLINE${idx}\x00`;
   });
 
-  // 3. Escape remaining HTML (outside code)
+  // 转义代码之外的 HTML，防止消息内容注入。
   result = escapeHtml(result);
 
-  // 4. Apply inline markdown rules
+  // 应用轻量 Markdown 规则。
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
   result = result.replace(/\[([^\]]+)\]\(([^()\s]+(?:\([^()]*\)[^()\s]*)*)\)/g, (_match, text, href) => {
@@ -64,10 +63,10 @@ function renderMarkdown(text: string): string {
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   });
 
-  // 5. Line breaks
+  // 保留消息里的换行。
   result = result.replace(/\n/g, '<br/>');
 
-  // 6. Restore placeholders
+  // 最后恢复前面暂存的代码内容。
   result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
   result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
 
@@ -83,7 +82,6 @@ interface MessageBubbleProps {
   onRetry?: () => void;
   onRemove?: () => void;
   isOwn?: boolean;
-  isRead?: boolean;
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
 }
@@ -113,7 +111,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onRetry,
   onRemove,
   isOwn = false,
-  isRead = false,
   onReply,
   onRecall,
 }) => {
@@ -128,7 +125,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
-  // Client-side hint only; server validates the actual recall window.
+  // 这里只做前端提示，撤回窗口仍由服务端校验。
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
 
   if (isSystem) {
@@ -149,7 +146,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       {showAvatar && (
         <Avatar
           size={24}
-          style={{ backgroundColor: getAvatarColor(message.username || message.role) }}
           className={styles.chatAvatar}
         >
           {avatarLetter}
@@ -185,11 +181,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             <Text type="secondary" className={styles.metaTime}>
               {formatTimestamp(message.created_at)}
             </Text>
-            {isOwn && !isOptimisticSending && !isOptimisticFailed && (
-              <span className={`${styles.readReceipt} ${isRead ? styles.readReceiptRead : styles.readReceiptSent}`}>
-                {isRead ? '✓✓' : '✓'}
-              </span>
-            )}
           </div>
         )}
         <div

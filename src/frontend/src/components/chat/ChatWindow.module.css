@@ -82,6 +82,10 @@
   color: var(--color-primary);
 }
 
+.hiddenFileInput {
+  display: none;
+}
+
 .typingIndicator {
   padding: 4px 18px;
   font-size: 12px;
@@ -94,47 +98,6 @@
   color: var(--color-text);
   width: 28px;
   height: 28px;
-}
-
-.searchPanel {
-  border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-bg-white);
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.searchBar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-}
-
-.searchResults {
-  max-height: 340px;
-  overflow-y: auto;
-}
-
-.searchResultItem {
-  padding: 6px 12px !important;
-}
-
-.searchResultSender {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.searchResultContent {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
-.searchResultTime {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  margin-left: 8px;
 }
 
 .highlightFlash {

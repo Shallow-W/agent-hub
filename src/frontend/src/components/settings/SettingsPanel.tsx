@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
+  BgColorsOutlined,
   CodeOutlined,
   DatabaseOutlined,
   MessageOutlined,
@@ -21,6 +22,8 @@ interface SettingsPanelProps {
   onLogout: () => void;
   wsStatus: WsStatus;
   onNavChange: (key: string) => void;
+  activeKey: string;
+  onCreate: () => void;
   collapsed: boolean;
 }
 
@@ -51,13 +54,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onLogout,
   wsStatus,
   onNavChange,
+  activeKey,
+  onCreate,
   collapsed,
 }) => {
-  const [selectedKey, setSelectedKey] = useState('chat');
   const initial = username ? username.charAt(0).toUpperCase() : '?';
 
   const handleNavClick = (key: string) => {
-    setSelectedKey(key);
     onNavChange(key);
   };
 
@@ -82,7 +85,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <div className={styles.quickCreate}>
         <Tooltip title="新建">
-          <button className={styles.createBtn} type="button">
+          <button className={styles.createBtn} type="button" onClick={onCreate}>
             <PlusOutlined />
           </button>
         </Tooltip>
@@ -92,7 +95,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {navItems.map((item) => (
           <Tooltip key={item.key} title={collapsed ? item.label : ''} placement="right">
             <button
-              className={`${styles.navItem} ${selectedKey === item.key ? styles.navItemActive : ''}`}
+              className={`${styles.navItem} ${activeKey === item.key ? styles.navItemActive : ''}`}
               type="button"
               onClick={() => handleNavClick(item.key)}
             >
@@ -114,6 +117,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         <Tooltip title={username || '个人头像'} placement="right">
           <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
+        </Tooltip>
+        <Tooltip title="调色板" placement="right">
+          <button className={styles.footerIconBtn} type="button" aria-label="调色板">
+            <BgColorsOutlined />
+          </button>
         </Tooltip>
         <Tooltip title="设置" placement="right">
           <button

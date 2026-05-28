@@ -1,183 +1,157 @@
 .bubble {
   display: flex;
-  width: min(100%, 1160px);
+  width: min(100%, 820px);
   margin: 0 auto;
-  padding: 13px 10px 14px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
+  padding: 12px 24px;
   position: relative;
-  transition: background-color var(--transition-fast);
 }
 
-.bubble:hover {
-  background: linear-gradient(90deg, rgba(246, 248, 250, 0.82), rgba(255, 255, 255, 0));
-}
-
-/* 自己的消息右对齐 */
-.bubbleUser {
-  flex-direction: row-reverse;
-}
-
-/* 其他人的消息左对齐 */
-.bubbleAssistant {
-  flex-direction: row;
-}
-
-.bubbleGrouped {
-  padding-top: 4px;
-}
+.bubbleUser { flex-direction: row-reverse; }
+.bubbleAssistant { flex-direction: row; }
+.bubbleGrouped { padding-top: 3px; }
 
 .chatAvatar {
   flex-shrink: 0;
-  margin-top: 1px;
-  box-shadow: 0 0 0 2px var(--color-bg-white), 0 1px 4px rgba(15, 23, 42, 0.12);
-  font-size: 11px;
+  margin-top: 20px;
   color: var(--color-bg-white);
+  background: var(--gradient-agent) !important;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--color-bg-white), 0 2px 8px rgba(15, 23, 42, 0.12);
 }
 
-/* own message avatar on the right side */
-.bubbleUser .chatAvatar {
-  margin-right: 0;
-  margin-left: 10px;
-}
+.bubbleUser .chatAvatar { margin: 20px 0 0 10px; }
+.bubbleAssistant .chatAvatar { margin: 20px 10px 0 0; }
 
-/* other's message avatar on the left side */
-.bubbleAssistant .chatAvatar {
-  margin-right: 10px;
-  margin-left: 0;
-}
-
-.avatarSpacer {
-  width: 33px;
-  flex-shrink: 0;
-}
+.avatarSpacer { width: 35px; flex-shrink: 0; }
 
 .content {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
-/* 自己的消息内容右对齐 */
-.bubbleUser .content {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
+.bubbleUser .content { align-items: flex-end; }
 
 .meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 22px;
-  margin-bottom: 5px;
-  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 16px;
+  margin-bottom: 3px;
+  padding: 0 4px;
 }
 
-/* 自己的消息 meta 右对齐 */
-.bubbleUser .meta {
-  flex-direction: row-reverse;
-}
+.bubbleUser .meta { flex-direction: row-reverse; }
 
 .agentLabel {
-  font-size: 12px;
-  font-weight: 700;
   color: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .metaTime,
 .systemText {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
+  color: rgba(104, 114, 125, 0.72);
+  font-size: 10.5px;
 }
 
 .inner {
-  color: var(--color-text);
-  font-size: 12.5px;
-  line-height: 1.78;
-  word-break: break-word;
   position: relative;
-  border-radius: 6px;
-}
-
-/* 自己的消息：蓝色背景白色文字 */
-.innerUser {
-  max-width: 75%;
-  padding: 8px 12px;
-  color: var(--color-bg-white);
-  background: linear-gradient(135deg, var(--color-user-bubble-from), var(--color-user-bubble-to));
-  border-radius: 12px 12px 2px 12px;
-}
-
-/* 自己的消息中链接和代码颜色适配 */
-.innerUser a {
-  color: var(--color-user-bubble-link);
-}
-
-.innerUser code {
-  background: var(--color-user-bubble-code-bg) !important;
-}
-
-.innerUser strong {
-  color: var(--color-bg-white);
-}
-
-/* 他人/Agent 的消息：浅色背景 */
-.innerAssistant {
-  max-width: 75%;
-  padding: 8px 12px;
+  max-width: min(440px, 70%);
+  padding: 10px 14px;
   color: var(--color-text);
-  background: var(--color-border-light);
-  border-radius: 12px 12px 12px 2px;
+  font-size: 13px;
+  line-height: 1.68;
+  word-break: break-word;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+}
+
+.innerUser {
+  color: var(--color-bg-white);
+  background: linear-gradient(135deg, #4f8fd8 0%, #3194d2 100%);
+  border-radius: 16px 16px 5px 16px;
+  box-shadow: 0 7px 18px rgba(79, 143, 216, 0.16);
+}
+
+.innerAssistant {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.055);
+  border-radius: 16px 16px 16px 5px;
+}
+
+.innerUser::after,
+.innerAssistant::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+}
+
+.innerUser::after {
+  right: -4px;
+  background: #3194d2;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+.innerAssistant::after {
+  left: -4px;
+  background: rgba(255, 255, 255, 0.96);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 
 .innerCollapsed {
-  max-height: 118px;
+  max-height: 132px;
   overflow: hidden;
 }
 
-.markdownBody {
-  max-width: 100%;
-}
+.markdownBody { max-width: 100%; }
+.markdownBody > :first-child { margin-top: 0; }
+.markdownBody > :last-child { margin-bottom: 0; }
 
-.markdownBody > :first-child {
-  margin-top: 0;
-}
+.innerAssistant .markdownBody :global(strong),
+.innerUser .markdownBody :global(strong) { font-weight: 700; }
 
-.markdownBody > :last-child {
-  margin-bottom: 0;
-}
+.innerUser a,
+.innerUser strong { color: var(--color-bg-white); }
+
+.innerUser code { background: rgba(255, 255, 255, 0.2) !important; }
 
 .fadeMask {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 54px;
+  height: 52px;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-bg-white) 74%);
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-bg-white) 78%);
 }
 
-.innerUser .fadeMask {
-  background: linear-gradient(180deg, rgba(29, 143, 90, 0), var(--color-user-bubble-from) 74%);
-}
+.innerUser .fadeMask { background: linear-gradient(180deg, rgba(22, 119, 255, 0), #1d8ff0 78%); }
 
-.innerAssistant strong,
-.innerUser strong {
-  font-weight: 700;
-}
-
-.innerAssistant :global(table) {
+.innerAssistant :global(table),
+.innerUser :global(table) {
   width: 100%;
-  border-collapse: collapse;
   margin: 9px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  overflow: hidden;
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.86);
-  border-top: 1px solid var(--color-border-light);
 }
 
 .innerAssistant :global(th),
-.innerAssistant :global(td) {
+.innerAssistant :global(td),
+.innerUser :global(th),
+.innerUser :global(td) {
   padding: 6px 8px;
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
   text-align: left;
 }
 
@@ -190,7 +164,7 @@
 .codeBlockWrapper {
   margin: 8px 0;
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: 6px;
   overflow: hidden;
   background-color: var(--color-bg-convlist);
 }
@@ -198,26 +172,24 @@
 .codeHeader {
   padding: 5px 10px;
   border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
   color: var(--color-text-tertiary);
+  font-size: 11px;
 }
 
 .codeBlock {
-  color: var(--color-text);
+  margin: 0;
   padding: 10px 12px;
   overflow-x: auto;
-  margin: 0;
+  color: var(--color-text);
   font-family: 'SF Mono', Menlo, Monaco, monospace;
   font-size: 12px;
   line-height: 1.55;
 }
 
-.codeBlock code { font-family: inherit; }
-
 .inlineCode {
-  background: var(--color-border-light);
   padding: 1px 4px;
   border-radius: 3px;
+  background: rgba(15, 23, 42, 0.07);
   font-size: 13px;
 }
 
@@ -225,9 +197,9 @@
   display: inline-block;
   width: 2px;
   height: 1em;
-  background-color: var(--color-primary);
   margin-left: 2px;
   vertical-align: text-bottom;
+  background-color: var(--color-primary);
   animation: cursorPulse 0.8s ease-in-out infinite;
 }
 
@@ -240,12 +212,12 @@
   display: inline-flex;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .innerSending {
   color: var(--color-text-secondary);
-  background: var(--color-bg-convlist);
+  background: var(--color-bg-white);
 }
 
 .innerFailed {
@@ -261,38 +233,41 @@
 }
 
 .retryBtn,
-.removeBtn {
-  padding: 0 !important;
-  height: auto !important;
-  font-size: 12px !important;
-}
+.removeBtn { height: auto !important; padding: 0 !important; font-size: 12px !important; }
 
 .retryBtn { color: var(--color-danger) !important; }
 .removeBtn { color: var(--color-text-tertiary) !important; }
 
 .replyBtn {
-  opacity: 0;
-  transition: opacity var(--transition-fast);
   position: absolute;
-  right: 8px;
   top: 9px;
+  right: 8px;
+  opacity: 0;
   color: var(--color-text-secondary);
+  transition: opacity var(--transition-fast);
 }
 
+.bubbleUser .replyBtn {
+  right: auto;
+  left: 8px;
+}
+
+.bubble:hover .replyBtn { opacity: 1; }
+
 .expandToggle {
-  margin: 8px auto 0;
-  padding: 3px 12px;
-  border: 1px solid rgba(22, 163, 101, 0.16);
-  border-radius: 999px;
-  background: var(--color-bg-white);
-  color: var(--color-primary);
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin: 7px 0 0;
+  padding: 3px 11px;
+  border: 1px solid rgba(22, 163, 101, 0.16);
+  border-radius: 999px;
+  color: var(--color-primary);
+  background: var(--color-bg-white);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
   font-size: 11px;
   font-weight: 600;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
 }
 
 .expandToggle:hover {
@@ -300,40 +275,19 @@
   border-color: rgba(22, 163, 101, 0.28);
 }
 
-.bubble:hover .replyBtn {
-  opacity: 1;
-}
-
 .replyQuote {
   padding: 5px 8px;
   margin-bottom: 6px;
   border-left: 2px solid var(--color-primary);
   background: rgba(22, 163, 101, 0.06);
-  font-size: 12px;
   color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .replyQuoteSender {
-  font-weight: 600;
-  color: var(--color-primary);
   margin-right: 4px;
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .sendingSpin { margin-left: 8px; }
-
-.readReceipt {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: -2px;
-  line-height: 1;
-  user-select: none;
-}
-
-.readReceiptSent {
-  color: var(--color-text-tertiary);
-}
-
-.readReceiptRead {
-  color: var(--color-primary);
-  letter-spacing: -1px;
-}

@@ -167,7 +167,6 @@ func main() {
 	// WebSocket 路由（通过 query 参数鉴权，不受限流）
 	router.GET("/ws", wsHandler.Handle)
 
-	router.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
 	// 认证路由（无需鉴权）
 	authGroup := router.Group("/api/auth")
@@ -237,7 +236,7 @@ func main() {
 		friendGroup.POST("/:id/reject", middleware.ValidateUUIDParam("id"), friendHandler.RejectRequest)
 		friendGroup.GET("", friendHandler.ListFriends)
 		friendGroup.GET("/pending", friendHandler.ListPending)
-		friendGroup.GET("/search", middleware.RateLimit(10, 20), friendHandler.SearchUsers)
+		friendGroup.GET("/search", friendHandler.SearchUsers)
 		friendGroup.DELETE("/:id", middleware.ValidateUUIDParam("id"), friendHandler.DeleteFriend)
 	}
 
@@ -258,7 +257,7 @@ func main() {
 	userGroup := router.Group("/api/users")
 	userGroup.Use(authMiddleware)
 	{
-		userGroup.GET("/search", middleware.RateLimit(10, 20), userHandler.Search)
+		userGroup.GET("/search", userHandler.Search)
 		userGroup.GET("/me", userHandler.GetProfile)
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
@@ -296,7 +295,6 @@ func main() {
 	defer shutdownCancel()
 
 	cancel() // 停止 Hub
-	middleware.StopRateLimiters()
 
 	if rdb != nil {
 		if err := rdb.Close(); err != nil {

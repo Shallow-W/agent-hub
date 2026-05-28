@@ -22,7 +22,15 @@
 }
 
 .settingsPanelCollapsed {
-  width: 44px;
+  width: 48px;
+}
+
+.disconnectAlert {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1000;
 }
 
 .toggleBtn {
@@ -45,19 +53,28 @@
   transition: left 0.2s ease;
 }
 
+.toggleBtnCollapsed {
+  left: 37px;
+}
+
+.toggleBtnExpanded {
+  left: 173px;
+}
+
 .container:hover .toggleBtn {
   opacity: 0.9;
 }
 
 .convPanel {
   flex-shrink: 0;
+  width: 184px;
   background: var(--color-bg-convlist);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 150px;
-  max-width: 220px;
+  min-width: 176px;
+  max-width: 250px;
   overflow: hidden;
 }
 
@@ -101,12 +118,15 @@
 }
 
 .archivedLink {
+  width: 100%;
   padding: 8px 12px;
+  border: none;
+  border-top: 1px solid var(--color-border, #e5e5e5);
   text-align: center;
   color: var(--color-text-secondary, #999);
   font-size: 12px;
+  background: transparent;
   cursor: pointer;
-  border-top: 1px solid var(--color-border, #e5e5e5);
 }
 
 .archivedLink:hover {

@@ -1,17 +1,12 @@
 .container {
   flex: 1;
   overflow-y: auto;
-  padding: 0 28px 14px;
+  padding: 24px 22px 22px;
   scroll-behavior: smooth;
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(250, 252, 251, 0.96)),
-    repeating-linear-gradient(
-      0deg,
-      transparent 0,
-      transparent 29px,
-      rgba(31, 35, 40, 0.026) 30px
-    );
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 30%),
+    linear-gradient(180deg, #f5f8fb 0%, #eef3f7 100%);
 }
 
 .loadMore {
@@ -40,6 +35,33 @@
 .loadMoreBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.skeletonList {
+  padding: 16px 20px;
+}
+
+.skeletonRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.skeletonRowReverse {
+  flex-direction: row-reverse;
+}
+
+.timeDivider {
+  width: fit-content;
+  margin: 8px auto 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: var(--color-text-tertiary);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.04);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .empty {
@@ -99,4 +121,8 @@
 .newMsgBtn:hover {
   background: rgba(22, 119, 255, 0.06);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+.newMsgText {
+  margin-left: 4px;
 }
