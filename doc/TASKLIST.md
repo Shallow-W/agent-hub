@@ -107,6 +107,21 @@
 | B72 | MIME 检测基于 512 字节——polyglot 文件绕过 | P3 | [ ] |
 | B73 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [ ] |
 | B74 | Upload FileSize 用客户端值 fileHeader.Size 而非实际磁盘大小 | P2 | [ ] |
+| B75 | authStore login/register 不调用 setToken——刷新后 token 丢失 | P1 | [ ] |
+| B76 | WS 重连后不恢复房间订阅——断线期间消息静默丢失 | P1 | [ ] |
+| B77 | GroupMemberPanel handleAddUser 无防重复点击 | P1 | [ ] |
+| B78 | FriendList handleAddFriend 无防重复点击——重复好友请求 | P1 | [ ] |
+| B79 | SettingsPanel 主题切换按钮无实际功能 | P1 | [ ] |
+| B80 | GroupInfoDrawer info.conversation 可能 undefined 渲染崩溃 | P2 | [ ] |
+| B81 | ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined | P2 | [ ] |
+| B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [ ] |
+| B83 | FriendRequest formatTime 对无效日期返回 NaN | P2 | [ ] |
+| B84 | FriendRequest sendRequest loading 复用全局 loading——UI 误判 | P2 | [ ] |
+| B85 | WS flushQueue 期间断开——消息顺序错乱 | P2 | [ ] |
+| B86 | 多 tab 打开 WS 状态不同步 | P3 | [ ] |
+| B87 | globals.css * 选择器覆盖所有元素滚动条样式 | P3 | [ ] |
+| B88 | GroupMemberPanel 退出群聊后不清除成员列表 | P3 | [ ] |
+| B89 | Friend 与 FriendRequest 类型字段完全重复 | P3 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |
 
