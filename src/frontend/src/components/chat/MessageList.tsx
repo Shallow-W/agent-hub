@@ -195,7 +195,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
           {streamingContent && (
             <MessageBubble
               message={{
-                id: 'streaming',
+                id: `__streaming_${conversationId}`,
                 conversation_id: conversationId,
                 role: 'assistant',
                 content: streamingContent,

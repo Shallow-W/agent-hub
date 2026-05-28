@@ -8,29 +8,24 @@ const ChatView: React.FC = () => {
   const { activeId, setActive } = useConversation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // On mount: read conv ID from URL and activate it
+  // Sync URL → activeId: respond to URL changes (incl. browser back/forward)
   useEffect(() => {
     const convId = searchParams.get('conv');
     if (convId && convId !== activeId) {
       setActive(convId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, activeId, setActive]);
 
-  // When active conversation changes, sync to URL
+  // When active conversation changes, sync to URL (skip if URL already matches)
   useEffect(() => {
-    if (activeId) {
+    if (activeId && searchParams.get('conv') !== activeId) {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        const current = next.get('conv');
-        if (current !== activeId) {
-          next.set('conv', activeId);
-          return next;
-        }
-        return prev;
+        next.set('conv', activeId);
+        return next;
       }, { replace: true });
     }
-  }, [activeId, setSearchParams]);
+  }, [activeId, searchParams, setSearchParams]);
 
   if (!activeId) {
     return (

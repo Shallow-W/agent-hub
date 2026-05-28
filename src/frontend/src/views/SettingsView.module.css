@@ -76,15 +76,66 @@
   margin-bottom: 8px;
 }
 
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sectionIcon {
+  color: var(--color-primary);
+  font-size: 15px;
+}
+
 .sectionTitle {
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
-  margin: 0 0 4px;
+  margin: 0;
 }
 
-.sectionDesc {
+.settingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+}
+
+.settingRow + .settingRow {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.settingLabel {
   font-size: 13px;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settingLabelIcon {
   color: var(--color-text-tertiary);
-  margin: 0;
+  font-size: 14px;
+}
+
+.aboutItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.aboutItem + .aboutItem {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.aboutLabel {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.aboutValue {
+  font-size: 13px;
+  color: var(--color-text);
 }

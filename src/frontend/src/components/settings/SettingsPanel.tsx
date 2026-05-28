@@ -1,9 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
-  BgColorsOutlined,
-  BulbOutlined,
   CodeOutlined,
   DatabaseOutlined,
   MessageOutlined,
@@ -63,16 +61,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onNavChange(key);
   };
 
-  const toggleTheme = useCallback(() => {
-    const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-  }, []);
-
-  // Load saved theme on mount
   useEffect(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'dark') {
       document.documentElement.classList.add('dark');
+    } else if (saved === 'system' || !saved) {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', prefersDark);
+    } else {
+      document.documentElement.classList.remove('dark');
     }
   }, []);
 
@@ -117,16 +114,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         <Tooltip title={username || '个人头像'} placement="right">
           <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
-        </Tooltip>
-        <Tooltip title="调色板" placement="right">
-          <button className={styles.footerIconBtn} type="button" onClick={toggleTheme}>
-            <BgColorsOutlined />
-          </button>
-        </Tooltip>
-        <Tooltip title="主题" placement="right">
-          <button className={styles.footerIconBtn} type="button" onClick={toggleTheme}>
-            <BulbOutlined />
-          </button>
         </Tooltip>
         <Tooltip title="设置" placement="right">
           <button

@@ -128,7 +128,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
-  const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 2 * 60 * 1000;
+  // Client-side hint only; server validates the actual recall window.
+  const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
 
   if (isSystem) {
     return (
@@ -205,11 +206,13 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           {message.reply_to_message && !message.reply_to_message.deleted_at && (
             <div className={styles.replyQuote}>
               <span className={styles.replyQuoteSender}>
-                {message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手'}
+                {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
               </span>
-              {message.reply_to_message.content.length > 50
-                ? message.reply_to_message.content.slice(0, 50) + '...'
-                : message.reply_to_message.content}
+              {escapeHtml(
+                message.reply_to_message.content.length > 50
+                  ? message.reply_to_message.content.slice(0, 50) + '...'
+                  : message.reply_to_message.content,
+              )}
             </div>
           )}
           {message.attachments && message.attachments.length > 0 && (
