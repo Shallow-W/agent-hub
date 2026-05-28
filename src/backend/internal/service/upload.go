@@ -90,6 +90,19 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, ErrUploadEmpty
 	}
 
+	// 预检：根据扩展名判断类型并检查客户端声明的大小
+	ext := strings.ToLower(filepath.Ext(filepath.Base(fileHeader.Filename)))
+	if !allowedExtensions[ext] {
+		return nil, ErrUploadTypeInvalid
+	}
+	preMaxSize := int64(s.cfg.MaxPDFMB) << 20
+	if isImageExt(ext) {
+		preMaxSize = int64(s.cfg.MaxImageMB) << 20
+	}
+	if fileHeader.Size > preMaxSize {
+		return nil, ErrUploadTooBig
+	}
+
 	// 文件名净化：只取 base name，防止路径穿越；去除 HTML 特殊字符防止 XSS
 	safeName := filepath.Base(fileHeader.Filename)
 	safeName = strings.Map(func(r rune) rune {
@@ -99,12 +112,6 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		}
 		return r
 	}, safeName)
-
-	// 扩展名白名单校验
-	ext := strings.ToLower(filepath.Ext(safeName))
-	if !allowedExtensions[ext] {
-		return nil, ErrUploadTypeInvalid
-	}
 
 	// 确保目录存在
 	origDir := filepath.Join(s.cfg.Dir, "originals")
@@ -249,6 +256,10 @@ func detectMIME(path string) (string, error) {
 
 func isImageMIME(mime string) bool {
 	return strings.HasPrefix(mime, "image/")
+}
+
+func isImageExt(ext string) bool {
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
 }
 
 // ImageDimensions 从图片读取宽高（用于已上传但未生成缩略图的场景）

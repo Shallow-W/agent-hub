@@ -93,34 +93,34 @@
 | B58 | Hub shutdown/handleUnregister 重复 close(sendCh)——panic | P1 | [x] |
 | B59 | shutdown bus 满载时 Unregister 丢弃——goroutine+连接泄漏 | P1 | [x] |
 | B60 | drain 窗口 wg.Add 无 wg.Done——WaitGroup panic | P1 | [ ] |
-| B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [ ] |
+| B61 | 背压二次写入无 select/default——dispatch 永久阻塞 | P2 | [x] |
 | B62 | WS chat 验证 DB 成员非房间成员——join_room 非强制 | P2 | [ ] |
 | B63 | 无 refresh token——JWT 过期强制重新登录 | P2 | [ ] |
 | B64 | ValidateToken 不校验 user_id 是否存在于 DB——删除用户 token 仍有效 | P2 | [ ] |
 | B65 | middleware+service 重复 JWT 解析逻辑——有分歧风险 | P2 | [ ] |
 | B66 | SearchByContent 内联 escapeLike 未复用共享函数 | P3 | [ ] |
 | B67 | ILIKE ESCAPE 在部分 PostgreSQL 配置下可能失败 | P2 | [ ] |
-| B68 | 限流器 c.ClientIP() 信任 X-Forwarded-For——可伪造绕过+StopRateLimiters空实现 | P1 | [ ] |
+| B68 | 限流器 c.ClientIP() 信任 X-Forwarded-For——可伪造绕过+StopRateLimiters空实现 | P1 | [x] |
 | B69 | 限流仅 IP 粒度——NAT 后多用户共享配额 | P2 | [ ] |
 | B70 | MaxBytesReader 硬编码 50MB——超过 20MB 的图片仍完整写入磁盘 | P2 | [ ] |
 | B71 | 静态文件 filepath.Clean 不充分——路径穿越 | P2 | [ ] |
 | B72 | MIME 检测基于 512 字节——polyglot 文件绕过 | P3 | [ ] |
-| B73 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [ ] |
-| B74 | Upload FileSize 用客户端值 fileHeader.Size 而非实际磁盘大小 | P2 | [ ] |
+| B73 | Auth middleware username claim 未做类型断言——可能存入 nil | P2 | [x] |
+| B74 | Upload FileSize 用客户端值 fileHeader.Size 而非实际磁盘大小 | P2 | [x] |
 | B75 | authStore login/register 不调用 setToken——刷新后 token 丢失 | P1 | [x] |
-| B76 | WS 重连后不恢复房间订阅——断线期间消息静默丢失 | P1 | [ ] |
+| B76 | WS 重连后不恢复房间订阅——断线期间消息静默丢失 | P1 | [x] |
 | B77 | GroupMemberPanel handleAddUser 无防重复点击 | P1 | [x] |
 | B78 | FriendList handleAddFriend 无防重复点击——重复好友请求 | P1 | [x] |
 | B79 | SettingsPanel 主题切换按钮无实际功能 | P1 | [ ] |
-| B80 | GroupInfoDrawer info.conversation 可能 undefined 渲染崩溃 | P2 | [ ] |
+| B80 | GroupInfoDrawer info.conversation 可能 undefined 渲染崩溃 | P2 | [x] |
 | B81 | ROLE_LABELS/ROLE_COLORS 对未知 role 显示 undefined | P2 | [x] |
-| B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [ ] |
+| B82 | GroupMemberPanel memberIds 闭包每次渲染重建——debounce 失效 | P2 | [x] |
 | B83 | FriendRequest formatTime 对无效日期返回 NaN | P2 | [x] |
-| B84 | FriendRequest sendRequest loading 复用全局 loading——UI 误判 | P2 | [ ] |
+| B84 | FriendRequest sendRequest loading 复用全局 loading——UI 误判 | P2 | [x] |
 | B85 | WS flushQueue 期间断开——消息顺序错乱 | P2 | [ ] |
 | B86 | 多 tab 打开 WS 状态不同步 | P3 | [ ] |
 | B87 | globals.css * 选择器覆盖所有元素滚动条样式 | P3 | [ ] |
-| B88 | GroupMemberPanel 退出群聊后不清除成员列表 | P3 | [ ] |
+| B88 | GroupMemberPanel 退出群聊后不清除成员列表 | P3 | [x] |
 | B89 | Friend 与 FriendRequest 类型字段完全重复 | P3 | [ ] |
 | B39 | 归档对话错误触发 delete API(双重请求) | P1 | [x] |
 | B40 | upload.ts JSON 解析无 try/catch(非 JSON 响应崩溃) | P2 | [x] |

@@ -183,11 +183,11 @@ func (r *FriendRepo) SearchUsers(ctx context.Context, query string, limit int) (
 	return list, nil
 }
 
-// escapeLike 转义 SQL LIKE 通配符
+// escapeLike 转义 SQL LIKE 通配符，使用 '=' 作为转义符（兼容所有 PG 配置）
 func escapeLike(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
+	s = strings.ReplaceAll(s, `=`, `==`)
+	s = strings.ReplaceAll(s, `%`, `=%`)
+	s = strings.ReplaceAll(s, `_`, `=_`)
 	return s
 }
 

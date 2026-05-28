@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -221,9 +220,7 @@ func (r *MessageRepo) GetMessageSender(ctx context.Context, messageID string) (s
 
 // SearchByContent 按关键词搜索对话消息（大小写不敏感）
 func (r *MessageRepo) SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error) {
-	keyword = strings.ReplaceAll(keyword, `\`, `\\`)
-	keyword = strings.ReplaceAll(keyword, "%", "\\%")
-	keyword = strings.ReplaceAll(keyword, "_", "\\_")
+	keyword = escapeLike(keyword)
 
 	var list []model.Message
 	err := r.db.SelectContext(ctx, &list,
