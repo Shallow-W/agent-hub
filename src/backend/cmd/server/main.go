@@ -158,12 +158,13 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 	router.Use(middleware.RequestLogger(logger))
-	router.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
-	// 健康检查（无需鉴权）
+	// 健康检查（无需鉴权、不受限流）
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
 	})
+
+	router.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
 	// 认证路由（无需鉴权）
 	authGroup := router.Group("/api/auth")
