@@ -37,33 +37,3 @@
 .emojiItem:hover {
   background-color: var(--color-bg-convlist);
 }
-
-.replyBar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  background: var(--color-bg-convlist);
-  border-radius: 8px;
-  border-left: 3px solid var(--color-primary);
-}
-
-.replyBarContent {
-  flex: 1;
-  min-width: 0;
-}
-
-.replyBarLabel {
-  font-size: 12px;
-  color: var(--color-primary);
-  font-weight: 500;
-}
-
-.replyBarText {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}

@@ -14,7 +14,7 @@ import type { AttachmentPayload } from '@/types/attachment';
 import type { Message } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
 import styles from './ChatInput.module.css';
-import replyStyles from './EmojiPicker.module.css';
+import replyStyles from './ChatInput.module.css';
 
 const { TextArea } = Input;
 

@@ -164,7 +164,7 @@
 | UI-13 | GroupMemberPanel 缺少 aria-label | P3 | [x] |
 | UI-14 | "文件"和"停止任务"按钮无功能 | P3 | [x] |
 | UI-15 | friendStore accept/reject 缺少 loading | P3 | [x] |
-| UI-16 | hasMore 翻页边界判断不准 | P3 | [ ] |
+| UI-16 | hasMore 翻页边界判断不准 | P3 | [-] |
 
 > 详情: [doc/task/Bugfix-测试发现的Bug.md](task/Bugfix-测试发现的Bug.md)
 
@@ -217,13 +217,13 @@
 | BUILD-01 | 缺少 ESLint 配置 | P3 | [ ] |
 | BUILD-02 | vendor-antd chunk 超 500 kB | P2 | [ ] |
 | BUILD-03 | 多个依赖有 Major 版本更新 | P3 | [ ] |
-| BUILD-04 | screenshot.mjs 幽灵 playwright 依赖 | P3 | [ ] |
+| BUILD-04 | screenshot.mjs 幽灵 playwright 依赖 | P3 | [-] |
 | BUILD-05 | 无 .env 环境文件 | P3 | [ ] |
 | BUILD-06 | useWebSocket.ts TODO 残留 | P3 | [x] |
 | BUILD-07 | 大量内联 style 违反编码规范(40+处) | P1 | [ ] |
 | BUILD-08 | messageStore.ts 超 300 行限制 | P2 | [-] |
-| BUILD-09 | ChatInput 跨组件导入 EmojiPicker.module.css | P3 | [ ] |
-| BUILD-10 | package.json 含冗余 playwright 依赖 | P3 | [ ] |
+| BUILD-09 | ChatInput 跨组件导入 EmojiPicker.module.css | P3 | [x] |
+| BUILD-10 | package.json 含冗余 playwright 依赖 | P3 | [-] |
 
 ---
 
