@@ -71,7 +71,15 @@ const SettingsView: React.FC = () => {
     localStorage.setItem('agenthub_notify_sound', String(checked));
   }, []);
 
-  const handleNotifyDesktop = useCallback((checked: boolean) => {
+  const handleNotifyDesktop = useCallback(async (checked: boolean) => {
+    if (checked && 'Notification' in window) {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        setNotifyDesktop(false);
+        localStorage.setItem('agenthub_notify_desktop', 'false');
+        return;
+      }
+    }
     setNotifyDesktop(checked);
     localStorage.setItem('agenthub_notify_desktop', String(checked));
   }, []);

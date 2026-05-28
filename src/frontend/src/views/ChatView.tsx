@@ -18,14 +18,14 @@ const ChatView: React.FC = () => {
 
   // When active conversation changes, sync to URL (skip if URL already matches)
   useEffect(() => {
-    if (activeId && searchParams.get('conv') !== activeId) {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('conv', activeId);
-        return next;
-      }, { replace: true });
-    }
-  }, [activeId, searchParams, setSearchParams]);
+    if (!activeId) return;
+    setSearchParams((prev) => {
+      if (prev.get('conv') === activeId) return prev;
+      const next = new URLSearchParams(prev);
+      next.set('conv', activeId);
+      return next;
+    }, { replace: true });
+  }, [activeId, setSearchParams]);
 
   if (!activeId) {
     return (

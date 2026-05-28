@@ -59,7 +59,7 @@ function renderMarkdown(text: string): string {
   // 4. Apply inline markdown rules
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, href) => {
+  result = result.replace(/\[([^\]]+)\]\(([^()\s]+(?:\([^()]*\)[^()\s]*)*)\)/g, (_match, text, href) => {
     const safeHref = /^https?:\/\//i.test(href) || /^mailto:/i.test(href) ? href : '#';
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   });
@@ -209,9 +209,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
               </span>
               {escapeHtml(
-                message.reply_to_message.content.length > 50
-                  ? message.reply_to_message.content.slice(0, 50) + '...'
-                  : message.reply_to_message.content,
+                (message.reply_to_message.content ?? '').length > 50
+                  ? (message.reply_to_message.content ?? '').slice(0, 50) + '...'
+                  : (message.reply_to_message.content ?? ''),
               )}
             </div>
           )}
