@@ -7,6 +7,7 @@ import {
   RightOutlined,
   ReloadOutlined,
   UploadOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import SettingsPanel from '@/components/settings/SettingsPanel';
@@ -14,7 +15,7 @@ import FriendList from '@/components/friends/FriendList';
 import FriendRequest from '@/components/friends/FriendRequest';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
-import { getArchivedConversations } from '@/api/conversation';
+import { getArchivedConversations, unarchiveConversation } from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import type { Conversation } from '@/types/conversation';
@@ -81,6 +82,43 @@ const AppLayout: React.FC = () => {
     }
   }, [totalUnread]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
+
+      if (e.key === 'Escape') {
+        const memberPanelOpen = useConversationStore.getState().memberPanelOpen;
+        if (memberPanelOpen) {
+          useConversationStore.getState().setMemberPanelOpen(false);
+          return;
+        }
+        if (archivedModalOpen) { setArchivedModalOpen(false); return; }
+        if (groupModalOpen) { setGroupModalOpen(false); return; }
+        return;
+      }
+
+      if (isInput) return;
+
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && e.key === 'k') {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>('[data-conv-search] input')?.focus();
+        return;
+      }
+
+      if (mod && e.key === 'n') {
+        e.preventDefault();
+        handleCreate();
+        return;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [archivedModalOpen, groupModalOpen]);
+
   const showArchived = async () => {
     try {
       const list = await getArchivedConversations();
@@ -88,6 +126,17 @@ const AppLayout: React.FC = () => {
       setArchivedModalOpen(true);
     } catch {
       antMessage.error('获取归档对话失败');
+    }
+  };
+
+  const handleUnarchive = async (convId: string) => {
+    try {
+      await unarchiveConversation(convId);
+      setArchivedConvs((prev) => prev.filter((c) => c.id !== convId));
+      await fetchConversations();
+      antMessage.success('已取消归档');
+    } catch {
+      antMessage.error('取消归档失败');
     }
   };
 
@@ -205,7 +254,7 @@ const AppLayout: React.FC = () => {
           <span className={styles.convPanelTitle}>消息</span>
           {renderPanelTools(handleCreate)}
         </div>
-        <ConversationList />
+        <ConversationList onNavigateFriends={() => setActiveNav('friends')} />
         <div className={styles.archivedLink} onClick={showArchived} role="button" tabIndex={0}>
           查看归档对话
         </div>
@@ -286,6 +335,14 @@ const AppLayout: React.FC = () => {
                 <Avatar size={28}>{(conv.title || '?').charAt(0).toUpperCase()}</Avatar>
                 <span style={{ flex: 1 }}>{conv.title || '未命名'}</span>
                 <span style={{ color: '#999', fontSize: 12 }}>{new Date(conv.created_at).toLocaleDateString('zh-CN')}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<UndoOutlined />}
+                  onClick={() => handleUnarchive(conv.id)}
+                >
+                  取消归档
+                </Button>
               </div>
             ))}
           </div>

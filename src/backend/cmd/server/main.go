@@ -213,6 +213,7 @@ func main() {
 			convRoutes.PUT("/:id", convHandler.RenameConversation)
 			convRoutes.DELETE("/:id", convHandler.Delete)
 			convRoutes.POST("/:id/archive", convHandler.ArchiveConversation)
+			convRoutes.POST("/:id/unarchive", convHandler.UnarchiveConversation)
 			convRoutes.POST("/:id/pin", convHandler.TogglePin)
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)

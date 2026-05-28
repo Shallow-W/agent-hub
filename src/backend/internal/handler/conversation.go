@@ -237,3 +237,29 @@ func (h *ConversationHandler) ArchiveConversation(c *gin.Context) {
 
 	middleware.SuccessResponse(c, nil)
 }
+
+// UnarchiveConversation 取消归档会话
+func (h *ConversationHandler) UnarchiveConversation(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40042, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.UnarchiveConversation(c.Request.Context(), userID, convID)
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40315, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50018, "取消归档对话失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}

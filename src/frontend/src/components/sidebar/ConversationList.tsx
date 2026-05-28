@@ -1,5 +1,6 @@
-import React from 'react';
-import { Skeleton, Empty } from 'antd';
+import React, { useState } from 'react';
+import { Skeleton, Button, Input } from 'antd';
+import { MessageOutlined, TeamOutlined, SearchOutlined } from '@ant-design/icons';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
@@ -8,12 +9,16 @@ import type { Message } from '@/types/message';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
 
-// 稳定空数组引用，避免 Zustand selector 每次返回新 [] 导致无限重渲染
 const EMPTY_MESSAGES: Message[] = [];
 
-export const ConversationList: React.FC = () => {
-  const { conversations, activeId, loading, setActive, remove, togglePin, rename } =
+interface ConversationListProps {
+  onNavigateFriends?: () => void;
+}
+
+export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateFriends }) => {
+  const { conversations, activeId, loading, setActive, remove, togglePin, rename, create } =
     useConversation();
+  const [searchQuery, setSearchQuery] = useState('');
   const archiveConversationLocal = useConversationStore((s) => s.archiveConversationLocal);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
 
@@ -38,19 +43,49 @@ export const ConversationList: React.FC = () => {
     return (
       <div className={styles.list}>
         <div className={styles.empty}>
-          <Empty
-            description="暂无对话，点击「新建对话」开始"
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
+          <div className={styles.emptyIcon}>
+            <MessageOutlined />
+          </div>
+          <div className={styles.emptyTitle}>欢迎使用 AgentHub</div>
+          <div className={styles.emptyDesc}>开始你的第一个对话吧</div>
+          <div className={styles.emptyActions}>
+            <Button
+              type="primary"
+              icon={<MessageOutlined />}
+              onClick={() => create('single', '新对话')}
+            >
+              新建对话
+            </Button>
+            <Button
+              icon={<TeamOutlined />}
+              onClick={onNavigateFriends}
+            >
+              添加好友
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
+  const filtered = searchQuery
+    ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : conversations;
+
   return (
     <div className={styles.list}>
+      <div className={styles.searchWrap} data-conv-search>
+        <Input
+          prefix={<SearchOutlined />}
+          placeholder="搜索对话..."
+          allowClear
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className={styles.searchInput}
+        />
+      </div>
       <div className={styles.items}>
-        {conversations.map((conv) => (
+        {filtered.map((conv) => (
           <ConversationItemWrapper
               key={conv.id}
               conversation={conv}

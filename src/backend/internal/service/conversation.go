@@ -32,6 +32,7 @@ type ConvRepo interface {
 	UpdateTimestamp(ctx context.Context, id string) error
 	UpdateTitle(ctx context.Context, id, title string) error
 	Archive(ctx context.Context, id string) error
+	Unarchive(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	DeleteMember(ctx context.Context, conversationID, userID string) error
 	AddMember(ctx context.Context, conversationID, userID, role string) error
@@ -256,4 +257,38 @@ func (s *ConversationService) ListArchivedConversations(ctx context.Context, use
 		list = []model.Conversation{}
 	}
 	return list, nil
+}
+
+// UnarchiveConversation 取消归档会话
+func (s *ConversationService) UnarchiveConversation(ctx context.Context, userID, conversationID string) error {
+	conv, err := s.repo.GetByID(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrConvNotFound
+	}
+	// 私聊会话：任何成员都可取消归档
+	if conv.Type == "single" {
+		if conv.UserID == userID {
+			return s.repo.Unarchive(ctx, conversationID)
+		}
+		member, err := s.repo.GetMember(ctx, conversationID, userID)
+		if err != nil {
+			return fmt.Errorf("check member: %w", err)
+		}
+		if member == nil {
+			return ErrConvNotMember
+		}
+		return s.repo.Unarchive(ctx, conversationID)
+	}
+	// 群聊需要 owner/admin 权限
+	member, err := s.repo.GetMember(ctx, conversationID, userID)
+	if err != nil {
+		return fmt.Errorf("check member: %w", err)
+	}
+	if member == nil || (member.Role != "owner" && member.Role != "admin") {
+		return ErrConvNotMember
+	}
+	return s.repo.Unarchive(ctx, conversationID)
 }
