@@ -74,7 +74,7 @@
 | B37 | 删除私聊后用户仍可通过 conv.UserID 绕过发消息 | P2 | [x] |
 | B38 | 多个并发 401 导致重复 token 清除+重定向风暴 | P2 | [x] |
 | B41 | B38 handling401 标志永不重置，二次 401 静默丢失 | P2 | [x] |
-| B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [ ] |
+| B42 | WS chat 类型畸形 JSON 静默丢弃无错误反馈 | P2 | [x] |
 | B43 | ConversationList noResults 分支不可达(死代码) | P3 | [ ] |
 | B44 | 好友请求只单向检查，允许双向重复请求 | P1 | [x] |
 | B45 | 归档私聊后对方 GetOrCreatePrivateChat 创建重复对话 | P1 | [x] |
@@ -180,10 +180,10 @@
 | CODE-04 | Hub bus channel 发送可无限阻塞 handler | P1 | [-] |
 | CODE-05 | config.yaml 缺 upload 和 redis.db 字段 | P1 | [x] |
 | CODE-06 | Client.LastActive 无同步并发读写 | P1 | [x] |
-| CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [ ] |
+| CODE-07 | createDatabase 数据库名通过 Sprintf 拼接 | P2 | [x] |
 | CODE-08 | 多语句迁移无事务包裹 | P2 | [ ] |
 | CODE-09 | WS chat handler 忽略 SendMessage 错误 | P2 | [ ] |
-| CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [ ] |
+| CODE-10 | WS readLoop JSON 解组错误被静默吞噬 | P2 | [x] |
 | CODE-11 | ListMemberIDs 不包含会话所有者(通知遗漏) | P2 | [x] |
 | CODE-12 | fillReplyTo 后独立查询用户名(N+1) | P2 | [-] |
 | CODE-13 | 静态文件服务缺少路径边界检查 | P2 | [x] |
@@ -292,7 +292,7 @@
 
 | ID | 功能 | 后端状态 | 状态 |
 |----|------|----------|------|
-| MISS-001 | 群聊重命名 UI | 已有 API | [ ] |
+| MISS-001 | 群聊重命名 UI | 已有 API | [x] |
 | MISS-002 | 个人资料编辑/展示 | 已有 API(placeholder UI) | [ ] |
 | MISS-003 | 设置页面实现 | 大部分前端本地(主题按钮无功能) | [ ] |
 
@@ -303,7 +303,7 @@
 | MISS-004 | 群成员角色管理 UI | 部分已有 | [ ] |
 | MISS-005 | 好友删除 | 需新增 API | [ ] |
 | MISS-006 | /api/users/search 对接 | 已有 API | [x] |
-| MISS-007 | 归档对话列表/查看 | 需新增 API | [ ] |
+| MISS-007 | 归档对话列表/查看 | 已有 API | [x] |
 | MISS-008 | GetGroupInfo 对接 | 已有 API | [x] |
 | MISS-009 | 消息转发 | 需新增 API | [ ] |
 | MISS-010 | @提及功能 | 需新增 API | [ ] |
@@ -400,7 +400,7 @@
 | UX-09 | 群聊创建后不自动打开成员面板 | P2 | [ ] |
 | UX-10 | 好友申请无备注/留言字段 | P2 | [ ] |
 | UX-11 | 消息时间戳仅显示时间不显示日期（跨天消息混乱） | P2 | [ ] |
-| UX-12 | 输入框不支持 Shift+Enter 换行 | P2 | [ ] |
+| UX-12 | 输入框不支持 Shift+Enter 换行 | P2 | [x] |
 | UX-13 | 消息列表不支持键盘快捷键（Esc关闭面板等） | P2 | [ ] |
 | UX-14 | 长消息无折叠/展开功能 | P2 | [ ] |
 | UX-15 | 无消息搜索功能（对话内搜索） | P2 | [ ] |

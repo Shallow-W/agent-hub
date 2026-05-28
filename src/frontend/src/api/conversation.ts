@@ -30,6 +30,10 @@ export async function archiveConversation(id: string): Promise<void> {
   return post<void>(`/api/conversations/${id}/archive`);
 }
 
+export async function getArchivedConversations(): Promise<Conversation[]> {
+  return get<Conversation[]>('/api/conversations/archived');
+}
+
 export async function renameConversation(
   id: string,
   title: string,

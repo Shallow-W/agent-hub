@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Button, Alert, Avatar } from 'antd';
+import { Button, Alert, Avatar, Modal } from 'antd';
 import {
   PlusOutlined,
   LeftOutlined,
@@ -14,8 +14,10 @@ import FriendList from '@/components/friends/FriendList';
 import FriendRequest from '@/components/friends/FriendRequest';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
+import { getArchivedConversations } from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
+import type { Conversation } from '@/types/conversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
@@ -40,6 +42,8 @@ const AppLayout: React.FC = () => {
   const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [archivedModalOpen, setArchivedModalOpen] = useState(false);
+  const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [convPanelWidth, setConvPanelWidth] = useState(166);
 
@@ -76,6 +80,16 @@ const AppLayout: React.FC = () => {
       document.title = 'AgentHub';
     }
   }, [totalUnread]);
+
+  const showArchived = async () => {
+    try {
+      const list = await getArchivedConversations();
+      setArchivedConvs(list ?? []);
+      setArchivedModalOpen(true);
+    } catch {
+      antMessage.error('获取归档对话失败');
+    }
+  };
 
   const handleCreate = async () => {
     await create('single', `新对话`);
@@ -190,6 +204,9 @@ const AppLayout: React.FC = () => {
           {renderPanelTools(handleCreate)}
         </div>
         <ConversationList />
+        <div className={styles.archivedLink} onClick={showArchived} role="button" tabIndex={0}>
+          查看归档对话
+        </div>
       </>
     );
   };
@@ -251,6 +268,27 @@ const AppLayout: React.FC = () => {
         onCancel={() => setGroupModalOpen(false)}
         onOk={handleGroupCreate}
       />
+      <Modal
+        title="归档对话"
+        open={archivedModalOpen}
+        onCancel={() => setArchivedModalOpen(false)}
+        footer={null}
+        width={400}
+      >
+        {archivedConvs.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>暂无归档对话</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {archivedConvs.map((conv) => (
+              <div key={conv.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <Avatar size={28}>{(conv.title || '?').charAt(0).toUpperCase()}</Avatar>
+                <span style={{ flex: 1 }}>{conv.title || '未命名'}</span>
+                <span style={{ color: '#999', fontSize: 12 }}>{new Date(conv.created_at).toLocaleDateString('zh-CN')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
