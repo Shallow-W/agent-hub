@@ -73,7 +73,10 @@ async function request<T>(
       if (!handling401) {
         handling401 = true;
         clearToken();
-        window.location.href = '/login';
+        const { message } = await import('antd');
+        message.warning('登录已过期，请重新登录', 2, () => {
+          window.location.href = '/login';
+        });
       }
       throw new ApiError(res.status, json.code, json.message);
     }

@@ -14,7 +14,7 @@ redis:
   db: 0
 jwt:
   secret: dev-secret-change-in-prod
-  expiry_hours: 24
+  expiry_hours: 48
 cors:
   allowed_origins:
     - http://localhost:5173

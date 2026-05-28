@@ -164,6 +164,9 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
 	})
 
+	// WebSocket 路由（通过 query 参数鉴权，不受限流）
+	router.GET("/ws", wsHandler.Handle)
+
 	router.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
 
 	// 认证路由（无需鉴权）
@@ -259,9 +262,6 @@ func main() {
 		userGroup.GET("/me", userHandler.GetProfile)
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
-
-	// WebSocket 路由（通过 query 参数鉴权）
-	router.GET("/ws", wsHandler.Handle)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
