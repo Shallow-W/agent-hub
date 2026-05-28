@@ -22,3 +22,5 @@ upload:
   dir: "./uploads"
   max_image_mb: 20
   max_pdf_mb: 50
+log:
+  level: info

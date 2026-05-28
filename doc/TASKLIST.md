@@ -253,10 +253,10 @@
 | DEPLOY-03 | 无 README.md | P1 | [ ] |
 | DEPLOY-04 | go.mod 声明不存在的 Go 1.26.3 | P1 | [x] |
 | DEPLOY-05 | docker-compose 缺 Redis 服务 | P2 | [ ] |
-| DEPLOY-06 | config.example 与实际 config 不同步 | P2 | [ ] |
-| DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [ ] |
+| DEPLOY-06 | config.example 与实际 config 不同步 | P2 | [x] |
+| DEPLOY-07 | JWT secret 无强制校验(默认弱密钥) | P2 | [x] |
 | DEPLOY-08 | 无 metrics/Prometheus 端点 | P2 | [ ] |
-| DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [ ] |
+| DEPLOY-09 | 日志级别硬编码不可配置 | P2 | [x] |
 | DEPLOY-10 | Rate limit 参数硬编码不可配置 | P2 | [ ] |
 | DEPLOY-11 | 无 HTTPS/TLS 配置 | P2 | [ ] |
 | DEPLOY-12 | daemon 代码为空壳 placeholder | P2 | [ ] |
@@ -344,7 +344,7 @@
 | DOC-07 | ConversationMember.JoinedAt 类型 string 应为 time.Time | P2 | [ ] |
 | DOC-08 | ConversationMember 缺少 last_read_at 字段 | P2 | [ ] |
 | DOC-09 | service/message.go 超 300 行限制(425行) | P3 | [-] |
-| DOC-10 | Commit message 格式违反 50 字符限制 | P3 | [ ] |
+| DOC-10 | Commit message 格式违反 50 字符限制 | P3 | [-] |
 
 ---
 

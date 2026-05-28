@@ -59,18 +59,34 @@ type Config struct {
 		MaxImageMB int    `koanf:"max_image_mb"`
 		MaxPDFMB   int    `koanf:"max_pdf_mb"`
 	} `koanf:"upload"`
+	Log struct {
+		Level string `koanf:"level"`
+	} `koanf:"log"`
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
-
 	// 加载配置
 	cfg, err := loadConfig("config/config.yaml")
 	if err != nil {
-		logger.Error("load config failed", "error", err)
+		slog.Error("load config failed", "error", err)
 		os.Exit(1)
 	}
+	logLevel := parseLogLevel(cfg.Log.Level)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
 
 	// 连接数据库，自动建库+自动迁移
 	db, err := initDatabase(cfg, logger)
@@ -171,10 +187,6 @@ func main() {
 				return
 			}
 			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
-			if err != nil {
-				c.Status(http.StatusForbidden)
-				return
-			}
 				c.Status(http.StatusForbidden)
 				return
 			}
