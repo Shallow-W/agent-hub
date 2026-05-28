@@ -126,9 +126,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
     setValue('');
     setPendingFiles([]);
+    setSending(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
-    await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id);
+    try {
+      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id);
+    } finally {
+      setSending(false);
+    }
   }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo]);
 
   const handleKeyDown = useCallback(
@@ -141,6 +146,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     [handleSubmit],
   );
 
+  const [sending, setSending] = useState(false);
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
   return (
@@ -206,6 +212,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           shape="default"
           icon={<SendOutlined />}
           onClick={handleSubmit}
+          loading={sending}
           disabled={!canSend}
           className={styles.sendBtn}
         />
