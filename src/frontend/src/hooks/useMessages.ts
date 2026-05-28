@@ -53,11 +53,10 @@ export function useMessages(conversationId: string | null) {
     const currentId = conversationId;
     const currentFetchId = ++fetchIdRef.current;
 
-    // Skip re-fetch if messages were loaded within CACHE_TTL_MS
+    // Skip re-fetch if fetched within CACHE_TTL_MS (regardless of success/failure)
     const now = Date.now();
     const lastFetch = lastFetchedAt[currentId];
-    const existingMessages = useMessageStore.getState().messages[currentId];
-    if (lastFetch && now - lastFetch < CACHE_TTL_MS && existingMessages && existingMessages.length > 0) {
+    if (lastFetch && now - lastFetch < CACHE_TTL_MS) {
       // Still mark as read even when using cache
       markConversationRead(currentId).catch(() => {});
       return;

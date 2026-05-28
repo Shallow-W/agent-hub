@@ -162,6 +162,10 @@ func (h *MessageHandler) Unread(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40423, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40324, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50023, "获取未读消息失败")
 		return
 	}
