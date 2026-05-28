@@ -40,7 +40,7 @@ func (h *UserHandler) Search(c *gin.Context) {
 
 // UpdateProfileRequest 更新资料请求体
 type UpdateProfileRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username" binding:"required,max=50"`
 }
 
 // GetProfile 获取当前用户资料
