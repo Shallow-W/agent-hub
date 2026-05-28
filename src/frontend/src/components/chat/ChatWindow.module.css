@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #fff;
+  background-color: var(--color-bg-white);
 }
 
 .header {
@@ -11,7 +11,7 @@
   justify-content: space-between;
   height: 42px;
   padding: 0 10px 0 14px;
-  background-color: #fff;
+  background-color: var(--color-bg-white);
   border-bottom: 1px solid var(--color-border);
   position: relative;
   z-index: 1;
@@ -27,7 +27,7 @@
 .conversationAvatar {
   flex-shrink: 0;
   background: var(--gradient-agent) !important;
-  color: #fff;
+  color: var(--color-bg-white);
   font-size: 12px;
   font-weight: 700;
 }
@@ -49,7 +49,7 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: #f0f3f6;
+  background: var(--color-border-light);
   color: var(--color-text-secondary);
   font-size: 11px;
   font-weight: 600;
@@ -86,19 +86,19 @@
   padding: 4px 18px;
   font-size: 12px;
   color: var(--color-primary);
-  background-color: #fff;
+  background-color: var(--color-bg-white);
   font-weight: 500;
 }
 
 .headerActions :global(.ant-btn) {
-  color: #1f2328;
+  color: var(--color-text);
   width: 28px;
   height: 28px;
 }
 
 .searchPanel {
   border-bottom: 1px solid var(--color-border);
-  background-color: #fff;
+  background-color: var(--color-bg-white);
   max-height: 400px;
   overflow-y: auto;
 }

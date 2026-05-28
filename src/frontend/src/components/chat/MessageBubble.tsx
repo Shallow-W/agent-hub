@@ -49,7 +49,7 @@ function renderMarkdown(text: string): string {
   const inlineCodes: string[] = [];
   result = result.replace(/`([^`]+)`/g, (_match, code) => {
     const idx = inlineCodes.length;
-    inlineCodes.push(`<code style="background:#e8e8e8;padding:1px 4px;border-radius:3px;font-size:13px;">${escapeHtml(code)}</code>`);
+    inlineCodes.push(`<code class="${styles.inlineCode}">${escapeHtml(code)}</code>`);
     return `\x00INLINE${idx}\x00`;
   });
 

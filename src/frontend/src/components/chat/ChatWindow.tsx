@@ -301,7 +301,7 @@ export const ChatWindow: React.FC = () => {
             />
           )}
           {hasSearched && searchResults.length === 0 && !searchLoading && (
-            <div style={{ padding: '16px', textAlign: 'center', color: '#999', fontSize: 13 }}>
+            <div style={{ padding: '16px', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>
               未找到相关消息
             </div>
           )}

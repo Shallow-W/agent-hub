@@ -29,9 +29,9 @@
 .chatAvatar {
   flex-shrink: 0;
   margin-top: 1px;
-  box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 0 0 2px var(--color-bg-white), 0 1px 4px rgba(15, 23, 42, 0.12);
   font-size: 11px;
-  color: #fff;
+  color: var(--color-bg-white);
 }
 
 /* own message avatar on the right side */
@@ -80,7 +80,7 @@
 .agentLabel {
   font-size: 12px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 .metaTime,
@@ -102,7 +102,7 @@
 .innerUser {
   max-width: 75%;
   padding: 8px 12px;
-  color: #fff;
+  color: var(--color-bg-white);
   background: linear-gradient(135deg, #1d8f5a, #34c38f);
   border-radius: 12px 12px 2px 12px;
 }
@@ -117,15 +117,15 @@
 }
 
 .innerUser strong {
-  color: #fff;
+  color: var(--color-bg-white);
 }
 
 /* 他人/Agent 的消息：浅色背景 */
 .innerAssistant {
   max-width: 75%;
   padding: 8px 12px;
-  color: #24292f;
-  background: #f0f2f5;
+  color: var(--color-text);
+  background: var(--color-border-light);
   border-radius: 12px 12px 12px 2px;
 }
 
@@ -153,7 +153,7 @@
   bottom: 0;
   height: 54px;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 74%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-bg-white) 74%);
 }
 
 .innerUser .fadeMask {
@@ -192,7 +192,7 @@
   border: 1px solid var(--color-border);
   border-radius: 5px;
   overflow: hidden;
-  background-color: #f6f8fa;
+  background-color: var(--color-bg-convlist);
 }
 
 .codeHeader {
@@ -203,7 +203,7 @@
 }
 
 .codeBlock {
-  color: #24292f;
+  color: var(--color-text);
   padding: 10px 12px;
   overflow-x: auto;
   margin: 0;
@@ -213,6 +213,13 @@
 }
 
 .codeBlock code { font-family: inherit; }
+
+.inlineCode {
+  background: var(--color-border-light);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+}
 
 .streamingCursor {
   display: inline-block;
@@ -238,7 +245,7 @@
 
 .innerSending {
   color: var(--color-text-secondary);
-  background: #f6f8fa;
+  background: var(--color-bg-convlist);
 }
 
 .innerFailed {
@@ -261,7 +268,7 @@
 }
 
 .retryBtn { color: var(--color-danger) !important; }
-.removeBtn { color: #999 !important; }
+.removeBtn { color: var(--color-text-tertiary) !important; }
 
 .replyBtn {
   opacity: 0;
@@ -269,7 +276,7 @@
   position: absolute;
   right: 8px;
   top: 9px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .expandToggle {
@@ -277,8 +284,8 @@
   padding: 3px 12px;
   border: 1px solid rgba(22, 163, 101, 0.16);
   border-radius: 999px;
-  background: #fff;
-  color: #168a4a;
+  background: var(--color-bg-white);
+  color: var(--color-primary);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -289,7 +296,7 @@
 }
 
 .expandToggle:hover {
-  color: #087443;
+  color: var(--color-primary-active);
   border-color: rgba(22, 163, 101, 0.28);
 }
 
