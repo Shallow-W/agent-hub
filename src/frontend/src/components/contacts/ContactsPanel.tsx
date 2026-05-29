@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { DeleteOutlined, MoreOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import { useConversationStore } from '@/store/conversationStore';
+import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
 import FriendRequest from '../friends/FriendRequest';
@@ -25,7 +26,11 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
     deleteFriend,
   } = useFriendStore();
   const setActive = useConversationStore((s) => s.setActive);
+  const agents = useAgentStore((s) => s.agents);
+  const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const [query, setQuery] = useState('');
+
+  useEffect(() => { fetchAgents(); }, [fetchAgents]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredFriends = useMemo(() => {
@@ -46,6 +51,11 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
     if (!normalizedQuery) return groupConvs;
     return groupConvs.filter((c) => (c.title ?? '').toLowerCase().includes(normalizedQuery));
   }, [groupConvs, normalizedQuery]);
+
+  const filteredAgents = useMemo(() => {
+    if (!normalizedQuery) return agents;
+    return agents.filter((a) => a.name.toLowerCase().includes(normalizedQuery));
+  }, [agents, normalizedQuery]);
 
   const hasFriends = filteredFriends.length > 0;
 
@@ -194,6 +204,35 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
                           }
                           title={<span className={styles.contactName}>{conv.title}</span>}
                           description={<span className={styles.contactMeta}>群聊</span>}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </div>
+            ),
+          },
+          {
+            key: 'agents',
+            label: `智能体 ${filteredAgents.length}`,
+            children: (
+              <div className={styles.section}>
+                {filteredAgents.length === 0 ? (
+                  <div className={layoutStyles.emptyState}>暂无智能体</div>
+                ) : (
+                  <List
+                    dataSource={filteredAgents}
+                    split={false}
+                    renderItem={(agent) => (
+                      <List.Item className={styles.contactItem}>
+                        <List.Item.Meta
+                          avatar={
+                            <Avatar className={styles.friendAvatar} size={28} style={{ background: '#6366f1' }}>
+                              <RobotOutlined />
+                            </Avatar>
+                          }
+                          title={<span className={styles.contactName}>{agent.name}</span>}
+                          description={<span className={styles.contactMeta}>{agent.cli_tool}</span>}
                         />
                       </List.Item>
                     )}
