@@ -17,6 +17,7 @@ export async function sendMessage(
     ...(replyToId ? { reply_to: replyToId } : {}),
     ...(mentions && mentions.length > 0 ? { mentions } : {}),
   });
+  if (!result.user_message) throw new Error('Server returned empty user_message');
   return result.user_message;
 }
 

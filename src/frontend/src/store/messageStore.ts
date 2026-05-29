@@ -275,7 +275,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.pendingAttachments);
+      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.pendingAttachments, optMsg.reply_to ?? undefined, optMsg.mentions);
       get().addMessage(conversationId, msg);
       // Remove on success
       set((s) => {
