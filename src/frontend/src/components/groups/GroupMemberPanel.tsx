@@ -75,7 +75,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
     setLoading(true);
     try {
       const list = await getGroupMembers(conversationId);
-      setMembers(list);
+      setMembers(list ?? []);
     } catch {
       message.error('获取群成员失败');
     } finally {
