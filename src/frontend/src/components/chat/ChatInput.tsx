@@ -112,7 +112,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           if (members.length === 0) {
             getGroupMembers(conversationId).then((list) => {
               if (list) setMembers(list);
-            }).catch(() => {});
+            }).catch((err) => console.error('Failed to load group members:', err));
           }
         }
       } else if (mentionVisible) {
