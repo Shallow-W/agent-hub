@@ -8,5 +8,5 @@ type ConversationMember struct {
 	Role           string `db:"role" json:"role"`
 	JoinedAt       string `db:"joined_at" json:"joined_at"`
 	LastReadAt     *string `db:"last_read_at" json:"last_read_at,omitempty"`
-	Username       string `db:"username" json:"username,omitempty"` // JOIN users
+	Username       string `db:"username" json:"username"` // JOIN users
 }

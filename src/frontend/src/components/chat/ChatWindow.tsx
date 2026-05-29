@@ -115,6 +115,15 @@ export const ChatWindow: React.FC = () => {
     setHasSearched(false);
   }, [activeId, markAllRead]);
 
+  // Join WebSocket room when switching conversations so real-time messages arrive
+  useEffect(() => {
+    if (!wsClient || !activeId) return;
+    wsClient.send(JSON.stringify({
+      type: 'join_room',
+      data: { conversation_id: activeId },
+    }));
+  }, [wsClient, activeId]);
+
   const toggleSearch = useCallback(() => {
     setSearchOpen((prev) => {
       if (prev) {
@@ -198,15 +207,29 @@ export const ChatWindow: React.FC = () => {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <Avatar className={styles.conversationAvatar} size={26}>
-            {avatarText}
-          </Avatar>
-          <h1 className={styles.title}>
-            {displayName}
-          </h1>
-          {isGroup && activeConv.member_count && <span className={styles.memberCount}>{activeConv.member_count}</span>}
-        </div>
+        <Tooltip title={isGroup ? '查看群聊信息' : undefined} mouseEnterDelay={0.8}>
+          <div
+            className={styles.headerLeft}
+            style={isGroup ? { cursor: 'pointer', borderRadius: 6 } : undefined}
+            role={isGroup ? 'button' : undefined}
+            tabIndex={isGroup ? 0 : undefined}
+            onClick={() => isGroup && setGroupInfoOpen(true)}
+            onKeyDown={(e) => {
+              if (isGroup && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                setGroupInfoOpen(true);
+              }
+            }}
+          >
+            <Avatar className={styles.conversationAvatar} size={26}>
+              {avatarText}
+            </Avatar>
+            <h1 className={styles.title}>
+              {displayName}
+            </h1>
+            {isGroup && activeConv.member_count && <span className={styles.memberCount}>{activeConv.member_count}</span>}
+          </div>
+        </Tooltip>
         <div className={styles.headerActions}>
           <Tooltip title="文件">
             <Button type="text" icon={<FolderOpenOutlined />} size="small" onClick={() => fileInputRef.current?.click()} />

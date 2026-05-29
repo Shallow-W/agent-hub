@@ -40,7 +40,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const wsClient = useWsStore((s) => s.wsClient);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mention state
+  const [sending, setSending] = useState(false);
   const [mentionVisible, setMentionVisible] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -261,7 +261,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     [handleSubmit, mentionVisible, filteredMembers, mentionIndex, insertMention],
   );
 
-  const [sending, setSending] = useState(false);
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
   return (
