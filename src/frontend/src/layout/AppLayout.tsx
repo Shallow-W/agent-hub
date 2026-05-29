@@ -16,6 +16,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
+import { useAgentStore } from '@/store/agentStore';
 import { getOrCreatePrivateChat } from '@/api/conversation';
 import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
@@ -45,7 +46,8 @@ const AppLayout: React.FC = () => {
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
 
   /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
@@ -202,6 +204,21 @@ const AppLayout: React.FC = () => {
     }
   }, [fetchConversations, setActive]);
 
+  const agents = useAgentStore((s) => s.agents);
+  const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null;
+
+  const handleSelectAgent = useCallback((agent: Agent) => {
+    setSelectedAgentId(agent.id);
+    if (agent.machine_id) {
+      setSelectedMachineId(agent.machine_id);
+    }
+  }, []);
+
+  const handleSelectMachine = useCallback((machineId: string) => {
+    setSelectedMachineId(machineId);
+    setSelectedAgentId(null);
+  }, []);
+
   return (
     <div className={styles.container}>
       {/* WebSocket disconnect alert — 仅在连接建立后断开时显示 */}
@@ -255,8 +272,10 @@ const AppLayout: React.FC = () => {
           onSwitchChat={() => setActiveNav('chat')}
           onSwitchContacts={() => setActiveNav('contacts')}
           onRefreshContacts={handleRefreshContacts}
-          selectedAgentId={selectedAgent?.id ?? null}
-          onSelectAgent={setSelectedAgent}
+          selectedAgentId={selectedAgentId}
+          selectedMachineId={selectedMachineId}
+          onSelectAgent={handleSelectAgent}
+          onSelectMachine={handleSelectMachine}
         />
       </div>
 
