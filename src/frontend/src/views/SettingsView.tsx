@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Avatar, Button, Descriptions, Divider, Segmented, Switch, Tag } from 'antd';
+import { Avatar, Button, Descriptions, Segmented, Switch, Tag } from 'antd';
 import {
   LogoutOutlined,
   SunOutlined,
@@ -106,99 +106,120 @@ const SettingsView: React.FC = () => {
       </div>
 
       <div className={styles.body}>
-        <div className={styles.profileCard}>
-          <Avatar size={56} className={styles.avatar} icon={<UserOutlined />}>
-            {initial}
-          </Avatar>
-          <div className={styles.profileInfo}>
-            <span className={styles.username}>{user.username}</span>
-            <span className={styles.userId}>ID: {user.id}</span>
+        <div className={styles.settingsGrid}>
+          <nav className={styles.settingsNav} aria-label="设置分组">
+            <a href="#account" className={styles.navItem}>账号</a>
+            <a href="#appearance" className={styles.navItem}>外观</a>
+            <a href="#notifications" className={styles.navItem}>通知</a>
+            <a href="#about" className={styles.navItem}>关于</a>
+          </nav>
+          <div className={styles.settingsContent}>
+            <div className={styles.profileCard}>
+              <div className={styles.profileGlow}>
+                <Avatar size={52} className={styles.avatar} icon={<UserOutlined />}>
+                  {initial}
+                </Avatar>
+              </div>
+              <div className={styles.profileInfo}>
+                <span className={styles.profileEyebrow}>账号状态</span>
+                <span className={styles.username}>{user.username}</span>
+                <span className={styles.userId}>ID: {user.id}</span>
+              </div>
+              <Tag color="success" className={styles.statusTag}>在线</Tag>
+            </div>
+            <section id="account" className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <UserOutlined className={styles.sectionIcon} />
+                <h4 className={styles.sectionTitle}>账号信息</h4>
+              </div>
+              <Descriptions column={1} size="small" className={styles.infoList}>
+                <Descriptions.Item label="用户名">{user.username}</Descriptions.Item>
+                <Descriptions.Item label="用户 ID">
+                  <span className={styles.idValue}>{user.id}</span>
+                </Descriptions.Item>
+                <Descriptions.Item label="注册时间">{memberSince}</Descriptions.Item>
+              </Descriptions>
+            </section>
+
+            <section id="appearance" className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <SunOutlined className={styles.sectionIcon} />
+                <h4 className={styles.sectionTitle}>外观</h4>
+              </div>
+              <div className={styles.settingRow}>
+                <div className={styles.settingCopy}>
+                  <span className={styles.settingLabel}>主题</span>
+                  <span className={styles.settingHint}>控制 AgentHub 的整体显示模式</span>
+                </div>
+                <Segmented
+                  className={styles.themeSegment}
+                  value={theme}
+                  onChange={handleThemeChange}
+                  options={[
+                    { label: '浅色', value: 'light', icon: <SunOutlined /> },
+                    { label: '深色', value: 'dark', icon: <MoonOutlined /> },
+                    { label: '跟随系统', value: 'system', icon: <DesktopOutlined /> },
+                  ]}
+                />
+              </div>
+            </section>
+
+            <section id="notifications" className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <BellOutlined className={styles.sectionIcon} />
+                <h4 className={styles.sectionTitle}>通知</h4>
+              </div>
+              <div className={styles.settingRow}>
+                <div className={styles.settingCopy}>
+                  <span className={styles.settingLabel}>
+                    <SoundOutlined className={styles.settingLabelIcon} />
+                    消息通知声音
+                  </span>
+                  <span className={styles.settingHint}>收到新消息时播放轻提示音</span>
+                </div>
+                <Switch checked={notifySound} onChange={handleNotifySound} />
+              </div>
+              <div className={styles.settingRow}>
+                <div className={styles.settingCopy}>
+                  <span className={styles.settingLabel}>
+                    <DesktopOutlined className={styles.settingLabelIcon} />
+                    桌面通知
+                  </span>
+                  <span className={styles.settingHint}>允许浏览器在桌面显示消息提醒</span>
+                </div>
+                <Switch checked={notifyDesktop} onChange={handleNotifyDesktop} />
+              </div>
+            </section>
+
+            <section id="about" className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <InfoCircleOutlined className={styles.sectionIcon} />
+                <h4 className={styles.sectionTitle}>关于</h4>
+              </div>
+              <div className={styles.aboutItem}>
+                <span className={styles.aboutLabel}>应用名称</span>
+                <span className={styles.aboutValue}>AgentHub</span>
+              </div>
+              <div className={styles.aboutItem}>
+                <span className={styles.aboutLabel}>版本</span>
+                <Tag className={styles.versionTag}>v0.1.0</Tag>
+              </div>
+              <div className={styles.aboutItem}>
+                <span className={styles.aboutLabel}>产品定位</span>
+                <span className={styles.aboutValue}>IM 驱动的多 Agent 协作工作台</span>
+              </div>
+            </section>
+
+            <Button
+              danger
+              icon={<LogoutOutlined />}
+              onClick={handleLogout}
+              block
+            >
+              退出登录
+            </Button>
           </div>
         </div>
-
-        <Divider style={{ margin: '16px 0' }} />
-
-        <Descriptions column={1} size="small" bordered>
-          <Descriptions.Item label="用户名">{user.username}</Descriptions.Item>
-          <Descriptions.Item label="用户 ID">{user.id}</Descriptions.Item>
-          <Descriptions.Item label="注册时间">{memberSince}</Descriptions.Item>
-        </Descriptions>
-
-        <Divider style={{ margin: '16px 0' }} />
-
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <SunOutlined className={styles.sectionIcon} />
-            <h4 className={styles.sectionTitle}>外观</h4>
-          </div>
-          <div className={styles.settingRow}>
-            <span className={styles.settingLabel}>主题</span>
-            <Segmented
-              value={theme}
-              onChange={handleThemeChange}
-              options={[
-                { label: '浅色', value: 'light', icon: <SunOutlined /> },
-                { label: '深色', value: 'dark', icon: <MoonOutlined /> },
-                { label: '跟随系统', value: 'system', icon: <DesktopOutlined /> },
-              ]}
-            />
-          </div>
-        </div>
-
-        <Divider style={{ margin: '16px 0' }} />
-
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <BellOutlined className={styles.sectionIcon} />
-            <h4 className={styles.sectionTitle}>通知</h4>
-          </div>
-          <div className={styles.settingRow}>
-            <span className={styles.settingLabel}>
-              <SoundOutlined className={styles.settingLabelIcon} />
-              消息通知声音
-            </span>
-            <Switch checked={notifySound} onChange={handleNotifySound} />
-          </div>
-          <div className={styles.settingRow}>
-            <span className={styles.settingLabel}>
-              <DesktopOutlined className={styles.settingLabelIcon} />
-              桌面通知
-            </span>
-            <Switch checked={notifyDesktop} onChange={handleNotifyDesktop} />
-          </div>
-        </div>
-
-        <Divider style={{ margin: '16px 0' }} />
-
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <InfoCircleOutlined className={styles.sectionIcon} />
-            <h4 className={styles.sectionTitle}>关于</h4>
-          </div>
-          <div className={styles.aboutItem}>
-            <span className={styles.aboutLabel}>应用名称</span>
-            <span className={styles.aboutValue}>AgentHub</span>
-          </div>
-          <div className={styles.aboutItem}>
-            <span className={styles.aboutLabel}>版本</span>
-            <Tag>v0.1.0</Tag>
-          </div>
-          <div className={styles.aboutItem}>
-            <span className={styles.aboutLabel}>技术栈</span>
-            <span className={styles.aboutValue}>React 18 / Go / PostgreSQL / Redis</span>
-          </div>
-        </div>
-
-        <Divider style={{ margin: '16px 0' }} />
-
-        <Button
-          danger
-          icon={<LogoutOutlined />}
-          onClick={handleLogout}
-          block
-        >
-          退出登录
-        </Button>
       </div>
     </div>
   );

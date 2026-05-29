@@ -67,13 +67,13 @@
 
 .convPanel {
   flex-shrink: 0;
-  width: 184px;
+  width: 216px;
   background: var(--color-bg-convlist);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 176px;
+  min-width: 204px;
   max-width: 250px;
   overflow: hidden;
 }

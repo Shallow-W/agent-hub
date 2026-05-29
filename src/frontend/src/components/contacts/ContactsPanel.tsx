@@ -1,13 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { DeleteOutlined, MoreOutlined } from '@ant-design/icons';
+import { DeleteOutlined, MoreOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import { useConversationStore } from '@/store/conversationStore';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
 import FriendRequest from '../friends/FriendRequest';
-import friendStyles from '../friends/FriendList.module.css';
 import layoutStyles from '@/layout/AppLayout.module.css';
 import styles from './ContactsPanel.module.css';
 
@@ -85,7 +84,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
 
     return (
       <List.Item
-        className={friendStyles.friendItem}
+        className={styles.contactItem}
         onClick={() => onStartChat(friend.friend_id)}
         actions={[
           <Dropdown
@@ -95,7 +94,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
             placement="bottomRight"
           >
             <button
-              className={friendStyles.actionBtn}
+              className={styles.actionBtn}
               onClick={(e) => e.stopPropagation()}
               aria-label="更多操作"
             >
@@ -107,12 +106,13 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
         <List.Item.Meta
           avatar={
             <Badge dot color="green">
-              <Avatar className={styles.friendAvatar} size="small">
+              <Avatar className={styles.friendAvatar} size={28} icon={<UserOutlined />}>
                 {friendName.charAt(0).toUpperCase()}
               </Avatar>
             </Badge>
           }
-          title={friendName}
+          title={<span className={styles.contactName}>{friendName}</span>}
+          description={<span className={styles.contactMeta}>好友</span>}
         />
       </List.Item>
     );
@@ -122,6 +122,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
     <div className={styles.container}>
       <div className={styles.searchBar}>
         <Input.Search
+          prefix={<SearchOutlined />}
           placeholder="搜索好友或群聊..."
           allowClear
           value={query}
@@ -130,8 +131,11 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
       </div>
 
       <div className={styles.section}>
-        <div className={styles.sectionHeader}>好友申请</div>
         <div className={styles.managerCard}>
+          <div className={styles.managerCopy}>
+            <span className={styles.managerTitle}>好友申请</span>
+            <span className={styles.managerHint}>{friends.length} 位好友 · {groupConvs.length} 个群聊</span>
+          </div>
           <FriendRequest />
         </div>
       </div>
@@ -142,7 +146,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
         items={[
           {
             key: 'friends',
-            label: '好友列表',
+            label: `好友 ${filteredFriends.length}`,
             children: (
               <div className={styles.section}>
                 {loading && !hasFriends ? (
@@ -165,7 +169,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
           },
           {
             key: 'groups',
-            label: '群聊列表',
+            label: `群聊 ${filteredGroups.length}`,
             children: (
               <div className={styles.section}>
                 {filteredGroups.length === 0 ? (
@@ -176,7 +180,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
                     split={false}
                     renderItem={(conv) => (
                       <List.Item
-                        className={friendStyles.friendItem}
+                        className={styles.contactItem}
                         onClick={() => {
                           setActive(conv.id);
                           onSwitchChat();
@@ -184,11 +188,12 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
                       >
                         <List.Item.Meta
                           avatar={
-                            <Avatar className={styles.friendAvatar} size="small">
-                              {conv.title.charAt(0).toUpperCase()}
+                              <Avatar className={styles.friendAvatar} size={28}>
+                              <TeamOutlined />
                             </Avatar>
                           }
-                          title={conv.title}
+                          title={<span className={styles.contactName}>{conv.title}</span>}
+                          description={<span className={styles.contactMeta}>群聊</span>}
                         />
                       </List.Item>
                     )}

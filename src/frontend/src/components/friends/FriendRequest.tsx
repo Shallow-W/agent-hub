@@ -115,7 +115,7 @@ const FriendRequest: React.FC = () => {
     <div className={styles.manager}>
       <Badge count={pendingCount} size="small">
         <Button className={styles.managerButton} onClick={() => setOpen(true)}>
-          好友申请管理
+          管理好友申请
         </Button>
       </Badge>
       <Modal

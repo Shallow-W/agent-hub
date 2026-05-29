@@ -1,18 +1,25 @@
 .manager {
   display: flex;
-  justify-content: center;
+  justify-content: stretch;
 }
 
 .managerButton {
-  width: 100%;
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border-color: rgba(22, 163, 101, 0.22);
+  color: var(--color-primary);
+  background: rgba(255, 255, 255, 0.68);
+  font-weight: 600;
 }
 
 .tabBody {
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 .searchRow {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .pendingHeader {
@@ -21,9 +28,9 @@
 }
 
 .empty {
-  padding: 8px 0;
+  padding: 12px 0;
 }
 
 .requestAvatar {
-  background-color: #1677ff;
+  background: linear-gradient(135deg, #2f8fd0, #31a873) !important;
 }
