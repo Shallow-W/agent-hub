@@ -206,7 +206,10 @@ func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userI
 			 JOIN conversations c ON c.id = ca.conversation_id
 			 JOIN agents a ON a.id = ca.agent_id
 			 WHERE ca.conversation_id = $1
-			   AND c.user_id = $2
+			   AND (c.user_id = $2 OR EXISTS (
+			       SELECT 1 FROM conversation_members cm
+			       WHERE cm.conversation_id = c.id AND cm.user_id = $2
+			   ))
 			   AND (a.user_id IS NULL OR a.user_id = $2)
 			 ORDER BY ca.joined_at ASC`,
 		conversationID, userID,
@@ -451,7 +454,12 @@ func (r *ConversationRepo) AddAgent(ctx context.Context, conversationID, agentID
 			 FROM conversations c
 			 JOIN agents a ON a.id = $2
 			 WHERE c.id = $1
-			   AND c.user_id = $3
+			   AND (c.user_id = $3 OR EXISTS (
+			       SELECT 1 FROM conversation_members cm
+			       WHERE cm.conversation_id = c.id
+			         AND cm.user_id = $3
+			         AND cm.role IN ('owner', 'admin')
+			   ))
 			   AND (a.user_id IS NULL OR a.user_id = $3)
 			 ON CONFLICT (conversation_id, agent_id) DO UPDATE
 			   SET joined_at = conversation_agents.joined_at
@@ -485,7 +493,12 @@ func (r *ConversationRepo) RemoveAgent(ctx context.Context, conversationID, agen
 			 WHERE ca.conversation_id = c.id
 			   AND ca.conversation_id = $1
 			   AND ca.agent_id = $2
-			   AND c.user_id = $3`,
+			   AND (c.user_id = $3 OR EXISTS (
+			       SELECT 1 FROM conversation_members cm
+			       WHERE cm.conversation_id = c.id
+			         AND cm.user_id = $3
+			         AND cm.role IN ('owner', 'admin')
+			   ))`,
 		conversationID, agentID, userID,
 	)
 	if err != nil {

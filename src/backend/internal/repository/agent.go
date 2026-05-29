@@ -248,7 +248,10 @@ func (r *AgentRepo) IsAgentInConversation(ctx context.Context, conversationID, a
 		   JOIN agents a ON a.id = ca.agent_id
 		   WHERE ca.conversation_id = $1
 		     AND ca.agent_id = $2
-		     AND c.user_id = $3
+		     AND (c.user_id = $3 OR EXISTS (
+		       SELECT 1 FROM conversation_members cm
+		       WHERE cm.conversation_id = c.id AND cm.user_id = $3
+		     ))
 		     AND (a.user_id IS NULL OR a.user_id = $3)
 		 )`,
 		conversationID, agentID, userID,

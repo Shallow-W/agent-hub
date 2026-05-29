@@ -17,8 +17,8 @@ type ConvFriendRepo interface {
 }
 
 var (
-	ErrSelfChat     = errors.New("不能与自己创建私聊")
-	ErrNotFriends   = errors.New("双方不是好友，无法创建私聊")
+	ErrSelfChat   = errors.New("不能与自己创建私聊")
+	ErrNotFriends = errors.New("双方不是好友，无法创建私聊")
 )
 
 // ConversationService 对话服务所需的仓库接口
@@ -46,16 +46,16 @@ type ConvRepo interface {
 }
 
 var (
-	ErrConvNotFound   = errors.New("对话不存在")
-	ErrConvNoPerm     = errors.New("无权操作此对话")
-	ErrConvNotGroup   = errors.New("私聊会话不支持此操作")
-	ErrConvNotMember  = errors.New("不是该会话成员")
+	ErrConvNotFound     = errors.New("对话不存在")
+	ErrConvNoPerm       = errors.New("无权操作此对话")
+	ErrConvNotGroup     = errors.New("私聊会话不支持此操作")
+	ErrConvNotMember    = errors.New("不是该会话成员")
 	ErrConvInvalidTitle = errors.New("标题无效")
 )
 
 // ConversationService 对话业务逻辑
 type ConversationService struct {
-	repo      ConvRepo
+	repo       ConvRepo
 	friendRepo ConvFriendRepo
 }
 
@@ -173,8 +173,18 @@ func (s *ConversationService) DeleteConversation(ctx context.Context, userID, co
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	if conv.Type != "single" {
-		return ErrConvNotGroup
+
+	// 创建者直接删除整条会话，覆盖空白新对话和 Agent 单聊没有成员记录的场景。
+	if conv.UserID == userID {
+		return s.repo.Delete(ctx, convID)
+	}
+
+	member, err := s.repo.GetMember(ctx, convID, userID)
+	if err != nil {
+		return fmt.Errorf("get member: %w", err)
+	}
+	if member == nil {
+		return ErrConvNotMember
 	}
 	return s.repo.DeleteMember(ctx, convID, userID)
 }
@@ -330,7 +340,13 @@ func (s *ConversationService) ListConversationAgents(ctx context.Context, userID
 		return nil, ErrConvNotFound
 	}
 	if conv.UserID != userID {
-		return nil, ErrConvNoPerm
+		member, err := s.repo.GetMember(ctx, convID, userID)
+		if err != nil {
+			return nil, fmt.Errorf("get member: %w", err)
+		}
+		if member == nil {
+			return nil, ErrConvNoPerm
+		}
 	}
 	list, err := s.repo.ListAgents(ctx, convID, userID)
 	if err != nil {
@@ -339,10 +355,37 @@ func (s *ConversationService) ListConversationAgents(ctx context.Context, userID
 	return list, nil
 }
 
+func (s *ConversationService) canManageConversationAgents(ctx context.Context, userID string, conv *model.Conversation) error {
+	if conv.UserID == userID {
+		return nil
+	}
+	member, err := s.repo.GetMember(ctx, conv.ID, userID)
+	if err != nil {
+		return fmt.Errorf("get member: %w", err)
+	}
+	if member == nil {
+		return ErrConvNoPerm
+	}
+	if conv.Type == "group" && (member.Role == "owner" || member.Role == "admin") {
+		return nil
+	}
+	return ErrConvNoPerm
+}
+
 // AddConversationAgent 把 Robot 加入当前对话。
 func (s *ConversationService) AddConversationAgent(ctx context.Context, userID, convID, agentID string) (*model.ConversationAgent, error) {
 	if convID == "" || agentID == "" {
 		return nil, ErrConvNotFound
+	}
+	conv, err := s.repo.GetByID(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return nil, ErrConvNotFound
+	}
+	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
+		return nil, err
 	}
 	item, err := s.repo.AddAgent(ctx, convID, agentID, userID)
 	if err != nil {
@@ -356,6 +399,16 @@ func (s *ConversationService) AddConversationAgent(ctx context.Context, userID, 
 
 // RemoveConversationAgent 从当前对话移除 Robot。
 func (s *ConversationService) RemoveConversationAgent(ctx context.Context, userID, convID, agentID string) error {
+	conv, err := s.repo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrConvNotFound
+	}
+	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
+		return err
+	}
 	ok, err := s.repo.RemoveAgent(ctx, convID, agentID, userID)
 	if err != nil {
 		return fmt.Errorf("remove conversation agent: %w", err)

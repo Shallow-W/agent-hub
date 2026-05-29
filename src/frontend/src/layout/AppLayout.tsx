@@ -9,6 +9,7 @@ import SettingsPanel from '@/components/settings/SettingsPanel';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
 import {
+  addConversationAgent,
   getArchivedConversations,
   getOrCreateAgentChat,
   getOrCreatePrivateChat,
@@ -320,8 +321,18 @@ const AppLayout: React.FC = () => {
       <NewConversationModal
         open={newConvModalOpen}
         onCancel={() => setNewConvModalOpen(false)}
-        onCreate={async (title) => {
-          await create('single', title);
+        onCreate={async (title, memberIds, agentIds) => {
+          if (memberIds.length > 0 || agentIds.length > 0) {
+            const conv = await createGroup({ name: title, member_ids: memberIds });
+            await Promise.all(agentIds.map((agentId) => addConversationAgent(conv.id, agentId)));
+            await fetchConversations();
+            setActive(conv.id);
+            if (memberIds.length > 0 || agentIds.length > 0) {
+              useConversationStore.getState().setMemberPanelOpen(true);
+            }
+          } else {
+            await create('single', title);
+          }
           setNewConvModalOpen(false);
         }}
       />
