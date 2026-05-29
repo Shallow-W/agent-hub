@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -12,7 +13,6 @@ import (
 type FriendRepo interface {
 	SendRequest(ctx context.Context, userID, friendID string) (*model.Friend, error)
 	AcceptRequest(ctx context.Context, userID, friendID string) error
-	CreateReverseFriendship(ctx context.Context, userID, friendID string) error
 	RejectRequest(ctx context.Context, userID, friendID string) error
 	ListFriends(ctx context.Context, userID string) ([]*model.Friend, error)
 	ListPendingRequests(ctx context.Context, userID string) ([]*model.Friend, error)
@@ -20,6 +20,8 @@ type FriendRepo interface {
 	GetFriendshipByID(ctx context.Context, id string) (*model.Friend, error)
 	GetUserByUsername(ctx context.Context, username string) (*model.User, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
+	SearchUsers(ctx context.Context, query string, limit int) ([]*model.User, error)
+	DeleteFriend(ctx context.Context, userID, friendID string) error
 }
 
 var (
@@ -54,10 +56,17 @@ func (s *FriendService) SendFriendRequest(ctx context.Context, userID, friendID 
 		return nil, ErrUserNotFound
 	}
 
-	// 检查是否已有好友关系（双向检查）
+	// 双向检查：任一方向存在关系均拒绝
 	existing, err := s.repo.GetFriendship(ctx, userID, friendID)
 	if err != nil {
 		return nil, fmt.Errorf("check existing friendship: %w", err)
+	}
+	if existing != nil {
+		return nil, ErrFriendExists
+	}
+	existing, err = s.repo.GetFriendship(ctx, friendID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check reverse friendship: %w", err)
 	}
 	if existing != nil {
 		return nil, ErrFriendExists
@@ -100,15 +109,14 @@ func (s *FriendService) AcceptFriendRequest(ctx context.Context, userID, request
 		return ErrFriendNotFound
 	}
 
-	// 接受申请
+	// 接受申请（事务内同时创建反向关系）
 	if err := s.repo.AcceptRequest(ctx, friend.UserID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFriendNotFound
+		}
 		return fmt.Errorf("accept request: %w", err)
 	}
 
-	// 创建反向好友关系
-	if err := s.repo.CreateReverseFriendship(ctx, userID, friend.UserID); err != nil {
-		return fmt.Errorf("create reverse friendship: %w", err)
-	}
 	return nil
 }
 
@@ -123,6 +131,9 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 	}
 
 	if err := s.repo.RejectRequest(ctx, friend.UserID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFriendNotFound
+		}
 		return fmt.Errorf("reject request: %w", err)
 	}
 	return nil
@@ -135,6 +146,44 @@ func (s *FriendService) ListFriends(ctx context.Context, userID string) ([]*mode
 		return nil, fmt.Errorf("list friends: %w", err)
 	}
 	return list, nil
+}
+
+// SearchUsers 搜索用户（排除自己，限制条数）
+func (s *FriendService) SearchUsers(ctx context.Context, userID, query string, limit int) ([]*model.User, error) {
+	if query == "" {
+		return nil, errors.New("搜索关键词不能为空")
+	}
+	list, err := s.repo.SearchUsers(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	// 排除自己
+	filtered := make([]*model.User, 0, len(list))
+	for _, u := range list {
+		if u.ID != userID {
+			filtered = append(filtered, u)
+		}
+	}
+	return filtered, nil
+}
+
+// DeleteFriend 删除好友关系
+func (s *FriendService) DeleteFriend(ctx context.Context, userID, friendID string) error {
+	// 检查好友关系是否存在
+	existing, err := s.repo.GetFriendship(ctx, userID, friendID)
+	if err != nil {
+		return fmt.Errorf("check friendship: %w", err)
+	}
+	if existing == nil {
+		existing, err = s.repo.GetFriendship(ctx, friendID, userID)
+		if err != nil {
+			return fmt.Errorf("check reverse friendship: %w", err)
+		}
+	}
+	if existing == nil {
+		return ErrFriendNotFound
+	}
+	return s.repo.DeleteFriend(ctx, userID, friendID)
 }
 
 // ListPending 查询收到的好友申请

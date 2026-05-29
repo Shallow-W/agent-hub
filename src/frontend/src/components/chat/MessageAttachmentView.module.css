@@ -1,0 +1,75 @@
+.container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.imageLink {
+  display: inline-block;
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 200px;
+  max-height: 200px;
+  box-shadow: var(--shadow-sm);
+}
+
+.imageThumb {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.imageThumb:hover {
+  opacity: 0.9;
+  transform: scale(1.02);
+}
+
+.pdfCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background-color: var(--color-bg-white);
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  max-width: 280px;
+  box-shadow: var(--shadow-sm);
+}
+
+.pdfCard:hover {
+  border-color: #ffccc7;
+  box-shadow: 0 2px 8px rgba(207, 19, 34, 0.08);
+}
+
+.pdfIcon {
+  font-size: 28px;
+  color: #cf1322;
+  flex-shrink: 0;
+}
+
+.pdfInfo {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pdfName {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pdfSize {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}

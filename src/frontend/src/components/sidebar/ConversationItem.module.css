@@ -1,48 +1,48 @@
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
   position: relative;
   margin-bottom: 2px;
+  border: 1px solid transparent;
 }
 
 .item:hover {
-  background-color: var(--color-bg);
+  background-color: rgba(47, 143, 107, 0.08);
 }
 
-/* ── Active State: left border accent + tint ── */
-
 .active {
-  background-color: #e8f3ff;
+  background-color: rgba(47, 143, 107, 0.12);
+  border-color: rgba(47, 143, 107, 0.24);
+  box-shadow: 0 10px 18px rgba(47, 143, 107, 0.12);
 }
 
 .active::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
+  top: 8px;
+  bottom: 8px;
   width: 3px;
-  border-radius: 0 3px 3px 0;
+  border-radius: 0 4px 4px 0;
   background: var(--color-primary);
+  box-shadow: 0 0 12px rgba(47, 143, 107, 0.3);
 }
 
 .active:hover {
-  background-color: #dbe8fa;
+  background-color: rgba(47, 143, 107, 0.16);
 }
-
-/* ── Content Area ── */
 
 .content {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .titleRow {
@@ -53,13 +53,14 @@
 }
 
 .title {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.4;
+  letter-spacing: -0.1px;
 }
 
 .subtitleRow {
@@ -70,21 +71,30 @@
 }
 
 .time {
-  font-size: 11px;
-  color: var(--color-text-secondary);
+  font-size: 10px;
+  color: var(--color-text-tertiary);
   flex-shrink: 0;
   line-height: 1.3;
-  opacity: 0.75;
+  margin-left: auto;
 }
 
-/* ── Action: 单个三点按钮 ── */
+.subtitle {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+}
 
 .actions {
-  display: flex;
+  display: none;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--transition-fast);
 }
 
 .item:hover .actions {
@@ -96,18 +106,94 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
   font-size: 14px;
   color: var(--color-text-secondary);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .actionBtn:hover {
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+}
+
+.avatarWrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.onlineDot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  z-index: 1;
+}
+
+.online {
+  background-color: var(--color-success);
+  box-shadow: 0 0 4px rgba(82, 196, 26, 0.4);
+}
+
+.offline {
+  background-color: #d9d9d9;
+}
+
+/* ── 置顶样式 ── */
+.pinned {
+  background-color: rgba(36, 119, 243, 0.035);
+}
+
+.pinned:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.pinned.active {
+  background-color: var(--color-primary-light);
+}
+
+/* ── 群聊头像特殊样式 ── */
+.groupAvatar {
+  border-radius: 10px;
+}
+
+/* ── 未读红点徽章 ── */
+.unreadBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(255, 77, 79, 0.4);
+  z-index: 2;
+  border: 2px solid #fff;
+}
+
+/* ── 成员数量徽章 ── */
+.memberBadge {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
 }

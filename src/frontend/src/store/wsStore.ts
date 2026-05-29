@@ -1,16 +1,26 @@
 import { create } from 'zustand';
 import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
+export interface TypingUser {
+  userId: string;
+  username?: string;
+}
+
 interface WsState {
   status: WsStatus;
   wsClient: WebSocketClient | null;
+  /** conversationId → typing users */
+  typingUsers: Record<string, TypingUser[]>;
   connect: (token: string) => WebSocketClient | null;
   disconnect: () => void;
+  addTypingUser: (conversationId: string, userId: string, username?: string) => void;
+  removeTypingUser: (conversationId: string, userId: string) => void;
 }
 
 export const useWsStore = create<WsState>((set, get) => ({
   status: 'disconnected',
   wsClient: null,
+  typingUsers: {},
 
   connect: (token: string) => {
     // 避免重复连接
@@ -34,5 +44,30 @@ export const useWsStore = create<WsState>((set, get) => ({
       client.disconnect();
     }
     set({ wsClient: null, status: 'disconnected' });
+  },
+
+  addTypingUser: (conversationId, userId, username) => {
+    set((state) => {
+      const current = state.typingUsers[conversationId] ?? [];
+      if (current.some((u) => u.userId === userId)) return state;
+      return {
+        typingUsers: {
+          ...state.typingUsers,
+          [conversationId]: [...current, { userId, username }],
+        },
+      };
+    });
+  },
+
+  removeTypingUser: (conversationId, userId) => {
+    set((state) => {
+      const current = state.typingUsers[conversationId] ?? [];
+      return {
+        typingUsers: {
+          ...state.typingUsers,
+          [conversationId]: current.filter((u) => u.userId !== userId),
+        },
+      };
+    });
   },
 }));

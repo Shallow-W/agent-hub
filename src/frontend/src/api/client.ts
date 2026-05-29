@@ -6,8 +6,15 @@ function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+/** Build auth headers (used by both JSON client and FormData upload). */
+export function getAuthHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  handling401 = false;
 }
 
 export function clearToken(): void {
@@ -25,29 +32,59 @@ export class ApiError extends Error {
   }
 }
 
+const MAX_RETRY = 1;
+const RETRY_DELAY_MS = 1000;
+let handling401 = false;
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  retryCount = 0,
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...getAuthHeaders(),
   };
 
-  const token = getToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    const { message } = await import('antd');
+    message.error('网络连接失败，请检查网络');
+    throw new ApiError(0, 0, '网络连接失败');
   }
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const json: ApiResponse<T> = await res.json();
+  let json: ApiResponse<T>;
+  try {
+    json = await res.json();
+  } catch {
+    throw new ApiError(res.status, 0, `服务器错误 (${res.status})`);
+  }
 
   if (!res.ok || json.code !== 0) {
+    // 401 → token 过期，清除并跳转登录（防并发重复）
+    if (res.status === 401) {
+      if (!handling401) {
+        handling401 = true;
+        clearToken();
+        const { message } = await import('antd');
+        message.warning('登录已过期，请重新登录', 2, () => {
+          window.location.href = '/login';
+        });
+      }
+      throw new ApiError(res.status, json.code, json.message);
+    }
+    // Retry once on 5xx errors
+    if (res.status >= 500 && retryCount < MAX_RETRY) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      return request<T>(method, path, body, retryCount + 1);
+    }
     throw new ApiError(res.status, json.code, json.message);
   }
 

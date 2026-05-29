@@ -1,99 +1,272 @@
-import React from 'react';
-import { Avatar, Typography } from 'antd';
-import { RobotOutlined } from '@ant-design/icons';
+import React, { useState, useMemo } from 'react';
+import { Avatar, Typography, Spin, Button, Tooltip } from 'antd';
+import {
+  CloseOutlined,
+  DownOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  RollbackOutlined,
+  UpOutlined,
+} from '@ant-design/icons';
 import type { Message } from '@/types/message';
+import type { OptimisticStatus } from '@/types/message';
+import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
+const COLLAPSE_CHAR_LIMIT = 280;
+const COLLAPSE_LINE_LIMIT = 6;
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderMarkdown(text: string): string {
+  // 先抽出代码块，避免后续转义破坏格式。
+  const codeBlocks: string[] = [];
+  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(
+      `<pre class="${styles.codeBlock}"><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`,
+    );
+    if (lang) {
+      codeBlocks[idx] =
+        `<div class="${styles.codeBlockWrapper}"><div class="${styles.codeHeader}"><span>${escapeHtml(lang)}</span></div>${codeBlocks[idx]}</div>`;
+    } else {
+      codeBlocks[idx] =
+        `<div class="${styles.codeBlockWrapper}">${codeBlocks[idx]}</div>`;
+    }
+    return `\x00CODEBLOCK${idx}\x00`;
+  });
+
+  // 再抽出行内代码，和普通文本分开处理。
+  const inlineCodes: string[] = [];
+  result = result.replace(/`([^`]+)`/g, (_match, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code class="${styles.inlineCode}">${escapeHtml(code)}</code>`);
+    return `\x00INLINE${idx}\x00`;
+  });
+
+  // 转义代码之外的 HTML，防止消息内容注入。
+  result = escapeHtml(result);
+
+  // 应用轻量 Markdown 规则。
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  result = result.replace(/\[([^\]]+)\]\(([^()\s]+(?:\([^()]*\)[^()\s]*)*)\)/g, (_match, text, href) => {
+    const safeHref = /^https?:\/\//i.test(href) || /^mailto:/i.test(href) ? href : '#';
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  });
+
+  // 保留消息里的换行。
+  result = result.replace(/\n/g, '<br/>');
+
+  // Highlight @mentions — before restoring code blocks to avoid matching inside them
+  result = result.replace(/(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g,
+    `$1<span class="${styles.mention}">@$2</span>`);
+
+  // 最后恢复前面暂存的代码内容。
+  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
+  result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
+
+  return result;
+}
 
 interface MessageBubbleProps {
   message: Message;
   streaming?: boolean;
-}
-
-/** 简单分割：用 ``` 包裹的代码块渲染为带头部的暗色代码区域 */
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
-  return (
-    <div className={styles.codeBlockWrapper}>
-      <div className={styles.codeHeader}>
-        <span>{lang || 'Code'}</span>
-      </div>
-      <Paragraph
-        copyable={{ text: code, tooltips: ['复制', '已复制'] }}
-        style={{ margin: 0 }}
-      >
-        <pre className={styles.codeBlock}>
-          <code>{code}</code>
-        </pre>
-      </Paragraph>
-    </div>
-  );
-}
-
-function renderContent(content: string): React.ReactNode {
-  const parts = content.split(/(```[\s\S]*?```)/g);
-
-  return parts.map((part, i) => {
-    if (part.startsWith('```') && part.endsWith('```')) {
-      const lines = part.slice(3, -3);
-      const firstNewline = lines.indexOf('\n');
-      const langMatch = firstNewline >= 0 ? lines.slice(0, firstNewline).trim() : '';
-      const code =
-        firstNewline >= 0 ? lines.slice(firstNewline + 1) : lines;
-      return <CodeBlock key={i} code={code} lang={langMatch} />;
-    }
-    // 保留换行
-    return part.split('\n').map((line, j, arr) => (
-      <React.Fragment key={`${i}-${j}`}>
-        {line}
-        {j < arr.length - 1 && <br />}
-      </React.Fragment>
-    ));
-  });
+  showAvatar?: boolean;
+  isGrouped?: boolean;
+  optimisticStatus?: OptimisticStatus;
+  onRetry?: () => void;
+  onRemove?: () => void;
+  isOwn?: boolean;
+  onReply?: (message: Message) => void;
+  onRecall?: (messageId: string) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
   const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
+
+  if (msgDate.getTime() === today.getTime()) {
+    return `${hh}:${mm}`;
+  }
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day} ${hh}:${mm}`;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
+  showAvatar = true,
+  isGrouped = false,
+  optimisticStatus,
+  onRetry,
+  onRemove,
+  isOwn = false,
+  onReply,
+  onRecall,
 }) => {
-  const isUser = message.role === 'user';
+  const [expanded, setExpanded] = useState(false);
+  const isSystem = message.role === 'system';
+  const isOptimisticSending = optimisticStatus === 'sending';
+  const isOptimisticFailed = optimisticStatus === 'failed';
+  const displayName = message.username || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+  const avatarLetter = message.username?.charAt(0)?.toUpperCase() || '?';
+  const renderedContent = useMemo(() => renderMarkdown(message.content ?? ''), [message.content]);
+  const contentLength = message.content?.length ?? 0;
+  const lineCount = message.content?.split('\n').length ?? 0;
+  const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
+  const collapsed = shouldCollapse && !expanded;
+  // 这里只做前端提示，撤回窗口仍由服务端校验。
+  const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
+
+  if (isSystem) {
+    return (
+      <div className={styles.systemMessage}>
+        <Text type="secondary" className={styles.systemText}>
+          {message.content}
+        </Text>
+      </div>
+    );
+  }
 
   return (
-    <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
-      {!isUser && (
+    <div
+      className={`${styles.bubble} ${isOwn ? styles.bubbleUser : styles.bubbleAssistant} ${isGrouped ? styles.bubbleGrouped : ''}`}
+      data-message-id={message.id}
+    >
+      {showAvatar && (
         <Avatar
-          size={32}
-          icon={<RobotOutlined />}
-          style={{ backgroundColor: '#1677ff', flexShrink: 0, marginRight: 10, marginTop: 2 }}
-        />
+          size={24}
+          className={styles.chatAvatar}
+        >
+          {avatarLetter}
+        </Avatar>
       )}
-      <div className={`${styles.content} ${isUser ? styles.contentUser : styles.contentAssistant}`}>
-        {!isUser && (
+      {!showAvatar && <div className={styles.avatarSpacer} />}
+      {!isSystem && onReply && (
+        <Tooltip title="回复">
+          <Button
+            type="text"
+            size="small"
+            icon={<MessageOutlined />}
+            className={styles.replyBtn}
+            onClick={() => onReply(message)}
+          />
+        </Tooltip>
+      )}
+      {canRecall && (
+        <Tooltip title="撤回">
+          <Button
+            type="text"
+            size="small"
+            icon={<RollbackOutlined />}
+            className={`${styles.replyBtn} ${styles.recallBtn}`}
+            onClick={() => onRecall!(message.id)}
+          />
+        </Tooltip>
+      )}
+      <div className={styles.content}>
+        {showAvatar && (
           <div className={styles.meta}>
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 500 }}>Agent</Text>
+            <Text className={styles.agentLabel}>{displayName}</Text>
+            <Text type="secondary" className={styles.metaTime}>
+              {formatTimestamp(message.created_at)}
+            </Text>
           </div>
         )}
         <div
-          className={`${styles.inner} ${isUser ? styles.innerUser : styles.innerAssistant}`}
+          className={`${styles.inner} ${collapsed ? styles.innerCollapsed : ''} ${
+            isOptimisticFailed
+              ? styles.innerFailed
+              : isOptimisticSending
+                ? styles.innerSending
+                : isOwn
+                  ? styles.innerUser
+                  : styles.innerAssistant
+          }`}
         >
-          {renderContent(message.content)}
+          {message.reply_to_message && !message.reply_to_message.deleted_at && (
+            <div className={styles.replyQuote}>
+              <span className={styles.replyQuoteSender}>
+                {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
+              </span>
+              {escapeHtml(
+                (message.reply_to_message.content ?? '').length > 50
+                  ? (message.reply_to_message.content ?? '').slice(0, 50) + '...'
+                  : (message.reply_to_message.content ?? ''),
+              )}
+            </div>
+          )}
+          {message.attachments && message.attachments.length > 0 && (
+            <MessageAttachmentView attachments={message.attachments} />
+          )}
+          {message.content && (
+            <div
+              className={styles.markdownBody}
+              dangerouslySetInnerHTML={{ __html: renderedContent }}
+            />
+          )}
+          {collapsed && <div className={styles.fadeMask} />}
           {streaming && <span className={styles.streamingCursor} />}
+          {isOptimisticSending && (
+            <Spin size="small" className={styles.sendingSpin} />
+          )}
         </div>
-        <div
-          className={`${styles.timestamp} ${isUser ? styles.timestampUser : styles.timestampAssistant}`}
-        >
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {formatTimestamp(message.created_at)}
-          </Text>
-        </div>
+        {shouldCollapse && (
+          <button
+            className={styles.expandToggle}
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? (
+              <>
+                收起内容
+                <UpOutlined />
+              </>
+            ) : (
+              <>
+                展开完整内容
+                <DownOutlined />
+              </>
+            )}
+          </button>
+        )}
+        {isOptimisticFailed && (
+          <div className={styles.failedActions}>
+            <Button
+              type="link"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={onRetry}
+              className={styles.retryBtn}
+            >
+              重试
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<CloseOutlined />}
+              onClick={onRemove}
+              className={styles.removeBtn}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
+export const MessageBubble = React.memo(MessageBubbleInner);

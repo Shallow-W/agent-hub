@@ -11,9 +11,11 @@ export class WebSocketClient {
   private maxRetryDelay = 30000;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: string[] = [];
+  private intentionalClose = false;
   private onMessageCallback: MessageHandler | null = null;
   private statusValue: WsStatus = 'disconnected';
   private statusListeners: Set<(status: WsStatus) => void> = new Set();
+  private joinedRooms: Set<string> = new Set();
 
   get status(): WsStatus {
     return this.statusValue;
@@ -30,6 +32,10 @@ export class WebSocketClient {
     this.onMessageCallback = handler;
   }
 
+  offMessage(): void {
+    this.onMessageCallback = null;
+  }
+
   connect(connectToken: string): void {
     // 开发环境通过 Vite 代理，生产环境直接连
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -44,18 +50,33 @@ export class WebSocketClient {
       // 断线时缓存消息，重连后发送
       this.queue.push(message);
     }
+    // 追踪 join_room 以便重连后恢复
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed.type === 'join_room' && parsed.data?.conversation_id) {
+        this.joinedRooms.add(parsed.data.conversation_id);
+      } else if (parsed.type === 'leave_room' && parsed.data?.conversation_id) {
+        this.joinedRooms.delete(parsed.data.conversation_id);
+      }
+    } catch {
+      // non-JSON message, ignore
+    }
   }
 
   disconnect(): void {
+    this.intentionalClose = true;
     this.clearRetryTimer();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+    this.queue.length = 0;
+    this.joinedRooms.clear();
     this.setStatus('disconnected');
   }
 
   private doConnect(): void {
+    this.intentionalClose = false;
     this.clearRetryTimer();
     this.setStatus('connecting');
 
@@ -66,6 +87,8 @@ export class WebSocketClient {
       this.setStatus('connected');
       // 重连后发送缓存的消息
       this.flushQueue();
+      // 重连后恢复房间订阅
+      this.rejoinRooms();
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -79,7 +102,10 @@ export class WebSocketClient {
 
     this.ws.onclose = () => {
       this.setStatus('disconnected');
-      this.scheduleReconnect();
+      if (!this.intentionalClose) {
+        this.scheduleReconnect();
+      }
+      // intentionalClose 仅在 doConnect() 开头重置，不在此处
     };
 
     this.ws.onerror = () => {
@@ -88,9 +114,10 @@ export class WebSocketClient {
   }
 
   private scheduleReconnect(): void {
+    const jitter = Math.random() * 500;
     this.retryTimer = setTimeout(() => {
       this.doConnect();
-    }, this.retryDelay);
+    }, this.retryDelay + jitter);
     // 指数退避
     this.retryDelay = Math.min(this.retryDelay * 2, this.maxRetryDelay);
   }
@@ -103,9 +130,22 @@ export class WebSocketClient {
   }
 
   private flushQueue(): void {
-    while (this.queue.length > 0) {
-      const msg = this.queue.shift();
-      if (msg) this.ws?.send(msg);
+    const batch = this.queue.splice(0);
+    for (let i = 0; i < batch.length; i++) {
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        this.queue.unshift(...batch.slice(i));
+        break;
+      }
+      this.ws.send(batch[i]!);
+    }
+  }
+
+  private rejoinRooms(): void {
+    for (const conversationId of this.joinedRooms) {
+      this.ws?.send(JSON.stringify({
+        type: 'join_room',
+        data: { conversation_id: conversationId },
+      }));
     }
   }
 

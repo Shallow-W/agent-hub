@@ -1,0 +1,51 @@
+.searchPanel {
+  max-height: 400px;
+  overflow-y: auto;
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
+  background-color: var(--color-surface);
+  backdrop-filter: blur(10px);
+}
+
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.searchInput { flex: 1; }
+
+.searchResults {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.searchResultItem {
+  padding: 8px 12px !important;
+  cursor: pointer;
+}
+
+.searchResultSender {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.searchResultContent {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.searchResultTime {
+  margin-left: 8px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.emptySearch {
+  padding: 16px;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}

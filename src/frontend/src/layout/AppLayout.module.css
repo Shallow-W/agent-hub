@@ -1,40 +1,171 @@
 .container {
   display: flex;
+  align-items: stretch;
   height: 100vh;
   overflow: hidden;
+  position: relative;
+  padding: 14px;
+  gap: 12px;
+  background: var(--color-bg-app);
+  background-image:
+    radial-gradient(circle at 16% 8%, rgba(47, 143, 107, 0.12), transparent 40%),
+    radial-gradient(circle at 85% 90%, rgba(245, 158, 11, 0.12), transparent 45%);
 }
 
 .settingsPanel {
-  width: var(--settings-width);
   background: var(--color-bg-settings);
-  border-right: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  box-shadow: var(--shadow-sm);
-  z-index: 1;
+  z-index: 10;
+  box-shadow: var(--shadow-card);
+  transition: width 0.2s ease;
+  overflow: hidden;
+  height: 100%;
+  width: var(--settings-width);
+  border-radius: var(--border-radius-lg);
+}
+
+.settingsPanelCollapsed {
+  width: var(--settings-width-collapsed);
+}
+
+.disconnectAlert {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1000;
+}
+
+.toggleBtn {
+  position: absolute;
+  top: 34px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-white);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  font-size: 10px;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  transition: left 0.2s ease, opacity 0.2s ease;
+}
+
+.toggleBtnCollapsed {
+  left: calc(var(--settings-width-collapsed) - 11px);
+}
+
+.toggleBtnExpanded {
+  left: calc(var(--settings-width) - 11px);
+}
+
+.container:hover .toggleBtn {
+  opacity: 0.9;
 }
 
 .convPanel {
+  flex-shrink: 0;
   width: var(--convlist-width);
   background: var(--color-bg-convlist);
-  border-right: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  height: 100%;
+  min-width: 220px;
+  max-width: 320px;
+  overflow: hidden;
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-card);
+  animation: panelEnter 0.5s ease 0.08s both;
 }
 
 .convPanelHeader {
-  padding: 16px;
-  border-bottom: 1px solid var(--color-border);
+  height: 52px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+}
+
+.convPanelTools {
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
 
 .convPanelTitle {
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.convPanelTools :global(.ant-btn) {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 8px;
   font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+}
+
+.convPanelTools :global(.ant-btn:hover) {
+  background: rgba(22, 163, 101, 0.08) !important;
+  color: var(--color-primary) !important;
+}
+
+.archivedLink {
+  width: calc(100% - 20px);
+  margin: 8px 10px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  background: var(--color-surface-muted);
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.archivedLink:hover {
+  color: var(--color-primary);
+}
+
+.middleContent {
+  padding: 12px;
+  overflow: auto;
+  flex: 1;
+}
+
+.friendListSection {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.sectionTitle {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.emptyPanel {
+  padding: 16px;
+  color: var(--color-text-secondary);
 }
 
 .chatPanel {
@@ -42,6 +173,98 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background-color: var(--color-bg);
+  height: 100%;
+  background-color: var(--color-bg-chat);
+  background-image:
+    radial-gradient(circle at 8% 0%, rgba(255, 255, 255, 0.65), transparent 42%),
+    radial-gradient(circle at 100% 100%, rgba(255, 255, 255, 0.6), transparent 38%);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+  animation: panelEnter 0.55s ease 0.16s both;
 }
 
+.middleScroll {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+.middleSection {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.emptyState {
+  padding: 24px 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.groupList {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+}
+
+.groupItem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.groupItem:hover {
+  background: rgba(47, 143, 107, 0.08);
+}
+
+.settingsPanel,
+.chatPanel {
+  animation: panelEnter 0.45s ease both;
+}
+
+@keyframes panelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.groupAvatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--gradient-agent) !important;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.groupMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.groupTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupTime {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}

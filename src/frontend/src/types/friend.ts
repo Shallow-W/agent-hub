@@ -10,12 +10,4 @@ export interface Friend {
   updated_at: string;
 }
 
-export interface FriendRequest {
-  id: string;
-  from_user_id: string;
-  to_user_id: string;
-  from_username?: string;
-  to_username?: string;
-  status: FriendStatus;
-  created_at: string;
-}
+export type FriendRequest = Friend;

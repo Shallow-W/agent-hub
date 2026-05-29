@@ -1,10 +1,14 @@
-import React from 'react';
-import { Avatar, Dropdown, Badge } from 'antd';
+import React, { useState } from 'react';
+import { Avatar, Dropdown, Modal, Input } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   PushpinOutlined,
   InboxOutlined,
   DeleteOutlined,
+  UserOutlined,
+  TeamOutlined,
+  UserAddOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
@@ -15,6 +19,12 @@ interface ConversationItemProps {
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: () => void;
+  onArchive: () => void;
+  onInviteMembers?: () => void;
+  onRename?: (newTitle: string) => void;
+  lastMessage?: string;
+  unreadCount?: number;
+  online?: boolean;
 }
 
 const AVATAR_COLORS: readonly string[] = [
@@ -37,13 +47,26 @@ function getAvatarColor(title: string): string {
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
 
-  if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  if (diffMin < 1440) return `${Math.floor(diffMin / 60)}小时前`;
-  return `${Math.floor(diffMin / 1440)}天前`;
+  if (msgDate.getTime() === today.getTime()) {
+    return `${hh}:${mm}`;
+  }
+  if (msgDate.getTime() === yesterday.getTime()) {
+    return '昨天';
+  }
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}-${day}`;
+}
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + '...';
 }
 
 export const ConversationItem: React.FC<ConversationItemProps> = ({
@@ -52,9 +75,22 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onSelect,
   onDelete,
   onTogglePin,
+  onArchive,
+  onInviteMembers,
+  onRename,
+  lastMessage,
+  unreadCount = 0,
+  online = false,
 }) => {
-  const firstChar = conversation.title ? conversation.title.charAt(0).toUpperCase() : '?';
-  const avatarColor = getAvatarColor(conversation.title || '?');
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const isGroup = conversation.type === 'group';
+  // 显示名称：私聊用对方用户名，群聊用标题
+  const displayName = isGroup
+    ? conversation.title
+    : (conversation.peer_name || conversation.title);
+  const firstChar = displayName ? displayName.charAt(0).toUpperCase() : '?';
+  const avatarColor = getAvatarColor(displayName || '?');
 
   const menuItems: MenuProps['items'] = [
     {
@@ -67,12 +103,35 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       },
     },
     {
+      key: 'rename',
+      icon: <EditOutlined />,
+      label: '重命名',
+      onClick: (info) => {
+        info.domEvent.stopPropagation();
+        setRenameValue(displayName);
+        setRenameOpen(true);
+      },
+    },
+    ...(isGroup && onInviteMembers
+      ? [
+          {
+            key: 'invite',
+            icon: <UserAddOutlined />,
+            label: '邀请成员',
+            onClick: (info: { domEvent: { stopPropagation: () => void } }) => {
+              info.domEvent.stopPropagation();
+              onInviteMembers();
+            },
+          },
+        ]
+      : []),
+    {
       key: 'archive',
       icon: <InboxOutlined />,
       label: '归档',
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        // TODO: 归档功能待实现
+        onArchive();
       },
     },
     { type: 'divider' },
@@ -83,14 +142,23 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       danger: true,
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        onDelete();
+        Modal.confirm({
+          title: '确认删除',
+          content: `确定要删除「${displayName}」吗？`,
+          okText: '删除',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: onDelete,
+        });
       },
     },
   ];
 
+  const pinnedClass = conversation.pinned ? ` ${styles.pinned}` : '';
+
   return (
     <div
-      className={`${styles.item} ${active ? styles.active : ''}`}
+      className={`${styles.item}${pinnedClass} ${active ? styles.active : ''}`}
       onClick={onSelect}
       role="button"
       tabIndex={0}
@@ -101,29 +169,44 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         }
       }}
     >
-      {/* 头像 - 使用 antd Avatar */}
-      <Badge dot={conversation.pinned} color="#1677ff" offset={[-4, 30]}>
+      <div className={styles.avatarWrapper}>
         <Avatar
-          style={{ backgroundColor: avatarColor, flexShrink: 0 }}
-          size={36}
+          style={{
+            backgroundColor: isGroup ? '#722ed1' : avatarColor,
+            flexShrink: 0,
+            borderRadius: isGroup ? 10 : 50,
+          }}
+          size={32}
+          icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
         >
-          {firstChar}
+          {!isGroup ? firstChar : undefined}
         </Avatar>
-      </Badge>
+        {!isGroup && (
+          <span
+            className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
+          />
+        )}
+        {unreadCount > 0 && (
+          <span className={styles.unreadBadge}>
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </div>
 
-      {/* 标题 + 时间 */}
       <div className={styles.content}>
         <div className={styles.titleRow}>
-          <span className={styles.title}>{conversation.title}</span>
-        </div>
-        <div className={styles.subtitleRow}>
+          <span className={styles.title}>{displayName}</span>
           <span className={styles.time}>
             {formatTime(conversation.updated_at)}
           </span>
         </div>
+        <div className={styles.subtitleRow}>
+          <span className={styles.subtitle}>
+            {lastMessage ? truncate(lastMessage, 24) : ''}
+          </span>
+        </div>
       </div>
 
-      {/* 悬停操作 - 使用 antd Dropdown */}
       <div className={styles.actions}>
         <Dropdown
           menu={{ items: menuItems }}
@@ -139,6 +222,36 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           </button>
         </Dropdown>
       </div>
+
+      <Modal
+        title="重命名"
+        open={renameOpen}
+        okText="确定"
+        cancelText="取消"
+        onOk={() => {
+          const trimmed = renameValue.trim();
+          if (trimmed && trimmed !== displayName && onRename) {
+            onRename(trimmed);
+          }
+          setRenameOpen(false);
+        }}
+        onCancel={() => setRenameOpen(false)}
+        destroyOnClose
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={() => {
+            const trimmed = renameValue.trim();
+            if (trimmed && trimmed !== displayName && onRename) {
+              onRename(trimmed);
+            }
+            setRenameOpen(false);
+          }}
+          maxLength={50}
+          autoFocus
+        />
+      </Modal>
     </div>
   );
 };

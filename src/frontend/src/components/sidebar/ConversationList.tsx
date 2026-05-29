@@ -1,89 +1,157 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Input, Spin } from 'antd';
+import React, { useState } from 'react';
+import { Skeleton, Button, Input, message as antMessage } from 'antd';
+import { MessageOutlined, TeamOutlined, SearchOutlined } from '@ant-design/icons';
 import { useConversation } from '@/hooks/useConversation';
+import { useConversationStore } from '@/store/conversationStore';
+import { useMessageStore } from '@/store/messageStore';
+import * as convApi from '@/api/conversation';
+import type { Message } from '@/types/message';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
 
-export const ConversationList: React.FC = () => {
-  const { conversations, activeId, loading, setActive, remove, togglePin } =
+const EMPTY_MESSAGES: Message[] = [];
+
+interface ConversationListProps {
+  onNavigateContacts?: () => void;
+}
+
+export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateContacts }) => {
+  const { conversations, activeId, loading, setActive, remove, togglePin, rename, create } =
     useConversation();
+  const [searchQuery, setSearchQuery] = useState('');
+  const archiveConversationLocal = useConversationStore((s) => s.archiveConversationLocal);
+  const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
 
-  const [searchText, setSearchText] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 防抖搜索：300ms
-  useEffect(() => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      setDebouncedSearch(searchText);
-    }, 300);
-    return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-    };
-  }, [searchText]);
-
-  const filtered = debouncedSearch
-    ? conversations.filter((c) =>
-        c.title.toLowerCase().includes(debouncedSearch.toLowerCase()),
-      )
-    : conversations;
-
-  // 加载状态
   if (loading && conversations.length === 0) {
     return (
       <div className={styles.list}>
-        <div className={styles.loading}>
-          <Spin size="small" />
-          <span>加载中...</span>
+        <div style={{ padding: '8px 12px' }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 0', alignItems: 'center' }}>
+              <Skeleton.Avatar active size={36} />
+              <div style={{ flex: 1 }}>
+                <Skeleton active paragraph={{ rows: 1, width: '60%' }} title={false} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
-  // 空状态
   if (conversations.length === 0) {
     return (
       <div className={styles.list}>
         <div className={styles.empty}>
-          <span className={styles.emptyIcon}>&#128172;</span>
-          <span>暂无对话，点击「新建对话」开始</span>
+          <div className={styles.emptyIcon}>
+            <MessageOutlined />
+          </div>
+          <div className={styles.emptyTitle}>欢迎使用 AgentHub</div>
+          <div className={styles.emptyDesc}>开始你的第一个对话吧</div>
+          <div className={styles.emptyActions}>
+            <Button
+              type="primary"
+              icon={<MessageOutlined />}
+              onClick={() => create('single', '新对话')}
+            >
+              新建对话
+            </Button>
+            <Button
+              icon={<TeamOutlined />}
+              onClick={onNavigateContacts}
+            >
+              添加好友
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
+  const filtered = searchQuery
+    ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : conversations;
+
   return (
     <div className={styles.list}>
-      {/* 搜索栏 - 使用 antd Input.Search */}
-      <div className={styles.searchWrapper}>
-        <Input.Search
+      <div className={styles.searchWrap} data-conv-search>
+        <Input
+          prefix={<SearchOutlined />}
           placeholder="搜索对话..."
           allowClear
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          onClear={() => setSearchText('')}
-          style={{ height: 34 }}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className={styles.searchInput}
         />
       </div>
-
-      {/* 对话列表 */}
       <div className={styles.items}>
-        {filtered.length === 0 ? (
-          <div className={styles.noResults}>未找到匹配的对话</div>
-        ) : (
-          filtered.map((conv) => (
-            <ConversationItem
+        {filtered.map((conv) => (
+          <ConversationItemWrapper
               key={conv.id}
               conversation={conv}
               active={conv.id === activeId}
               onSelect={() => setActive(conv.id)}
               onDelete={() => remove(conv.id)}
-              onTogglePin={() => togglePin(conv.id, !conv.pinned)}
+              onTogglePin={() => togglePin(conv.id)}
+              onRename={conv.type === 'group' ? (newTitle: string) => rename(conv.id, newTitle) : undefined}
+              onArchive={async () => {
+                try {
+                  await convApi.archiveConversation(conv.id);
+                  archiveConversationLocal(conv.id);
+                } catch {
+                  antMessage.error('归档失败');
+                }
+              }}
+              onInviteMembers={
+                conv.type === 'group'
+                  ? () => {
+                      setActive(conv.id);
+                      setMemberPanelOpen(true);
+                    }
+                  : undefined
+              }
             />
           ))
-        )}
+        }
       </div>
     </div>
+  );
+};
+
+/** Wrapper that reads last message and unread count from message store */
+const ConversationItemWrapper: React.FC<{
+  conversation: Parameters<typeof ConversationItem>[0]['conversation'];
+  active: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onTogglePin: () => void;
+  onRename?: (newTitle: string) => void;
+  onArchive: () => void;
+  onInviteMembers?: () => void;
+}> = ({ conversation, active, onSelect, onDelete, onTogglePin, onRename, onArchive, onInviteMembers }) => {
+  const messages = useMessageStore(
+    (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
+  );
+  const unreadCount = useMessageStore(
+    (s) => s.unreadCounts[conversation.id] ?? 0,
+  );
+
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  // 优先使用本地 store 实时数据，API 数据作为兜底
+  const lastMessage = lastMsg?.content || conversation.last_message;
+
+  return (
+    <ConversationItem
+      conversation={conversation}
+      active={active}
+      onSelect={onSelect}
+      onDelete={onDelete}
+      onTogglePin={onTogglePin}
+      onRename={onRename}
+      onArchive={onArchive}
+      onInviteMembers={onInviteMembers}
+      lastMessage={lastMessage}
+      unreadCount={unreadCount}
+    />
   );
 };

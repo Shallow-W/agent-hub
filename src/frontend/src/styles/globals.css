@@ -1,23 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
 :root {
-  --color-primary: #1677ff;
-  --color-primary-hover: #4096ff;
-  --color-primary-active: #0958d9;
-  --color-bg: #f5f5f5;
+  --color-primary: #2f8f6b;
+  --color-primary-hover: #35a377;
+  --color-primary-active: #257a59;
+  --color-primary-light: #e2f4ea;
+  --color-primary-bg: rgba(47, 143, 107, 0.08);
+  --color-bg: #efe9df;
+  --color-bg-app: #f7f3ec;
   --color-bg-white: #ffffff;
-  --color-text: #1a1a1a;
-  --color-text-secondary: #666;
-  --color-border: #e8e8e8;
-  --color-danger: #ff4d4f;
-  --color-danger-hover: #ff7875;
+  --color-bg-tertiary: #f0ebe3;
+  --color-text: #1d2329;
+  --color-text-secondary: #5f6b75;
+  --color-text-tertiary: #8b96a0;
+  --color-border: #e3ddd3;
+  --color-border-light: #efe9e1;
+  --color-danger: #ff5c5c;
+  --color-danger-hover: #ff7a7a;
+  --color-danger-bg: #fff1f0;
+  --color-danger-border: #ffccc7;
+  --color-success: #52c41a;
+  --color-user-bubble-from: #2f8f6b;
+  --color-user-bubble-to: #4fb688;
+  --color-user-bubble-link: #d1f5e3;
+  --color-user-bubble-code-bg: rgba(255, 255, 255, 0.22);
   --sidebar-width: 300px;
-  --settings-width: 220px;
-  --convlist-width: 300px;
-  --color-bg-settings: #f8f9fa;
-  --color-bg-convlist: #ffffff;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --settings-width: 208px;
+  --settings-width-collapsed: 72px;
+  --convlist-width: 262px;
+  --color-bg-settings: #fbf8f2;
+  --color-bg-convlist: #f6f2eb;
+  --color-bg-chat: #f6f1ea;
+  --color-surface: rgba(255, 255, 255, 0.86);
+  --color-surface-strong: #ffffff;
+  --color-surface-muted: rgba(255, 255, 255, 0.72);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 6px 16px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 32px rgba(15, 23, 42, 0.12);
+  --shadow-card: 0 8px 20px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.04);
+  --shadow-bubble-user: 0 8px 22px rgba(47, 143, 107, 0.18);
+  --shadow-bubble-assistant: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-input-focus: 0 0 0 3px rgba(47, 143, 107, 0.16), 0 10px 20px rgba(47, 143, 107, 0.08);
   --transition-fast: 0.15s ease;
-  --border-radius: 8px;
-  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --transition-normal: 0.25s ease;
+  --border-radius: 14px;
+  --border-radius-sm: 8px;
+  --border-radius-lg: 18px;
+  --gradient-brand: linear-gradient(135deg, #2f8f6b 0%, #49b37e 100%);
+  --gradient-agent: linear-gradient(135deg, #7fbf7c 0%, #4fad89 100%);
+  --gradient-avatar-group: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+  --font-family: 'IBM Plex Sans', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-family-display: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+}
+
+html.dark {
+  --color-primary: #34d399;
+  --color-primary-hover: #6ee7b7;
+  --color-primary-active: #10b981;
+  --color-primary-light: #064e3b;
+  --color-primary-bg: rgba(52, 211, 153, 0.12);
+  --color-bg: #0f172a;
+  --color-bg-app: #111827;
+  --color-bg-white: #1f2937;
+  --color-bg-tertiary: #1b2432;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-tertiary: #64748b;
+  --color-border: #2d3748;
+  --color-border-light: #1f2937;
+  --color-danger: #f87171;
+  --color-danger-hover: #fca5a5;
+  --color-danger-bg: #451a1a;
+  --color-danger-border: #7f1d1d;
+  --color-success: #4ade80;
+  --color-user-bubble-from: #065f46;
+  --color-user-bubble-to: #059669;
+  --color-user-bubble-link: #a7f3d0;
+  --color-user-bubble-code-bg: rgba(255, 255, 255, 0.12);
+  --color-bg-settings: #1b2432;
+  --color-bg-convlist: #1a2332;
+  --color-bg-chat: #0f172a;
+  --color-surface: rgba(17, 24, 39, 0.88);
+  --color-surface-strong: #111827;
+  --color-surface-muted: rgba(17, 24, 39, 0.72);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(15, 23, 42, 0.5);
+  --shadow-bubble-user: 0 6px 18px rgba(6, 95, 70, 0.32);
+  --shadow-bubble-assistant: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-input-focus: 0 0 0 3px rgba(52, 211, 153, 0.2), 0 6px 14px rgba(52, 211, 153, 0.12);
+  --gradient-brand: linear-gradient(135deg, #0f766e 0%, #10b981 100%);
+  --gradient-agent: linear-gradient(135deg, #0f766e 0%, #22c55e 100%);
 }
 
 *,
@@ -57,4 +131,42 @@ textarea,
 button {
   font-family: inherit;
   font-size: inherit;
+}
+
+/* Global transition for clickable elements */
+a,
+button,
+[role="button"] {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* Firefox scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+
+/* Keyboard focus indicator */
+:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
 }
