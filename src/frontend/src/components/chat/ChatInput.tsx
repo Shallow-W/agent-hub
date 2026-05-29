@@ -12,7 +12,9 @@ import { useWsStore } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { uploadFile } from '@/api/upload';
 import { getGroupMembers } from '@/api/group';
+import { getConversationAgents } from '@/api/conversation';
 import type { GroupMember } from '@/types/group';
+import type { ConversationAgent } from '@/types/conversation';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message, ReplyToPreview } from '@/types/message';
@@ -24,6 +26,10 @@ const { TextArea } = Input;
 
 const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+type MentionTarget =
+  | { id: string; label: string; kind: 'user'; user: GroupMember }
+  | { id: string; label: string; kind: 'agent'; agent: ConversationAgent };
 
 interface ChatInputProps {
   conversationId: string;
@@ -45,6 +51,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
   const textareaRef = useRef<TextAreaRef>(null);
 
@@ -54,6 +61,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const boundAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
   const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
+
+  const loadMentionTargets = useCallback(() => {
+    if (!isGroup) return;
+    if (members.length === 0) {
+      getGroupMembers(conversationId).then((list) => {
+        setMembers(list ?? []);
+      }).catch((err) => console.error('Failed to load group members:', err));
+    }
+    if (agentMembers.length === 0) {
+      getConversationAgents(conversationId).then((list) => {
+        setAgentMembers(list ?? []);
+      }).catch((err) => console.error('Failed to load conversation agents:', err));
+    }
+  }, [agentMembers.length, conversationId, isGroup, members.length]);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -110,18 +131,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         setMentionIndex(0);
         if (!mentionVisible) {
           setMentionVisible(true);
-          // Fetch members if not already loaded
-          if (members.length === 0) {
-            getGroupMembers(conversationId).then((list) => {
-              if (list) setMembers(list);
-            }).catch((err) => console.error('Failed to load group members:', err));
-          }
+          loadMentionTargets();
         }
       } else if (mentionVisible) {
         setMentionVisible(false);
       }
     }
-  }, [sendTypingStart, sendTypingStop, isGroup, conversationId, mentionVisible, members.length]);
+  }, [sendTypingStart, sendTypingStop, isGroup, mentionVisible, loadMentionTargets]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -160,21 +176,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     setPendingFiles((prev) => prev.filter((p) => p.uid !== uid));
   }, []);
 
-  // Filtered members for mention dropdown
-  const filteredMembers = members.filter(
-    (m) => m.username && m.username.toLowerCase().includes(mentionQuery.toLowerCase()),
+  const mentionTargets: MentionTarget[] = [
+    ...members
+      .filter((m) => !!m.username)
+      .map((m) => ({ id: m.user_id, label: m.username ?? 'unknown', kind: 'user' as const, user: m })),
+    ...agentMembers.map((agent) => ({ id: agent.agent_id, label: agent.name, kind: 'agent' as const, agent })),
+  ];
+
+  const filteredTargets = mentionTargets.filter(
+    (target) => target.label.toLowerCase().includes(mentionQuery.toLowerCase()),
   );
 
-  const insertMention = useCallback((member: GroupMember) => {
-    const username = member.username ?? 'unknown';
+  const insertMention = useCallback((target: MentionTarget) => {
     const before = value.slice(0, mentionStart);
     const after = value.slice(mentionStart + mentionQuery.length + 1); // +1 for @
-    const newValue = `${before}@${username} ${after}`;
+    const newValue = `${before}@${target.label} ${after}`;
     setValue(newValue);
     setMentionVisible(false);
     // Focus back on textarea
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [value, mentionStart, mentionQuery]);
+
+  const hasMention = useCallback((content: string, label: string) => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|\\s)@${escaped}(?=\\s|$)`, 'i').test(content);
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
@@ -187,24 +213,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
     // Extract mentions from content for group chats
     let mentions: string[] | undefined;
-    if (isGroup && members.length > 0) {
-      const mentionRegex = /(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g;
-      const mentionedUsernames: string[] = [];
-      let match;
-      while ((match = mentionRegex.exec(trimmed)) !== null) {
-        mentionedUsernames.push(match[2] ?? '');
-      }
-      if (mentionedUsernames.length > 0) {
-        const usernameSet = new Set(members.map((m) => m.username?.toLowerCase()));
-        mentions = mentionedUsernames
-          .filter((u) => usernameSet.has(u.toLowerCase()))
-          .map((u) => {
-            const member = members.find((m) => m.username?.toLowerCase() === u.toLowerCase());
-            return member?.user_id ?? '';
-          })
-          .filter(Boolean);
-        if (mentions.length === 0) mentions = undefined;
-      }
+    let mentionedAgentId: string | undefined;
+    if (isGroup) {
+      const userMentions = members
+        .filter((member) => member.username && hasMention(trimmed, member.username))
+        .map((member) => member.user_id);
+      mentions = userMentions.length > 0 ? userMentions : undefined;
+      mentionedAgentId = agentMembers.find((agent) => hasMention(trimmed, agent.name))?.agent_id;
     }
 
     setSending(true);
@@ -220,7 +235,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions, directAgentId);
+      await send(
+        trimmed,
+        attachments.length ? attachments : undefined,
+        replyTo?.id,
+        replyPreview,
+        mentions,
+        mentionedAgentId ?? directAgentId,
+      );
       setValue('');
       setPendingFiles([]);
       onCancelReply?.();
@@ -229,25 +251,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, directAgentId]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, agentMembers, hasMention, directAgentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // Mention dropdown navigation
-      if (mentionVisible && filteredMembers.length > 0) {
+      if (mentionVisible && filteredTargets.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setMentionIndex((i) => (i + 1) % filteredMembers.length);
+          setMentionIndex((i) => (i + 1) % filteredTargets.length);
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setMentionIndex((i) => (i - 1 + filteredMembers.length) % filteredMembers.length);
+          setMentionIndex((i) => (i - 1 + filteredTargets.length) % filteredTargets.length);
           return;
         }
         if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault();
-          insertMention(filteredMembers[mentionIndex]!);
+          insertMention(filteredTargets[mentionIndex]!);
           return;
         }
         if (e.key === 'Escape') {
@@ -262,7 +284,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         handleSubmit();
       }
     },
-    [handleSubmit, mentionVisible, filteredMembers, mentionIndex, insertMention],
+    [handleSubmit, mentionVisible, filteredTargets, mentionIndex, insertMention],
   );
 
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
@@ -336,19 +358,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           className={styles.sendBtn}
         />
       </div>
-      {mentionVisible && filteredMembers.length > 0 && (
+      {mentionVisible && filteredTargets.length > 0 && (
         <div className={styles.mentionDropdown}>
-          {filteredMembers.map((m, i) => (
+          {filteredTargets.map((target, i) => (
             <button
-              key={m.user_id}
+              key={`${target.kind}-${target.id}`}
               className={`${styles.mentionItem} ${i === mentionIndex ? styles.mentionItemActive : ''}`}
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault();
-                insertMention(m);
+                insertMention(target);
               }}
             >
-              @{m.username}
+              @{target.label}
+              {target.kind === 'agent' ? ' · Agent' : ''}
             </button>
           ))}
         </div>
