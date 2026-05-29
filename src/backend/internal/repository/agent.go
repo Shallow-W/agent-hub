@@ -282,14 +282,14 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error
 }
 
 // CreateDaemonTask 创建一次等待远端电脑执行的 CLI 任务。
-func (r *AgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error) {
+func (r *AgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
 	var t model.DaemonTask
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO daemon_tasks (user_id, conversation_id, agent_id, machine_id, cli_tool, prompt)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt,
+		`INSERT INTO daemon_tasks (user_id, conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
 		           status, result, error, claimed_at, completed_at, created_at, updated_at`,
-		userID, conversationID, agentID, machineID, cliTool, prompt,
+		userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages,
 	).StructScan(&t)
 	if err != nil {
 		return nil, fmt.Errorf("insert daemon task: %w", err)
@@ -301,7 +301,7 @@ func (r *AgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID
 func (r *AgentRepo) GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error) {
 	var t model.DaemonTask
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt,
+		`SELECT id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
 		        status, result, error, claimed_at, completed_at, created_at, updated_at
 		 FROM daemon_tasks WHERE id = $1`,
 		id,
@@ -330,7 +330,7 @@ func (r *AgentRepo) ClaimDaemonTask(ctx context.Context, machineID string) (*mod
 		 UPDATE daemon_tasks
 		 SET status = 'running', claimed_at = NOW(), updated_at = NOW()
 		 WHERE id = (SELECT id FROM next_task)
-		 RETURNING id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt,
+		 RETURNING id, user_id, conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
 		           status, result, error, claimed_at, completed_at, created_at, updated_at`,
 		machineID,
 	).StructScan(&t)

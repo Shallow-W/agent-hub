@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Input, Button, Tooltip, Spin, message } from 'antd';
 import {
   CloseOutlined,
   LinkOutlined,
+  RobotOutlined,
   SendOutlined,
   UpOutlined,
   DownOutlined,
@@ -10,6 +11,7 @@ import {
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
+import { useAgentStore } from '@/store/agentStore';
 import { uploadFile } from '@/api/upload';
 import { getGroupMembers } from '@/api/group';
 import { getConversationAgents } from '@/api/conversation';
@@ -60,8 +62,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     s.conversations.find((c) => c.id === conversationId),
   );
   const boundAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
+  const bindDirectAgentChat = useConversationStore((s) => s.bindDirectAgentChat);
+  const unbindDirectAgentChat = useConversationStore((s) => s.unbindDirectAgentChat);
   const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
+  const globalAgents = useAgentStore((s) => s.agents);
 
   const fetchMentionTargets = useCallback(async () => {
     if (!isGroup) return { members, agentMembers };
@@ -87,6 +92,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     setAgentMembers([]);
     setMentionTargetsLoaded(false);
   }, [conversationId]);
+
+  // Proactively load agent names when there's an active target (for the target bar display)
+  useEffect(() => {
+    if (isGroup && boundAgentId && !mentionTargetsLoaded) {
+      loadMentionTargets();
+    }
+  }, [isGroup, boundAgentId, mentionTargetsLoaded, loadMentionTargets]);
+
+  // Resolve the display name for the currently targeted agent
+  const targetAgentName = useMemo(() => {
+    if (!directAgentId) return null;
+    // Group chat: check loaded group agents first, then fall back to global list
+    const fromGroup = agentMembers.find((a) => a.agent_id === directAgentId)?.name;
+    if (fromGroup) return fromGroup;
+    const fromGlobal = globalAgents.find((a) => a.id === directAgentId)?.name;
+    if (fromGlobal) return fromGlobal;
+    // Direct agent chat: peer_name is always available
+    if (!isGroup) return conversation?.peer_name ?? null;
+    return null;
+  }, [directAgentId, agentMembers, globalAgents, isGroup, conversation]);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -240,6 +265,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     setSending(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
+
+    // 立即清空输入框，给用户即时反馈
+    setValue('');
+    setPendingFiles([]);
+    onCancelReply?.();
+
     try {
       const replyPreview: ReplyToPreview | undefined = replyTo
         ? {
@@ -258,15 +289,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         mentions,
         mentionedAgentId ?? directAgentId,
       );
-      setValue('');
-      setPendingFiles([]);
-      onCancelReply?.();
+      // Persist the @mentioned agent as sticky target for subsequent messages
+      if (isGroup && mentionedAgentId) {
+        bindDirectAgentChat(conversationId, mentionedAgentId);
+      }
     } catch {
+      // 发送失败时恢复输入内容，方便用户重试
+      setValue(trimmed);
       message.error('发送失败，请稍后重试');
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, mentionTargetsLoaded, fetchMentionTargets, members, agentMembers, hasMention, directAgentId]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, mentionTargetsLoaded, fetchMentionTargets, members, agentMembers, hasMention, directAgentId, bindDirectAgentChat, conversationId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -309,7 +343,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
       {isStreaming && (
         <div className={styles.typingIndicator}>
           <Spin size="small" />
-          <span>Agent 正在输入</span>
+          <span>{targetAgentName ?? (conversation?.peer_name ?? 'Agent')} 正在输入</span>
+        </div>
+      )}
+      {isGroup && boundAgentId && (
+        <div className={styles.targetBar}>
+          <RobotOutlined className={styles.targetBarIcon} />
+          <span className={styles.targetBarName}>{targetAgentName ?? 'Agent'}</span>
+          <Tooltip title="停止@此智能体" mouseEnterDelay={0.8}>
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseOutlined />}
+              className={styles.targetBarClear}
+              onClick={() => unbindDirectAgentChat(conversationId)}
+            />
+          </Tooltip>
         </div>
       )}
       {replyTo && (

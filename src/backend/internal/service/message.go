@@ -58,7 +58,7 @@ type ConvRepoForMsg interface {
 type AgentRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
-	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error)
+	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
 }
 
@@ -464,6 +464,42 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	return nil
 }
 
+// buildContextMessages 拉取最近 40 条消息，组装为结构化上下文 JSON。
+// 包含发送者名称和 agent 身份，供 daemon 侧区分不同 Agent 的回复。
+func (s *MessageService) buildContextMessages(ctx context.Context, convID string) string {
+	const contextLimit = 40
+	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, contextLimit)
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+	// ListByConversation 返回倒序（最新在前），需要反转为时间正序
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	ctx2 := make([]model.ContextMessage, 0, len(msgs))
+	for _, m := range msgs {
+		cm := model.ContextMessage{Role: m.Role, Content: m.Content}
+		if m.Role == "user" {
+			cm.Name = m.Username
+		} else if m.Role == "assistant" && m.ArtifactsJSON != "" {
+			var a struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+			}
+			if json.Unmarshal([]byte(m.ArtifactsJSON), &a) == nil {
+				cm.Name = a.AgentName
+				cm.AgentID = a.AgentID
+			}
+		}
+		ctx2 = append(ctx2, cm)
+	}
+	b, err := json.Marshal(ctx2)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // createAgentReply 生成 Agent 回复消息
 func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent string) (*model.Message, error) {
 	if s.agentRepo == nil {
@@ -490,7 +526,8 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, ErrMsgAgentOffline
 	}
 
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent)
+	contextMessages := s.buildContextMessages(ctx, convID)
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}

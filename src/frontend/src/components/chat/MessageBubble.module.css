@@ -219,13 +219,25 @@
 .innerFailed {
   display: inline-flex;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: 6px;
 }
 
 .innerSending {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-white);
+  color: var(--color-bg-white);
+  background: linear-gradient(135deg, var(--color-user-bubble-from) 0%, var(--color-user-bubble-to) 100%);
+  border-radius: 18px 18px 6px 18px;
+  padding: 11px 16px;
+  box-shadow: var(--shadow-bubble-user);
+  opacity: 0.85;
+}
+
+/* 发送中的转圈改为白色，与绿色背景搭配 */
+.innerSending :global(.ant-spin-dot-item) {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.innerFailed {
+  padding: 6px 8px;
+  border-radius: 6px;
 }
 
 .innerFailed {
@@ -318,4 +330,9 @@
   color: var(--color-primary);
   font-weight: 500;
   cursor: default;
+}
+
+/* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
+.innerUser .mention {
+  color: rgba(255, 255, 255, 0.92);
 }
