@@ -179,6 +179,32 @@ func (h *GroupHandler) LeaveGroup(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// DissolveGroup 解散群聊
+func (h *GroupHandler) DissolveGroup(c *gin.Context) {
+	conversationID := c.Param("id")
+	if conversationID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "缺少群聊 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.DissolveGroup(c.Request.Context(), conversationID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotOwner) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40301, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50307, "解散群聊失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}
+
 // GetGroupInfo 获取群聊详情
 func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 	conversationID := c.Param("id")

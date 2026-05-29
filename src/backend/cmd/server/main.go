@@ -281,6 +281,7 @@ func main() {
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
 		groupRoutes.PUT("/:id/members/:memberId/role", groupHandler.ChangeMemberRole)
 		groupRoutes.POST("/:id/leave", groupHandler.LeaveGroup)
+		groupRoutes.POST("/:id/dissolve", groupHandler.DissolveGroup)
 	}
 
 	// 用户路由（需要鉴权）

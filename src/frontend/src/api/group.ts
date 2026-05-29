@@ -32,5 +32,8 @@ export const getGroupInfo = (groupId: string) =>
 export const leaveGroup = (groupId: string) =>
   post<void>(`/api/groups/${groupId}/leave`);
 
+export const dissolveGroup = (groupId: string) =>
+  post<void>(`/api/groups/${groupId}/dissolve`);
+
 export const changeMemberRole = (groupId: string, memberId: string, role: string) =>
   put<void>(`/api/groups/${groupId}/members/${memberId}/role`, { role });
