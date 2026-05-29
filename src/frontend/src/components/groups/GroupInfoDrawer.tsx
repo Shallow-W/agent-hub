@@ -76,7 +76,7 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
                 {info.conversation?.created_at ? new Date(info.conversation.created_at).toLocaleString() : "-"}
               </Descriptions.Item>
               <Descriptions.Item label="成员数">
-                {info.members.length}
+                {info.members?.length ?? 0}
               </Descriptions.Item>
             </Descriptions>
 
@@ -84,7 +84,7 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
               <TeamOutlined /> 成员列表
             </div>
 
-            {info.members.length === 0 ? (
+            {!info.members?.length ? (
               <Empty description="暂无成员" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <List
