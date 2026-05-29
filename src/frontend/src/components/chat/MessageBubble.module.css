@@ -1,29 +1,29 @@
 .bubble {
   display: flex;
-  width: min(100%, 820px);
+  width: min(100%, 900px);
   margin: 0 auto;
-  padding: 12px 24px;
+  padding: 14px 26px;
   position: relative;
 }
 
 .bubbleUser {
   flex-direction: row-reverse;
-  margin-right: -10px;
+  margin-right: -8px;
 }
 .bubbleAssistant {
   flex-direction: row;
-  margin-left: -30px;
+  margin-left: -24px;
 }
 .bubbleGrouped { padding-top: 3px; }
 
 .chatAvatar {
   flex-shrink: 0;
-  margin-top: 20px;
+  margin-top: 18px;
   color: var(--color-bg-white);
   background: var(--gradient-agent) !important;
   font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 0 0 2px var(--color-bg-white), 0 2px 8px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 0 0 2px var(--color-bg-white), 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
 .bubbleUser .chatAvatar { margin: 20px 0 0 10px; }
@@ -35,7 +35,7 @@
   display: flex;
   flex: 0 0 auto;
   width: fit-content;
-  max-width: min(440px, 70%);
+  max-width: min(520px, 72%);
   flex-direction: column;
   align-items: flex-start;
 }
@@ -45,9 +45,9 @@
 .meta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   min-height: 16px;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
   padding: 0 4px;
 }
 
@@ -69,26 +69,26 @@
   position: relative;
   display: inline-block;
   max-width: 100%;
-  padding: 10px 14px;
+  padding: 11px 16px;
   color: var(--color-text);
-  font-size: 13px;
-  line-height: 1.68;
+  font-size: 13.5px;
+  line-height: 1.7;
   word-break: break-word;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+  box-shadow: var(--shadow-bubble-assistant);
 }
 
 .innerUser {
   color: var(--color-bg-white);
-  background: linear-gradient(135deg, #4f8fd8 0%, #3194d2 100%);
-  border-radius: 16px 16px 5px 16px;
-  box-shadow: 0 7px 18px rgba(79, 143, 216, 0.16);
+  background: linear-gradient(135deg, var(--color-user-bubble-from) 0%, var(--color-user-bubble-to) 100%);
+  border-radius: 18px 18px 6px 18px;
+  box-shadow: var(--shadow-bubble-user);
 }
 
 .innerAssistant {
   color: var(--color-text);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(15, 23, 42, 0.055);
-  border-radius: 16px 16px 16px 5px;
+  background: var(--color-surface-strong);
+  border: 1px solid rgba(31, 35, 40, 0.06);
+  border-radius: 18px 18px 18px 6px;
 }
 
 .innerUser::after,
@@ -102,13 +102,13 @@
 
 .innerUser::after {
   right: -4px;
-  background: #3194d2;
+  background: var(--color-user-bubble-to);
   clip-path: polygon(0 0, 100% 100%, 0 100%);
 }
 
 .innerAssistant::after {
   left: -4px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--color-surface-strong);
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 
@@ -137,10 +137,10 @@
   height: 52px;
   pointer-events: none;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-bg-white) 78%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-surface-strong) 78%);
 }
 
-.innerUser .fadeMask { background: linear-gradient(180deg, rgba(22, 119, 255, 0), #1d8ff0 78%); }
+.innerUser .fadeMask { background: linear-gradient(180deg, rgba(47, 143, 107, 0), var(--color-user-bubble-to) 78%); }
 
 .innerAssistant :global(table),
 .innerUser :global(table) {
@@ -172,7 +172,7 @@
 .codeBlockWrapper {
   margin: 8px 0;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
   background-color: var(--color-bg-convlist);
 }

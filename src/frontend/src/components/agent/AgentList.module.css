@@ -24,18 +24,22 @@
 
 .card {
   width: 100%;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--color-bg);
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--color-surface-strong);
   text-align: left;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .card:hover,
 .cardActive {
-  border-color: var(--color-primary);
-  background: #f4f8ff;
+  border-color: rgba(47, 143, 107, 0.35);
+  background: var(--color-surface);
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
 }
 
 .card:focus-visible {

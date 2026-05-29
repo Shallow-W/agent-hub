@@ -1,15 +1,16 @@
 .searchPanel {
   max-height: 400px;
   overflow-y: auto;
-  border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-bg-white);
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
+  background-color: var(--color-surface);
+  backdrop-filter: blur(10px);
 }
 
 .searchBar {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
+  padding: 10px 12px;
 }
 
 .searchInput { flex: 1; }
@@ -20,7 +21,7 @@
 }
 
 .searchResultItem {
-  padding: 6px 12px !important;
+  padding: 8px 12px !important;
   cursor: pointer;
 }
 

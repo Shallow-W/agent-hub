@@ -1,9 +1,10 @@
 .container {
-  padding: 10px 16px 12px;
-  background: rgba(255, 255, 255, 0.96);
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  padding: 12px 18px 14px;
+  background: var(--color-surface);
+  border-top: 1px solid rgba(31, 35, 40, 0.08);
   position: relative;
   z-index: 1;
+  backdrop-filter: blur(10px);
 }
 
 .typingIndicator {
@@ -50,11 +51,11 @@
   align-items: center;
   max-width: none;
   margin: 0 auto;
-  padding: 5px 6px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 16px;
-  background: rgba(248, 250, 252, 0.96);
-  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  padding: 6px 8px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 18px;
+  background: var(--color-surface-strong);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
 .textarea {
@@ -63,7 +64,7 @@
   border: none !important;
   background: transparent !important;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
-  font-size: 13.5px !important;
+  font-size: 14px !important;
 }
 
 .textarea:focus-within {
@@ -86,27 +87,27 @@
 
 .attachBtn:hover,
 .expandBtn:hover {
-  color: #1677ff !important;
-  background: rgba(22, 119, 255, 0.08) !important;
+  color: var(--color-primary) !important;
+  background: rgba(47, 143, 107, 0.1) !important;
 }
 
 .sendBtn,
 .sendBtn:disabled {
   color: #aab2bd !important;
-  background: #eef2f6 !important;
+  background: #ece7df !important;
   border: none !important;
   box-shadow: none;
 }
 
 .sendBtn:not(:disabled) {
   color: #fff !important;
-  background: linear-gradient(135deg, #4a90e2, #2f9bdc) !important;
-  box-shadow: 0 6px 16px rgba(74, 144, 226, 0.24);
+  background: var(--gradient-brand) !important;
+  box-shadow: 0 10px 18px rgba(47, 143, 107, 0.28);
 }
 
 .sendBtn:not(:disabled):hover {
-  background: linear-gradient(135deg, #3c82d4, #238fd1) !important;
-  box-shadow: 0 8px 20px rgba(74, 144, 226, 0.3);
+  background: linear-gradient(135deg, #2b8161, #3ca874) !important;
+  box-shadow: 0 12px 24px rgba(47, 143, 107, 0.32);
 }
 
 .fileInput {
@@ -119,8 +120,8 @@
   gap: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
-  background: var(--color-bg-convlist);
-  border-radius: 8px;
+  background: var(--color-surface-muted);
+  border-radius: 12px;
   border-left: 3px solid var(--color-primary);
 }
 
