@@ -11,7 +11,6 @@ import {
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
-  RobotOutlined,
 } from '@ant-design/icons';
 import styles from './SettingsPanel.module.css';
 
