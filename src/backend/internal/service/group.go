@@ -14,6 +14,7 @@ type GroupRepo interface {
 	CreateGroup(ctx context.Context, ownerID, name string, memberIDs []string) (*model.Conversation, error)
 	AddMember(ctx context.Context, conversationID, userID, role string) error
 	RemoveMember(ctx context.Context, conversationID, userID string) error
+	DeleteGroup(ctx context.Context, conversationID string) error
 	ListMembers(ctx context.Context, conversationID string) ([]*model.ConversationMember, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	UpdateMemberRole(ctx context.Context, conversationID, userID, role string) error
@@ -164,6 +165,24 @@ func (s *GroupService) LeaveGroup(ctx context.Context, conversationID, userID st
 
 	if err := s.repo.RemoveMember(ctx, conversationID, userID); err != nil {
 		return fmt.Errorf("leave group: %w", err)
+	}
+	return nil
+}
+
+// DissolveGroup 解散群聊（仅群主可操作）
+func (s *GroupService) DissolveGroup(ctx context.Context, conversationID, userID string) error {
+	member, err := s.repo.GetMember(ctx, conversationID, userID)
+	if err != nil {
+		return fmt.Errorf("check member: %w", err)
+	}
+	if member == nil {
+		return ErrNotMember
+	}
+	if member.Role != "owner" {
+		return ErrNotOwner
+	}
+	if err := s.repo.DeleteGroup(ctx, conversationID); err != nil {
+		return fmt.Errorf("dissolve group: %w", err)
 	}
 	return nil
 }

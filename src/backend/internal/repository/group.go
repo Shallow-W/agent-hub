@@ -176,6 +176,27 @@ func (r *GroupRepo) GetConversationByID(ctx context.Context, id string) (*model.
 	return &c, nil
 }
 
+// DeleteGroup 删除群聊及其所有成员记录（事务）
+func (r *GroupRepo) DeleteGroup(ctx context.Context, conversationID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM conversation_members WHERE conversation_id = $1`, conversationID)
+	if err != nil {
+		return fmt.Errorf("delete members: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM conversations WHERE id = $1`, conversationID)
+	if err != nil {
+		return fmt.Errorf("delete conversation: %w", err)
+	}
+
+	return tx.Commit()
+}
+
 // GetUserByID 按 ID 查找用户
 func (r *GroupRepo) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	var u model.User

@@ -2,12 +2,14 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Avatar, Tooltip, Button, Dropdown, message as antMessage } from 'antd';
 import {
   FolderOpenOutlined,
+  LogoutOutlined,
   MoreOutlined,
   SearchOutlined,
   SettingOutlined,
   StopOutlined,
   UserAddOutlined,
   InfoCircleOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -16,6 +18,7 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import * as convApi from '@/api/conversation';
+import { leaveGroup, dissolveGroup } from '@/api/group';
 import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -200,6 +203,63 @@ export const ChatWindow: React.FC = () => {
             label: '群聊设置',
             onClick: () => setMemberPanelOpen(true),
           },
+          { type: 'divider' as const },
+          ...(activeConv.user_id === user?.id
+            ? [{
+                key: 'dissolve' as const,
+                icon: <DeleteOutlined />,
+                label: '解散群聊',
+                danger: true as const,
+                onClick: () => {
+                  antMessage.warning('确认解散？', 0);
+                  import('antd').then(({ Modal }) => {
+                    Modal.confirm({
+                      title: '解散群聊',
+                      content: '解散后所有成员将被移除，聊天记录将清除，此操作不可撤销。',
+                      okText: '确认解散',
+                      okType: 'danger',
+                      cancelText: '取消',
+                      onOk: async () => {
+                        try {
+                          await dissolveGroup(activeConv.id);
+                          antMessage.success('群聊已解散');
+                          fetchConversations();
+                          useConversationStore.getState().setActive(null);
+                        } catch {
+                          antMessage.error('解散失败');
+                        }
+                      },
+                    });
+                  });
+                },
+              }]
+            : [{
+                key: 'leave' as const,
+                icon: <LogoutOutlined />,
+                label: '退出群聊',
+                danger: true as const,
+                onClick: () => {
+                  import('antd').then(({ Modal }) => {
+                    Modal.confirm({
+                      title: '退出群聊',
+                      content: '退出后将不再接收此群聊消息。',
+                      okText: '确认退出',
+                      okType: 'danger',
+                      cancelText: '取消',
+                      onOk: async () => {
+                        try {
+                          await leaveGroup(activeConv.id);
+                          antMessage.success('已退出群聊');
+                          fetchConversations();
+                          useConversationStore.getState().setActive(null);
+                        } catch {
+                          antMessage.error('退出失败');
+                        }
+                      },
+                    });
+                  });
+                },
+              }]),
         ]
       : []),
   ];
