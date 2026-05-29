@@ -24,7 +24,7 @@ interface ConnectComputerModalProps {
   loading: boolean;
   onClose: () => void;
   onCreate: (name: string) => Promise<CreateDaemonMachineResponse>;
-  onAddCandidate: (id: string, name: string) => Promise<Agent>;
+  onAddCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
   onDeleteMachine: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
 }

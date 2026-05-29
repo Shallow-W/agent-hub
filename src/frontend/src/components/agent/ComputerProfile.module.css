@@ -1,0 +1,242 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  padding: 18px 22px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(22, 163, 101, 0.08), transparent 30%),
+    linear-gradient(180deg, #f7fafb 0%, #eef4f7 100%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+}
+
+.titleBlock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.machineAvatar {
+  flex-shrink: 0;
+  background: var(--gradient-agent) !important;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitle {
+  max-width: 520px;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #6f7b86;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerActions,
+.sectionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.headerActions :global(.ant-btn),
+.sectionActions :global(.ant-btn) {
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.section {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.028);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.sectionHint {
+  color: #6f7b86;
+  font-size: 12px;
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid rgba(15, 23, 42, 0.055);
+  border-left: 1px solid rgba(15, 23, 42, 0.055);
+}
+
+.infoItem {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-right: 1px solid rgba(15, 23, 42, 0.055);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
+}
+
+.infoLabel {
+  color: #6f7b86;
+  font-size: 12px;
+}
+
+.infoValue {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseList,
+.agentList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.baseCard,
+.agentRow {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.065);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.baseName,
+.agentName {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseMeta,
+.agentMeta,
+.agentPrompt {
+  overflow: hidden;
+  margin-top: 3px;
+  color: #6f7b86;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseTags,
+.agentTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.agentRow {
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.agentRow:hover,
+.agentRowActive {
+  border-color: rgba(22, 163, 101, 0.28);
+  box-shadow: 0 6px 14px rgba(22, 163, 101, 0.08);
+}
+
+.agentMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agentMain :global(.ant-avatar) {
+  flex-shrink: 0;
+  background: var(--gradient-agent) !important;
+}
+
+.agentInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.emptyRow,
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 92px;
+  color: #6f7b86;
+  font-size: 13px;
+}
+
+.empty {
+  height: 100%;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(22, 163, 101, 0.08), transparent 30%),
+    linear-gradient(180deg, #f7fafb 0%, #eef4f7 100%);
+}
+
+@media (max-width: 900px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .infoGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .baseList,
+  .agentList {
+    grid-template-columns: 1fr;
+  }
+}

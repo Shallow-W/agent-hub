@@ -20,7 +20,7 @@ interface AgentState {
   deleteDaemonMachine: (id: string) => Promise<void>;
   fetchAgentCandidates: () => Promise<void>;
   createDaemonMachine: (name: string) => Promise<CreateDaemonMachineResponse>;
-  addAgentCandidate: (id: string, name: string) => Promise<Agent>;
+  addAgentCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
   deleteAgent: (id: string) => Promise<void>;
@@ -99,8 +99,9 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   },
 
-  addAgentCandidate: async (id, name) => {
-    const agent = await agentApi.addAgentCandidate(id, { name });
+  addAgentCandidate: async (id, name, systemPrompt) => {
+    const payload = systemPrompt ? { name, system_prompt: systemPrompt } : { name };
+    const agent = await agentApi.addAgentCandidate(id, payload);
     set((state) => ({
       agents: sortAgents([...state.agents.filter((item) => item.id !== agent.id), agent]),
     }));

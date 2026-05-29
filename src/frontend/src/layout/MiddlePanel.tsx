@@ -21,7 +21,9 @@ interface MiddlePanelProps {
   onSwitchContacts: () => void;
   onRefreshContacts: () => void;
   selectedAgentId: string | null;
+  selectedMachineId: string | null;
   onSelectAgent: (agent: Agent) => void;
+  onSelectMachine: (machineId: string) => void;
 }
 
 const MiddlePanel: React.FC<MiddlePanelProps> = ({
@@ -37,7 +39,9 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   onSwitchContacts,
   onRefreshContacts,
   selectedAgentId,
+  selectedMachineId,
   onSelectAgent,
+  onSelectMachine,
 }) => {
   const renderPanelTools = (onAdd: () => void) => (
     <div className={styles.convPanelTools}>
@@ -54,7 +58,12 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
           <span className={styles.convPanelTitle}>智能体</span>
         </div>
         <div className={styles.middleScroll}>
-          <AgentList selectedAgentId={selectedAgentId} onSelect={onSelectAgent} />
+          <AgentList
+            selectedAgentId={selectedAgentId}
+            selectedMachineId={selectedMachineId}
+            onSelect={onSelectAgent}
+            onSelectMachine={onSelectMachine}
+          />
         </div>
       </>
     );

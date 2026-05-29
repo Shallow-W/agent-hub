@@ -20,7 +20,9 @@ export function useAgents() {
 
   useEffect(() => {
     fetchAgents();
-  }, [fetchAgents]);
+    fetchDaemonMachines();
+    fetchAgentCandidates();
+  }, [fetchAgents, fetchDaemonMachines, fetchAgentCandidates]);
 
   return {
     agents,

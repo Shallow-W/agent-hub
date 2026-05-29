@@ -1,7 +1,7 @@
 .container {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 12px;
   overflow: auto;
   flex: 1;
@@ -22,35 +22,155 @@
   gap: 6px;
 }
 
-.card {
+.machineCard {
   width: 100%;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 14px;
-  padding: 14px;
-  background: var(--color-surface-strong);
-  text-align: left;
-  cursor: pointer;
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  background: var(--color-bg-white);
   box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  overflow: hidden;
 }
 
-.card:hover,
-.cardActive {
+.machineCardActive {
   border-color: rgba(47, 143, 107, 0.35);
-  background: var(--color-surface);
-  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(47, 143, 107, 0.16);
 }
 
-.card:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+.machineHeader {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
 }
 
-.cardHeader {
+.machineHeader:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.machineLeft {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.machineAvatar {
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary);
+}
+
+.machineMeta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.machineTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.machineTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machineSub {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machineActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.machineCount {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 0 6px;
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expandIcon {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.machineBody {
+  border-top: 1px solid var(--color-border-light);
+  padding: 8px 12px 12px;
+  background: var(--color-bg-white);
+}
+
+
+.sectionLabel {
+  margin: 8px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.agentList,
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agentRow {
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--color-bg-white);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.agentRow:hover {
+  border-color: rgba(31, 35, 40, 0.2);
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+}
+
+.agentRowActive {
+  border-color: rgba(47, 143, 107, 0.4);
+  box-shadow: 0 8px 16px rgba(47, 143, 107, 0.16);
+}
+
+.agentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .agentMeta {
@@ -60,7 +180,7 @@
 
 .agentName {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
@@ -71,15 +191,52 @@
 .agentTool {
   display: block;
   margin-top: 2px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
-.tags {
+.agentTags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+}
+
+.candidateRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.candidateInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.candidateName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.candidateMeta {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machineEmpty {
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
 }
 
 .empty {

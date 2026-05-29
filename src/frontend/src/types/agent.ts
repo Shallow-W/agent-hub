@@ -65,4 +65,5 @@ export interface CreateDaemonMachineResponse {
 
 export interface AddCandidateAgentRequest {
   name: string;
+  system_prompt?: string;
 }

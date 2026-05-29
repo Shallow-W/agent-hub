@@ -46,7 +46,8 @@ type CreateDaemonMachineResponse struct {
 
 // AddCandidateAgentRequest 添加候选 Agent 请求体
 type AddCandidateAgentRequest struct {
-	Name string `json:"name" binding:"required,max=100"`
+	Name         string `json:"name" binding:"required,max=100"`
+	SystemPrompt string `json:"system_prompt"`
 }
 
 // List 查询可用 Agent 列表
@@ -91,7 +92,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name)
+	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.SystemPrompt)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentInvalidInput) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40038, err.Error())

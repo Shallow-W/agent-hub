@@ -22,6 +22,7 @@ import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
+import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 
@@ -49,7 +50,6 @@ const AppLayout: React.FC = () => {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
 
-  /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
     setActiveNav(key);
     if (key === 'settings') {
@@ -87,7 +87,6 @@ const AppLayout: React.FC = () => {
     }
   }, [activeNav, fetchFriends, fetchPending]);
 
-  // 只订阅未读总数，避免每个会话未读变化都触发布局重渲染。
   const totalUnread = useMessageStore((s) =>
     Object.values(s.unreadCounts).reduce((sum, c) => sum + c, 0),
   );
@@ -181,10 +180,8 @@ const AppLayout: React.FC = () => {
       antMessage.success('群聊创建成功');
       setGroupModalOpen(false);
       await fetchConversations();
-      // UX-02: 自动激活新创建的群聊
       if (conv?.id) {
         setActive(conv.id);
-        // UX-09: 群聊创建后自动打开成员面板
         useConversationStore.getState().setMemberPanelOpen(true);
       }
     } catch {
@@ -192,7 +189,6 @@ const AppLayout: React.FC = () => {
     }
   };
 
-  /** 点击好友开始私聊 */
   const handleStartChat = useCallback(async (friendId: string) => {
     try {
       const conv = await getOrCreatePrivateChat(friendId);
@@ -221,7 +217,6 @@ const AppLayout: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      {/* WebSocket disconnect alert — 仅在连接建立后断开时显示 */}
       {showDisconnectAlert && (
         <Alert
           message="连接已断开，正在重连..."
@@ -232,7 +227,6 @@ const AppLayout: React.FC = () => {
         />
       )}
 
-      {/* 左侧：设置面板 */}
       <div
         className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
       >
@@ -247,7 +241,6 @@ const AppLayout: React.FC = () => {
         />
       </div>
 
-      {/* 折叠/展开切换按钮 - 放在 settingsPanel 外部，避免 overflow 问题 */}
       <button
         className={`${styles.toggleBtn} ${
           settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
@@ -258,7 +251,6 @@ const AppLayout: React.FC = () => {
         {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
       </button>
 
-      {/* 中间：对话/好友/群聊列表 */}
       <div className={styles.convPanel}>
         <MiddlePanel
           activeNav={activeNav}
@@ -282,13 +274,21 @@ const AppLayout: React.FC = () => {
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
         {activeNav === 'models' ? (
-          <AgentProfile agent={selectedAgent} />
+          selectedAgent ? (
+            <AgentProfile agent={selectedAgent} />
+          ) : (
+            <ComputerProfile
+              machineId={selectedMachineId}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={handleSelectAgent}
+              onClearSelection={() => setSelectedMachineId(null)}
+            />
+          )
         ) : (
           <Outlet />
         )}
       </div>
 
-      {/* 群聊创建弹窗 */}
       <GroupCreateModal
         open={groupModalOpen}
         onCancel={() => setGroupModalOpen(false)}

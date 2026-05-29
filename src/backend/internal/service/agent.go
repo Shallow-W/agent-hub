@@ -30,7 +30,7 @@ type AgentRepo interface {
 	UpsertMachineAgent(ctx context.Context, userID, machineID, machineName, name, cliTool, version, capabilitiesJSON string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
-	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName string) (*model.Agent, error)
+	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error)
 	DeleteOwned(ctx context.Context, id, userID string) (bool, error)
@@ -221,12 +221,13 @@ func (s *AgentService) ListAgentCandidates(ctx context.Context, userID string) (
 }
 
 // AddCandidateAgent 将候选 Agent 添加成可用 Agent。
-func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName string) (*model.Agent, error) {
+func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error) {
 	displayName = strings.TrimSpace(displayName)
+	systemPrompt = strings.TrimSpace(systemPrompt)
 	if userID == "" || candidateID == "" || displayName == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName)
+	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("add candidate agent: %w", err)
 	}

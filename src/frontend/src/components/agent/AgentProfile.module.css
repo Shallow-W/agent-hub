@@ -84,7 +84,7 @@
 
 .tabs {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   padding: 6px 0 12px;
   border-bottom: 1px solid var(--color-border-light);
   background: transparent;
@@ -98,12 +98,12 @@
 
 .tab {
   height: 34px;
-  padding: 0 14px;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.4px;
   white-space: nowrap;
@@ -185,6 +185,11 @@
   margin-bottom: 18px;
 }
 
+.formGrid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 16px;
+}
 .label {
   display: block;
   margin-bottom: 6px;
@@ -211,6 +216,18 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+.tagPreview,
+.actionPanel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.actionPanel :global(.ant-btn) {
+  border-radius: 8px;
+  font-weight: 600;
+}
 
 .runtimeBadge {
   display: inline-flex;
@@ -230,7 +247,6 @@
   color: var(--color-primary);
   border-color: rgba(47, 143, 107, 0.24);
 }
-
 .reasoningBadge {
   background: rgba(245, 158, 11, 0.12);
   color: #8a5200;
@@ -255,7 +271,6 @@
   flex-direction: column;
   gap: 10px;
 }
-
 .capabilityItem {
   padding: 14px 16px;
   border: 1px solid rgba(31, 35, 40, 0.08);
@@ -275,10 +290,10 @@
 }
 
 @media (max-width: 900px) {
-  .infoGrid {
+  .infoGrid,
+  .formGrid {
     grid-template-columns: 1fr;
   }
-
   .actions {
     display: none;
   }

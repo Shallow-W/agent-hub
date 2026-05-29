@@ -16,6 +16,7 @@ type fakeAgentRepo struct {
 	machines     []model.DaemonMachine
 	machineAgent []string
 	candidates   []string
+	addedPrompt  string
 }
 
 func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
@@ -90,8 +91,9 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName string) (*model.Agent, error) {
-	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "system"}, nil
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error) {
+	r.addedPrompt = systemPrompt
+	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
 func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
@@ -183,6 +185,18 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "")
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestAddCandidateAgentStoresPrompt(t *testing.T) {
+	repo := &fakeAgentRepo{}
+	svc := NewAgentService(repo)
+	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "persona")
+	if err != nil {
+		t.Fatalf("add candidate agent failed: %v", err)
+	}
+	if repo.addedPrompt != "persona" {
+		t.Fatalf("expected system prompt stored, got %q", repo.addedPrompt)
 	}
 }
 
