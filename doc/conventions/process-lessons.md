@@ -79,3 +79,51 @@ cd /Users/shallow/Desktop/repo/agent-hub/src/frontend && npx tsc --noEmit
 - [ ] 用户交互（点击、提交）正确传递参数到 handler
 - [ ] handler 调用正确的 API 并处理响应/错误
 - [ ] UI 在空数据/加载中/错误状态下不崩溃
+
+---
+
+## 6. API 响应结构不一致导致的幽灵消息
+
+**问题**：用户发送带回复的消息后，左侧出现一条幽灵消息，显示为"助手 NaN:NaN"，内容仅为引用的原文。普通消息发送也存在同样问题（幽灵消息为空气泡，不易察觉）。
+
+**根因分析**：
+
+后端 `MessageHandler.Send` 返回 `SendMessageResult` 结构：
+
+```go
+type SendMessageResult struct {
+    UserMessage  *model.Message `json:"user_message"`
+    AgentMessage *model.Message `json:"agent_message,omitempty"`
+}
+```
+
+经 `middleware.CreatedResponse` 包装后，前端收到：
+```json
+{ "code": 0, "data": { "user_message": {...}, "agent_message": null } }
+```
+
+但前端 `api/message.ts` 的 `sendMessage` 直接将 `json.data` 当作 `Message` 类型返回。`client.ts` 的 `request<T>` 函数执行 `return json.data as T`，所以 `msg` 实际是 `{ user_message: {...}, agent_message: null }`，而非 `Message` 对象。
+
+`messageStore.ts` 收到后：
+1. `msg.id` → `undefined`（真正的 id 在 `msg.user_message.id`）
+2. `msg.content` → `undefined`
+3. `msg.role` → `undefined`
+4. `patchedMsg` 逻辑将 `reply_to_message` 拼到这个错误对象上 → 引用内容被渲染为独立气泡
+5. `MessageBubble` 渲染：`role` 缺失走 assistant 分支 → 显示"助手"，`created_at` 缺失 → `new Date(undefined)` → "NaN:NaN"
+
+由于幽灵消息 `id: undefined`，后续 WS 推送的真实消息无法通过 `addMessage` 去重（`findIndex` 比对 `undefined` vs 真实 ID 不匹配），导致两条消息同时存在。
+
+**修复**：在 `api/message.ts` 提取 `result.user_message`：
+
+```ts
+const result = await post<SendMessageResult>(...);
+return result.user_message;
+```
+
+**教训**：
+
+- **后端返回包装结构时，前端必须正确解包**。当 API 响应是 `{ user_message, agent_message }` 这种包装结构而非直接实体时，`post<T>` 的泛型 `T` 应为包装类型，然后手动提取所需字段
+- **TypeScript 类型系统无法在运行时防止此类错误**。`as T` 只是编译期断言，实际运行时数据结构不符时不会报错
+- **检查清单**：新增 API 调用时，必须确认后端实际返回结构与前端类型定义一致
+
+**影响范围**：所有通过 HTTP API 发送的消息（包括普通消息和回复消息）。WS 推送路径不受影响（WS handler 直接使用推送数据构造 Message 对象）。
