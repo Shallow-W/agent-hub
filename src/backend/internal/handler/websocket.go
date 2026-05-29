@@ -30,7 +30,7 @@ type MemberChecker interface {
 
 // WSMessageSender WS 消息持久化接口
 type WSMessageSender interface {
-	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error)
+	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*service.SendMessageResult, error)
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器

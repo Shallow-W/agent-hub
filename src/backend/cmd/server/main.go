@@ -45,6 +45,9 @@ type Config struct {
 		Secret      string `koanf:"secret"`
 		ExpiryHours int    `koanf:"expiry_hours"`
 	} `koanf:"jwt"`
+	Daemon struct {
+		Token string `koanf:"token"`
+	} `koanf:"daemon"`
 	CORS struct {
 		AllowedOrigins []string `koanf:"allowed_origins"`
 	} `koanf:"cors"`
@@ -106,13 +109,14 @@ func main() {
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo)
 	friendRepo := repository.NewFriendRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
 		JWTExpiryHours: cfg.JWT.ExpiryHours,
 	})
 	convSvc := service.NewConversationService(convRepo, friendRepo)
-	msgSvc := service.NewMessageService(msgRepo, convRepo)
+	msgSvc := service.NewMessageService(msgRepo, convRepo, agentRepo)
 	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
@@ -139,6 +143,7 @@ func main() {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
 		msgSvc.SetCacher(redisMsgRepo)
 	}
+	agentSvc := service.NewAgentService(agentRepo)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -150,6 +155,8 @@ func main() {
 	userHandler := handler.NewUserHandler(friendSvc, userSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
+	agentHandler := handler.NewAgentHandler(agentSvc)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -225,6 +232,18 @@ func main() {
 			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
+		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
+		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
+		apiGroup.GET("/agents", agentHandler.List)
+		apiGroup.POST("/agents", agentHandler.Create)
+		apiGroup.PUT("/agents/:id", agentHandler.Update)
+		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
+		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
+		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
+		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
+		apiGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		apiGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
 	}
 
 	// 好友路由（需要鉴权）
@@ -261,6 +280,10 @@ func main() {
 		userGroup.GET("/me", userHandler.GetProfile)
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
+	router.GET("/daemon/ws", daemonHandler.Handle)
+	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
+	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
+	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
@@ -273,7 +296,7 @@ func main() {
 		Addr:         addr,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 180 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

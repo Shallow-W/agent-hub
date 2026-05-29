@@ -36,6 +36,17 @@ export interface OptimisticMessage extends Message {
 
 export type DisplayMessage = Message | OptimisticMessage;
 
+export interface SendMessageResult {
+  user_message: Message;
+  agent_message?: Message;
+}
+
+export interface MessageArtifacts {
+  agent_id?: string;
+  agent_name?: string;
+  cli_tool?: string;
+}
+
 export interface StreamMessage {
   type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'message.recall' | 'error';
   data: {

@@ -1,5 +1,5 @@
 import { get, post, put, del } from './client';
-import type { Conversation, ConversationType } from '@/types/conversation';
+import type { Conversation, ConversationAgent, ConversationType } from '@/types/conversation';
 
 export async function getConversations(): Promise<Conversation[]> {
   return get<Conversation[]>('/api/conversations?limit=100');
@@ -47,4 +47,23 @@ export async function renameConversation(
 
 export async function markConversationRead(id: string): Promise<void> {
   return put<void>(`/api/conversations/${id}/read`);
+}
+
+export async function getConversationAgents(id: string): Promise<ConversationAgent[]> {
+  const agents = await get<ConversationAgent[] | null>(`/api/conversations/${id}/agents`);
+  return agents ?? [];
+}
+
+export async function addConversationAgent(
+  id: string,
+  agentId: string,
+): Promise<ConversationAgent> {
+  return post<ConversationAgent>(`/api/conversations/${id}/agents`, { agent_id: agentId });
+}
+
+export async function removeConversationAgent(
+  id: string,
+  agentId: string,
+): Promise<void> {
+  return del<void>(`/api/conversations/${id}/agents/${agentId}`);
 }

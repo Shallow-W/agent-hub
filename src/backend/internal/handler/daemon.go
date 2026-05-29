@@ -1,0 +1,213 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/service"
+	"github.com/gin-gonic/gin"
+	"nhooyr.io/websocket"
+)
+
+// DaemonHandler 处理本地守护进程连接
+type DaemonHandler struct {
+	agentSvc       *service.AgentService
+	token          string
+	logger         *slog.Logger
+	allowedOrigins []string
+}
+
+// NewDaemonHandler 创建 daemon WebSocket 处理器
+func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog.Logger, allowedOrigins []string) *DaemonHandler {
+	return &DaemonHandler{
+		agentSvc:       agentSvc,
+		token:          token,
+		logger:         logger,
+		allowedOrigins: allowedOrigins,
+	}
+}
+
+// Handle 处理 daemon WebSocket 连接
+func (h *DaemonHandler) Handle(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40120, "message": "无效 daemon token", "data": nil})
+		return
+	}
+
+	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
+		OriginPatterns: h.allowedOrigins,
+	})
+	if err != nil {
+		h.logger.Error("daemon websocket accept failed", "error", err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "disconnect")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.readLoop(ctx, conn, machine)
+}
+
+// RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
+func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40120, "message": "无效 daemon token", "data": nil})
+		return
+	}
+
+	var req struct {
+		MachineID string                    `json:"machine_id"`
+		Agents    []service.DiscoveredAgent `json:"agents"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 40040, "message": "daemon 注册参数错误: " + err.Error(), "data": nil})
+		return
+	}
+
+	registerCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	if machine != nil {
+		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
+			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
+		return
+	}
+
+	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.Agents); err != nil {
+		h.logger.Error("register system agents failed", "machine_id", req.MachineID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 50041, "message": "注册系统 Agent 失败", "data": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
+}
+
+// ClaimTask 让已连接电脑领取一条待执行的真实 CLI 任务。
+func (h *DaemonHandler) ClaimTask(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil || machine == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40121, "message": "无效 machine key", "data": nil})
+		return
+	}
+
+	taskCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	task, err := h.agentSvc.ClaimDaemonTask(taskCtx, machine)
+	if err != nil {
+		h.logger.Error("claim daemon task failed", "machine", machine.ID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 50042, "message": "领取 daemon 任务失败", "data": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": task})
+}
+
+// CompleteTask 接收电脑 daemon 对真实 CLI 任务的执行结果。
+func (h *DaemonHandler) CompleteTask(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil || machine == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40122, "message": "无效 machine key", "data": nil})
+		return
+	}
+
+	var req struct {
+		Result string `json:"result"`
+		Error  string `json:"error"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 40041, "message": "任务结果参数错误: " + err.Error(), "data": nil})
+		return
+	}
+
+	taskCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	if err := h.agentSvc.CompleteDaemonTask(taskCtx, machine, c.Param("id"), req.Result, req.Error); err != nil {
+		h.logger.Error("complete daemon task failed", "machine", machine.ID, "task", c.Param("id"), "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 50043, "message": "提交 daemon 任务结果失败", "data": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
+}
+
+func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (*model.DaemonMachine, error) {
+	if token == "" {
+		return nil, service.ErrAgentInvalidInput
+	}
+	if h.token != "" && token == h.token {
+		return nil, nil
+	}
+
+	authCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return h.agentSvc.GetDaemonMachineByAPIKey(authCtx, token)
+}
+
+func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, machine *model.DaemonMachine) {
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			h.logger.Debug("daemon websocket read end", "error", err)
+			return
+		}
+
+		var envelope struct {
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			h.logger.Warn("invalid daemon message", "error", err)
+			continue
+		}
+
+		switch envelope.Type {
+		case "daemon.register":
+			h.handleRegister(ctx, envelope.Data, machine)
+		case "ping":
+			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`)); err != nil {
+				h.logger.Warn("daemon pong failed", "error", err)
+				return
+			}
+		default:
+			h.logger.Warn("unknown daemon message", "type", envelope.Type)
+		}
+	}
+}
+
+func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage, machine *model.DaemonMachine) {
+	var req struct {
+		MachineID string                    `json:"machine_id"`
+		Agents    []service.DiscoveredAgent `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid daemon register data", "error", err)
+		return
+	}
+
+	registerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if machine != nil {
+		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
+			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
+			return
+		}
+		h.logger.Info("daemon machine agents registered", "machine_id", req.MachineID, "machine", machine.ID, "count", len(req.Agents))
+		return
+	}
+
+	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.Agents); err != nil {
+		h.logger.Error("register system agents failed", "machine_id", req.MachineID, "error", err)
+		return
+	}
+	h.logger.Info("daemon agents registered", "machine_id", req.MachineID, "count", len(req.Agents))
+}

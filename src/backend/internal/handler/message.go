@@ -30,6 +30,7 @@ type SendMessageRequest struct {
 	ArtifactsJSON string                    `json:"artifacts_json"`
 	Attachments   []model.MessageAttachment `json:"attachments"`
 	ReplyTo       *string                   `json:"reply_to"`
+	AgentID       string                    `json:"agent_id"`
 }
 
 // Send 发送消息
@@ -47,7 +48,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo)
+	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo, req.AgentID)
 	if err != nil {
 		slog.Error("send message failed", "error", err, "convID", convID, "userID", userID)
 		if errors.Is(err, service.ErrMsgConvNotFound) {
@@ -68,6 +69,22 @@ func (h *MessageHandler) Send(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrMsgEmptyContent) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40042, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40422, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgAgentNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40322, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgAgentOffline) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40024, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgAgentTimeout) {
+			middleware.ErrorResponse(c, http.StatusGatewayTimeout, 50420, err.Error())
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50020, "发送消息失败")

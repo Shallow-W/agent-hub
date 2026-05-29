@@ -1,0 +1,196 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.nameRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.commandPanel {
+  border: 2px solid #111;
+  background: #fff;
+}
+
+.commandHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #111;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.command {
+  max-height: 160px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  background: #0f1115;
+  color: #9cff6a;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.commandEmpty {
+  padding: 14px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.waitingPanel {
+  border: 2px solid #111;
+  background: #fff4c7;
+}
+
+.waitingTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  color: #111;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.waitingDot {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #111;
+  border-radius: 50%;
+  background: #ffb37a;
+}
+
+.connectedDot {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #111;
+  border-radius: 50%;
+  background: #52c41a;
+}
+
+.machineList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.machineItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #111;
+  background: #fff;
+}
+
+.machineMeta {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connectedIcon {
+  color: #52c41a;
+}
+
+.empty {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.errorMessage {
+  padding: 8px 10px;
+  border: 1px solid #ff7875;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 13px;
+}
+
+.candidatePanel {
+  border: 2px solid #111;
+  background: #fff;
+}
+
+.candidateTitle {
+  padding: 10px 12px;
+  border-bottom: 1px solid #111;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.candidateItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+}
+
+.candidateEmpty {
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.candidateMeta {
+  min-width: 0;
+}
+
+.candidateMeta span {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .nameRow {
+    grid-template-columns: 1fr;
+  }
+
+  .machineItem {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .candidateItem {
+    grid-template-columns: 1fr;
+  }
+
+}

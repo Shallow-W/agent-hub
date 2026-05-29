@@ -58,6 +58,11 @@ func (h *ConversationHandler) GetOrCreatePrivate(c *gin.Context) {
 	middleware.SuccessResponse(c, conv)
 }
 
+// AgentMemberRequest 添加 Robot 成员请求体。
+type AgentMemberRequest struct {
+	AgentID string `json:"agent_id" binding:"required"`
+}
+
 // Create 创建新对话
 func (h *ConversationHandler) Create(c *gin.Context) {
 	var req CreateRequest
@@ -261,5 +266,68 @@ func (h *ConversationHandler) UnarchiveConversation(c *gin.Context) {
 		return
 	}
 
+	middleware.SuccessResponse(c, nil)
+}
+
+// ListAgents 查询当前对话中的 Robot 成员。
+func (h *ConversationHandler) ListAgents(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	list, err := h.svc.ListConversationAgents(c.Request.Context(), userID, c.Param("id"))
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40412, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40312, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50014, "查询对话 Robot 失败")
+		return
+	}
+	middleware.SuccessResponse(c, list)
+}
+
+// AddAgent 把一个已创建 Agent 作为 Robot 加入当前对话。
+func (h *ConversationHandler) AddAgent(c *gin.Context) {
+	var req AgentMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40014, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	item, err := h.svc.AddConversationAgent(c.Request.Context(), userID, c.Param("id"), req.AgentID)
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40413, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40313, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50015, "添加对话 Robot 失败")
+		return
+	}
+	middleware.CreatedResponse(c, item)
+}
+
+// RemoveAgent 从当前对话移除 Robot。
+func (h *ConversationHandler) RemoveAgent(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	err := h.svc.RemoveConversationAgent(c.Request.Context(), userID, c.Param("id"), c.Param("agentID"))
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40314, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50016, "移除对话 Robot 失败")
+		return
+	}
 	middleware.SuccessResponse(c, nil)
 }

@@ -22,6 +22,7 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
+  flex: 1;
 }
 
 .conversationAvatar {
@@ -53,6 +54,26 @@
   color: var(--color-text-secondary);
   font-size: 11px;
   font-weight: 600;
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.robotStrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  overflow: hidden;
+}
+
+.robotHint {
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .headerActions {

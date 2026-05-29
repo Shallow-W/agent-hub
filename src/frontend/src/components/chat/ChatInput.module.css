@@ -16,6 +16,34 @@
   font-weight: 500;
 }
 
+.agentRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 260px) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.agentSelect {
+  min-width: 0;
+}
+
+.addRobotButton {
+  flex-shrink: 0;
+}
+
+.agentHint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addRobotSelect {
+  width: 100%;
+}
+
 .inputRow {
   display: flex;
   gap: 7px;
@@ -113,4 +141,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .agentRow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .agentHint {
+    display: none;
+  }
 }

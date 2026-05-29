@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -53,6 +54,14 @@ type ConvRepoForMsg interface {
 	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
 }
 
+// AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
+type AgentRepoForMsg interface {
+	GetByID(ctx context.Context, id string) (*model.Agent, error)
+	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
+	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error)
+	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
+}
+
 var (
 	ErrMsgConvNotFound = errors.New("对话不存在")
 	ErrMsgConvNoPerm   = errors.New("无权操作此对话")
@@ -64,19 +73,29 @@ var (
 	ErrMsgEmptyContent  = errors.New("消息内容不能为空")
 	ErrMsgReplyNotFound = errors.New("回复的消息不存在")
 	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
+	ErrMsgAgentNoPerm  = errors.New("无权使用此 Agent")
+	ErrMsgAgentOffline = errors.New("Agent 未连接电脑，无法执行真实 CLI")
+	ErrMsgAgentTimeout = errors.New("Agent 执行超时")
 )
 
 // MessageService 消息业务逻辑
 type MessageService struct {
-	msgRepo  MsgRepo
-	convRepo ConvRepoForMsg
-	notifier MessageNotifier
-	cacher   MessageCacher
+	msgRepo   MsgRepo
+	convRepo  ConvRepoForMsg
+	agentRepo AgentRepoForMsg
+	notifier  MessageNotifier
+	cacher    MessageCacher
+}
+
+// SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
+type SendMessageResult struct {
+	UserMessage  *model.Message `json:"user_message"`
+	AgentMessage *model.Message `json:"agent_message,omitempty"`
 }
 
 // NewMessageService 创建消息服务
-func NewMessageService(msgRepo MsgRepo, convRepo ConvRepoForMsg) *MessageService {
-	return &MessageService{msgRepo: msgRepo, convRepo: convRepo}
+func NewMessageService(msgRepo MsgRepo, convRepo ConvRepoForMsg, agentRepo AgentRepoForMsg) *MessageService {
+	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, agentRepo: agentRepo}
 }
 
 // SetNotifier 注入消息推送器（避免循环依赖，由 main.go 调用）
@@ -106,12 +125,12 @@ func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conver
 }
 
 // SendMessage 发送消息：持久化 → 推送 → 缓存
-func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*model.Message, error) {
-	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil)
+func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*SendMessageResult, error) {
+	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil, "")
 }
 
-// SendMessageWithReply 发送消息（支持回复引用）
-func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string) (*model.Message, error) {
+// SendMessageWithReply 发送消息（支持回复引用和 Agent 回复）
+func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, agentID string) (*SendMessageResult, error) {
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
@@ -157,10 +176,26 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		return nil, fmt.Errorf("create message: %w", err)
 	}
 
+	result := &SendMessageResult{UserMessage: msg}
+
+	// Agent 回复
+	if strings.TrimSpace(agentID) != "" {
+		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content)
+		if err != nil {
+			return nil, err
+		}
+		result.AgentMessage = agentMsg
+	}
+
 	// 异步推送和缓存（失败不影响消息持久化）
 	go s.postPersist(convID, userID, msg)
 
-	return msg, nil
+	// 刷新对话的 updated_at
+	if err := s.convRepo.UpdateTimestamp(ctx, convID); err != nil {
+		return nil, fmt.Errorf("update conversation timestamp: %w", err)
+	}
+
+	return result, nil
 }
 
 // postPersist 持久化后的推送和缓存操作
@@ -422,4 +457,82 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	}()
 
 	return nil
+}
+
+// createAgentReply 生成 Agent 回复消息
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent string) (*model.Message, error) {
+	if s.agentRepo == nil {
+		return nil, ErrAgentNotFound
+	}
+	agent, err := s.agentRepo.GetByID(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	if agent.UserID != nil && *agent.UserID != userID {
+		return nil, ErrMsgAgentNoPerm
+	}
+	ok, err := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check conversation agent: %w", err)
+	}
+	if !ok {
+		return nil, ErrMsgAgentNoPerm
+	}
+	if agent.MachineID == nil || *agent.MachineID == "" {
+		return nil, ErrMsgAgentOffline
+	}
+
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent)
+	if err != nil {
+		return nil, fmt.Errorf("create daemon task: %w", err)
+	}
+	task, err = s.waitDaemonTask(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if task.Status == "failed" {
+		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
+	}
+
+	artifacts, err := json.Marshal(map[string]string{
+		"agent_id":   agent.ID,
+		"agent_name": agent.Name,
+		"cli_tool":   agent.CLITool,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
+	}
+
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create agent reply: %w", err)
+	}
+	return msg, nil
+}
+
+func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(600 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("get daemon task: %w", err)
+		}
+		if task != nil && (task.Status == "completed" || task.Status == "failed") {
+			return task, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ErrMsgAgentTimeout
+		case <-ticker.C:
+		}
+	}
 }
