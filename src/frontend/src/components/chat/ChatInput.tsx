@@ -52,6 +52,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const [mentionIndex, setMentionIndex] = useState(0);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
+  const [mentionTargetsLoaded, setMentionTargetsLoaded] = useState(false);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
   const textareaRef = useRef<TextAreaRef>(null);
 
@@ -62,19 +63,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
 
+  const fetchMentionTargets = useCallback(async () => {
+    if (!isGroup) return { members, agentMembers };
+    const [nextMembers, nextAgents] = await Promise.all([
+      getGroupMembers(conversationId),
+      getConversationAgents(conversationId),
+    ]);
+    const safeMembers = nextMembers ?? [];
+    const safeAgents = nextAgents ?? [];
+    setMembers(safeMembers);
+    setAgentMembers(safeAgents);
+    setMentionTargetsLoaded(true);
+    return { members: safeMembers, agentMembers: safeAgents };
+  }, [agentMembers, conversationId, isGroup, members]);
+
   const loadMentionTargets = useCallback(() => {
-    if (!isGroup) return;
-    if (members.length === 0) {
-      getGroupMembers(conversationId).then((list) => {
-        setMembers(list ?? []);
-      }).catch((err) => console.error('Failed to load group members:', err));
-    }
-    if (agentMembers.length === 0) {
-      getConversationAgents(conversationId).then((list) => {
-        setAgentMembers(list ?? []);
-      }).catch((err) => console.error('Failed to load conversation agents:', err));
-    }
-  }, [agentMembers.length, conversationId, isGroup, members.length]);
+    if (!isGroup || mentionTargetsLoaded) return;
+    fetchMentionTargets().catch((err) => console.error('Failed to load mention targets:', err));
+  }, [fetchMentionTargets, isGroup, mentionTargetsLoaded]);
+
+  useEffect(() => {
+    setMembers([]);
+    setAgentMembers([]);
+    setMentionTargetsLoaded(false);
+  }, [conversationId]);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,11 +227,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     let mentions: string[] | undefined;
     let mentionedAgentId: string | undefined;
     if (isGroup) {
-      const userMentions = members
+      const targetLists = trimmed.includes('@') && !mentionTargetsLoaded
+        ? await fetchMentionTargets()
+        : { members, agentMembers };
+      const userMentions = targetLists.members
         .filter((member) => member.username && hasMention(trimmed, member.username))
         .map((member) => member.user_id);
       mentions = userMentions.length > 0 ? userMentions : undefined;
-      mentionedAgentId = agentMembers.find((agent) => hasMention(trimmed, agent.name))?.agent_id;
+      mentionedAgentId = targetLists.agentMembers.find((agent) => hasMention(trimmed, agent.name))?.agent_id;
     }
 
     setSending(true);
@@ -251,7 +266,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, agentMembers, hasMention, directAgentId]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, mentionTargetsLoaded, fetchMentionTargets, members, agentMembers, hasMention, directAgentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

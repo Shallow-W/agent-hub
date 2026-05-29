@@ -322,18 +322,35 @@ const AppLayout: React.FC = () => {
         open={newConvModalOpen}
         onCancel={() => setNewConvModalOpen(false)}
         onCreate={async (title, memberIds, agentIds) => {
-          if (memberIds.length > 0 || agentIds.length > 0) {
-            const conv = await createGroup({ name: title, member_ids: memberIds });
-            await Promise.all(agentIds.map((agentId) => addConversationAgent(conv.id, agentId)));
-            await fetchConversations();
-            setActive(conv.id);
+          try {
             if (memberIds.length > 0 || agentIds.length > 0) {
+              const conv = await createGroup({ name: title, member_ids: memberIds });
+              const results = await Promise.allSettled(
+                agentIds.map((agentId) => addConversationAgent(conv.id, agentId)),
+              );
+              const failed = results.filter((result) => result.status === 'rejected').length;
+              await fetchConversations();
+              setActive(conv.id);
+              setActiveNav('chat');
+              if (location.pathname !== '/') {
+                navigate('/');
+              }
               useConversationStore.getState().setMemberPanelOpen(true);
+              if (failed > 0) {
+                antMessage.warning(`对话已创建，${failed} 个智能体拉入失败`);
+              }
+            } else {
+              await create('single', title);
+              setActiveNav('chat');
+              if (location.pathname !== '/') {
+                navigate('/');
+              }
             }
-          } else {
-            await create('single', title);
+            setNewConvModalOpen(false);
+          } catch {
+            antMessage.error('创建对话失败');
+            throw new Error('创建对话失败');
           }
-          setNewConvModalOpen(false);
         }}
       />
       <ArchivedConversationsModal

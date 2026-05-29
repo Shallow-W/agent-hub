@@ -454,6 +454,7 @@ func (r *ConversationRepo) AddAgent(ctx context.Context, conversationID, agentID
 			 FROM conversations c
 			 JOIN agents a ON a.id = $2
 			 WHERE c.id = $1
+			   AND c.type = 'group'
 			   AND (c.user_id = $3 OR EXISTS (
 			       SELECT 1 FROM conversation_members cm
 			       WHERE cm.conversation_id = c.id
@@ -493,6 +494,7 @@ func (r *ConversationRepo) RemoveAgent(ctx context.Context, conversationID, agen
 			 WHERE ca.conversation_id = c.id
 			   AND ca.conversation_id = $1
 			   AND ca.agent_id = $2
+			   AND c.type = 'group'
 			   AND (c.user_id = $3 OR EXISTS (
 			       SELECT 1 FROM conversation_members cm
 			       WHERE cm.conversation_id = c.id

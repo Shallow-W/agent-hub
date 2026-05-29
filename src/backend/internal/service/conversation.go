@@ -356,6 +356,9 @@ func (s *ConversationService) ListConversationAgents(ctx context.Context, userID
 }
 
 func (s *ConversationService) canManageConversationAgents(ctx context.Context, userID string, conv *model.Conversation) error {
+	if conv.Type != "group" {
+		return ErrConvNotGroup
+	}
 	if conv.UserID == userID {
 		return nil
 	}
@@ -366,7 +369,7 @@ func (s *ConversationService) canManageConversationAgents(ctx context.Context, u
 	if member == nil {
 		return ErrConvNoPerm
 	}
-	if conv.Type == "group" && (member.Role == "owner" || member.Role == "admin") {
+	if member.Role == "owner" || member.Role == "admin" {
 		return nil
 	}
 	return ErrConvNoPerm
