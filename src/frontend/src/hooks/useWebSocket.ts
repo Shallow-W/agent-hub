@@ -89,6 +89,8 @@ export function useWebSocket() {
               attachments: msg.data.attachments,
               sender_id: msg.data.sender_id,
               username: msg.data.username,
+              reply_to: msg.data.reply_to ?? null,
+              reply_to_message: msg.data.reply_to_message ?? null,
             });
           } else if (messageId && content) {
             // Streaming completion

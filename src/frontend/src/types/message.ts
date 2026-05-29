@@ -69,5 +69,7 @@ export interface StreamMessage {
     message?: string;
     userId?: string;
     attachments?: MessageAttachment[];
+    reply_to?: string | null;
+    reply_to_message?: ReplyToPreview | null;
   };
 }
