@@ -167,7 +167,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           },
         };
       });
-    } catch {
+    } catch (err) {
       // Mark optimistic message as failed
       set((state) => {
         const updated = (state.optimisticMessages[conversationId] ?? []).map(
@@ -180,6 +180,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           },
         };
       });
+      throw err;
     }
   },
 
@@ -307,7 +308,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           },
         };
       });
-    } catch {
+    } catch (err) {
       // Mark as failed again
       set((s) => {
         const updated = (s.optimisticMessages[conversationId] ?? []).map(
@@ -320,6 +321,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           },
         };
       });
+      throw err;
     }
   },
 

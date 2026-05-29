@@ -2,9 +2,12 @@ import { create } from 'zustand';
 import type { Conversation, ConversationType } from '@/types/conversation';
 import * as convApi from '@/api/conversation';
 
+const DIRECT_AGENT_CHATS_KEY = 'agenthub_direct_agent_chats';
+
 interface ConversationState {
   conversations: Conversation[];
   activeConversationId: string | null;
+  directAgentChats: Record<string, string>;
   memberPanelOpen: boolean;
   loading: boolean;
   _fetching: boolean;
@@ -15,7 +18,21 @@ interface ConversationState {
   togglePin: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setActive: (id: string | null) => void;
+  bindDirectAgentChat: (conversationId: string, agentId: string) => void;
   setMemberPanelOpen: (open: boolean) => void;
+}
+
+function loadDirectAgentChats(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(DIRECT_AGENT_CHATS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, string>
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 /** 置顶优先，再按更新时间倒序 */
@@ -29,6 +46,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
   activeConversationId: localStorage.getItem('agenthub_active_conv'),
+  directAgentChats: loadDirectAgentChats(),
   memberPanelOpen: false,
   loading: false,
   _fetching: false,
@@ -125,6 +143,14 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (id) localStorage.setItem('agenthub_active_conv', id);
     else localStorage.removeItem('agenthub_active_conv');
     set({ activeConversationId: id, memberPanelOpen: false });
+  },
+
+  bindDirectAgentChat: (conversationId, agentId) => {
+    set((state) => {
+      const next = { ...state.directAgentChats, [conversationId]: agentId };
+      localStorage.setItem(DIRECT_AGENT_CHATS_KEY, JSON.stringify(next));
+      return { directAgentChats: next };
+    });
   },
 
   setMemberPanelOpen: (open) => {

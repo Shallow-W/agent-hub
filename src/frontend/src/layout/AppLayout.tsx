@@ -10,7 +10,9 @@ import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
 import {
   addConversationAgent,
+  createConversation,
   getArchivedConversations,
+  getConversationAgents,
   unarchiveConversation,
 } from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
@@ -36,6 +38,8 @@ const AppLayout: React.FC = () => {
   const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const setActive = useConversationStore((s) => s.setActive);
+  const directAgentChats = useConversationStore((s) => s.directAgentChats);
+  const bindDirectAgentChat = useConversationStore((s) => s.bindDirectAgentChat);
   const { status } = useWebSocket();
   const wasConnectedRef = useRef(false);
   useEffect(() => {
@@ -53,6 +57,7 @@ const AppLayout: React.FC = () => {
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
+  const creatingAgentChatsRef = useRef<Set<string>>(new Set());
 
   const handleNavChange = useCallback((key: string) => {
     setActiveNav(key);
@@ -205,19 +210,36 @@ const AppLayout: React.FC = () => {
   }, [fetchConversations, setActive]);
 
   const handleStartAgentChat = useCallback(async (agent: Agent) => {
+    if (creatingAgentChatsRef.current.has(agent.id)) return;
+    creatingAgentChatsRef.current.add(agent.id);
     try {
-      const existing = conversations.find((conv) => (
-        conv.type === 'group' && conv.title === agent.name
+      const existingEntry = Object.entries(directAgentChats).find(([, agentId]) => (
+        agentId === agent.id
       ));
-      const conv = existing ?? await create('group', agent.name);
+      const existing = existingEntry
+        ? conversations.find((conv) => conv.id === existingEntry[0])
+        : undefined;
+      let conv = existing;
+      if (!conv) {
+        const groups = conversations.filter((item) => item.type === 'group');
+        const checks = await Promise.all(groups.map(async (item) => {
+          const members = await getConversationAgents(item.id).catch(() => []);
+          return members.length === 1 && members[0]?.agent_id === agent.id ? item : null;
+        }));
+        conv = checks.find((item): item is Conversation => item !== null);
+      }
+      conv = conv ?? await createConversation('group', agent.name);
       await addConversationAgent(conv.id, agent.id);
+      bindDirectAgentChat(conv.id, agent.id);
       await fetchConversations();
       setActive(conv.id);
       setActiveNav('chat');
     } catch {
       antMessage.error('创建智能体对话失败');
+    } finally {
+      creatingAgentChatsRef.current.delete(agent.id);
     }
-  }, [conversations, create, fetchConversations, setActive]);
+  }, [bindDirectAgentChat, conversations, directAgentChats, fetchConversations, setActive]);
 
   const agents = useAgentStore((s) => s.agents);
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null;
