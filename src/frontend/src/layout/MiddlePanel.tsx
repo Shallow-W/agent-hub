@@ -3,7 +3,9 @@ import { Button } from 'antd';
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import ContactsPanel from '@/components/contacts/ContactsPanel';
+import { AgentList } from '@/components/agent/AgentList';
 import type { Conversation } from '@/types/conversation';
+import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 
 interface MiddlePanelProps {
@@ -18,6 +20,8 @@ interface MiddlePanelProps {
   onSwitchChat: () => void;
   onSwitchContacts: () => void;
   onRefreshContacts: () => void;
+  selectedAgentId: string | null;
+  onSelectAgent: (agent: Agent) => void;
 }
 
 const MiddlePanel: React.FC<MiddlePanelProps> = ({
@@ -32,6 +36,8 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   onSwitchChat,
   onSwitchContacts,
   onRefreshContacts,
+  selectedAgentId,
+  onSelectAgent,
 }) => {
   const renderPanelTools = (onAdd: () => void) => (
     <div className={styles.convPanelTools}>
@@ -40,6 +46,19 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
       <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={onRefresh} />
     </div>
   );
+
+  if (activeNav === 'models') {
+    return (
+      <>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>智能体</span>
+        </div>
+        <div className={styles.middleScroll}>
+          <AgentList selectedAgentId={selectedAgentId} onSelect={onSelectAgent} />
+        </div>
+      </>
+    );
+  }
 
   if (activeNav === 'contacts') {
     return (

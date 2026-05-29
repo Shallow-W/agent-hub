@@ -20,6 +20,8 @@ import { getOrCreatePrivateChat } from '@/api/conversation';
 import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
+import { AgentProfile } from '@/components/agent/AgentProfile';
+import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
@@ -43,6 +45,7 @@ const AppLayout: React.FC = () => {
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
@@ -234,12 +237,18 @@ const AppLayout: React.FC = () => {
           onSwitchChat={() => setActiveNav('chat')}
           onSwitchContacts={() => setActiveNav('contacts')}
           onRefreshContacts={handleRefreshContacts}
+          selectedAgentId={selectedAgent?.id ?? null}
+          onSelectAgent={setSelectedAgent}
         />
       </div>
 
-      {/* 右侧：聊天区域 */}
+      {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={styles.chatPanel}>
-        <Outlet />
+        {activeNav === 'models' ? (
+          <AgentProfile agent={selectedAgent} />
+        ) : (
+          <Outlet />
+        )}
       </div>
 
       {/* 群聊创建弹窗 */}
