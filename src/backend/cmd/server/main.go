@@ -235,6 +235,7 @@ func main() {
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
 		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
 		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
 		apiGroup.GET("/agents", agentHandler.List)

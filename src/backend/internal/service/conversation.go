@@ -38,6 +38,8 @@ type ConvRepo interface {
 	AddMember(ctx context.Context, conversationID, userID, role string) error
 	FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error)
 	CreatePrivateChat(ctx context.Context, userID, friendID, title string) (*model.Conversation, error)
+	FindAgentChat(ctx context.Context, userID, agentID string) (*model.Conversation, error)
+	CreateAgentChat(ctx context.Context, userID, agentID string) (*model.Conversation, error)
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	AddAgent(ctx context.Context, conversationID, agentID, userID string) (*model.ConversationAgent, error)
 	RemoveAgent(ctx context.Context, conversationID, agentID, userID string) (bool, error)
@@ -117,6 +119,28 @@ func (s *ConversationService) GetOrCreatePrivateChat(ctx context.Context, userID
 	}
 	// 不存在则创建
 	return s.repo.CreatePrivateChat(ctx, userID, friendID, "私聊")
+}
+
+// GetOrCreateAgentChat 查找或创建当前用户和指定 Agent 的一对一会话。
+func (s *ConversationService) GetOrCreateAgentChat(ctx context.Context, userID, agentID string) (*model.Conversation, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, ErrConvNotFound
+	}
+	conv, err := s.repo.FindAgentChat(ctx, userID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("find agent chat: %w", err)
+	}
+	if conv != nil {
+		return conv, nil
+	}
+	conv, err = s.repo.CreateAgentChat(ctx, userID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("create agent chat: %w", err)
+	}
+	if conv == nil {
+		return nil, ErrConvNotFound
+	}
+	return conv, nil
 }
 
 // ListConversations 查询用户对话列表

@@ -36,6 +36,11 @@ type PrivateChatRequest struct {
 	FriendID string `json:"friend_id" binding:"required,uuid"`
 }
 
+// AgentChatRequest 智能体私聊请求体。
+type AgentChatRequest struct {
+	AgentID string `json:"agent_id" binding:"required,uuid"`
+}
+
 // GetOrCreatePrivate 查找或创建与指定好友的私聊会话
 func (h *ConversationHandler) GetOrCreatePrivate(c *gin.Context) {
 	var req PrivateChatRequest
@@ -52,6 +57,28 @@ func (h *ConversationHandler) GetOrCreatePrivate(c *gin.Context) {
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50016, "创建私聊失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, conv)
+}
+
+// GetOrCreateAgentPrivate 查找或创建与指定智能体的一对一会话。
+func (h *ConversationHandler) GetOrCreateAgentPrivate(c *gin.Context) {
+	var req AgentChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40046, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	conv, err := h.svc.GetOrCreateAgentChat(c.Request.Context(), userID, req.AgentID)
+	if err != nil {
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40415, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50019, "创建智能体私聊失败")
 		return
 	}
 

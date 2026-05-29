@@ -51,7 +51,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const conversation = useConversationStore((s) =>
     s.conversations.find((c) => c.id === conversationId),
   );
-  const directAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
+  const boundAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
+  const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
 
   // Typing broadcast state
