@@ -1,5 +1,5 @@
 import { get, post, del } from './client';
-import type { Message, MessageRole } from '@/types/message';
+import type { Message, SendMessageResult, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
 export async function sendMessage(
@@ -10,13 +10,14 @@ export async function sendMessage(
   replyToId?: string,
   mentions?: string[],
 ): Promise<Message> {
-  return post<Message>(`/api/conversations/${conversationId}/messages`, {
+  const result = await post<SendMessageResult>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
     attachments: attachments ?? [],
     ...(replyToId ? { reply_to: replyToId } : {}),
     ...(mentions && mentions.length > 0 ? { mentions } : {}),
   });
+  return result.user_message;
 }
 
 export async function getMessages(
