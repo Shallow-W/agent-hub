@@ -49,15 +49,33 @@ const AppLayout: React.FC = () => {
 
   /** 导航切换：设置页使用路由跳转 */
   const handleNavChange = useCallback((key: string) => {
+    setActiveNav(key);
     if (key === 'settings') {
       navigate('/settings');
       return;
     }
-    setActiveNav(key);
+    if (key === 'workspace') {
+      navigate('/tasks');
+      return;
+    }
     if (location.pathname !== '/') {
       navigate('/');
     }
   }, [navigate, location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/tasks')) {
+      setActiveNav('workspace');
+      return;
+    }
+    if (location.pathname.startsWith('/settings')) {
+      setActiveNav('settings');
+      return;
+    }
+    if (activeNav === 'workspace' || activeNav === 'settings') {
+      setActiveNav('chat');
+    }
+  }, [activeNav, location.pathname]);
 
   // 切换到联系人页时自动拉取数据
   useEffect(() => {
@@ -243,7 +261,7 @@ const AppLayout: React.FC = () => {
       </div>
 
       {/* 右侧：聊天区域 / 智能体详情 */}
-      <div className={styles.chatPanel}>
+      <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
         {activeNav === 'models' ? (
           <AgentProfile agent={selectedAgent} />
         ) : (

@@ -18,7 +18,6 @@ import (
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -26,6 +25,7 @@ import (
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // Config 应用配置结构
@@ -110,6 +110,7 @@ func main() {
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := repository.NewTaskRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -120,6 +121,7 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
+	taskSvc := service.NewTaskService(taskRepo)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
@@ -157,6 +159,7 @@ func main() {
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
+	taskHandler := handler.NewTaskHandler(taskSvc)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -173,7 +176,6 @@ func main() {
 
 	// WebSocket 路由（通过 query 参数鉴权，不受限流）
 	router.GET("/ws", wsHandler.Handle)
-
 
 	// 认证路由（无需鉴权）
 	authGroup := router.Group("/api/auth")
@@ -244,6 +246,15 @@ func main() {
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
 		apiGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
 		apiGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
+		taskRoutes := apiGroup.Group("/tasks")
+		taskRoutes.Use(middleware.ValidateUUIDParam("id"))
+		{
+			taskRoutes.GET("", taskHandler.List)
+			taskRoutes.POST("", taskHandler.Create)
+			taskRoutes.PUT("/:id", taskHandler.Update)
+			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
+			taskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
 	}
 
 	// 好友路由（需要鉴权）

@@ -13,7 +13,7 @@ type fakeMsgRepo struct {
 	messages []model.Message
 }
 
-func (r *fakeMsgRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string) (*model.Message, error) {
+func (r *fakeMsgRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error) {
 	msg := model.Message{
 		ID:             role + "-1",
 		ConversationID: conversationID,
@@ -21,13 +21,46 @@ func (r *fakeMsgRepo) Create(ctx context.Context, conversationID, role, content,
 		Content:        content,
 		ArtifactsJSON:  artifactsJSON,
 		CreatedAt:      time.Now(),
+		Attachments:    attachments,
+		ReplyTo:        replyTo,
+		SenderID:       senderID,
+		Mentions:       mentions,
 	}
 	r.messages = append(r.messages, msg)
 	return &msg, nil
 }
 
-func (r *fakeMsgRepo) ListByConversation(ctx context.Context, conversationID string, before time.Time, limit int) ([]model.Message, error) {
+func (r *fakeMsgRepo) ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error) {
 	return r.messages, nil
+}
+
+func (r *fakeMsgRepo) MarkConversationRead(ctx context.Context, conversationID, userID string) error {
+	return nil
+}
+
+func (r *fakeMsgRepo) GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error) {
+	return r.messages, nil
+}
+
+func (r *fakeMsgRepo) GetByID(ctx context.Context, id string) (*model.Message, error) {
+	for i := range r.messages {
+		if r.messages[i].ID == id {
+			return &r.messages[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeMsgRepo) GetMessageSender(ctx context.Context, messageID string) (string, error) {
+	return "user-1", nil
+}
+
+func (r *fakeMsgRepo) SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error) {
+	return r.messages, nil
+}
+
+func (r *fakeMsgRepo) SoftDelete(ctx context.Context, messageID string) error {
+	return nil
 }
 
 type fakeConvRepoForMsg struct {
@@ -42,6 +75,20 @@ func (r *fakeConvRepoForMsg) GetByID(ctx context.Context, id string) (*model.Con
 func (r *fakeConvRepoForMsg) UpdateTimestamp(ctx context.Context, id string) error {
 	r.timestamp = true
 	return nil
+}
+
+func (r *fakeConvRepoForMsg) GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error) {
+	if r.conv != nil && r.conv.ID == conversationID && r.conv.UserID == userID {
+		return &model.ConversationMember{ConversationID: conversationID, UserID: userID, Role: "owner"}, nil
+	}
+	return nil, nil
+}
+
+func (r *fakeConvRepoForMsg) ListMemberIDs(ctx context.Context, conversationID string) ([]string, error) {
+	if r.conv == nil {
+		return []string{}, nil
+	}
+	return []string{r.conv.UserID}, nil
 }
 
 type fakeAgentRepoForMsg struct {
@@ -96,7 +143,7 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
 
-	result, err := svc.SendMessage(context.Background(), "conv-1", userID, "user", "hello", "", "agent-1")
+	result, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
 	if err != nil {
 		t.Fatalf("send message failed: %v", err)
 	}
@@ -133,7 +180,7 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
 
-	_, err := svc.SendMessage(context.Background(), "conv-1", userID, "user", "hello", "", "agent-1")
+	_, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
 	if !errors.Is(err, ErrMsgAgentNoPerm) {
 		t.Fatalf("expected ErrMsgAgentNoPerm, got %v", err)
 	}
