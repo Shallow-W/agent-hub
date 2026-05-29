@@ -70,6 +70,9 @@ function renderMarkdown(text: string): string {
   result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
   result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
 
+  // Highlight @mentions
+  result = result.replace(/@(\S+)/g, `<span class="${styles.mention}">@$1</span>`);
+
   return result;
 }
 

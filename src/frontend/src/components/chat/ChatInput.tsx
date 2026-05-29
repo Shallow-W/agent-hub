@@ -9,7 +9,11 @@ import {
 } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
+import { useConversationStore } from '@/store/conversationStore';
 import { uploadFile } from '@/api/upload';
+import { getGroupMembers } from '@/api/group';
+import type { GroupMember } from '@/types/group';
+import type { TextAreaRef } from 'antd/es/input/TextArea';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message, ReplyToPreview } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
@@ -35,6 +39,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Mention state
+  const [mentionVisible, setMentionVisible] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
+  const textareaRef = useRef<TextAreaRef>(null);
+
+  const conversation = useConversationStore((s) =>
+    s.conversations.find((c) => c.id === conversationId),
+  );
+  const isGroup = conversation?.type === 'group';
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,13 +87,39 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   }, [conversationId]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setValue(e.target.value);
+    const val = e.target.value;
+    setValue(val);
     sendTypingStart();
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
       sendTypingStop();
     }, 2000);
-  }, [sendTypingStart, sendTypingStop]);
+
+    // Detect @ mention trigger in group chats
+    if (isGroup) {
+      const el = e.target as HTMLTextAreaElement;
+      const cursorPos = el.selectionStart;
+      const textBeforeCursor = val.slice(0, cursorPos);
+      const atMatch = textBeforeCursor.match(/@(\S*)$/);
+      if (atMatch) {
+        const query = atMatch[1] ?? '';
+        setMentionQuery(query);
+        setMentionStart(cursorPos - query.length - 1); // position of @
+        setMentionIndex(0);
+        if (!mentionVisible) {
+          setMentionVisible(true);
+          // Fetch members if not already loaded
+          if (members.length === 0) {
+            getGroupMembers(conversationId).then((list) => {
+              if (list) setMembers(list);
+            }).catch(() => {});
+          }
+        }
+      } else if (mentionVisible) {
+        setMentionVisible(false);
+      }
+    }
+  }, [sendTypingStart, sendTypingStop, isGroup, conversationId, mentionVisible, members.length]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -115,6 +158,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     setPendingFiles((prev) => prev.filter((p) => p.uid !== uid));
   }, []);
 
+  // Filtered members for mention dropdown
+  const filteredMembers = members.filter(
+    (m) => m.username && m.username.toLowerCase().includes(mentionQuery.toLowerCase()),
+  );
+
+  const insertMention = useCallback((member: GroupMember) => {
+    const username = member.username ?? 'unknown';
+    const before = value.slice(0, mentionStart);
+    const after = value.slice(mentionStart + mentionQuery.length + 1); // +1 for @
+    const newValue = `${before}@${username} ${after}`;
+    setValue(newValue);
+    setMentionVisible(false);
+    // Focus back on textarea
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [value, mentionStart, mentionQuery]);
+
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
     const attachments: AttachmentPayload[] = pendingFiles
@@ -123,6 +182,28 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
     if (!trimmed && !attachments.length) return;
     if (isStreaming) return;
+
+    // Extract mentions from content for group chats
+    let mentions: string[] | undefined;
+    if (isGroup && members.length > 0) {
+      const mentionRegex = /@(\S+)/g;
+      const mentionedUsernames: string[] = [];
+      let match;
+      while ((match = mentionRegex.exec(trimmed)) !== null) {
+        mentionedUsernames.push(match[1] ?? '');
+      }
+      if (mentionedUsernames.length > 0) {
+        const usernameSet = new Set(members.map((m) => m.username?.toLowerCase()));
+        mentions = mentionedUsernames
+          .filter((u) => usernameSet.has(u.toLowerCase()))
+          .map((u) => {
+            const member = members.find((m) => m.username?.toLowerCase() === u.toLowerCase());
+            return member?.user_id ?? '';
+          })
+          .filter(Boolean);
+        if (mentions.length === 0) mentions = undefined;
+      }
+    }
 
     setSending(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -137,23 +218,47 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview);
+      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions);
       setValue('');
       setPendingFiles([]);
       onCancelReply?.();
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Mention dropdown navigation
+      if (mentionVisible && filteredMembers.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMentionIndex((i) => (i + 1) % filteredMembers.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMentionIndex((i) => (i - 1 + filteredMembers.length) % filteredMembers.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          insertMention(filteredMembers[mentionIndex]!);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMentionVisible(false);
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit();
       }
     },
-    [handleSubmit],
+    [handleSubmit, mentionVisible, filteredMembers, mentionIndex, insertMention],
   );
 
   const [sending, setSending] = useState(false);
@@ -202,6 +307,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           className={styles.fileInput}
         />
         <TextArea
+          ref={textareaRef}
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
@@ -227,6 +333,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           className={styles.sendBtn}
         />
       </div>
+      {mentionVisible && filteredMembers.length > 0 && (
+        <div className={styles.mentionDropdown}>
+          {filteredMembers.map((m, i) => (
+            <button
+              key={m.user_id}
+              className={`${styles.mentionItem} ${i === mentionIndex ? styles.mentionItemActive : ''}`}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                insertMention(m);
+              }}
+            >
+              @{m.username}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

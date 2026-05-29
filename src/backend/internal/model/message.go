@@ -23,6 +23,7 @@ type Message struct {
 	CreatedAt      time.Time           `json:"created_at" db:"created_at"`
 	SenderID       *string             `json:"sender_id,omitempty" db:"sender_id"`
 	Username       string              `json:"username,omitempty" db:"username"`
-	Attachments    []MessageAttachment `json:"attachments,omitempty" db:"-"`
-	ReplyToMessage *ReplyToPreview     `json:"reply_to_message,omitempty" db:"-"`
+	Attachments      []MessageAttachment `json:"attachments,omitempty" db:"-"`
+	ReplyToMessage   *ReplyToPreview     `json:"reply_to_message,omitempty" db:"-"`
+	Mentions         []string            `json:"mentions,omitempty" db:"-"` // JSON array of user IDs, stored in mentions TEXT column
 }

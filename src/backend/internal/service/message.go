@@ -36,7 +36,7 @@ type MessageCacher interface {
 
 // MsgRepo 消息服务所需的仓库接口
 type MsgRepo interface {
-	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string) (*model.Message, error)
+	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
 	MarkConversationRead(ctx context.Context, conversationID, userID string) error
 	GetMessagesAfter(ctx context.Context, conversationID string, afterTime interface{}, limit int) ([]model.Message, error)
@@ -126,11 +126,16 @@ func (s *MessageService) checkMembership(ctx context.Context, conv *model.Conver
 
 // SendMessage 发送消息：持久化 → 推送 → 缓存
 func (s *MessageService) SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*SendMessageResult, error) {
-	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil, "")
+	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil, "", nil)
+}
+
+// SendMessageWithMentions 发送消息（支持 mentions）
+func (s *MessageService) SendMessageWithMentions(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, mentions []string) (*SendMessageResult, error) {
+	return s.SendMessageWithReply(ctx, convID, userID, role, content, artifactsJSON, attachments, nil, "", mentions)
 }
 
 // SendMessageWithReply 发送消息（支持回复引用和 Agent 回复）
-func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, agentID string) (*SendMessageResult, error) {
+func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, agentID string, mentions []string) (*SendMessageResult, error) {
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
@@ -171,7 +176,7 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if role == "user" {
 		senderID = &userID
 	}
-	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo, senderID)
+	msg, err := s.msgRepo.Create(ctx, convID, role, content, artifactsJSON, attachments, replyTo, senderID, mentions)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
@@ -506,7 +511,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}

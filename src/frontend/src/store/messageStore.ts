@@ -27,6 +27,7 @@ interface MessageState {
     attachments?: AttachmentPayload[],
     replyTo?: string,
     replyPreview?: ReplyToPreview,
+    mentions?: string[],
   ) => Promise<void>;
   recall: (conversationId: string, messageId: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
@@ -97,7 +98,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content, attachments?, replyTo?, replyPreview?) => {
+  sendMessage: async (conversationId, content, attachments?, replyTo?, replyPreview?, mentions?) => {
     const resolveReplyPreview = (replyToId?: string): ReplyToPreview | null => {
       if (!replyToId) return null;
       const existing = get().messages[conversationId] ?? [];
@@ -139,7 +140,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo);
+      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo, mentions);
       const patchedMsg = resolvedReplyPreview && !msg.reply_to_message
         ? {
             ...msg,

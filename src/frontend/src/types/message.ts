@@ -23,6 +23,7 @@ export interface Message {
   attachments?: MessageAttachment[];
   reply_to?: string | null;
   reply_to_message?: ReplyToPreview | null;
+  mentions?: string[];
 }
 
 export type OptimisticStatus = 'sending' | 'failed';

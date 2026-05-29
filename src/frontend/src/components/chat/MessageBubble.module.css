@@ -313,3 +313,9 @@
 }
 
 .sendingSpin { margin-left: 8px; }
+
+.mention {
+  color: var(--color-primary);
+  font-weight: 500;
+  cursor: default;
+}

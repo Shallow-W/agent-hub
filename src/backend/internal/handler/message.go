@@ -31,6 +31,7 @@ type SendMessageRequest struct {
 	Attachments   []model.MessageAttachment `json:"attachments"`
 	ReplyTo       *string                   `json:"reply_to"`
 	AgentID       string                    `json:"agent_id"`
+	Mentions      []string                  `json:"mentions"`
 }
 
 // Send 发送消息
@@ -48,7 +49,7 @@ func (h *MessageHandler) Send(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo, req.AgentID)
+	msg, err := h.svc.SendMessageWithReply(c.Request.Context(), convID, userID, req.Role, req.Content, req.ArtifactsJSON, req.Attachments, req.ReplyTo, req.AgentID, req.Mentions)
 	if err != nil {
 		slog.Error("send message failed", "error", err, "convID", convID, "userID", userID)
 		if errors.Is(err, service.ErrMsgConvNotFound) {

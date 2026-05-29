@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -28,19 +29,27 @@ COALESCE(u.username, '') AS username`
 const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
 
 // Create 创建新消息并刷新对话时间戳（事务保证原子性，附件在同一事务内写入）
-func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string) (*model.Message, error) {
+func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
+	// 序列化 mentions 为 JSON
+	var mentionsJSON *string
+	if len(mentions) > 0 {
+		b, _ := json.Marshal(mentions)
+		s := string(b)
+		mentionsJSON = &s
+	}
+
 	var m model.Message
 	err = tx.QueryRowxContext(ctx,
-		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to, sender_id)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to, sender_id, mentions)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING id, conversation_id, role, content, COALESCE(artifacts_json, '') AS artifacts_json, reply_to, deleted_at, created_at, sender_id`,
-		conversationID, role, content, artifactsJSON, replyTo, senderID,
+		conversationID, role, content, artifactsJSON, replyTo, senderID, mentionsJSON,
 	).StructScan(&m)
 	if err != nil {
 		return nil, fmt.Errorf("insert message: %w", err)
@@ -82,6 +91,9 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	if filled, err := r.fillAttachmentsAndReply(ctx, []model.Message{m}); err == nil && len(filled) > 0 {
 		m = filled[0]
 	}
+
+	// 填充 mentions（直接从内存设置，无需再查 DB）
+	m.Mentions = mentions
 
 	return &m, nil
 }
@@ -270,6 +282,12 @@ func (r *MessageRepo) fillAttachmentsAndReply(ctx context.Context, messages []mo
 		return nil, err
 	}
 
+	// 填充 mentions
+	messages, err = r.fillMentions(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+
 	return messages, nil
 }
 
@@ -288,6 +306,41 @@ func (r *MessageRepo) fillAttachments(ctx context.Context, messages []model.Mess
 	}
 	for i := range messages {
 		messages[i].Attachments = attMap[messages[i].ID]
+	}
+	return messages, nil
+}
+
+// fillMentions 批量填充消息的 mentions 字段
+func (r *MessageRepo) fillMentions(ctx context.Context, messages []model.Message) ([]model.Message, error) {
+	if len(messages) == 0 {
+		return messages, nil
+	}
+	ids := make([]string, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	rows, err := r.db.QueryxContext(ctx,
+		`SELECT id, mentions FROM messages WHERE id = ANY($1) AND mentions IS NOT NULL`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("fill mentions: %w", err)
+	}
+	defer rows.Close()
+
+	mentionMap := make(map[string][]string)
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			continue
+		}
+		var list []string
+		if json.Unmarshal([]byte(raw), &list) == nil {
+			mentionMap[id] = list
+		}
+	}
+	for i := range messages {
+		if m, ok := mentionMap[messages[i].ID]; ok {
+			messages[i].Mentions = m
+		}
 	}
 	return messages, nil
 }

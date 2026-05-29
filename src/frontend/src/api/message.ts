@@ -8,12 +8,14 @@ export async function sendMessage(
   role: MessageRole,
   attachments?: AttachmentPayload[],
   replyToId?: string,
+  mentions?: string[],
 ): Promise<Message> {
   return post<Message>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
     attachments: attachments ?? [],
     ...(replyToId ? { reply_to: replyToId } : {}),
+    ...(mentions && mentions.length > 0 ? { mentions } : {}),
   });
 }
 

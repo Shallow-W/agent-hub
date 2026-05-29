@@ -31,6 +31,7 @@ type MemberChecker interface {
 // WSMessageSender WS 消息持久化接口
 type WSMessageSender interface {
 	SendMessage(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment) (*service.SendMessageResult, error)
+	SendMessageWithMentions(ctx context.Context, convID, userID, role, content, artifactsJSON string, attachments []model.MessageAttachment, mentions []string) (*service.SendMessageResult, error)
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
@@ -140,8 +141,9 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			}
 		case "chat":
 			var payload struct {
-				ConversationID string `json:"conversation_id"`
-				Content        string `json:"content"`
+				ConversationID string   `json:"conversation_id"`
+				Content        string   `json:"content"`
+				Mentions       []string `json:"mentions"`
 			}
 			if raw, err := json.Marshal(msg.Data); err == nil {
 				if err := json.Unmarshal(raw, &payload); err != nil {
@@ -175,7 +177,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 			}
 			// 通过 Service 持久化（内部触发 Hub 推送 + Redis 缓存）
 			if h.msgSender != nil {
-				if _, err := h.msgSender.SendMessage(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "", nil); err != nil {
+				if _, err := h.msgSender.SendMessageWithMentions(ctx, payload.ConversationID, client.UserID, "user", payload.Content, "", nil, payload.Mentions); err != nil {
 					h.logger.Error("ws message persist failed", "conversation_id", payload.ConversationID, "user_id", client.UserID, "error", err)
 					h.hub.SendToUser(client.UserID, ws.WSMessage{
 						Type: ws.TypeError,
