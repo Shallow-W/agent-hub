@@ -144,7 +144,7 @@ export const AgentList: React.FC<AgentListProps> = ({
   const totalAgents = agents.length;
   const totalMachines = machines.length;
 
-  if ((loading || machineLoading) && agents.length === 0 && machines.length === 0) {
+  if ((loading || machineLoading) && agents.length === 0 && machines.length === 0 && !connectOpen) {
     return (
       <div className={styles.container}>
         <Spin size="small" />

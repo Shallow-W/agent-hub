@@ -9,6 +9,7 @@ import {
   TeamOutlined,
   UserAddOutlined,
   EditOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
@@ -85,7 +86,8 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const isGroup = conversation.type === 'group';
-  // 显示名称：私聊用对方用户名，群聊用标题
+  const isAgent = conversation.type === 'agent';
+  // 显示名称：私聊用对方用户名，群聊/智能体用标题或名称
   const displayName = isGroup
     ? conversation.title
     : (conversation.peer_name || conversation.title);
@@ -102,16 +104,16 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
         onTogglePin();
       },
     },
-    {
+    ...(isGroup ? [{
       key: 'rename',
       icon: <EditOutlined />,
       label: '重命名',
-      onClick: (info) => {
+      onClick: (info: { domEvent: { stopPropagation: () => void } }) => {
         info.domEvent.stopPropagation();
         setRenameValue(displayName);
         setRenameOpen(true);
       },
-    },
+    }] : []),
     ...(isGroup && onInviteMembers
       ? [
           {
@@ -172,16 +174,16 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       <div className={styles.avatarWrapper}>
         <Avatar
           style={{
-            backgroundColor: isGroup ? '#722ed1' : avatarColor,
+            backgroundColor: isAgent ? '#2f9d74' : isGroup ? '#722ed1' : avatarColor,
             flexShrink: 0,
             borderRadius: isGroup ? 10 : 50,
           }}
           size={32}
-          icon={isGroup ? <TeamOutlined /> : <UserOutlined />}
+          icon={isAgent ? <RobotOutlined /> : isGroup ? <TeamOutlined /> : <UserOutlined />}
         >
-          {!isGroup ? firstChar : undefined}
+          {!isGroup && !isAgent ? firstChar : undefined}
         </Avatar>
-        {!isGroup && (
+        {!isGroup && !isAgent && (
           <span
             className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
           />

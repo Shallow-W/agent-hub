@@ -18,6 +18,10 @@ export async function getOrCreatePrivateChat(
   return post<Conversation>('/api/conversations/private', { friend_id: friendId });
 }
 
+export async function getOrCreateAgentChat(agentId: string): Promise<Conversation> {
+  return post<Conversation>('/api/conversations/agent', { agent_id: agentId });
+}
+
 export async function deleteConversation(id: string): Promise<void> {
   return del<void>(`/api/conversations/${id}`);
 }

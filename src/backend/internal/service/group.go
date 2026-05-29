@@ -169,17 +169,25 @@ func (s *GroupService) LeaveGroup(ctx context.Context, conversationID, userID st
 	return nil
 }
 
-// DissolveGroup 解散群聊（仅群主可操作）
+// DissolveGroup 解散群聊（仅群主/创建者可操作）
 func (s *GroupService) DissolveGroup(ctx context.Context, conversationID, userID string) error {
 	member, err := s.repo.GetMember(ctx, conversationID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
 	}
-	if member == nil {
-		return ErrNotMember
-	}
-	if member.Role != "owner" {
-		return ErrNotOwner
+	isOwner := member != nil && member.Role == "owner"
+	// 兼容旧数据：member 记录不存在时回退检查 conversations.user_id
+	if !isOwner {
+		conv, err := s.repo.GetConversationByID(ctx, conversationID)
+		if err != nil {
+			return fmt.Errorf("get conversation: %w", err)
+		}
+		if conv == nil || conv.UserID != userID {
+			if member == nil {
+				return ErrNotMember
+			}
+			return ErrNotOwner
+		}
 	}
 	if err := s.repo.DeleteGroup(ctx, conversationID); err != nil {
 		return fmt.Errorf("dissolve group: %w", err)

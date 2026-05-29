@@ -51,6 +51,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const conversation = useConversationStore((s) =>
     s.conversations.find((c) => c.id === conversationId),
   );
+  const boundAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
+  const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
 
   // Typing broadcast state
@@ -218,14 +220,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions);
+      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions, directAgentId);
       setValue('');
       setPendingFiles([]);
       onCancelReply?.();
+    } catch {
+      message.error('发送失败，请稍后重试');
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, directAgentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

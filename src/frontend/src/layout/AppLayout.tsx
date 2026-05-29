@@ -8,7 +8,12 @@ import {
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
-import { getArchivedConversations, unarchiveConversation } from '@/api/conversation';
+import {
+  getArchivedConversations,
+  getOrCreateAgentChat,
+  getOrCreatePrivateChat,
+  unarchiveConversation,
+} from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import type { Conversation } from '@/types/conversation';
@@ -17,7 +22,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
-import { getOrCreatePrivateChat } from '@/api/conversation';
 import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
@@ -32,6 +36,7 @@ const AppLayout: React.FC = () => {
   const { create, conversations } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const setActive = useConversationStore((s) => s.setActive);
+  const bindDirectAgentChat = useConversationStore((s) => s.bindDirectAgentChat);
   const { status } = useWebSocket();
   const wasConnectedRef = useRef(false);
   useEffect(() => {
@@ -49,6 +54,7 @@ const AppLayout: React.FC = () => {
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
+  const creatingAgentChatRef = useRef<string | null>(null);
 
   const handleNavChange = useCallback((key: string) => {
     setActiveNav(key);
@@ -200,6 +206,22 @@ const AppLayout: React.FC = () => {
     }
   }, [fetchConversations, setActive]);
 
+  const handleStartAgentChat = useCallback(async (agent: Agent) => {
+    if (creatingAgentChatRef.current === agent.id) return;
+    creatingAgentChatRef.current = agent.id;
+    try {
+      const conv = await getOrCreateAgentChat(agent.id);
+      bindDirectAgentChat(conv.id, agent.id);
+      await fetchConversations();
+      setActive(conv.id);
+      setActiveNav('chat');
+    } catch {
+      antMessage.error('创建智能体对话失败');
+    } finally {
+      creatingAgentChatRef.current = null;
+    }
+  }, [bindDirectAgentChat, fetchConversations, setActive]);
+
   const agents = useAgentStore((s) => s.agents);
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null;
 
@@ -261,6 +283,7 @@ const AppLayout: React.FC = () => {
           onUpload={handleUpload}
           onShowArchived={showArchived}
           onStartChat={handleStartChat}
+          onStartAgentChat={handleStartAgentChat}
           onSwitchChat={() => setActiveNav('chat')}
           onSwitchContacts={() => setActiveNav('contacts')}
           onRefreshContacts={handleRefreshContacts}

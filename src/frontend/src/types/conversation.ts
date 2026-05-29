@@ -1,4 +1,4 @@
-export type ConversationType = 'single' | 'group';
+export type ConversationType = 'single' | 'group' | 'agent';
 
 export interface Conversation {
   id: string;

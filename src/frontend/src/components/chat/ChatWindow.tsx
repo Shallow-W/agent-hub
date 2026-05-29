@@ -211,7 +211,6 @@ export const ChatWindow: React.FC = () => {
                 label: '解散群聊',
                 danger: true as const,
                 onClick: () => {
-                  antMessage.warning('确认解散？', 0);
                   import('antd').then(({ Modal }) => {
                     Modal.confirm({
                       title: '解散群聊',
