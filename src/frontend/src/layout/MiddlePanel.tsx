@@ -17,6 +17,7 @@ interface MiddlePanelProps {
   onUpload: () => void;
   onShowArchived: () => void;
   onStartChat: (friendId: string) => void;
+  onStartAgentChat: (agent: Agent) => void;
   onSwitchChat: () => void;
   onSwitchContacts: () => void;
   onRefreshContacts: () => void;
@@ -35,6 +36,7 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   onUpload,
   onShowArchived,
   onStartChat,
+  onStartAgentChat,
   onSwitchChat,
   onSwitchContacts,
   onRefreshContacts,
@@ -83,6 +85,7 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
           <ContactsPanel
             conversations={conversations}
             onStartChat={onStartChat}
+            onStartAgentChat={onStartAgentChat}
             onSwitchChat={onSwitchChat}
           />
         </div>

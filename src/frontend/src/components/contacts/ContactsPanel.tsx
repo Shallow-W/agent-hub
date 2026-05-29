@@ -7,6 +7,7 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
+import type { Agent } from '@/types/agent';
 import FriendRequest from '../friends/FriendRequest';
 import layoutStyles from '@/layout/AppLayout.module.css';
 import styles from './ContactsPanel.module.css';
@@ -14,12 +15,18 @@ import styles from './ContactsPanel.module.css';
 interface ContactsPanelProps {
   conversations: Conversation[];
   onStartChat: (friendId: string) => void;
+  onStartAgentChat: (agent: Agent) => void;
   onSwitchChat: () => void;
 }
 
 const getFriendName = (friend: Friend): string => friend.friend_name ?? '未知用户';
 
-const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartChat, onSwitchChat }) => {
+const ContactsPanel: React.FC<ContactsPanelProps> = ({
+  conversations,
+  onStartChat,
+  onStartAgentChat,
+  onSwitchChat,
+}) => {
   const {
     friends,
     loading,
@@ -224,10 +231,10 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ conversations, onStartCha
                     dataSource={filteredAgents}
                     split={false}
                     renderItem={(agent) => (
-                      <List.Item className={styles.contactItem}>
+                      <List.Item className={styles.contactItem} onClick={() => onStartAgentChat(agent)}>
                         <List.Item.Meta
                           avatar={
-                            <Avatar className={styles.friendAvatar} size={28} style={{ background: '#6366f1' }}>
+                            <Avatar className={styles.agentAvatar} size={28}>
                               <RobotOutlined />
                             </Avatar>
                           }

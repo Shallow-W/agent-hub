@@ -28,6 +28,7 @@ interface MessageState {
     replyTo?: string,
     replyPreview?: ReplyToPreview,
     mentions?: string[],
+    agentId?: string,
   ) => Promise<void>;
   recall: (conversationId: string, messageId: string) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
@@ -98,7 +99,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, content, attachments?, replyTo?, replyPreview?, mentions?) => {
+  sendMessage: async (conversationId, content, attachments?, replyTo?, replyPreview?, mentions?, agentId?) => {
     const resolveReplyPreview = (replyToId?: string): ReplyToPreview | null => {
       if (!replyToId) return null;
       const existing = get().messages[conversationId] ?? [];
@@ -126,6 +127,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       optimistic: true,
       optimisticStatus: 'sending',
       pendingAttachments: attachments,
+      pendingAgentId: agentId,
     };
 
     // Add optimistic message immediately
@@ -140,7 +142,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo, mentions);
+      const result = await msgApi.sendMessage(conversationId, content, 'user', attachments, replyTo, mentions, agentId);
+      const msg = result.user_message;
+      if (!msg) throw new Error('Server returned empty user_message');
       const patchedMsg = resolvedReplyPreview && !msg.reply_to_message
         ? {
             ...msg,
@@ -149,6 +153,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           }
         : msg;
       get().addMessage(conversationId, patchedMsg);
+      if (result.agent_message) {
+        get().addMessage(conversationId, result.agent_message);
+      }
       // Remove optimistic message on success
       set((state) => {
         const remaining = (state.optimisticMessages[conversationId] ?? [])
@@ -275,8 +282,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
 
     try {
-      const msg = await msgApi.sendMessage(conversationId, optMsg.content, 'user', optMsg.pendingAttachments, optMsg.reply_to ?? undefined, optMsg.mentions);
-      get().addMessage(conversationId, msg);
+      const result = await msgApi.sendMessage(
+        conversationId,
+        optMsg.content,
+        'user',
+        optMsg.pendingAttachments,
+        optMsg.reply_to ?? undefined,
+        optMsg.mentions,
+        optMsg.pendingAgentId,
+      );
+      if (!result.user_message) throw new Error('Server returned empty user_message');
+      get().addMessage(conversationId, result.user_message);
+      if (result.agent_message) {
+        get().addMessage(conversationId, result.agent_message);
+      }
       // Remove on success
       set((s) => {
         const remaining = (s.optimisticMessages[conversationId] ?? [])

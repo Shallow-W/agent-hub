@@ -100,11 +100,18 @@ export function useMessages(conversationId: string | null) {
   }, [conversationId, hasMore, loadingEntry, messages, fetchMessages]);
 
   const send = useCallback(
-    async (content: string, attachments?: AttachmentPayload[], replyTo?: string, replyPreview?: ReplyToPreview, mentions?: string[]) => {
+    async (
+      content: string,
+      attachments?: AttachmentPayload[],
+      replyTo?: string,
+      replyPreview?: ReplyToPreview,
+      mentions?: string[],
+      agentId?: string,
+    ) => {
       if (!conversationId) return;
       // Invalidate cache so next switch re-fetches
       delete lastFetchedAt[conversationId];
-      await sendMessage(conversationId, content, attachments, replyTo, replyPreview, mentions);
+      await sendMessage(conversationId, content, attachments, replyTo, replyPreview, mentions, agentId);
     },
     [conversationId, sendMessage],
   );

@@ -9,16 +9,16 @@ export async function sendMessage(
   attachments?: AttachmentPayload[],
   replyToId?: string,
   mentions?: string[],
-): Promise<Message> {
-  const result = await post<SendMessageResult>(`/api/conversations/${conversationId}/messages`, {
+  agentId?: string,
+): Promise<SendMessageResult> {
+  return post<SendMessageResult>(`/api/conversations/${conversationId}/messages`, {
     content,
     role,
     attachments: attachments ?? [],
     ...(replyToId ? { reply_to: replyToId } : {}),
     ...(mentions && mentions.length > 0 ? { mentions } : {}),
+    ...(agentId ? { agent_id: agentId } : {}),
   });
-  if (!result.user_message) throw new Error('Server returned empty user_message');
-  return result.user_message;
 }
 
 export async function getMessages(

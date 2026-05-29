@@ -33,6 +33,7 @@ export interface OptimisticMessage extends Message {
   optimisticStatus: OptimisticStatus;
   /** Original attachment payloads used when sending, for retry */
   pendingAttachments?: AttachmentPayload[];
+  pendingAgentId?: string;
 }
 
 export type DisplayMessage = Message | OptimisticMessage;

@@ -8,7 +8,11 @@ import {
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
-import { getArchivedConversations, unarchiveConversation } from '@/api/conversation';
+import {
+  addConversationAgent,
+  getArchivedConversations,
+  unarchiveConversation,
+} from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import type { Conversation } from '@/types/conversation';
@@ -200,6 +204,21 @@ const AppLayout: React.FC = () => {
     }
   }, [fetchConversations, setActive]);
 
+  const handleStartAgentChat = useCallback(async (agent: Agent) => {
+    try {
+      const existing = conversations.find((conv) => (
+        conv.type === 'group' && conv.title === agent.name
+      ));
+      const conv = existing ?? await create('group', agent.name);
+      await addConversationAgent(conv.id, agent.id);
+      await fetchConversations();
+      setActive(conv.id);
+      setActiveNav('chat');
+    } catch {
+      antMessage.error('创建智能体对话失败');
+    }
+  }, [conversations, create, fetchConversations, setActive]);
+
   const agents = useAgentStore((s) => s.agents);
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null;
 
@@ -261,6 +280,7 @@ const AppLayout: React.FC = () => {
           onUpload={handleUpload}
           onShowArchived={showArchived}
           onStartChat={handleStartChat}
+          onStartAgentChat={handleStartAgentChat}
           onSwitchChat={() => setActiveNav('chat')}
           onSwitchContacts={() => setActiveNav('contacts')}
           onRefreshContacts={handleRefreshContacts}

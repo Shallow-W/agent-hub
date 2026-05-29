@@ -11,6 +11,7 @@ import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { uploadFile } from '@/api/upload';
+import { getConversationAgents } from '@/api/conversation';
 import { getGroupMembers } from '@/api/group';
 import type { GroupMember } from '@/types/group';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
@@ -45,6 +46,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [directAgentId, setDirectAgentId] = useState<string | undefined>();
   const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
   const textareaRef = useRef<TextAreaRef>(null);
 
@@ -52,6 +54,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     s.conversations.find((c) => c.id === conversationId),
   );
   const isGroup = conversation?.type === 'group';
+
+  useEffect(() => {
+    let cancelled = false;
+    setDirectAgentId(undefined);
+    if (!isGroup || (conversation?.member_count ?? 1) > 1) return undefined;
+    getConversationAgents(conversationId).then((list) => {
+      if (!cancelled && list.length === 1) {
+        setDirectAgentId(list[0]?.agent_id);
+      }
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, conversation?.member_count, isGroup]);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,14 +234,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions);
+      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions, directAgentId);
       setValue('');
       setPendingFiles([]);
       onCancelReply?.();
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, directAgentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
