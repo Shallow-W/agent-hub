@@ -66,12 +66,13 @@ function renderMarkdown(text: string): string {
   // 保留消息里的换行。
   result = result.replace(/\n/g, '<br/>');
 
+  // Highlight @mentions — before restoring code blocks to avoid matching inside them
+  result = result.replace(/(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g,
+    `$1<span class="${styles.mention}">@$2</span>`);
+
   // 最后恢复前面暂存的代码内容。
   result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
   result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
-
-  // Highlight @mentions
-  result = result.replace(/@(\S+)/g, `<span class="${styles.mention}">@$1</span>`);
 
   return result;
 }

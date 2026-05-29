@@ -186,11 +186,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     // Extract mentions from content for group chats
     let mentions: string[] | undefined;
     if (isGroup && members.length > 0) {
-      const mentionRegex = /@(\S+)/g;
+      const mentionRegex = /(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g;
       const mentionedUsernames: string[] = [];
       let match;
       while ((match = mentionRegex.exec(trimmed)) !== null) {
-        mentionedUsernames.push(match[1] ?? '');
+        mentionedUsernames.push(match[2] ?? '');
       }
       if (mentionedUsernames.length > 0) {
         const usernameSet = new Set(members.map((m) => m.username?.toLowerCase()));
