@@ -21,11 +21,15 @@ import {
   MoreOutlined,
   TeamOutlined,
   UserOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember, changeMemberRole } from '@/api/group';
+import { getConversationAgents, addConversationAgent, removeConversationAgent } from '@/api/conversation';
 import type { GroupMember } from '@/types/group';
+import type { ConversationAgent } from '@/types/conversation';
 import { useFriendStore } from '@/store/friendStore';
+import { useAgentStore } from '@/store/agentStore';
 import { searchUsers as searchUsersApi } from '@/api/friend';
 import type { User } from '@/types/auth';
 import { Checkbox } from 'antd';
@@ -70,12 +74,19 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const [addingUser, setAddingUser] = useState<string | null>(null);
   const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { friends } = useFriendStore();
+  const agents = useAgentStore((s) => s.agents);
+  const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
+  const [addingAgent, setAddingAgent] = useState<string | null>(null);
 
   const fetchMembers = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await getGroupMembers(conversationId);
+      const [list, agentList] = await Promise.all([
+        getGroupMembers(conversationId),
+        getConversationAgents(conversationId),
+      ]);
       setMembers(list ?? []);
+      setAgentMembers(agentList ?? []);
     } catch {
       message.error('获取群成员失败');
     } finally {
@@ -338,6 +349,67 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
         )}
       </Spin>
 
+      {/* Agent 成员列表 */}
+      {agentMembers.length > 0 && (
+        <>
+          <div style={{ marginTop: 12, marginBottom: 4, fontSize: 12, color: '#999' }}>
+            <RobotOutlined /> 智能体
+          </div>
+          <List
+            dataSource={agentMembers}
+            renderItem={(agent) => (
+              <List.Item
+                actions={
+                  canManage
+                    ? [
+                        <Popconfirm
+                          key="remove-agent"
+                          title="确定移除该智能体？"
+                          onConfirm={async () => {
+                            setActionLoading(agent.agent_id);
+                            try {
+                              await removeConversationAgent(conversationId, agent.agent_id);
+                              message.success('已移除智能体');
+                              await fetchMembers();
+                            } catch {
+                              message.error('移除智能体失败');
+                            } finally {
+                              setActionLoading(null);
+                            }
+                          }}
+                          okText="确定"
+                          cancelText="取消"
+                        >
+                          <Button
+                            type="text"
+                            danger
+                            size="small"
+                            icon={<DeleteOutlined />}
+                            loading={actionLoading === agent.agent_id}
+                          />
+                        </Popconfirm>,
+                      ]
+                    : []
+                }
+              >
+                <List.Item.Meta
+                  avatar={
+                    <Avatar size="small" style={{ backgroundColor: '#52c41a' }} icon={<RobotOutlined />} />
+                  }
+                  title={
+                    <span>
+                      {agent.name}
+                      <Tag color="purple" style={{ fontSize: 10, marginLeft: 4 }}>智能体</Tag>
+                    </span>
+                  }
+                  description={agent.cli_tool}
+                />
+              </List.Item>
+            )}
+          />
+        </>
+      )}
+
       {currentUserRole !== 'owner' && (
         <div style={{ marginTop: 16, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
           <Popconfirm
@@ -468,6 +540,58 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                   )}
                 </>
               ),
+            },
+            {
+              key: 'agents',
+              label: '智能体',
+              children: (() => {
+                const agentIdsInGroup = new Set(agentMembers.map((a) => a.agent_id));
+                const availableAgents = agents.filter((a) => !agentIdsInGroup.has(a.id));
+                if (availableAgents.length === 0) {
+                  return <Empty description="没有可添加的智能体" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+                }
+                return (
+                  <List
+                    dataSource={availableAgents}
+                    renderItem={(agent) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="add"
+                            type="primary"
+                            size="small"
+                            icon={<RobotOutlined />}
+                            loading={addingAgent === agent.id}
+                            disabled={!!addingAgent && addingAgent !== agent.id}
+                            onClick={async () => {
+                              setAddingAgent(agent.id);
+                              try {
+                                await addConversationAgent(conversationId, agent.id);
+                                message.success('已添加智能体');
+                                await fetchMembers();
+                              } catch {
+                                message.error('添加智能体失败');
+                              } finally {
+                                setAddingAgent(null);
+                              }
+                            }}
+                          >
+                            添加
+                          </Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          avatar={
+                            <Avatar size="small" style={{ backgroundColor: '#52c41a' }} icon={<RobotOutlined />} />
+                          }
+                          title={agent.name}
+                          description={`${agent.cli_tool} · ${agent.status === 'online' ? '在线' : '离线'}`}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                );
+              })(),
             },
           ]}
         />
