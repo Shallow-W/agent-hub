@@ -27,6 +27,7 @@ import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
+import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
@@ -297,7 +298,13 @@ const AppLayout: React.FC = () => {
 
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'models' ? (
+        {activeNav === 'skills' ? (
+          selectedAgent ? (
+            <AgentSkillsPanel agent={selectedAgent} />
+          ) : (
+            <div style={{ padding: 32, color: 'var(--color-text-secondary)' }}>← 选择一个 Agent 管理技能</div>
+          )
+        ) : activeNav === 'models' ? (
           selectedAgent ? (
             <AgentProfile agent={selectedAgent} />
           ) : (

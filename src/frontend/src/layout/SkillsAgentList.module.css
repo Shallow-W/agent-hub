@@ -1,0 +1,67 @@
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.empty {
+  padding: 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.card:hover {
+  background: rgba(47, 143, 107, 0.06);
+  border-color: rgba(47, 143, 107, 0.12);
+}
+
+.cardActive {
+  background: rgba(47, 143, 107, 0.1);
+  border-color: rgba(47, 143, 107, 0.28);
+}
+
+.card :global(.ant-avatar) {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 50% !important;
+  flex-shrink: 0;
+  background: var(--gradient-agent) !important;
+  color: #fff;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}

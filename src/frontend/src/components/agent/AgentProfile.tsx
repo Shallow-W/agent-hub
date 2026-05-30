@@ -9,6 +9,9 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
+  CloseOutlined,
+  StarOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -18,11 +21,15 @@ import {
   getModelLabel,
   getRuntimeLabel,
   parseCapabilities,
+  parseSkills,
+  autoGenerateSkills,
 } from './agentPresentation';
+import type { Skill } from './agentPresentation';
 import styles from './AgentProfile.module.css';
 
 interface AgentProfileProps {
   agent: Agent | null;
+  defaultTab?: string;
 }
 
 const tabItems = [
@@ -37,24 +44,32 @@ function getStatusText(agent: Agent): string {
   return agent.status === 'online' ? 'Online' : agent.status;
 }
 
-export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
+export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile' }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
-  const [activeTab, setActiveTab] = useState('profile');
+  const [activeTab, setActiveTab] = useState(defaultTab);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('');
   const [descriptionValue, setDescriptionValue] = useState('');
   const [tagsValue, setTagsValue] = useState('');
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [newSkillName, setNewSkillName] = useState('');
+  const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
+  const [editingSkillName, setEditingSkillName] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!agent) return;
     const capabilities = parseCapabilities(agent.capabilities_json);
-    setActiveTab('profile');
+    setActiveTab(defaultTab);
     setName(agent.name);
     setAvatar(agent.avatar ?? '');
     setDescriptionValue(agent.system_prompt ?? getAgentDescription(agent));
     setTagsValue(capabilities.join(', '));
+    setSkills(parseSkills(agent.capabilities_json));
+    setNewSkillName('');
+    setEditingSkillIdx(null);
+    setEditingSkillName('');
   }, [agent]);
 
   if (!agent) {
@@ -65,7 +80,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
     );
   }
 
-  const capabilities = parseCapabilities(agent.capabilities_json);
   const description = getAgentDescription(agent);
   const runtimeLabel = getRuntimeLabel(agent);
   const modelLabel = getModelLabel(agent);
@@ -86,7 +100,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
         cli_tool: agent.cli_tool,
         avatar: avatar.trim() || undefined,
         system_prompt: descriptionValue.trim() || undefined,
-        capabilities_json: JSON.stringify(editableTags),
+        capabilities_json: JSON.stringify(skills),
       });
       message.success('Agent Profile 已保存');
     } catch {
@@ -94,6 +108,49 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAddSkill = () => {
+    const trimmed = newSkillName.trim();
+    if (!trimmed) return;
+    if (skills.some((s) => s.name === trimmed)) {
+      message.warning('该技能已存在');
+      return;
+    }
+    setSkills((prev) => [...prev, { name: trimmed }]);
+    setNewSkillName('');
+  };
+
+  const handleDeleteSkill = (idx: number) => {
+    setSkills((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleStartEditSkill = (idx: number) => {
+    setEditingSkillIdx(idx);
+    setEditingSkillName(skills[idx]?.name ?? '');
+  };
+
+  const handleCommitEditSkill = () => {
+    if (editingSkillIdx === null) return;
+    const trimmed = editingSkillName.trim();
+    if (trimmed) {
+      setSkills((prev) =>
+        prev.map((s, i) => (i === editingSkillIdx ? { ...s, name: trimmed } : s))
+      );
+    }
+    setEditingSkillIdx(null);
+    setEditingSkillName('');
+  };
+
+  const handleAutoGenerate = () => {
+    const generated = autoGenerateSkills(agent);
+    const existingNames = new Set(skills.map((s) => s.name));
+    const merged = [
+      ...skills,
+      ...generated.filter((s) => !existingNames.has(s.name)),
+    ];
+    setSkills(merged);
+    message.success('已自动生成技能');
   };
 
   const handleDelete = async () => {
@@ -129,7 +186,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
             type="button"
             onClick={() => setActiveTab(item.key)}
           >
-            {item.icon} {item.key === 'skills' ? `SKILLS (${capabilities.length})` : item.label}
+            {item.icon} {item.key === 'skills' ? `SKILLS (${skills.length})` : item.label}
           </button>
         ))}
       </div>
@@ -241,21 +298,73 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent }) => {
 
         {activeTab === 'skills' && (
           <section className={styles.section}>
-            <div className={styles.sectionTitle}>SKILLS ({capabilities.length})</div>
-            {capabilities.length === 0 ? (
-              <div className={styles.emptyState}>暂无 Skill 或能力标签</div>
+            <div className={styles.skillsHeader}>
+              <div className={styles.sectionTitle}>SKILLS ({skills.length})</div>
+              <Button
+                size="small"
+                icon={<StarOutlined />}
+                onClick={handleAutoGenerate}
+              >
+                自动生成
+              </Button>
+            </div>
+            {skills.length === 0 ? (
+              <div className={styles.skillsEmpty}>
+                暂无技能，点击「自动生成」或在下方添加
+              </div>
             ) : (
-              <div className={styles.capabilityList}>
-                {capabilities.map((item) => (
-                  <div className={styles.capabilityItem} key={item}>
-                    <strong>{item}</strong>
-                    <div className={styles.value}>
-                      {item} capability detected from local CLI registration.
-                    </div>
+              <div className={styles.skillGrid}>
+                {skills.map((skill, idx) => (
+                  <div className={styles.skillCard} key={idx}>
+                    <button
+                      className={styles.skillDelete}
+                      type="button"
+                      onClick={() => handleDeleteSkill(idx)}
+                      title="删除"
+                    >
+                      <CloseOutlined />
+                    </button>
+                    {skill.auto && (
+                      <span className={styles.skillBadge}>auto</span>
+                    )}
+                    {editingSkillIdx === idx ? (
+                      <Input
+                        autoFocus
+                        size="small"
+                        value={editingSkillName}
+                        onChange={(e) => setEditingSkillName(e.target.value)}
+                        onBlur={handleCommitEditSkill}
+                        onPressEnter={handleCommitEditSkill}
+                        className={styles.skillNameInput}
+                      />
+                    ) : (
+                      <div
+                        className={styles.skillName}
+                        onClick={() => handleStartEditSkill(idx)}
+                        title="点击编辑名称"
+                      >
+                        {skill.name}
+                      </div>
+                    )}
+                    {skill.description && (
+                      <div className={styles.skillDesc}>{skill.description}</div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
+            <div className={styles.skillAddRow}>
+              <Input
+                placeholder="输入新技能名称"
+                value={newSkillName}
+                onChange={(e) => setNewSkillName(e.target.value)}
+                onPressEnter={handleAddSkill}
+                style={{ flex: 1 }}
+              />
+              <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
+                添加
+              </Button>
+            </div>
           </section>
         )}
       </div>
