@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,7 +123,7 @@ func TestRegisterSystemAgentsSkipsInvalidItems(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo)
 	err := svc.RegisterSystemAgents(context.Background(), []DiscoveredAgent{
-		{Name: "Claude Code", CLITool: "claude", Capabilities: []string{"coding"}},
+		{Name: "Claude Code", CLITool: "claude", Capabilities: []DiscoveredSkill{{Name: "coding"}}},
 		{Name: "", CLITool: "codex"},
 		{Name: "OpenCode", CLITool: ""},
 	})
@@ -166,7 +169,7 @@ func TestRegisterMachineAgentsMarksMachineConnected(t *testing.T) {
 	}
 
 	err = svc.RegisterMachineAgents(context.Background(), machine, "DESKTOP-1", []DiscoveredAgent{
-		{Name: "Codex", CLITool: "codex", Capabilities: []string{"coding"}},
+		{Name: "Codex", CLITool: "codex", Capabilities: []DiscoveredSkill{{Name: "coding"}}},
 		{Name: "", CLITool: "broken"},
 	})
 	if err != nil {
@@ -178,6 +181,40 @@ func TestRegisterMachineAgentsMarksMachineConnected(t *testing.T) {
 	if repo.machines[0].Status != "connected" || repo.machines[0].MachineID != "DESKTOP-1" {
 		t.Fatalf("expected connected machine, got %#v", repo.machines[0])
 	}
+}
+
+func TestDiscoveredSkillAcceptsLegacyString(t *testing.T) {
+	var skill DiscoveredSkill
+	if err := skill.UnmarshalJSON([]byte(`"coding"`)); err != nil {
+		t.Fatalf("unmarshal legacy skill: %v", err)
+	}
+	if skill.Name != "coding" || !skill.Auto {
+		t.Fatalf("unexpected skill: %#v", skill)
+	}
+}
+
+func TestSyncSkillFilesWritesExistingSkillMD(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	payload := `[{"name":"coding","detail":"new content","source_path":` + strconvQuote(path) + `}]`
+	if err := syncSkillFiles(payload); err != nil {
+		t.Fatalf("sync skill file: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if string(content) != "new content" {
+		t.Fatalf("expected synced content, got %q", string(content))
+	}
+}
+
+func strconvQuote(value string) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }
 
 func TestUpdateCustomReturnsNotFound(t *testing.T) {
