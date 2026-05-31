@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,12 @@ func DefaultCandidates() []Candidate {
 			Name:         "OpenCode",
 			CLITool:      "opencode",
 			Command:      "opencode",
+			Capabilities: defaultSkills("coding"),
+		},
+		{
+			Name:         "OpenClaw",
+			CLITool:      "openclaw",
+			Command:      "openclaw",
 			Capabilities: defaultSkills("coding"),
 		},
 	}
@@ -143,19 +150,61 @@ func skillRoots(cliTool string) []string {
 	roots := make([]string, 0, 4)
 	switch cliTool {
 	case "claude":
-		roots = append(roots, filepath.Join(wd, ".claude", "skills"))
+		roots = appendUniqueRoot(roots, filepath.Join(wd, ".claude", "skills"))
 		if home != "" {
-			roots = append(roots, filepath.Join(home, ".claude", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "skills"))
 		}
 	case "codex":
-		roots = append(roots, filepath.Join(wd, ".agents", "skills"))
+		roots = appendUniqueRoot(roots, filepath.Join(wd, ".agents", "skills"))
 		if home != "" {
-			roots = append(roots, filepath.Join(home, ".codex", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".codex", "skills"))
 		}
-	case "opencode":
-		roots = append(roots, filepath.Join(wd, ".opencode", "skills"))
+	case "opencode", "openclaw":
+		roots = appendUniqueRoot(roots, filepath.Join(wd, ".opencode", "skills"))
+		roots = appendUniqueRoot(roots, filepath.Join(wd, ".openclaw", "skills"))
 		if home != "" {
-			roots = append(roots, filepath.Join(home, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".openclaw", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".openclaw", "plugin-skills"))
+			roots = append(roots, openClawInstallSkillRoots(home)...)
+		}
+	}
+	return roots
+}
+
+func appendUniqueRoot(roots []string, root string) []string {
+	if root == "" {
+		return roots
+	}
+	for _, existing := range roots {
+		if existing == root {
+			return roots
+		}
+	}
+	return append(roots, root)
+}
+
+func openClawInstallSkillRoots(home string) []string {
+	data, err := os.ReadFile(filepath.Join(home, ".openclaw", "plugins", "installs.json"))
+	if err != nil {
+		return nil
+	}
+	var installs struct {
+		InstallRecords map[string]struct {
+			InstallPath string `json:"installPath"`
+			SourcePath  string `json:"sourcePath"`
+		} `json:"installRecords"`
+	}
+	if err := json.Unmarshal(data, &installs); err != nil {
+		return nil
+	}
+	roots := make([]string, 0, len(installs.InstallRecords))
+	for _, record := range installs.InstallRecords {
+		if record.InstallPath != "" {
+			roots = appendUniqueRoot(roots, filepath.Join(record.InstallPath, "skills"))
+		}
+		if record.SourcePath != "" {
+			roots = appendUniqueRoot(roots, filepath.Join(record.SourcePath, "skills"))
 		}
 	}
 	return roots

@@ -4,13 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
 func TestNewUsesDefaultCandidates(t *testing.T) {
 	s := New(nil)
-	if len(s.candidates) != 3 {
-		t.Fatalf("expected 3 default candidates, got %d", len(s.candidates))
+	if len(s.candidates) != 4 {
+		t.Fatalf("expected 4 default candidates, got %d", len(s.candidates))
 	}
 }
 
@@ -58,6 +59,28 @@ func TestReadSkillsReturnsSkillFiles(t *testing.T) {
 	if !found {
 		t.Fatalf("expected project skill in %#v", skills)
 	}
+}
+
+func TestOpenClawInstallSkillRootsUsesInstallRecords(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "npm", "node_modules", "@openclaw", "qqbot")
+	configDir := filepath.Join(dir, ".openclaw", "plugins")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	installs := `{"installRecords":{"qqbot":{"installPath":` + strconv.Quote(pluginDir) + `}}}`
+	if err := os.WriteFile(filepath.Join(configDir, "installs.json"), []byte(installs), 0o644); err != nil {
+		t.Fatalf("write installs: %v", err)
+	}
+
+	roots := openClawInstallSkillRoots(dir)
+	expected := filepath.Join(pluginDir, "skills")
+	for _, root := range roots {
+		if root == expected {
+			return
+		}
+	}
+	t.Fatalf("expected %q in %#v", expected, roots)
 }
 
 func TestScanSkipsMissingCommand(t *testing.T) {

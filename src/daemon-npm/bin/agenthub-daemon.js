@@ -180,19 +180,63 @@ function findSkillFiles(root) {
   return results;
 }
 
+function addRoot(roots, root) {
+  if (root && !roots.includes(root)) roots.push(root);
+}
+
+function localRepoRoot() {
+  const root = path.resolve(__dirname, '..', '..', '..');
+  const marker = path.join(root, 'src', 'daemon-npm', 'package.json');
+  return fs.existsSync(marker) ? root : null;
+}
+
+function openClawInstallSkillRoots(home) {
+  const installsPath = path.join(home, '.openclaw', 'plugins', 'installs.json');
+  let installs = null;
+  try {
+    installs = JSON.parse(fs.readFileSync(installsPath, 'utf8'));
+  } catch {
+    return [];
+  }
+
+  const roots = [];
+  const records = installs && typeof installs.installRecords === 'object'
+    ? Object.values(installs.installRecords)
+    : [];
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    if (record.installPath) addRoot(roots, path.join(String(record.installPath), 'skills'));
+    if (record.sourcePath) addRoot(roots, path.join(String(record.sourcePath), 'skills'));
+  }
+  return roots;
+}
+
 function skillRoots(cliTool) {
   const roots = [];
   const cwd = process.cwd();
   const home = os.homedir();
+  const repoRoot = localRepoRoot();
   if (cliTool === 'claude') {
-    roots.push(path.join(cwd, '.claude', 'skills'));
-    if (home) roots.push(path.join(home, '.claude', 'skills'));
+    addRoot(roots, path.join(cwd, '.claude', 'skills'));
+    if (repoRoot) addRoot(roots, path.join(repoRoot, '.claude', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.claude', 'skills'));
   } else if (cliTool === 'codex') {
-    roots.push(path.join(cwd, '.agents', 'skills'));
-    if (home) roots.push(path.join(home, '.codex', 'skills'));
+    addRoot(roots, path.join(cwd, '.agents', 'skills'));
+    if (repoRoot) addRoot(roots, path.join(repoRoot, '.agents', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.codex', 'skills'));
   } else if (cliTool === 'opencode' || cliTool === 'openclaw') {
-    roots.push(path.join(cwd, '.opencode', 'skills'));
-    if (home) roots.push(path.join(home, '.opencode', 'skills'));
+    addRoot(roots, path.join(cwd, '.opencode', 'skills'));
+    addRoot(roots, path.join(cwd, '.openclaw', 'skills'));
+    if (repoRoot) addRoot(roots, path.join(repoRoot, '.opencode', 'skills'));
+    if (repoRoot) addRoot(roots, path.join(repoRoot, '.openclaw', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.opencode', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.openclaw', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.openclaw', 'plugin-skills'));
+    if (home) {
+      for (const root of openClawInstallSkillRoots(home)) {
+        addRoot(roots, root);
+      }
+    }
   }
   return roots;
 }
