@@ -77,10 +77,10 @@ type AgentService struct {
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
 type DiscoveredAgent struct {
-	Name         string   `json:"name"`
-	CLITool      string   `json:"cli_tool"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities"`
+	Name         string            `json:"name"`
+	CLITool      string            `json:"cli_tool"`
+	Version      string            `json:"version"`
+	Capabilities []DiscoveredSkill `json:"capabilities"`
 }
 
 // NewAgentService 创建 Agent 服务
@@ -257,6 +257,9 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	cliTool = strings.TrimSpace(cliTool)
 	if id == "" || name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
+	}
+	if err := syncSkillFiles(capabilitiesJSON); err != nil {
+		return nil, err
 	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON)
 	if err != nil {
