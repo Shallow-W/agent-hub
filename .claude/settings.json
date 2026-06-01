@@ -69,5 +69,10 @@
       }
     ]
   },
+  "permissions": {
+    "allow": [
+      "Bash(*)"
+    ]
+  },
   "enabledPlugins": {}
 }

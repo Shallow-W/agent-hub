@@ -2,18 +2,29 @@ package scanner
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
+// SkillInfo 描述本机 Agent 暴露的真实 skill 文件
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	SourcePath  string `json:"source_path,omitempty"`
+	Auto        bool   `json:"auto,omitempty"`
+}
+
 // AgentInfo 描述本机已发现的 Agent CLI
 type AgentInfo struct {
-	Name         string   `json:"name"`
-	CLITool      string   `json:"cli_tool"`
-	CommandPath  string   `json:"command_path"`
-	Version      string   `json:"version"`
-	Capabilities []string `json:"capabilities"`
+	Name         string      `json:"name"`
+	CLITool      string      `json:"cli_tool"`
+	CommandPath  string      `json:"command_path"`
+	Version      string      `json:"version"`
+	Capabilities []SkillInfo `json:"capabilities"`
 }
 
 // Candidate 是已知 Agent CLI 的扫描配置
@@ -21,7 +32,7 @@ type Candidate struct {
 	Name         string
 	CLITool      string
 	Command      string
-	Capabilities []string
+	Capabilities []SkillInfo
 }
 
 // Scanner 扫描 PATH 中可用的 Agent CLI
@@ -37,19 +48,19 @@ func DefaultCandidates() []Candidate {
 			Name:         "Claude Code",
 			CLITool:      "claude",
 			Command:      "claude",
-			Capabilities: []string{"coding", "review", "orchestration"},
+			Capabilities: defaultSkills("coding", "review", "orchestration"),
 		},
 		{
 			Name:         "Codex",
 			CLITool:      "codex",
 			Command:      "codex",
-			Capabilities: []string{"coding", "review"},
+			Capabilities: defaultSkills("coding", "review"),
 		},
 		{
 			Name:         "OpenCode",
 			CLITool:      "opencode",
 			Command:      "opencode",
-			Capabilities: []string{"coding"},
+			Capabilities: defaultSkills("coding"),
 		},
 	}
 }
@@ -74,12 +85,16 @@ func (s *Scanner) Scan(ctx context.Context) ([]AgentInfo, error) {
 			continue
 		}
 		version := s.readVersion(ctx, candidate.Command)
+		capabilities := s.readSkills(candidate)
+		if len(capabilities) == 0 {
+			capabilities = candidate.Capabilities
+		}
 		agents = append(agents, AgentInfo{
 			Name:         candidate.Name,
 			CLITool:      candidate.CLITool,
 			CommandPath:  path,
 			Version:      version,
-			Capabilities: candidate.Capabilities,
+			Capabilities: capabilities,
 		})
 	}
 	return agents, nil
@@ -94,4 +109,90 @@ func (s *Scanner) readVersion(parent context.Context, command string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func (s *Scanner) readSkills(candidate Candidate) []SkillInfo {
+	roots := skillRoots(candidate.CLITool)
+	skills := make([]SkillInfo, 0)
+	seen := make(map[string]bool)
+	for _, root := range roots {
+		filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || entry.Name() != "SKILL.md" {
+				return nil
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			skill := parseSkillFile(filepath.Base(filepath.Dir(path)), path, string(content))
+			key := strings.ToLower(skill.Name)
+			if key == "" || seen[key] {
+				return nil
+			}
+			seen[key] = true
+			skills = append(skills, skill)
+			return nil
+		})
+	}
+	return skills
+}
+
+func skillRoots(cliTool string) []string {
+	wd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	roots := make([]string, 0, 4)
+	switch cliTool {
+	case "claude":
+		roots = append(roots, filepath.Join(wd, ".claude", "skills"))
+		if home != "" {
+			roots = append(roots, filepath.Join(home, ".claude", "skills"))
+		}
+	case "codex":
+		roots = append(roots, filepath.Join(wd, ".agents", "skills"))
+		if home != "" {
+			roots = append(roots, filepath.Join(home, ".codex", "skills"))
+		}
+	case "opencode":
+		roots = append(roots, filepath.Join(wd, ".opencode", "skills"))
+		if home != "" {
+			roots = append(roots, filepath.Join(home, ".opencode", "skills"))
+		}
+	}
+	return roots
+}
+
+func parseSkillFile(fallbackName, path, content string) SkillInfo {
+	skill := SkillInfo{Name: fallbackName, Detail: content, SourcePath: path, Auto: true}
+	lines := strings.Split(content, "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
+		return skill
+	}
+	for _, line := range lines[1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			break
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		switch strings.TrimSpace(key) {
+		case "name":
+			if value != "" {
+				skill.Name = value
+			}
+		case "description":
+			skill.Description = value
+		}
+	}
+	return skill
+}
+
+func defaultSkills(names ...string) []SkillInfo {
+	skills := make([]SkillInfo, 0, len(names))
+	for _, name := range names {
+		skills = append(skills, SkillInfo{Name: name, Auto: true})
+	}
+	return skills
 }

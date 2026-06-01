@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { Avatar, Dropdown, Modal, Input } from 'antd';
+import { Avatar, Dropdown, Input, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  PushpinOutlined,
-  InboxOutlined,
   DeleteOutlined,
-  UserOutlined,
+  EditOutlined,
+  InboxOutlined,
+  PushpinOutlined,
+  RobotOutlined,
   TeamOutlined,
   UserAddOutlined,
-  EditOutlined,
-  RobotOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import { useAuthStore } from '@/store/authStore';
 import type { Conversation } from '@/types/conversation';
 import styles from './ConversationItem.module.css';
 
@@ -67,7 +68,7 @@ function formatTime(dateStr: string): string {
 
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen) + '...';
+  return `${text.slice(0, maxLen)}...`;
 }
 
 export const ConversationItem: React.FC<ConversationItemProps> = ({
@@ -85,9 +86,10 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
 }) => {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const isGroup = conversation.type === 'group';
   const isAgent = conversation.type === 'agent';
-  // 显示名称：私聊用对方用户名，群聊/智能体用标题或名称
+  const isOwner = conversation.user_id === currentUserId;
   const displayName = isGroup
     ? conversation.title
     : (conversation.peer_name || conversation.title);
@@ -140,14 +142,16 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
     {
       key: 'delete',
       icon: <DeleteOutlined />,
-      label: '删除',
+      label: isGroup && isOwner ? '解散并删除' : '删除',
       danger: true,
       onClick: (info) => {
         info.domEvent.stopPropagation();
         Modal.confirm({
-          title: '确认删除',
-          content: `确定要删除「${displayName}」吗？`,
-          okText: '删除',
+          title: isGroup && isOwner ? '解散并删除群聊' : '删除对话',
+          content: isGroup && isOwner
+            ? `确定要解散并删除「${displayName}」吗？所有成员都会失去这个群聊和聊天记录。`
+            : `确定要删除「${displayName}」吗？`,
+          okText: isGroup && isOwner ? '解散并删除' : '删除',
           okType: 'danger',
           cancelText: '取消',
           onOk: onDelete,
@@ -184,9 +188,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           {!isGroup && !isAgent ? firstChar : undefined}
         </Avatar>
         {!isGroup && !isAgent && (
-          <span
-            className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`}
-          />
+          <span className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`} />
         )}
         {unreadCount > 0 && (
           <span className={styles.unreadBadge}>
@@ -210,11 +212,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       </div>
 
       <div className={styles.actions}>
-        <Dropdown
-          menu={{ items: menuItems }}
-          trigger={['click']}
-          placement="bottomRight"
-        >
+        <Dropdown menu={{ items: menuItems }} trigger={['click']} placement="bottomRight">
           <button
             className={styles.actionBtn}
             onClick={(e) => e.stopPropagation()}

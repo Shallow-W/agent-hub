@@ -127,6 +127,49 @@
   display: none;
 }
 
+.targetBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  margin-bottom: 6px;
+  background: rgba(47, 143, 107, 0.08);
+  border-radius: 20px;
+  border: 1px solid rgba(47, 143, 107, 0.2);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.targetBarIcon {
+  color: var(--color-primary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.targetBarName {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.targetBarClear {
+  flex-shrink: 0;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  padding: 0 !important;
+  color: var(--color-text-secondary) !important;
+}
+
+.targetBarClear:hover {
+  color: var(--color-primary) !important;
+  background: rgba(47, 143, 107, 0.12) !important;
+}
+
 .replyBar {
   display: flex;
   align-items: center;

@@ -13,24 +13,28 @@ const CANDIDATES = [
   {
     name: 'Claude Code',
     cli_tool: 'claude',
-    capabilities: ['coding', 'review', 'orchestration'],
+    capabilities: defaultSkills(['coding', 'review', 'orchestration']),
   },
   {
     name: 'Codex',
     cli_tool: 'codex',
-    capabilities: ['coding', 'review'],
+    capabilities: defaultSkills(['coding', 'review']),
   },
   {
     name: 'OpenCode',
     cli_tool: 'opencode',
-    capabilities: ['coding'],
+    capabilities: defaultSkills(['coding']),
   },
   {
     name: 'OpenClaw',
     cli_tool: 'openclaw',
-    capabilities: ['coding'],
+    capabilities: defaultSkills(['coding']),
   },
 ];
+
+function defaultSkills(names) {
+  return names.map((name) => ({ name, auto: true }));
+}
 
 function npmWrapperScript(command) {
   if (process.platform !== 'win32') return null;
@@ -120,14 +124,99 @@ function scanAgents() {
       const command = resolveCommand(candidate.cli_tool);
       const version = commandVersion(command);
       if (version === null) return null;
+      const skills = scanSkills(candidate.cli_tool);
       return {
         name: candidate.name,
         cli_tool: candidate.cli_tool,
         version,
-        capabilities: candidate.capabilities,
+        capabilities: skills.length > 0 ? skills : candidate.capabilities,
       };
     })
     .filter(Boolean);
+}
+
+function scanSkills(cliTool) {
+  const skills = [];
+  const seen = new Set();
+  for (const root of skillRoots(cliTool)) {
+    for (const skillPath of findSkillFiles(root)) {
+      let content = '';
+      try {
+        content = fs.readFileSync(skillPath, 'utf8');
+      } catch {
+        continue;
+      }
+      const skill = parseSkillFile(path.basename(path.dirname(skillPath)), skillPath, content);
+      const key = skill.name.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      skills.push(skill);
+    }
+  }
+  return skills;
+}
+
+function findSkillFiles(root) {
+  const results = [];
+  function walk(current) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name === 'SKILL.md') {
+        results.push(entryPath);
+      }
+    }
+  }
+  walk(root);
+  return results;
+}
+
+function skillRoots(cliTool) {
+  const roots = [];
+  const cwd = process.cwd();
+  const home = os.homedir();
+  if (cliTool === 'claude') {
+    roots.push(path.join(cwd, '.claude', 'skills'));
+    if (home) roots.push(path.join(home, '.claude', 'skills'));
+  } else if (cliTool === 'codex') {
+    roots.push(path.join(cwd, '.agents', 'skills'));
+    if (home) roots.push(path.join(home, '.codex', 'skills'));
+  } else if (cliTool === 'opencode' || cliTool === 'openclaw') {
+    roots.push(path.join(cwd, '.opencode', 'skills'));
+    if (home) roots.push(path.join(home, '.opencode', 'skills'));
+  }
+  return roots;
+}
+
+function parseSkillFile(fallbackName, sourcePath, content) {
+  const skill = {
+    name: fallbackName,
+    detail: content,
+    source_path: sourcePath,
+    auto: true,
+  };
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== '---') return skill;
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (line === '---') break;
+    const separator = line.indexOf(':');
+    if (separator === -1) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (key === 'name' && value) skill.name = value;
+    if (key === 'description') skill.description = value;
+  }
+  return skill;
 }
 
 function apiURL(serverURL, apiKey, pathname) {

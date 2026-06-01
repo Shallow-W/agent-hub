@@ -19,6 +19,7 @@ interface ConversationState {
   renameConversation: (id: string, title: string) => Promise<void>;
   setActive: (id: string | null) => void;
   bindDirectAgentChat: (conversationId: string, agentId: string) => void;
+  unbindDirectAgentChat: (conversationId: string) => void;
   setMemberPanelOpen: (open: boolean) => void;
 }
 
@@ -89,8 +90,21 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   deleteConversation: async (id) => {
+    let removeLocally = false;
     try {
       await convApi.deleteConversation(id);
+      removeLocally = true;
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 403 || status === 404) {
+        // Conversation inaccessible (removed from group, already deleted, etc.) — remove from local list
+        removeLocally = true;
+      } else {
+        const { message } = await import('antd');
+        message.error('删除对话失败');
+      }
+    }
+    if (removeLocally) {
       set((state) => {
         const next = state.conversations.filter((c) => c.id !== id);
         const activeId =
@@ -99,9 +113,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
             : state.activeConversationId;
         return { conversations: next, activeConversationId: activeId };
       });
-    } catch {
-      const { message } = await import('antd');
-      message.error('删除对话失败');
     }
   },
 
@@ -148,6 +159,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   bindDirectAgentChat: (conversationId, agentId) => {
     set((state) => {
       const next = { ...state.directAgentChats, [conversationId]: agentId };
+      localStorage.setItem(DIRECT_AGENT_CHATS_KEY, JSON.stringify(next));
+      return { directAgentChats: next };
+    });
+  },
+
+  unbindDirectAgentChat: (conversationId) => {
+    set((state) => {
+      const next = { ...state.directAgentChats };
+      delete next[conversationId];
       localStorage.setItem(DIRECT_AGENT_CHATS_KEY, JSON.stringify(next));
       return { directAgentChats: next };
     });
