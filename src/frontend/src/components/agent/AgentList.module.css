@@ -158,7 +158,7 @@
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
@@ -198,12 +198,39 @@
   margin-top: 2px;
   font-size: 11px;
   color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.agentTags {
+.agentSummary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 36px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.agentSummary span:first-child {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  max-width: 84px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agentSummary span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .candidateRow {
