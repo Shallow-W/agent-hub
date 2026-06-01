@@ -206,7 +206,18 @@ func main() {
 				c.Status(http.StatusForbidden)
 				return
 			}
-			c.Header("Content-Disposition", "inline")
+
+			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
+			isThumbnail := strings.HasPrefix(filepath.Clean(filePath), string(os.PathSeparator)+"thumbnails")
+			ext := strings.ToLower(filepath.Ext(absPath))
+			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
+			if isThumbnail || isImage {
+				c.Header("Content-Disposition", "inline")
+			} else {
+				// 非图片文件触发浏览器下载，使用原始文件名
+				fileName := filepath.Base(absPath)
+				c.Header("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+			}
 			c.Header("X-Content-Type-Options", "nosniff")
 			c.File(absPath)
 		})

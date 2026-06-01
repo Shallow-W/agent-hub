@@ -169,6 +169,14 @@
   padding: 10px 0;
 }
 
+.systemText {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  background-color: var(--color-surface-muted);
+  padding: 4px 14px;
+  border-radius: 10px;
+}
+
 .codeBlockWrapper {
   margin: 8px 0;
   border: 1px solid var(--color-border);

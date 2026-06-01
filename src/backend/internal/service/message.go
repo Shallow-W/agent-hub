@@ -139,7 +139,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
-	if strings.TrimSpace(content) == "" {
+	// 允许纯附件消息（无文字内容），仅当内容为空且无附件时拒绝
+	if strings.TrimSpace(content) == "" && len(attachments) == 0 {
 		return nil, ErrMsgEmptyContent
 	}
 

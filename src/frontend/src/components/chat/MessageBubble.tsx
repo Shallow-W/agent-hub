@@ -8,8 +8,8 @@ import {
   RollbackOutlined,
   UpOutlined,
 } from '@ant-design/icons';
-import type { Message } from '@/types/message';
-import type { OptimisticStatus } from '@/types/message';
+import type { Message, OptimisticStatus } from '@/types/message';
+import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import styles from './MessageBubble.module.css';
 
@@ -136,12 +136,31 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   // 这里只做前端提示，撤回窗口仍由服务端校验。
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
 
+  // 乐观消息的 pendingAttachments 需要转换为 MessageAttachment 格式才能渲染
+  const displayAttachments = useMemo((): MessageAttachment[] => {
+    if (message.attachments && message.attachments.length > 0) return message.attachments;
+    const pending = (message as Message & { pendingAttachments?: unknown[] }).pendingAttachments;
+    if (!pending || !Array.isArray(pending) || pending.length === 0) return [];
+    return pending.map((p, i) => ({
+      id: `pending_${i}`,
+      message_id: '',
+      file_name: (p as Record<string, unknown>).file_name as string,
+      mime_type: (p as Record<string, unknown>).mime_type as string,
+      file_size: (p as Record<string, unknown>).file_size as number,
+      file_path: (p as Record<string, unknown>).file_path as string,
+      thumbnail_path: ((p as Record<string, unknown>).thumbnail_path as string) ?? null,
+      width: ((p as Record<string, unknown>).width as number) ?? 0,
+      height: ((p as Record<string, unknown>).height as number) ?? 0,
+      created_at: new Date().toISOString(),
+    }));
+  }, [message.attachments, (message as Message & { pendingAttachments?: unknown[] }).pendingAttachments]);
+
   if (isSystem) {
     return (
       <div className={styles.systemMessage}>
-        <Text type="secondary" className={styles.systemText}>
+        <span className={styles.systemText}>
           {message.content}
-        </Text>
+        </span>
       </div>
     );
   }
@@ -214,8 +233,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               )}
             </div>
           )}
-          {message.attachments && message.attachments.length > 0 && (
-            <MessageAttachmentView attachments={message.attachments} />
+          {displayAttachments.length > 0 && (
+            <MessageAttachmentView attachments={displayAttachments} />
           )}
           {message.content && (
             <div

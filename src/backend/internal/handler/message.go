@@ -26,7 +26,7 @@ func NewMessageHandler(svc *service.MessageService) *MessageHandler {
 // SendMessageRequest 发送消息请求体
 type SendMessageRequest struct {
 	Role          string                    `json:"role"`
-	Content       string                    `json:"content" binding:"required"`
+	Content       string                    `json:"content"`
 	ArtifactsJSON string                    `json:"artifacts_json"`
 	Attachments   []model.MessageAttachment `json:"attachments"`
 	ReplyTo       *string                   `json:"reply_to"`
