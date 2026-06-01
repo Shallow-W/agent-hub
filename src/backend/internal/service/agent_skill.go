@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const daemonSkillSyncTool = "__agenthub_skill_sync__"
+
 // DiscoveredSkill 兼容旧 daemon 的字符串能力，也承载真实 SKILL.md 内容。
 type DiscoveredSkill struct {
 	Name        string `json:"name"`
@@ -48,6 +50,34 @@ func syncSkillFiles(capabilitiesJSON string) error {
 		}
 	}
 	return nil
+}
+
+func validateDaemonSkillFiles(previousJSON, nextJSON string) error {
+	allowed := make(map[string]bool)
+	for _, skill := range parseDiscoveredSkills(previousJSON) {
+		sourcePath := strings.TrimSpace(skill.SourcePath)
+		if sourcePath != "" {
+			allowed[sourcePath] = true
+		}
+	}
+	for _, skill := range parseDiscoveredSkills(nextJSON) {
+		sourcePath := strings.TrimSpace(skill.SourcePath)
+		if sourcePath == "" {
+			continue
+		}
+		if !allowed[sourcePath] {
+			return ErrAgentInvalidInput
+		}
+	}
+	return nil
+}
+
+func parseDiscoveredSkills(capabilitiesJSON string) []DiscoveredSkill {
+	var skills []DiscoveredSkill
+	if err := json.Unmarshal([]byte(capabilitiesJSON), &skills); err != nil {
+		return nil
+	}
+	return skills
 }
 
 func writeSkillFile(sourcePath, detail string) error {

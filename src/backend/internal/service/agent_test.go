@@ -14,6 +14,8 @@ import (
 
 type fakeAgentRepo struct {
 	updateResult *model.Agent
+	currentAgent *model.Agent
+	daemonTask   *model.DaemonTask
 	deleted      bool
 	registered   []string
 	machines     []model.DaemonMachine
@@ -27,11 +29,28 @@ func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]mod
 }
 
 func (r *fakeAgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error) {
-	return nil, nil
+	return r.currentAgent, nil
 }
 
 func (r *fakeAgentRepo) GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error) {
+	if r.daemonTask != nil {
+		return r.daemonTask, nil
+	}
 	return nil, nil
+}
+
+func (r *fakeAgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
+	r.daemonTask = &model.DaemonTask{
+		ID:        "task-1",
+		UserID:    userID,
+		AgentID:   agentID,
+		MachineID: machineID,
+		CLITool:   cliTool,
+		Prompt:    prompt,
+		Status:    "completed",
+		Result:    "ok",
+	}
+	return r.daemonTask, nil
 }
 
 func (r *fakeAgentRepo) ClaimDaemonTask(ctx context.Context, machineID string) (*model.DaemonTask, error) {
@@ -209,6 +228,35 @@ func TestSyncSkillFilesWritesExistingSkillMD(t *testing.T) {
 	}
 	if string(content) != "new content" {
 		t.Fatalf("expected synced content, got %q", string(content))
+	}
+}
+
+func TestUpdateDaemonAgentQueuesSkillSyncTask(t *testing.T) {
+	userID := "user-1"
+	machineID := "machine-1"
+	payload := `[{"name":"coding","detail":"new content","source_path":"C:\\skills\\coding\\SKILL.md"}]`
+	repo := &fakeAgentRepo{
+		currentAgent: &model.Agent{
+			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
+			Source: "daemon", MachineID: &machineID,
+			CapabilitiesJSON: `[{"name":"coding","detail":"old","source_path":"C:\\skills\\coding\\SKILL.md"}]`,
+		},
+		updateResult: &model.Agent{
+			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
+			Source: "daemon", MachineID: &machineID,
+			CapabilitiesJSON: payload,
+		},
+	}
+	svc := NewAgentService(repo)
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", userID, "Agent", "claude", "", "", payload)
+	if err != nil {
+		t.Fatalf("update daemon agent: %v", err)
+	}
+	if repo.daemonTask == nil || repo.daemonTask.CLITool != daemonSkillSyncTool {
+		t.Fatalf("expected daemon skill sync task, got %#v", repo.daemonTask)
+	}
+	if !strings.Contains(repo.daemonTask.Prompt, "new content") {
+		t.Fatalf("expected skill content in sync payload, got %q", repo.daemonTask.Prompt)
 	}
 }
 
