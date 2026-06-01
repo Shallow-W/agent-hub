@@ -27,6 +27,7 @@ function killSessionProcess(sessionId) {
 }
 
 const OPEN_PATH_TIMEOUT_MS = 5000;
+const MIN_DESCRIPTION_CHARS = 12;
 const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
@@ -299,7 +300,10 @@ function parseSkillFile(fallbackName, sourcePath, content) {
     auto: true,
   };
   const lines = content.split(/\r?\n/);
-  if (lines[0]?.trim() !== '---') return skill;
+  if (lines[0]?.trim() !== '---') {
+    skill.description = normalizeSkillDescription(skill.name, skill.description, content);
+    return skill;
+  }
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (line === '---') break;
@@ -310,7 +314,75 @@ function parseSkillFile(fallbackName, sourcePath, content) {
     if (key === 'name' && value) skill.name = value;
     if (key === 'description') skill.description = value;
   }
+  skill.description = normalizeSkillDescription(skill.name, skill.description, content);
   return skill;
+}
+
+function normalizeSkillDescription(name, description, content) {
+  const current = String(description || '').trim();
+  if (isUsefulDescription(current)) return current;
+  return inferSkillDescription(name, content);
+}
+
+function isUsefulDescription(description) {
+  const text = String(description || '').trim();
+  if (!text) return false;
+  const compact = text.replace(/[\s\p{P}\p{S}]/gu, '');
+  return compact.length >= MIN_DESCRIPTION_CHARS;
+}
+
+function inferSkillDescription(name, content) {
+  const body = stripFrontmatter(content);
+  const chunks = [];
+  let inFence = false;
+  for (const rawLine of body.split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (line.startsWith('```') || line.startsWith('~~~')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !line) continue;
+    line = cleanMarkdownLine(line);
+    if (!line || line.toLowerCase() === String(name || '').toLowerCase()) continue;
+    chunks.push(line);
+    if (chunks.join(' ').length >= 120) break;
+  }
+  const summary = truncateDescription(chunks.join(' ').replace(/\s+/g, ' ').trim());
+  if (summary) return summary;
+  return `Provides the ${name || 'selected'} skill for local Agent workflows.`;
+}
+
+function stripFrontmatter(content) {
+  const lines = String(content || '').split(/\r?\n/);
+  if (lines[0]?.trim() !== '---') return String(content || '');
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === '---') {
+      return lines.slice(i + 1).join('\n');
+    }
+  }
+  return String(content || '');
+}
+
+function cleanMarkdownLine(line) {
+  return line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+[.)]\s+/, '')
+    .replace(/^>\s?/, '')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .trim();
+}
+
+function truncateDescription(text) {
+  if (!text) return '';
+  if (text.length <= 180) return text;
+  return `${text.slice(0, 177).trimEnd()}...`;
 }
 
 function apiURL(serverURL, apiKey, pathname) {
