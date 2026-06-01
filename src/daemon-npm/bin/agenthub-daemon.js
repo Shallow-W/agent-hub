@@ -467,18 +467,19 @@ function openSkillLocation(prompt) {
   const folder = path.dirname(sourcePath);
   let command = 'xdg-open';
   let args = [folder];
+  let hideWindow = false;
   if (process.platform === 'win32') {
     command = 'explorer.exe';
-    args = [folder];
+    args = [`/select,${sourcePath}`];
   } else if (process.platform === 'darwin') {
     command = 'open';
-    args = [folder];
+    args = ['-R', sourcePath];
   }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       detached: true,
       stdio: 'ignore',
-      windowsHide: true,
+      windowsHide: hideWindow,
     });
     let settled = false;
     const finish = (callback) => {
