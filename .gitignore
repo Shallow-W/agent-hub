@@ -76,3 +76,6 @@ src/frontend/screenshot.mjs
 # === Claude Code 会话数据 ===
 .claude/sessions/
 .claude/state/
+
+# === 本地临时运行文件 ===
+.tmp/

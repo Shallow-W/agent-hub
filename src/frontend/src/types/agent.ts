@@ -67,3 +67,7 @@ export interface AddCandidateAgentRequest {
   name: string;
   system_prompt?: string;
 }
+
+export interface OpenSkillLocationRequest {
+  source_path: string;
+}

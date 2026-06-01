@@ -7,6 +7,7 @@ import type {
   CreateDaemonMachineRequest,
   CreateDaemonMachineResponse,
   DaemonMachine,
+  OpenSkillLocationRequest,
 } from '@/types/agent';
 
 export async function getAgents(): Promise<Agent[]> {
@@ -51,4 +52,11 @@ export async function addAgentCandidate(
   body: AddCandidateAgentRequest,
 ): Promise<Agent> {
   return post<Agent>(`/api/daemon/agent-candidates/${id}/add`, body);
+}
+
+export async function openSkillLocation(
+  id: string,
+  body: OpenSkillLocationRequest,
+): Promise<void> {
+  return post<void>(`/api/agents/${id}/skills/open-location`, body);
 }

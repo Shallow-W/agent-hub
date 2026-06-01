@@ -242,6 +242,7 @@ func main() {
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
+		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
