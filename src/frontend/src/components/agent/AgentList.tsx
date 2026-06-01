@@ -188,7 +188,7 @@ export const AgentList: React.FC<AgentListProps> = ({
                 aria-expanded={isExpanded}
               >
                 <div className={styles.machineLeft}>
-                  <Avatar className={styles.machineAvatar} icon={<DesktopOutlined />} />
+                  <Avatar size={36} className={styles.machineAvatar} icon={<DesktopOutlined />} />
                   <div className={styles.machineMeta}>
                     <div className={styles.machineTitleRow}>
                       <span className={styles.machineTitle}>{group.name}</span>

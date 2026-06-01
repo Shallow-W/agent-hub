@@ -61,7 +61,7 @@
 
 .metaTime,
 .systemText {
-  color: rgba(104, 114, 125, 0.72);
+  color: var(--color-text-secondary) !important;
   font-size: 10.5px;
 }
 
