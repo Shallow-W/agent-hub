@@ -256,6 +256,42 @@ func TestSyncSkillFilesWritesExistingSkillMD(t *testing.T) {
 	}
 }
 
+func TestSyncSkillFilesRejectsAgentHubWorkspaceSkill(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "daemon-npm"), 0o755); err != nil {
+		t.Fatalf("mkdir daemon package: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "frontend"), 0o755); err != nil {
+		t.Fatalf("mkdir frontend package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "daemon-npm", "package.json"), []byte(`{"name":"@agenthub/daemon"}`), 0o644); err != nil {
+		t.Fatalf("write daemon package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "frontend", "package.json"), []byte(`{"name":"frontend"}`), 0o644); err != nil {
+		t.Fatalf("write frontend package: %v", err)
+	}
+	skillDir := filepath.Join(dir, ".agents", "skills", "trellis")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	payload := `[{"name":"trellis","detail":"new content","source_path":` + strconvQuote(skillPath) + `}]`
+	if err := syncSkillFiles(payload); err != ErrAgentInvalidInput {
+		t.Fatalf("expected invalid input for AgentHub workspace skill, got %v", err)
+	}
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if string(content) != "old" {
+		t.Fatalf("expected stale workspace skill to remain unchanged, got %q", string(content))
+	}
+}
+
 func TestUpdateDaemonAgentQueuesSkillSyncTask(t *testing.T) {
 	userID := "user-1"
 	machineID := "machine-1"

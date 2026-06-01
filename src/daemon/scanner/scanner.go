@@ -148,20 +148,27 @@ func skillRoots(cliTool string) []string {
 	wd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	roots := make([]string, 0, 4)
+	includeProjectRoots := !isAgentHubWorkspace(wd)
 	switch cliTool {
 	case "claude":
-		roots = appendUniqueRoot(roots, filepath.Join(wd, ".claude", "skills"))
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".claude", "skills"))
+		}
 		if home != "" {
 			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "skills"))
 		}
 	case "codex":
-		roots = appendUniqueRoot(roots, filepath.Join(wd, ".agents", "skills"))
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".agents", "skills"))
+		}
 		if home != "" {
 			roots = appendUniqueRoot(roots, filepath.Join(home, ".codex", "skills"))
 		}
 	case "opencode", "openclaw":
-		roots = appendUniqueRoot(roots, filepath.Join(wd, ".opencode", "skills"))
-		roots = appendUniqueRoot(roots, filepath.Join(wd, ".openclaw", "skills"))
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".openclaw", "skills"))
+		}
 		if home != "" {
 			roots = appendUniqueRoot(roots, filepath.Join(home, ".opencode", "skills"))
 			roots = appendUniqueRoot(roots, filepath.Join(home, ".openclaw", "skills"))
@@ -170,6 +177,28 @@ func skillRoots(cliTool string) []string {
 		}
 	}
 	return roots
+}
+
+func isAgentHubWorkspace(root string) bool {
+	if root == "" {
+		return false
+	}
+	daemonPackage := filepath.Join(root, "src", "daemon-npm", "package.json")
+	frontendPackage := filepath.Join(root, "src", "frontend", "package.json")
+	if _, err := os.Stat(frontendPackage); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(daemonPackage)
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	return pkg.Name == "@agenthub/daemon"
 }
 
 func appendUniqueRoot(roots []string, root string) []string {

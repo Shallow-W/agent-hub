@@ -175,9 +175,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                   <span className={styles.detailTitle}>{selectedSkill.name}</span>
                   {selectedSkill.auto && <span className={styles.autoBadge}>auto</span>}
                 </div>
-                {selectedSkill.source_path && (
-                  <div className={styles.sourcePath}>{selectedSkill.source_path}</div>
-                )}
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>描述</span>
                   <Input.TextArea
