@@ -30,6 +30,30 @@ func TestParseSkillFileReadsFrontmatterAndContent(t *testing.T) {
 	}
 }
 
+func TestParseSkillFileInfersShortDescription(t *testing.T) {
+	content := "---\nname: access\ndescription: ok\n---\n\n# access\nUse when an agent needs to inspect permission boundaries and explain safe access steps.\n"
+	skill := parseSkillFile("fallback", "C:/tmp/SKILL.md", content)
+	if !strings.Contains(skill.Description, "permission boundaries") {
+		t.Fatalf("expected inferred description from body, got %q", skill.Description)
+	}
+}
+
+func TestParseSkillFileKeepsUsefulDescription(t *testing.T) {
+	content := "---\nname: coding\ndescription: Write code safely with tests and concise implementation notes.\n---\n\n# Body\n"
+	skill := parseSkillFile("fallback", "C:/tmp/SKILL.md", content)
+	if skill.Description != "Write code safely with tests and concise implementation notes." {
+		t.Fatalf("expected original description, got %q", skill.Description)
+	}
+}
+
+func TestParseSkillFileInfersDescriptionWithoutFrontmatter(t *testing.T) {
+	content := "# deploy\nPrepare release commands, verify generated artifacts, and summarize deployment risks.\n"
+	skill := parseSkillFile("deploy", "C:/tmp/SKILL.md", content)
+	if !strings.Contains(skill.Description, "release commands") {
+		t.Fatalf("expected inferred description without frontmatter, got %q", skill.Description)
+	}
+}
+
 func TestReadSkillsReturnsSkillFiles(t *testing.T) {
 	dir := t.TempDir()
 	oldWd, err := os.Getwd()

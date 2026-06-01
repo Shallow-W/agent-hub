@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
+
+const minDescriptionChars = 12
 
 // SkillInfo 描述本机 Agent 暴露的真实 skill 文件
 type SkillInfo struct {
@@ -254,6 +257,7 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 	skill := SkillInfo{Name: fallbackName, Detail: content, SourcePath: path, Auto: true}
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
+		skill.Description = normalizeSkillDescription(skill.Name, skill.Description, content)
 		return skill
 	}
 	for _, line := range lines[1:] {
@@ -275,7 +279,103 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 			skill.Description = value
 		}
 	}
+	skill.Description = normalizeSkillDescription(skill.Name, skill.Description, content)
 	return skill
+}
+
+func normalizeSkillDescription(name, description, content string) string {
+	current := strings.TrimSpace(description)
+	if isUsefulDescription(current) {
+		return current
+	}
+	return inferSkillDescription(name, content)
+}
+
+func isUsefulDescription(description string) bool {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return false
+	}
+	count := 0
+	for _, r := range description {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		count++
+	}
+	return count >= minDescriptionChars
+}
+
+func inferSkillDescription(name, content string) string {
+	body := stripFrontmatter(content)
+	lines := strings.Split(body, "\n")
+	chunks := make([]string, 0, 3)
+	inFence := false
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || line == "" {
+			continue
+		}
+		line = cleanMarkdownLine(line)
+		if line == "" || strings.EqualFold(line, name) {
+			continue
+		}
+		chunks = append(chunks, line)
+		if len(strings.Join(chunks, " ")) >= 120 {
+			break
+		}
+	}
+	summary := truncateDescription(strings.Join(chunks, " "))
+	if summary != "" {
+		return summary
+	}
+	if name == "" {
+		name = "selected"
+	}
+	return "Provides the " + name + " skill for local Agent workflows."
+}
+
+func stripFrontmatter(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return content
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return content
+}
+
+func cleanMarkdownLine(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "#")
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "-*+>")
+	line = strings.TrimSpace(line)
+	if index := strings.Index(line, "]("); index > 0 && strings.HasPrefix(line, "[") {
+		closeLabel := strings.Index(line, "]")
+		closeURL := strings.Index(line, ")")
+		if closeLabel > 1 && closeURL > closeLabel {
+			line = line[1:closeLabel] + line[closeURL+1:]
+		}
+	}
+	replacer := strings.NewReplacer("`", "", "**", "", "__", "", "*", "", "_", "")
+	return strings.TrimSpace(replacer.Replace(line))
+}
+
+func truncateDescription(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len([]rune(text)) <= 180 {
+		return text
+	}
+	runes := []rune(text)
+	return strings.TrimSpace(string(runes[:177])) + "..."
 }
 
 func defaultSkills(names ...string) []SkillInfo {
