@@ -26,6 +26,7 @@ function killSessionProcess(sessionId) {
   activeSessions.delete(sessionId);
 }
 
+const OPEN_PATH_TIMEOUT_MS = 5000;
 const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
@@ -610,13 +611,34 @@ function openSkillLocation(prompt) {
     command = 'open';
     args = [folder];
   }
-  const child = spawn(command, args, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+    const timer = setTimeout(() => {
+      child.unref();
+      finish(() => resolve(`Opened folder ${folder}`));
+    }, OPEN_PATH_TIMEOUT_MS);
+    child.on('error', (error) => {
+      finish(() => reject(new Error(`Open folder failed: ${error.message}`)));
+    });
+    child.on('close', (code) => {
+      if (process.platform === 'win32' || code === 0) {
+        finish(() => resolve(`Opened folder ${folder}`));
+        return;
+      }
+      finish(() => reject(new Error(`Open folder exited with code ${code}`)));
+    });
   });
-  child.unref();
-  return `Opened folder ${folder}`;
 }
 
 function parseOpenClawOutput(stdout) {
