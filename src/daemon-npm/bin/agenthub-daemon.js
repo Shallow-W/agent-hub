@@ -605,10 +605,10 @@ function openSkillLocation(prompt) {
   let args = [folder];
   if (process.platform === 'win32') {
     command = 'explorer.exe';
-    args = [`/select,${sourcePath}`];
+    args = [folder];
   } else if (process.platform === 'darwin') {
     command = 'open';
-    args = ['-R', sourcePath];
+    args = [folder];
   }
   const child = spawn(command, args, {
     detached: true,
@@ -616,7 +616,7 @@ function openSkillLocation(prompt) {
     windowsHide: true,
   });
   child.unref();
-  return `Opened ${sourcePath}`;
+  return `Opened folder ${folder}`;
 }
 
 function parseOpenClawOutput(stdout) {

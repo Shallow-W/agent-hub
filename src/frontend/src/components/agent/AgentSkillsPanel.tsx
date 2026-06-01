@@ -98,11 +98,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setOpeningPath(true);
     try {
       await openSkillLocation(agent.id, selectedSkill.source_path);
-      message.success('已在对应电脑打开 skill 位置');
+      message.success('已打开所在文件夹');
     } catch (err) {
       const errorMessage = err instanceof Error && err.message
         ? err.message
-        : '打开 skill 位置失败，请确认电脑 daemon 在线';
+        : '打开所在文件夹失败，请确认电脑 daemon 在线';
       message.error(errorMessage);
     } finally {
       setOpeningPath(false);
@@ -206,7 +206,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                       loading={openingPath}
                       onClick={handleOpenLocation}
                     >
-                      打开位置
+                      打开所在文件夹
                     </Button>
                   </div>
                 )}
