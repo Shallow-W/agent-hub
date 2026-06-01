@@ -285,8 +285,7 @@ export const AgentList: React.FC<AgentListProps> = ({
         onCreate={createDaemonMachine}
         onDeleteMachine={deleteDaemonMachine}
         onRefresh={async () => {
-          await refreshMachines();
-          await refreshCandidates();
+          await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
         }}
       />
     </div>

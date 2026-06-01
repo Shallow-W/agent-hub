@@ -27,7 +27,7 @@ function killSessionProcess(sessionId) {
 }
 
 const OPEN_PATH_TIMEOUT_MS = 5000;
-const MIN_DESCRIPTION_CHARS = 12;
+const MIN_DESCRIPTION_CHARS = 6;
 const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
@@ -55,7 +55,20 @@ const CANDIDATES = [
 ];
 
 function defaultSkills(names) {
-  return names.map((name) => ({ name, auto: true }));
+  return names.map((name) => ({
+    name,
+    description: defaultSkillDescription(name),
+    auto: true,
+  }));
+}
+
+function defaultSkillDescription(name) {
+  const descriptions = {
+    coding: 'Handle local coding tasks such as implementation, refactoring, and project edits.',
+    review: 'Review code changes, identify risks, and suggest focused improvements.',
+    orchestration: 'Coordinate multi-step work and route tasks across local Agent workflows.',
+  };
+  return descriptions[name] || `Provides the ${name} skill for local Agent workflows.`;
 }
 
 function npmWrapperScript(command) {
@@ -310,7 +323,9 @@ function parseSkillFile(fallbackName, sourcePath, content) {
     const separator = line.indexOf(':');
     if (separator === -1) continue;
     const key = line.slice(0, separator).trim();
-    const value = line.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '');
+    const parsed = readFrontmatterValue(lines, i, line.slice(separator + 1).trim());
+    const value = parsed.value;
+    i = parsed.nextIndex - 1;
     if (key === 'name' && value) skill.name = value;
     if (key === 'description') skill.description = value;
   }
@@ -327,8 +342,11 @@ function normalizeSkillDescription(name, description, content) {
 function isUsefulDescription(description) {
   const text = String(description || '').trim();
   if (!text) return false;
+  if (/^(ok|todo|tbd|none|n\/a|na|null|undefined|test|demo|sample|example)$/i.test(text)) {
+    return false;
+  }
   const compact = text.replace(/[\s\p{P}\p{S}]/gu, '');
-  return compact.length >= MIN_DESCRIPTION_CHARS;
+  return descriptionLength(compact) >= MIN_DESCRIPTION_CHARS;
 }
 
 function inferSkillDescription(name, content) {
@@ -345,7 +363,7 @@ function inferSkillDescription(name, content) {
     line = cleanMarkdownLine(line);
     if (!line || line.toLowerCase() === String(name || '').toLowerCase()) continue;
     chunks.push(line);
-    if (chunks.join(' ').length >= 120) break;
+    if (descriptionLength(chunks.join(' ')) >= 120) break;
   }
   const summary = truncateDescription(chunks.join(' ').replace(/\s+/g, ' ').trim());
   if (summary) return summary;
@@ -381,8 +399,40 @@ function cleanMarkdownLine(line) {
 
 function truncateDescription(text) {
   if (!text) return '';
-  if (text.length <= 180) return text;
-  return `${text.slice(0, 177).trimEnd()}...`;
+  const chars = Array.from(text);
+  if (chars.length <= 180) return text;
+  return `${chars.slice(0, 177).join('').trimEnd()}...`;
+}
+
+function descriptionLength(text) {
+  return Array.from(String(text || '')).length;
+}
+
+function readFrontmatterValue(lines, index, rawValue) {
+  let value = rawValue.replace(/^['"]|['"]$/g, '');
+  let nextIndex = index + 1;
+  if (rawValue !== '>' && rawValue !== '|') {
+    return { value, nextIndex };
+  }
+  const folded = rawValue === '>';
+  const parts = [];
+  for (let i = index + 1; i < lines.length; i += 1) {
+    const current = lines[i];
+    const trimmed = current.trim();
+    if (trimmed === '---' || isFrontmatterKeyLine(current)) {
+      nextIndex = i;
+      break;
+    }
+    parts.push(trimmed);
+    nextIndex = i + 1;
+  }
+  value = folded ? parts.join(' ') : parts.join('\n');
+  return { value: value.trim(), nextIndex };
+}
+
+function isFrontmatterKeyLine(line) {
+  if (/^\s/.test(line)) return false;
+  return /^[A-Za-z0-9_-]+\s*:/.test(line.trim());
 }
 
 function apiURL(serverURL, apiKey, pathname) {

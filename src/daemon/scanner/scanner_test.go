@@ -46,11 +46,37 @@ func TestParseSkillFileKeepsUsefulDescription(t *testing.T) {
 	}
 }
 
+func TestParseSkillFileKeepsTechnicalShortDescription(t *testing.T) {
+	content := "---\nname: codegen\ndescription: C++ codegen\n---\n\n# codegen\nGenerate compiler fixtures.\n"
+	skill := parseSkillFile("fallback", "C:/tmp/SKILL.md", content)
+	if skill.Description != "C++ codegen" {
+		t.Fatalf("expected technical short description, got %q", skill.Description)
+	}
+}
+
+func TestParseSkillFileReadsFoldedDescription(t *testing.T) {
+	content := "---\nname: coding\ndescription: >\n  Write code safely with tests\n  and concise implementation notes.\n---\n\n# Body\n"
+	skill := parseSkillFile("fallback", "C:/tmp/SKILL.md", content)
+	expected := "Write code safely with tests and concise implementation notes."
+	if skill.Description != expected {
+		t.Fatalf("expected folded description %q, got %q", expected, skill.Description)
+	}
+}
+
 func TestParseSkillFileInfersDescriptionWithoutFrontmatter(t *testing.T) {
 	content := "# deploy\nPrepare release commands, verify generated artifacts, and summarize deployment risks.\n"
 	skill := parseSkillFile("deploy", "C:/tmp/SKILL.md", content)
 	if !strings.Contains(skill.Description, "release commands") {
 		t.Fatalf("expected inferred description without frontmatter, got %q", skill.Description)
+	}
+}
+
+func TestDefaultSkillsIncludeDescriptions(t *testing.T) {
+	skills := defaultSkills("coding", "custom")
+	for _, skill := range skills {
+		if skill.Description == "" {
+			t.Fatalf("expected default description for %#v", skill)
+		}
 	}
 }
 
