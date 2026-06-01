@@ -32,14 +32,15 @@ export function parseSkills(value?: string): Skill[] {
   try {
     const parsed: unknown = JSON.parse(value);
     if (Array.isArray(parsed)) {
-      // New format: array of Skill objects
-      if (parsed.length > 0 && parsed[0] && typeof parsed[0] === 'object' && 'name' in (parsed[0] as object)) {
-        return (parsed as Skill[]).filter((item) => item && typeof item.name === 'string' && item.name.trim());
-      }
-      // Old format: array of strings
-      return (parsed as unknown[])
-        .filter((item): item is string => typeof item === 'string')
-        .map((name) => ({ name }));
+      return parsed
+        .map((item): Skill | null => {
+          if (typeof item === 'string') return { name: item };
+          if (item && typeof item === 'object' && 'name' in item && typeof (item as Skill).name === 'string') {
+            return item as Skill;
+          }
+          return null;
+        })
+        .filter((item): item is Skill => item !== null && item.name.trim().length > 0);
     }
   } catch {
     return value.split(',').map((item) => item.trim()).filter(Boolean).map((name) => ({ name }));

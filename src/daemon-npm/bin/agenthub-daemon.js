@@ -26,6 +26,8 @@ function killSessionProcess(sessionId) {
   activeSessions.delete(sessionId);
 }
 
+const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
+
 const CANDIDATES = [
   {
     name: 'Claude Code',
@@ -474,6 +476,9 @@ function commandForTask(task) {
 }
 
 async function executeTask(task) {
+  if (task.cli_tool === SKILL_SYNC_TOOL) {
+    return syncSkillFiles(task.prompt);
+  }
   const spec = commandForTask(task);
 
   let stdout;
@@ -523,6 +528,36 @@ async function executeTask(task) {
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   return text || '(Agent CLI 没有返回内容)';
+}
+
+function syncSkillFiles(prompt) {
+  let payload = null;
+  try {
+    payload = JSON.parse(prompt);
+  } catch {
+    throw new Error('Invalid skill sync payload');
+  }
+  let skills = [];
+  try {
+    skills = JSON.parse(String(payload.capabilities_json || '[]'));
+  } catch {
+    throw new Error('Invalid skills JSON');
+  }
+  let count = 0;
+  for (const skill of skills) {
+    if (!skill || typeof skill !== 'object') continue;
+    const sourcePath = String(skill.source_path || '').trim();
+    if (!sourcePath) continue;
+    if (path.basename(sourcePath) !== 'SKILL.md') {
+      throw new Error(`Refuse to write non-skill file: ${sourcePath}`);
+    }
+    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+      throw new Error(`Skill file not found: ${sourcePath}`);
+    }
+    fs.writeFileSync(sourcePath, String(skill.detail || ''), 'utf8');
+    count += 1;
+  }
+  return `Synced ${count} skill file(s).`;
 }
 
 function parseOpenClawOutput(stdout) {

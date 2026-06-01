@@ -21,6 +21,7 @@ type AgentRepo interface {
 	ListAvailable(ctx context.Context, userID string) ([]model.Agent, error)
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
+	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	ClaimDaemonTask(ctx context.Context, machineID string) (*model.DaemonTask, error)
 	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
 	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error
@@ -303,8 +304,24 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if id == "" || name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	if err := syncSkillFiles(capabilitiesJSON); err != nil {
-		return nil, err
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
+		return nil, ErrAgentNotFound
+	}
+	if current.Source == "daemon" && current.MachineID != nil && *current.MachineID != "" {
+		if err := validateDaemonSkillFiles(current.CapabilitiesJSON, capabilitiesJSON); err != nil {
+			return nil, err
+		}
+		if err := s.syncDaemonSkillFiles(ctx, current, userID, capabilitiesJSON); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := syncSkillFiles(capabilitiesJSON); err != nil {
+			return nil, err
+		}
 	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {

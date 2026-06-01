@@ -30,7 +30,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setEditingSkillIdx(null);
     setEditingSkillName('');
     setSelectedSkillIdx(nextSkills.length > 0 ? 0 : null);
-  }, [agent.id]);
+  }, [agent.id, agent.capabilities_json]);
 
   const selectedSkill = selectedSkillIdx === null ? null : skills[selectedSkillIdx] ?? null;
 
@@ -175,6 +175,9 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                   <span className={styles.detailTitle}>{selectedSkill.name}</span>
                   {selectedSkill.auto && <span className={styles.autoBadge}>auto</span>}
                 </div>
+                {selectedSkill.source_path && (
+                  <div className={styles.sourcePath}>{selectedSkill.source_path}</div>
+                )}
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>描述</span>
                   <Input.TextArea
