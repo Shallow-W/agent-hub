@@ -321,6 +321,51 @@ func TestUpdateDaemonAgentQueuesSkillSyncTask(t *testing.T) {
 	}
 }
 
+func TestOpenDaemonSkillLocationQueuesOpenTask(t *testing.T) {
+	userID := "user-1"
+	machineID := "machine-1"
+	sourcePath := `C:\skills\coding\SKILL.md`
+	repo := &fakeAgentRepo{
+		currentAgent: &model.Agent{
+			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
+			Source:           "daemon",
+			MachineID:        &machineID,
+			CapabilitiesJSON: `[{"name":"coding","source_path":"` + strings.ReplaceAll(sourcePath, `\`, `\\`) + `"}]`,
+		},
+	}
+	svc := NewAgentService(repo)
+	if err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", sourcePath); err != nil {
+		t.Fatalf("open daemon skill location: %v", err)
+	}
+	if repo.daemonTask == nil || repo.daemonTask.CLITool != daemonOpenPathTool {
+		t.Fatalf("expected open path daemon task, got %#v", repo.daemonTask)
+	}
+	if !strings.Contains(repo.daemonTask.Prompt, "source_path") {
+		t.Fatalf("expected source path in open payload, got %q", repo.daemonTask.Prompt)
+	}
+}
+
+func TestOpenDaemonSkillLocationRejectsUnknownSourcePath(t *testing.T) {
+	userID := "user-1"
+	machineID := "machine-1"
+	repo := &fakeAgentRepo{
+		currentAgent: &model.Agent{
+			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
+			Source:           "daemon",
+			MachineID:        &machineID,
+			CapabilitiesJSON: `[{"name":"coding","source_path":"C:\\skills\\coding\\SKILL.md"}]`,
+		},
+	}
+	svc := NewAgentService(repo)
+	err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", `C:\other\SKILL.md`)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected invalid input, got %v", err)
+	}
+	if repo.daemonTask != nil {
+		t.Fatalf("unexpected daemon task: %#v", repo.daemonTask)
+	}
+}
+
 func strconvQuote(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)

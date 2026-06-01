@@ -7,6 +7,7 @@ import type {
   CreateDaemonMachineRequest,
   CreateDaemonMachineResponse,
   DaemonMachine,
+  OpenSkillLocationRequest,
 } from '@/types/agent';
 
 export async function getAgents(): Promise<Agent[]> {
@@ -62,4 +63,11 @@ export interface MachineConnectResponse {
 
 export async function getMachineConnectCommand(id: string): Promise<MachineConnectResponse> {
   return get<MachineConnectResponse>(`/api/daemon/machines/${id}/connect`);
+}
+
+export async function openSkillLocation(
+  id: string,
+  body: OpenSkillLocationRequest,
+): Promise<void> {
+  return post<void>(`/api/agents/${id}/skills/open-location`, body);
 }

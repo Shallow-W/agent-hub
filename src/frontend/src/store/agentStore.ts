@@ -23,6 +23,7 @@ interface AgentState {
   addAgentCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
+  openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
 }
 
@@ -122,6 +123,10 @@ export const useAgentStore = create<AgentState>((set) => ({
       ))),
     }));
     return agent;
+  },
+
+  openSkillLocation: async (id, sourcePath) => {
+    await agentApi.openSkillLocation(id, { source_path: sourcePath });
   },
 
   deleteAgent: async (id) => {

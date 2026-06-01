@@ -27,6 +27,7 @@ function killSessionProcess(sessionId) {
 }
 
 const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
+const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
 const CANDIDATES = [
   {
@@ -492,6 +493,9 @@ async function executeTask(task) {
   if (task.cli_tool === SKILL_SYNC_TOOL) {
     return syncSkillFiles(task.prompt);
   }
+  if (task.cli_tool === OPEN_PATH_TOOL) {
+    return openSkillLocation(task.prompt);
+  }
   const spec = commandForTask(task);
 
   let stdout;
@@ -574,6 +578,42 @@ function syncSkillFiles(prompt) {
     count += 1;
   }
   return `Synced ${count} skill file(s).`;
+}
+
+function openSkillLocation(prompt) {
+  let payload = null;
+  try {
+    payload = JSON.parse(prompt);
+  } catch {
+    throw new Error('Invalid open path payload');
+  }
+  const sourcePath = String(payload.source_path || '').trim();
+  if (!sourcePath || path.basename(sourcePath) !== 'SKILL.md') {
+    throw new Error('Invalid skill file path');
+  }
+  if (agentHubWorkspaceForPath(sourcePath)) {
+    throw new Error('Refuse to open stale AgentHub workspace skill source. Reconnect this computer to refresh skills.');
+  }
+  if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+    throw new Error(`Skill file not found: ${sourcePath}`);
+  }
+  const folder = path.dirname(sourcePath);
+  let command = 'xdg-open';
+  let args = [folder];
+  if (process.platform === 'win32') {
+    command = 'explorer.exe';
+    args = [`/select,${sourcePath}`];
+  } else if (process.platform === 'darwin') {
+    command = 'open';
+    args = ['-R', sourcePath];
+  }
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+  return `Opened ${sourcePath}`;
 }
 
 function parseOpenClawOutput(stdout) {

@@ -281,6 +281,7 @@ func main() {
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
+		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)

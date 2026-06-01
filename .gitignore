@@ -90,3 +90,8 @@ uploads/
 # === 测试时从 src/backend 复制到根目录的文件（防止误提交） ===
 /config/
 /migrations/
+=======
+
+# === 本地临时运行文件 ===
+.tmp/
+>>>>>>> 19e1b81 (feat(agent): 支持打开真实 skill 路径)
