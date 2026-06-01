@@ -14,7 +14,6 @@ import type {
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
-import { parseCapabilities } from './agentPresentation';
 import styles from './ConnectComputerModal.module.css';
 
 interface ConnectComputerModalProps {
@@ -275,7 +274,10 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
         </div>
 
         <div className={styles.candidatePanel}>
-          <div className={styles.candidateTitle}>DETECTED CLI TOOLS</div>
+          <div className={styles.candidateTitle}>
+            <span>DETECTED CLI TOOLS</span>
+            <span>{safeCandidates.length} Agents</span>
+          </div>
           <div className={styles.candidateList}>
             {safeCandidates.length === 0 ? (
               <div className={styles.candidateEmpty}>
@@ -284,9 +286,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                   : '电脑连接成功后，会在这里显示可用 CLI。你可以基于同一个 CLI 添加多个 Agent。'}
               </div>
             ) : (
-              safeCandidates.map((candidate) => {
-                const capabilities = parseCapabilities(candidate.capabilities_json);
-                return (
+              safeCandidates.map((candidate) => (
                   <div className={styles.candidateItem} key={candidate.id}>
                     <div className={styles.candidateMeta}>
                       <strong>{candidate.name}</strong>
@@ -320,8 +320,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                       添加 Agent
                     </Button>
                   </div>
-                );
-              })
+              ))
             )}
           </div>
         </div>

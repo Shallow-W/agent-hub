@@ -102,6 +102,37 @@ func TestReadSkillsSkipsAgentHubWorkspaceSkills(t *testing.T) {
 	}
 }
 
+func TestReadSkillsFindsClaudePluginMarketplaceSkills(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(oldWd)
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	skillDir := filepath.Join(dir, ".claude", "plugins", "marketplaces", "official", "plugins", "frontend-design", "skills", "frontend-design")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	content := "---\nname: frontend-design\n---\nbody"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	skills := New(nil).readSkills(Candidate{CLITool: "claude"})
+	for _, skill := range skills {
+		if skill.Name == "frontend-design" && skill.Detail == content {
+			return
+		}
+	}
+	t.Fatalf("expected Claude plugin marketplace skill in %#v", skills)
+}
+
 func TestOpenClawInstallSkillRootsUsesInstallRecords(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "npm", "node_modules", "@openclaw", "qqbot")

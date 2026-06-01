@@ -234,9 +234,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           <div className={styles.emptyRow}>暂无底座</div>
         ) : (
           <div className={styles.baseList}>
-            {machineCandidates.map((candidate: AgentCandidate) => {
-              const capabilityList = parseCapabilities(candidate.capabilities_json);
-              return (
+            {machineCandidates.map((candidate: AgentCandidate) => (
                 <div className={styles.baseCard} key={candidate.id}>
                   <div className={styles.baseName}>{candidate.name}</div>
                   <div className={styles.baseMeta}>
@@ -252,8 +250,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                     </div>
                   )}
                 </div>
-              );
-            })}
+            ))}
           </div>
         )}
       </section>

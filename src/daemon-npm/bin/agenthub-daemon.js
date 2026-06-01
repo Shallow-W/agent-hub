@@ -201,6 +201,7 @@ function findSkillFiles(root) {
     for (const entry of entries) {
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name === '.git') continue;
         walk(entryPath);
         continue;
       }
@@ -267,6 +268,8 @@ function skillRoots(cliTool) {
   if (cliTool === 'claude') {
     if (includeProjectRoots) addRoot(roots, path.join(cwd, '.claude', 'skills'));
     if (home) addRoot(roots, path.join(home, '.claude', 'skills'));
+    if (home) addRoot(roots, path.join(home, '.claude', 'plugins', 'marketplaces'));
+    if (home) addRoot(roots, path.join(home, '.claude', 'plugins', 'cache'));
   } else if (cliTool === 'codex') {
     if (includeProjectRoots) addRoot(roots, path.join(cwd, '.agents', 'skills'));
     if (home) addRoot(roots, path.join(home, '.codex', 'skills'));
