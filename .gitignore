@@ -76,3 +76,5 @@ src/frontend/screenshot.mjs
 # === Claude Code 会话数据 ===
 .claude/sessions/
 .claude/state/
+src/backend/uploads/originals/
+src/backend/uploads/thumbnails/
