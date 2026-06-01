@@ -11,7 +11,7 @@ import {
 import { useAgents } from '@/hooks/useAgents';
 import type { Agent, AgentStatus, DaemonMachine } from '@/types/agent';
 import { ConnectComputerModal } from './ConnectComputerModal';
-import { formatDateTime, parseCapabilities } from './agentPresentation';
+import { formatDateTime, parseSkills } from './agentPresentation';
 import styles from './AgentList.module.css';
 
 interface AgentListProps {
@@ -220,7 +220,7 @@ export const AgentList: React.FC<AgentListProps> = ({
                       <div className={styles.machineEmpty}>暂无 Agent</div>
                     ) : (
                       machineAgents.map((agent) => {
-                        const capabilities = parseCapabilities(agent.capabilities_json);
+                        const skillCount = parseSkills(agent.capabilities_json).length;
                         return (
                           <div
                             key={agent.id}
@@ -256,13 +256,10 @@ export const AgentList: React.FC<AgentListProps> = ({
                                 </Popconfirm>
                               )}
                             </div>
-                            {capabilities.length > 0 && (
-                              <div className={styles.agentTags}>
-                                {capabilities.map((item) => (
-                                  <Tag key={item}>{item}</Tag>
-                                ))}
-                              </div>
-                            )}
+                            <div className={styles.agentSummary}>
+                              <span>{skillCount} skills</span>
+                              <span>右侧查看详情</span>
+                            </div>
                           </div>
                         );
                       })
