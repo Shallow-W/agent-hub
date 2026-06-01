@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,46 @@ func TestReadSkillsReturnsSkillFiles(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected project skill in %#v", skills)
+	}
+}
+
+func TestReadSkillsSkipsAgentHubWorkspaceSkills(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := os.MkdirAll(filepath.Join(dir, "src", "daemon-npm"), 0o755); err != nil {
+		t.Fatalf("mkdir daemon package: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "src", "frontend"), 0o755); err != nil {
+		t.Fatalf("mkdir frontend package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "daemon-npm", "package.json"), []byte(`{"name":"@agenthub/daemon"}`), 0o644); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "frontend", "package.json"), []byte(`{"name":"frontend"}`), 0o644); err != nil {
+		t.Fatalf("write frontend package: %v", err)
+	}
+
+	skillDir := filepath.Join(dir, ".agents", "skills", "trellis")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: trellis\n---\nbody"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	skills := New(nil).readSkills(Candidate{CLITool: "codex"})
+	for _, skill := range skills {
+		if strings.Contains(skill.SourcePath, dir) {
+			t.Fatalf("expected AgentHub workspace skill to be skipped, got %#v", skills)
+		}
 	}
 }
 

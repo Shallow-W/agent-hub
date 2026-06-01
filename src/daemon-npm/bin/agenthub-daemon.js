@@ -185,10 +185,25 @@ function addRoot(roots, root) {
   if (root && !roots.includes(root)) roots.push(root);
 }
 
-function localRepoRoot() {
-  const root = path.resolve(__dirname, '..', '..', '..');
-  const marker = path.join(root, 'src', 'daemon-npm', 'package.json');
-  return fs.existsSync(marker) ? root : null;
+function isAgentHubWorkspace(root) {
+  const daemonPackage = path.join(root, 'src', 'daemon-npm', 'package.json');
+  const frontendPackage = path.join(root, 'src', 'frontend', 'package.json');
+  if (!fs.existsSync(daemonPackage) || !fs.existsSync(frontendPackage)) return false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(daemonPackage, 'utf8'));
+    return pkg.name === '@agenthub/daemon';
+  } catch {
+    return false;
+  }
+}
+
+function agentHubWorkspaceForPath(targetPath) {
+  let current = path.dirname(path.resolve(targetPath));
+  while (current && current !== path.dirname(current)) {
+    if (isAgentHubWorkspace(current)) return current;
+    current = path.dirname(current);
+  }
+  return null;
 }
 
 function openClawInstallSkillRoots(home) {
@@ -216,20 +231,18 @@ function skillRoots(cliTool) {
   const roots = [];
   const cwd = process.cwd();
   const home = os.homedir();
-  const repoRoot = localRepoRoot();
+  const includeProjectRoots = !isAgentHubWorkspace(cwd);
   if (cliTool === 'claude') {
-    addRoot(roots, path.join(cwd, '.claude', 'skills'));
-    if (repoRoot) addRoot(roots, path.join(repoRoot, '.claude', 'skills'));
+    if (includeProjectRoots) addRoot(roots, path.join(cwd, '.claude', 'skills'));
     if (home) addRoot(roots, path.join(home, '.claude', 'skills'));
   } else if (cliTool === 'codex') {
-    addRoot(roots, path.join(cwd, '.agents', 'skills'));
-    if (repoRoot) addRoot(roots, path.join(repoRoot, '.agents', 'skills'));
+    if (includeProjectRoots) addRoot(roots, path.join(cwd, '.agents', 'skills'));
     if (home) addRoot(roots, path.join(home, '.codex', 'skills'));
   } else if (cliTool === 'opencode' || cliTool === 'openclaw') {
-    addRoot(roots, path.join(cwd, '.opencode', 'skills'));
-    addRoot(roots, path.join(cwd, '.openclaw', 'skills'));
-    if (repoRoot) addRoot(roots, path.join(repoRoot, '.opencode', 'skills'));
-    if (repoRoot) addRoot(roots, path.join(repoRoot, '.openclaw', 'skills'));
+    if (includeProjectRoots) {
+      addRoot(roots, path.join(cwd, '.opencode', 'skills'));
+      addRoot(roots, path.join(cwd, '.openclaw', 'skills'));
+    }
     if (home) addRoot(roots, path.join(home, '.opencode', 'skills'));
     if (home) addRoot(roots, path.join(home, '.openclaw', 'skills'));
     if (home) addRoot(roots, path.join(home, '.openclaw', 'plugin-skills'));
@@ -413,6 +426,9 @@ function syncSkillFiles(prompt) {
     if (!sourcePath) continue;
     if (path.basename(sourcePath) !== 'SKILL.md') {
       throw new Error(`Refuse to write non-skill file: ${sourcePath}`);
+    }
+    if (agentHubWorkspaceForPath(sourcePath)) {
+      throw new Error('Refuse to write stale AgentHub workspace skill source. Reconnect this computer to refresh skills.');
     }
     if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
       throw new Error(`Skill file not found: ${sourcePath}`);

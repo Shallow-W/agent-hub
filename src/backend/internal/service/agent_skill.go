@@ -88,6 +88,9 @@ func writeSkillFile(sourcePath, detail string) error {
 	if filepath.Base(cleanPath) != "SKILL.md" {
 		return ErrAgentInvalidInput
 	}
+	if isInsideAgentHubWorkspace(cleanPath) {
+		return ErrAgentInvalidInput
+	}
 	info, err := os.Stat(cleanPath)
 	if err != nil {
 		return fmt.Errorf("stat skill file: %w", err)
@@ -99,4 +102,37 @@ func writeSkillFile(sourcePath, detail string) error {
 		return fmt.Errorf("write skill file: %w", err)
 	}
 	return nil
+}
+
+func isInsideAgentHubWorkspace(sourcePath string) bool {
+	current := filepath.Dir(sourcePath)
+	for {
+		if isAgentHubWorkspace(current) {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false
+		}
+		current = parent
+	}
+}
+
+func isAgentHubWorkspace(root string) bool {
+	daemonPackage := filepath.Join(root, "src", "daemon-npm", "package.json")
+	frontendPackage := filepath.Join(root, "src", "frontend", "package.json")
+	if _, err := os.Stat(frontendPackage); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(daemonPackage)
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	return pkg.Name == "@agenthub/daemon"
 }
