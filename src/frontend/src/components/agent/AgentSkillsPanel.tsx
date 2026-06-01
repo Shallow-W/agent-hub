@@ -99,8 +99,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     try {
       await openSkillLocation(agent.id, selectedSkill.source_path);
       message.success('已在对应电脑打开 skill 位置');
-    } catch {
-      message.error('打开 skill 位置失败，请确认电脑 daemon 在线');
+    } catch (err) {
+      const errorMessage = err instanceof Error && err.message
+        ? err.message
+        : '打开 skill 位置失败，请确认电脑 daemon 在线';
+      message.error(errorMessage);
     } finally {
       setOpeningPath(false);
     }

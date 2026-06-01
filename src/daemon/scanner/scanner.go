@@ -124,7 +124,16 @@ func (s *Scanner) readSkills(candidate Candidate) []SkillInfo {
 	seen := make(map[string]bool)
 	for _, root := range roots {
 		filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil || entry.IsDir() || entry.Name() != "SKILL.md" {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() {
+				if entry.Name() == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.Name() != "SKILL.md" {
 				return nil
 			}
 			content, err := os.ReadFile(path)
@@ -156,6 +165,8 @@ func skillRoots(cliTool string) []string {
 		}
 		if home != "" {
 			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "plugins", "marketplaces"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "plugins", "cache"))
 		}
 	case "codex":
 		if includeProjectRoots {
