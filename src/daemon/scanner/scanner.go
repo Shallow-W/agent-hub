@@ -6,12 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
 
-const minDescriptionChars = 12
+const minDescriptionChars = 6
 
 // SkillInfo 描述本机 Agent 暴露的真实 skill 文件
 type SkillInfo struct {
@@ -260,8 +261,8 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 		skill.Description = normalizeSkillDescription(skill.Name, skill.Description, content)
 		return skill
 	}
-	for _, line := range lines[1:] {
-		trimmed := strings.TrimSpace(line)
+	for i := 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "---" {
 			break
 		}
@@ -269,7 +270,7 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 		if !ok {
 			continue
 		}
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		value, i = readFrontmatterValue(lines, i, strings.TrimSpace(value))
 		switch strings.TrimSpace(key) {
 		case "name":
 			if value != "" {
@@ -294,6 +295,10 @@ func normalizeSkillDescription(name, description, content string) string {
 func isUsefulDescription(description string) bool {
 	description = strings.TrimSpace(description)
 	if description == "" {
+		return false
+	}
+	switch strings.ToLower(description) {
+	case "ok", "todo", "tbd", "none", "n/a", "na", "null", "undefined", "test", "demo", "sample", "example":
 		return false
 	}
 	count := 0
@@ -358,15 +363,26 @@ func cleanMarkdownLine(line string) string {
 	line = strings.TrimSpace(line)
 	line = strings.TrimLeft(line, "-*+>")
 	line = strings.TrimSpace(line)
-	if index := strings.Index(line, "]("); index > 0 && strings.HasPrefix(line, "[") {
-		closeLabel := strings.Index(line, "]")
-		closeURL := strings.Index(line, ")")
-		if closeLabel > 1 && closeURL > closeLabel {
-			line = line[1:closeLabel] + line[closeURL+1:]
-		}
-	}
+	line = trimOrderedListPrefix(line)
+	line = regexp.MustCompile(`!\[[^\]]*]\([^)]*\)`).ReplaceAllString(line, "")
+	line = regexp.MustCompile(`\[([^\]]+)]\([^)]*\)`).ReplaceAllString(line, "$1")
 	replacer := strings.NewReplacer("`", "", "**", "", "__", "", "*", "", "_", "")
 	return strings.TrimSpace(replacer.Replace(line))
+}
+
+func trimOrderedListPrefix(line string) string {
+	index := 0
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if index == 0 || index >= len(line) || (line[index] != '.' && line[index] != ')') {
+		return line
+	}
+	index++
+	for index < len(line) && (line[index] == ' ' || line[index] == '\t') {
+		index++
+	}
+	return line[index:]
 }
 
 func truncateDescription(text string) string {
@@ -381,7 +397,55 @@ func truncateDescription(text string) string {
 func defaultSkills(names ...string) []SkillInfo {
 	skills := make([]SkillInfo, 0, len(names))
 	for _, name := range names {
-		skills = append(skills, SkillInfo{Name: name, Auto: true})
+		skills = append(skills, SkillInfo{Name: name, Description: defaultSkillDescription(name), Auto: true})
 	}
 	return skills
+}
+
+func defaultSkillDescription(name string) string {
+	switch name {
+	case "coding":
+		return "Handle local coding tasks such as implementation, refactoring, and project edits."
+	case "review":
+		return "Review code changes, identify risks, and suggest focused improvements."
+	case "orchestration":
+		return "Coordinate multi-step work and route tasks across local Agent workflows."
+	default:
+		return "Provides the " + name + " skill for local Agent workflows."
+	}
+}
+
+func readFrontmatterValue(lines []string, index int, rawValue string) (string, int) {
+	value := strings.Trim(strings.TrimSpace(rawValue), `"'`)
+	if rawValue != ">" && rawValue != "|" {
+		return value, index
+	}
+	folded := rawValue == ">"
+	parts := make([]string, 0)
+	nextIndex := index
+	for i := index + 1; i < len(lines); i++ {
+		current := lines[i]
+		trimmed := strings.TrimSpace(current)
+		if trimmed == "---" || isFrontmatterKeyLine(current) {
+			nextIndex = i - 1
+			break
+		}
+		parts = append(parts, trimmed)
+		nextIndex = i
+	}
+	if folded {
+		return strings.TrimSpace(strings.Join(parts, " ")), nextIndex
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), nextIndex
+}
+
+func isFrontmatterKeyLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	first := rune(line[0])
+	if unicode.IsSpace(first) {
+		return false
+	}
+	return regexp.MustCompile(`^[A-Za-z0-9_-]+\s*:`).MatchString(strings.TrimSpace(line))
 }
