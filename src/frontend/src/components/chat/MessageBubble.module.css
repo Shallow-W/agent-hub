@@ -78,7 +78,7 @@
 }
 
 .innerUser {
-  color: var(--color-bg-white);
+  color: #ffffff;
   background: linear-gradient(135deg, var(--color-user-bubble-from) 0%, var(--color-user-bubble-to) 100%);
   border-radius: 18px 18px 6px 18px;
   box-shadow: var(--shadow-bubble-user);
@@ -125,7 +125,7 @@
 .innerUser .markdownBody :global(strong) { font-weight: 700; }
 
 .innerUser a,
-.innerUser strong { color: var(--color-bg-white); }
+.innerUser strong { color: #ffffff; }
 
 .innerUser code { background: rgba(255, 255, 255, 0.2) !important; }
 
@@ -148,7 +148,7 @@
   margin: 9px 0;
   border-collapse: separate;
   border-spacing: 0;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--color-bg-tertiary);
   border-radius: 8px;
   overflow: hidden;
   font-size: 12px;

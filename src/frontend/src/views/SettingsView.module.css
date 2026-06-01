@@ -4,17 +4,17 @@
   flex-direction: column;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 0%, rgba(22, 163, 101, 0.08), transparent 32%),
-    linear-gradient(180deg, #f7fafb 0%, #eef4f7 100%);
+    radial-gradient(circle at 18% 0%, rgba(47, 143, 107, 0.08), transparent 32%),
+    linear-gradient(180deg, var(--color-surface) 0%, var(--color-bg-tertiary) 100%);
 }
 
 .header {
   height: 42px;
   padding: 0 18px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-bottom: 1px solid var(--color-border-light);
   display: flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--color-surface);
 }
 
 .title {
@@ -45,10 +45,10 @@
 }
 
 .section {
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .profileCard {
@@ -56,7 +56,7 @@
   align-items: center;
   gap: 16px;
   padding: 16px 18px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .profileGlow {
@@ -122,9 +122,9 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.055);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--color-surface);
 }
 
 .navItem {
@@ -143,10 +143,10 @@
 
 .settingsContent {
   min-width: 0;
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.028);
+  background: var(--color-surface-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .section {
@@ -159,7 +159,7 @@
 }
 
 .section + .section {
-  border-top: 1px solid rgba(15, 23, 42, 0.055);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .sectionHeader {
@@ -193,7 +193,7 @@
 
 .settingRow + .settingRow,
 .aboutItem + .aboutItem {
-  border-top: 1px solid rgba(15, 23, 42, 0.055);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .settingCopy {
