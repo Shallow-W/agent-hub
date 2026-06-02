@@ -50,6 +50,7 @@ export const ChatWindow: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wsClient = useWsStore((s) => s.wsClient);
@@ -116,6 +117,7 @@ export const ChatWindow: React.FC = () => {
     setSearchOpen(false);
     setSearchResults([]);
     setHasSearched(false);
+    setSearchKeyword('');
   }, [activeId, markAllRead]);
 
   // Join WebSocket room when switching conversations so real-time messages arrive
@@ -132,6 +134,7 @@ export const ChatWindow: React.FC = () => {
       if (prev) {
         setSearchResults([]);
         setHasSearched(false);
+        setSearchKeyword('');
       }
       return !prev;
     });
@@ -141,6 +144,7 @@ export const ChatWindow: React.FC = () => {
     async (value: string) => {
       const keyword = value.trim();
       if (!keyword || !activeConv) return;
+      setSearchKeyword(keyword);
       setSearchLoading(true);
       try {
         const results = await searchMessages(activeConv.id, keyword);
@@ -341,6 +345,7 @@ export const ChatWindow: React.FC = () => {
           searchLoading={searchLoading}
           searchResults={searchResults}
           hasSearched={hasSearched}
+          keyword={searchKeyword}
           onSearch={handleSearch}
           onClose={toggleSearch}
           onSelectMessage={handleSelectSearchResult}
