@@ -290,11 +290,18 @@ func (h *Hub) handleUnregister(msg BusMessage) {
 		return
 	}
 	list := val.(*[]*Client)
+	found := false
 	for i, c := range *list {
 		if c == client {
 			*list = append((*list)[:i], (*list)[i+1:]...)
+			found = true
 			break
 		}
+	}
+
+	// client 不在列表中（可能是被 max-conns 踢出后重复 unregister），直接跳过
+	if !found {
+		return
 	}
 
 	// 所有连接断开时广播离线状态
