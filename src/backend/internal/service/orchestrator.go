@@ -286,8 +286,9 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 // dispatchParallel creates daemon tasks for multiple agents simultaneously and waits for all.
 func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string) []*model.Message {
 	type taskResult struct {
-		index int
-		msg   *model.Message
+		index     int
+		msg       *model.Message
+		agentName string
 	}
 
 	resultCh := make(chan taskResult, len(tasks))
@@ -299,8 +300,7 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 				resultCh <- taskResult{index: idx, msg: nil}
 				return
 			}
-			depResults[task.AgentName] = truncateString(msg.Content, 500)
-			resultCh <- taskResult{index: idx, msg: msg}
+			resultCh <- taskResult{index: idx, msg: msg, agentName: task.AgentName}
 		}(i, t)
 	}
 
@@ -308,6 +308,7 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 	for range tasks {
 		tr := <-resultCh
 		if tr.msg != nil {
+			depResults[tr.agentName] = truncateString(tr.msg.Content, 500)
 			results = append(results, tr.msg)
 		}
 	}
