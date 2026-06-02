@@ -412,7 +412,7 @@ func TestSendMessage_NilAttachmentsEmptyContent_ReturnsError(t *testing.T) {
 // Bug 2: Failed parallel dispatch writes [任务失败] to depResults
 // ---------------------------------------------------------------------------
 
-func TestDispatchParallel_FailedTask_WritesFailureToDepResults(t *testing.T) {
+func TestDispatchSequential_FailedTask_WritesFailureToDepResults(t *testing.T) {
 	userID := "u1"
 	// Agent without MachineID will cause dispatchWorker to fail
 	agent := &model.Agent{

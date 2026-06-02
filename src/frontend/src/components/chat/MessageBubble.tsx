@@ -67,7 +67,7 @@ function renderMarkdown(text: string): string {
   result = result.replace(/\n/g, '<br/>');
 
   // Highlight @mentions — before restoring code blocks to avoid matching inside them
-  result = result.replace(/(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g,
+  result = result.replace(/(^|\s)@([\p{L}\p{N}_\-.]{2,20})(?=\s|$)/gu,
     `$1<span class="${styles.mention}">@$2</span>`);
 
   // 最后恢复前面暂存的代码内容。

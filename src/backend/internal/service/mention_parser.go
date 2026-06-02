@@ -81,6 +81,7 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 
 	var preamble string
 	var dispatches []dispatchLine
+	var dispatchLineIndices []int
 	dispatchStartIdx := -1
 
 	for i, line := range lines {
@@ -122,6 +123,7 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 				taskText:   taskOnLine,
 				sequential: sequential,
 			})
+			dispatchLineIndices = append(dispatchLineIndices, i)
 		}
 	}
 
@@ -133,30 +135,6 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 	if dispatchStartIdx > 0 {
 		preambleLines := lines[:dispatchStartIdx]
 		preamble = strings.TrimSpace(strings.Join(preambleLines, "\n"))
-	}
-
-	// Collect continuation lines between dispatch lines for each task
-	// Map dispatch index -> line index in original text
-	dispatchLineIndices := make([]int, len(dispatches))
-	idx := 0
-	inCodeBlock2 := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			inCodeBlock2 = !inCodeBlock2
-			continue
-		}
-		if inCodeBlock2 {
-			continue
-		}
-		withoutArrow := strings.TrimPrefix(trimmed, "→")
-		withoutArrow = strings.TrimSpace(withoutArrow)
-		if strings.HasPrefix(withoutArrow, "@") && mentionRe.FindStringSubmatch(withoutArrow) != nil {
-			if idx < len(dispatches) {
-				dispatchLineIndices[idx] = i
-				idx++
-			}
-		}
 	}
 
 	// Build full task text for each dispatch (dispatch line + continuation lines)

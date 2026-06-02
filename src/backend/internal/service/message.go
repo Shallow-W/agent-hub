@@ -196,9 +196,11 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		mentions := ParseMentions(content)
 		if len(mentions) > 0 {
 			// 广播 agent typing 状态
-			s.broadcastAgentTyping(convID, userID, true)
+			go s.broadcastAgentTyping(convID, true)
 			orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
-			s.broadcastAgentTyping(convID, userID, false)
+			defer func() {
+				go s.broadcastAgentTyping(convID, false)
+			}()
 			if err != nil {
 				slog.Warn("mention routing failed", "convID", convID, "error", err)
 			} else if orchResult != nil && len(orchResult.AgentMessages) > 0 {
@@ -645,7 +647,7 @@ func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*mo
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
-func (s *MessageService) broadcastAgentTyping(convID, userID string, typing bool) {
+func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
 	if s.notifier == nil {
 		return
 	}

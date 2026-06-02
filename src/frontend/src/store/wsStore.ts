@@ -82,5 +82,14 @@ export const useWsStore = create<WsState>((set, get) => ({
         [conversationId]: typing,
       },
     }));
+    // Auto-clear after 60s to handle cases where typing_stop is never received
+    if (typing) {
+      setTimeout(() => {
+        const current = useWsStore.getState().agentTyping[conversationId];
+        if (current) {
+          useWsStore.getState().setAgentTyping(conversationId, false);
+        }
+      }, 60_000);
+    }
   },
 }));

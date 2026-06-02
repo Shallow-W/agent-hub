@@ -462,8 +462,9 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	// 总长度保护：超过 4000 字符时从最早的消息开始截断
 	const maxContextLen = 4000
 	result := sb.String()
-	if len(result) > maxContextLen {
-		result = result[len(result)-maxContextLen:]
+	runes := []rune(result)
+	if len(runes) > maxContextLen {
+		result = string(runes[len(runes)-maxContextLen:])
 		// 截断后跳过第一个不完整的行
 		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
 			result = result[idx+1:]
