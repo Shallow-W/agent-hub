@@ -288,18 +288,20 @@ function buildPrompt(task) {
   const parts = [];
 
   if (ctx) {
-    if (ctx.trimStart().startsWith('[')) {
+    let handoffs = null;
+    try {
+      handoffs = JSON.parse(ctx);
+    } catch {
+      // not JSON — treat as plain text (orchestrator dispatch context)
+    }
+
+    if (handoffs !== null && Array.isArray(handoffs)) {
       // JSON handoffs from direct dispatch
       parts.push('[历史 Agent 交接]');
-      try {
-        const handoffs = JSON.parse(ctx);
-        for (const h of handoffs) {
-          const req = truncateStr(h.user_request, 100);
-          const res = truncateStr(h.result, 200);
-          parts.push(`- ${h.agent_name}: 用户问 "${req}" → 回复：${res}`);
-        }
-      } catch {
-        parts.push(ctx);
+      for (const h of handoffs) {
+        const req = truncateStr(h.user_request, 100);
+        const res = truncateStr(h.result, 200);
+        parts.push(`- ${h.agent_name}: 用户问 "${req}" → 回复：${res}`);
       }
       parts.push('');
       parts.push('你是 AgentHub 群聊中被 @提及的机器人，请参考上述交接上下文回答用户消息。');

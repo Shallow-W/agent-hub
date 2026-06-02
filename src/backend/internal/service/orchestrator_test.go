@@ -129,3 +129,60 @@ func TestRouteMention_ListAgentsError_ReturnsError(t *testing.T) {
 		t.Fatal("expected error when ListAgents fails, got nil")
 	}
 }
+
+func TestDispatchSingleAgent_NotInConversation_ReturnsError(t *testing.T) {
+	userID := "u1"
+	agent := &model.Agent{
+		ID:        "agent-1",
+		UserID:    &userID,
+		Name:      "TestAgent",
+		Type:      "custom",
+		CLITool:   "claude",
+		MachineID: stringPtr("machine-1"),
+	}
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{agent: agent, inConv: false, task: &model.DaemonTask{ID: "task-1"}},
+		&fakeMsgRepo{},
+	)
+
+	_, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	if err == nil {
+		t.Fatal("expected error when agent not in conversation, got nil")
+	}
+	if err != ErrMsgAgentNoPerm {
+		t.Fatalf("expected ErrMsgAgentNoPerm, got %v", err)
+	}
+}
+
+func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
+	userID := "u1"
+	agent := &model.Agent{
+		ID:        "agent-2",
+		UserID:    &userID,
+		Name:      "TestAgent2",
+		Type:      "custom",
+		CLITool:   "claude",
+		MachineID: stringPtr("machine-1"),
+	}
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{
+			agent:  agent,
+			inConv: true,
+			task:   &model.DaemonTask{ID: "task-2", Status: "completed", Result: "hello world"},
+		},
+		&fakeMsgRepo{},
+	)
+
+	msg, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected message, got nil")
+	}
+	if msg.Content != "hello world" {
+		t.Fatalf("expected 'hello world', got %s", msg.Content)
+	}
+}
