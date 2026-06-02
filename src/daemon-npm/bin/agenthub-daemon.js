@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const POLL_INTERVAL_MS = 1500;
 const EXEC_TIMEOUT_MS = 120000;
+const HEARTBEAT_INTERVAL_MS = 30000;
 
 const CANDIDATES = [
   {
@@ -287,6 +288,14 @@ function buildPrompt(task) {
   let ctx = task.context_messages;
   ctx = typeof ctx === 'string' ? ctx : '';
 
+  // 长度保护：超过 8000 字符时截断中间部分，保留头部和尾部
+  const maxCtxLen = 8000;
+  if (ctx.length > maxCtxLen) {
+    const headLen = Math.floor(maxCtxLen * 0.4);
+    const tailLen = Math.floor(maxCtxLen * 0.4);
+    ctx = ctx.slice(0, headLen) + '\n...[上下文已截断]...\n' + ctx.slice(ctx.length - tailLen);
+  }
+
   const parts = [];
 
   if (ctx) {
@@ -423,12 +432,16 @@ function parseOpenClawOutput(stdout) {
   if (!text) return '(OpenClaw CLI 没有返回内容)';
   try {
     const parsed = JSON.parse(text);
+
+    // 常见字段：finalAssistantVisibleText / finalAssistantRawText
     if (typeof parsed.finalAssistantVisibleText === 'string' && parsed.finalAssistantVisibleText.trim()) {
       return parsed.finalAssistantVisibleText.trim();
     }
     if (typeof parsed.finalAssistantRawText === 'string' && parsed.finalAssistantRawText.trim()) {
       return parsed.finalAssistantRawText.trim();
     }
+
+    // payloads 数组（OpenClaw 标准格式）
     if (Array.isArray(parsed.payloads)) {
       const payloadText = parsed.payloads
         .map((payload) => (typeof payload?.text === 'string' ? payload.text : ''))
@@ -436,6 +449,37 @@ function parseOpenClawOutput(stdout) {
         .join('\n')
         .trim();
       if (payloadText) return payloadText;
+    }
+
+    // messages 数组格式（兼容更多 CLI 输出）
+    if (Array.isArray(parsed.messages)) {
+      const msgText = parsed.messages
+        .filter((m) => typeof m?.content === 'string' && m.role === 'assistant')
+        .map((m) => m.content)
+        .join('\n')
+        .trim();
+      if (msgText) return msgText;
+    }
+
+    // content 字段（简化 JSON 格式）
+    if (typeof parsed.content === 'string' && parsed.content.trim()) {
+      return parsed.content.trim();
+    }
+
+    // response / result / output 字段
+    for (const key of ['response', 'result', 'output', 'text', 'message']) {
+      if (typeof parsed[key] === 'string' && parsed[key].trim()) {
+        return parsed[key].trim();
+      }
+    }
+
+    // 嵌套 data 字段
+    if (parsed.data && typeof parsed.data === 'object') {
+      for (const key of ['text', 'content', 'message', 'response']) {
+        if (typeof parsed.data[key] === 'string' && parsed.data[key].trim()) {
+          return parsed.data[key].trim();
+        }
+      }
     }
   } catch {
     return text;
@@ -492,6 +536,18 @@ async function register(serverURL, apiKey) {
   console.log('AgentHub daemon is running. Keep this terminal open to execute chat tasks.');
 }
 
+// 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
+function startHeartbeat(serverURL, apiKey, taskId) {
+  const timer = setInterval(async () => {
+    try {
+      await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${taskId}/heartbeat`), {});
+    } catch (error) {
+      console.error(`AgentHub daemon task ${taskId} heartbeat failed: ${error.message}`);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
+
 async function pollTasks(serverURL, apiKey) {
   for (;;) {
     try {
@@ -503,11 +559,14 @@ async function pollTasks(serverURL, apiKey) {
       }
 
       console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool}`);
+      const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
       try {
         const result = await executeTask(task);
+        stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
         console.log(`AgentHub daemon task ${task.id} completed.`);
       } catch (error) {
+        stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), {
           error: error instanceof Error ? error.message : String(error),
         });

@@ -109,6 +109,13 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			if _, active := s.activeOrchs[convID]; active {
 				s.mu.Unlock()
 				slog.Warn("orchestration already active for conversation", "conv_id", convID)
+				// 返回提示消息给用户（直接构造，避免并发调用 msgRepo.Create）
+				result.AgentMessages = append(result.AgentMessages, &model.Message{
+					ConversationID: convID,
+					Role:           "system",
+					Content:        "编排器正忙，请稍后再试。",
+					CreatedAt:      time.Now(),
+				})
 				continue
 			}
 			s.activeOrchs[convID] = struct{}{}
@@ -195,6 +202,10 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent) ([]*model.Message, error) {
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
+	}
+	// 确保 orchestratorName 非空，后续 dispatchWorker 依赖它构建上下文
+	if orchAgent.Name == "" {
+		orchAgent.Name = "Orchestrator"
 	}
 
 	recentSummary, agentNames, err := s.buildRecentSummary(ctx, convID, convAgents)
@@ -299,6 +310,7 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 		index     int
 		msg       *model.Message
 		agentName string
+		failed    bool
 	}
 
 	// 快照 depResults 避免并发 map 读写竞争
@@ -313,7 +325,7 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depSnapshot, orchestratorName)
 			if err != nil {
 				slog.Warn("parallel dispatch failed", "agent", task.AgentName, "error", err)
-				resultCh <- taskResult{index: idx, msg: nil}
+				resultCh <- taskResult{index: idx, msg: nil, agentName: task.AgentName, failed: true}
 				return
 			}
 			resultCh <- taskResult{index: idx, msg: msg, agentName: task.AgentName}
@@ -326,6 +338,8 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 		if tr.msg != nil {
 			depResults[tr.agentName] = truncateString(tr.msg.Content, 500)
 			results = append(results, tr.msg)
+		} else if tr.failed {
+			depResults[tr.agentName] = "[任务失败]"
 		}
 	}
 	return results
@@ -336,6 +350,7 @@ func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, us
 	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults, orchestratorName)
 	if err != nil {
 		slog.Warn("sequential dispatch failed", "agent", task.AgentName, "error", err)
+		depResults[task.AgentName] = "[任务失败]"
 		return nil
 	}
 	depResults[task.AgentName] = truncateString(msg.Content, 500)
@@ -424,9 +439,12 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	}
 	sb.WriteString("\n")
 
-	if task.Task != "" {
+	// 限制任务描述长度
+	taskDesc := truncateString(task.Task, 2000)
+
+	if taskDesc != "" {
 		sb.WriteString("[调度指令]\n")
-		fmt.Fprintf(&sb, "Orch @你，分配了以下任务：\n%s\n\n", task.Task)
+		fmt.Fprintf(&sb, "Orch @你，分配了以下任务：\n%s\n\n", taskDesc)
 	}
 
 	if len(depResults) > 0 {
@@ -441,7 +459,17 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	}
 	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
 
-	return sb.String(), nil
+	// 总长度保护：超过 4000 字符时从最早的消息开始截断
+	const maxContextLen = 4000
+	result := sb.String()
+	if len(result) > maxContextLen {
+		result = result[len(result)-maxContextLen:]
+		// 截断后跳过第一个不完整的行
+		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
+			result = result[idx+1:]
+		}
+	}
+	return result, nil
 }
 
 // buildRecentSummary formats the last 10 messages and returns agent names in the conversation.

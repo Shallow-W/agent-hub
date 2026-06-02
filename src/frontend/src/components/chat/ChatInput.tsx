@@ -46,6 +46,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
+  const agentTyping = useWsStore((s) => conversationId ? (s.agentTyping[conversationId] ?? false) : false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [sending, setSending] = useState(false);
@@ -338,12 +339,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
+  // 点击下拉列表外部关闭 mention 下拉
+  useEffect(() => {
+    if (!mentionVisible) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(`.${styles.mentionDropdown}`)) {
+        setMentionVisible(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mentionVisible]);
+
   return (
     <div className={styles.container}>
-      {isStreaming && (
+      {(isStreaming || agentTyping) && (
         <div className={styles.typingIndicator}>
           <Spin size="small" />
-          <span>{targetAgentName ?? (conversation?.peer_name ?? 'Agent')} 正在输入</span>
+          <span>{targetAgentName ?? (conversation?.peer_name ?? 'Agent')} 正在思考...</span>
         </div>
       )}
       {isGroup && boundAgentId && (

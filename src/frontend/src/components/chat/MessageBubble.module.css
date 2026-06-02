@@ -338,9 +338,32 @@
   color: var(--color-primary);
   font-weight: 500;
   cursor: default;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+/* 助手气泡里的 @mention 用蓝色背景高亮，区别于普通文本 */
+.innerAssistant .mention {
+  color: #1a73e8;
+  background: rgba(26, 115, 232, 0.1);
 }
 
 /* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
 .innerUser .mention {
   color: rgba(255, 255, 255, 0.92);
+}
+
+/* Agent 回复的 badge 标识 */
+.agentBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.1);
+  border-radius: 8px;
+  line-height: 1.5;
 }

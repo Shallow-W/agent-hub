@@ -127,7 +127,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     try { return (JSON.parse(message.artifacts_json) as { agent_name?: string }).agent_name ?? null; } catch { return null; }
   })();
   const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
-  const avatarLetter = message.username?.charAt(0)?.toUpperCase() || '?';
+  const avatarLetter = agentName ? 'AI' : (message.username?.charAt(0)?.toUpperCase() || '?');
   const renderedContent = useMemo(() => renderMarkdown(message.content ?? ''), [message.content]);
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
@@ -205,6 +205,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
         {showAvatar && (
           <div className={styles.meta}>
             <Text className={styles.agentLabel}>{displayName}</Text>
+            {agentName && (
+              <span className={styles.agentBadge}>Agent</span>
+            )}
             <Text type="secondary" className={styles.metaTime}>
               {formatTimestamp(message.created_at)}
             </Text>

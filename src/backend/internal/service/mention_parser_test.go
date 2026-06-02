@@ -300,6 +300,108 @@ func TestFindMentionedAgentIDEmpty(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ParseOrchestratorOutput: 代码块内 @mention 忽略
+// ---------------------------------------------------------------------------
+
+func TestParseOrchOutput_IgnoresCodeBlockMentions(t *testing.T) {
+	text := "好的，分配如下：\n@Alice 分析数据\n```\n@Bob 这段不应该被解析\n@Charlie 也不应该\n```\n@Bob 写报告"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks (code block @mentions ignored), got %d", len(dispatch.Tasks))
+	}
+	if dispatch.Tasks[0].AgentName != "Alice" {
+		t.Errorf("task[0] agent = %q, want Alice", dispatch.Tasks[0].AgentName)
+	}
+	if dispatch.Tasks[1].AgentName != "Bob" {
+		t.Errorf("task[1] agent = %q, want Bob", dispatch.Tasks[1].AgentName)
+	}
+}
+
+func TestParseOrchOutput_CodeBlockAtEnd(t *testing.T) {
+	text := "@Alice 做任务\n```\n@FakeAgent 在代码块里\n"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(dispatch.Tasks))
+	}
+	if dispatch.Tasks[0].AgentName != "Alice" {
+		t.Errorf("task[0] agent = %q, want Alice", dispatch.Tasks[0].AgentName)
+	}
+}
+
+func TestParseOrchOutput_AllInCodeBlock(t *testing.T) {
+	text := "```\n@Alice 不应该被解析\n@Bob 也不应该\n```"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch != nil {
+		t.Fatal("expected nil when all @mentions are inside code blocks")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseOrchestratorOutput: 续行处理改进
+// ---------------------------------------------------------------------------
+
+func TestParseOrchOutput_IndentedContinuation(t *testing.T) {
+	text := "@Alice 分析数据\n  包括详细报告\n  和图表生成"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(dispatch.Tasks))
+	}
+	want := "分析数据 包括详细报告 和图表生成"
+	if dispatch.Tasks[0].Task != want {
+		t.Errorf("task = %q, want %q", dispatch.Tasks[0].Task, want)
+	}
+}
+
+func TestParseOrchOutput_NonIndentedStopsContinuation(t *testing.T) {
+	text := "@Alice 分析数据\n这是独立的说明文本\n  不应属于 Alice 的任务"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(dispatch.Tasks))
+	}
+	// 只包含 dispatch 行本身的内容，续行被非缩进行阻断
+	if dispatch.Tasks[0].Task != "分析数据" {
+		t.Errorf("task = %q, want %q", dispatch.Tasks[0].Task, "分析数据")
+	}
+}
+
+func TestParseOrchOutput_MixedIndentedAndNonIndented(t *testing.T) {
+	text := "@Alice 主任务\n  缩行的续行\n非缩行的独立文本\n@Bob 另一个任务\n  Bob的续行"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(dispatch.Tasks))
+	}
+	wantAlice := "主任务 缩行的续行"
+	if dispatch.Tasks[0].Task != wantAlice {
+		t.Errorf("task[0] = %q, want %q", dispatch.Tasks[0].Task, wantAlice)
+	}
+	wantBob := "另一个任务 Bob的续行"
+	if dispatch.Tasks[1].Task != wantBob {
+		t.Errorf("task[1] = %q, want %q", dispatch.Tasks[1].Task, wantBob)
+	}
+}
+
 func TestFindMentionedAgentIDNoMatch(t *testing.T) {
 	mentions := []MentionResult{
 		{AgentName: "Ghost", Task: "什么都不做"},

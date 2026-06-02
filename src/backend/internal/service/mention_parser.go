@@ -75,12 +75,26 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 
 	// Split into lines to identify dispatch lines vs continuation text
 	lines := strings.Split(text, "\n")
+
+	// 追踪代码块状态，忽略代码块内的 @mention
+	inCodeBlock := false
+
 	var preamble string
 	var dispatches []dispatchLine
 	dispatchStartIdx := -1
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+
+		// 检测代码块边界
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		// 代码块内不解析 @mention
+		if inCodeBlock {
+			continue
+		}
 
 		// Check if this line starts with optional "→" then @mention
 		withoutArrow := strings.TrimPrefix(trimmed, "→")
@@ -122,11 +136,19 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 	}
 
 	// Collect continuation lines between dispatch lines for each task
-	// Map dispatch index -> list of continuation line indices
+	// Map dispatch index -> line index in original text
 	dispatchLineIndices := make([]int, len(dispatches))
 	idx := 0
+	inCodeBlock2 := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock2 = !inCodeBlock2
+			continue
+		}
+		if inCodeBlock2 {
+			continue
+		}
 		withoutArrow := strings.TrimPrefix(trimmed, "→")
 		withoutArrow = strings.TrimSpace(withoutArrow)
 		if strings.HasPrefix(withoutArrow, "@") && mentionRe.FindStringSubmatch(withoutArrow) != nil {
@@ -137,11 +159,12 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 		}
 	}
 
-	// Now build full task text for each dispatch (dispatch line + continuation lines)
+	// Build full task text for each dispatch (dispatch line + continuation lines)
+	// Continuation lines: only indented or blank lines immediately following the dispatch line.
+	// A non-blank, non-indented line (that is not itself a dispatch) terminates the task text.
 	tasks := make([]DispatchTask, 0, len(dispatches))
 
 	for i, d := range dispatches {
-		// Collect continuation lines until next dispatch or end
 		var taskParts []string
 		if d.taskText != "" {
 			taskParts = append(taskParts, d.taskText)
@@ -154,7 +177,18 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 		}
 
 		for j := thisLineIdx + 1; j < nextLineIdx; j++ {
-			taskParts = append(taskParts, strings.TrimSpace(lines[j]))
+			raw := lines[j]
+			trimmed := strings.TrimSpace(raw)
+			if trimmed == "" {
+				// 空行仍属于 task，保留为空字符串（join 时产生空格分隔）
+				taskParts = append(taskParts, "")
+				continue
+			}
+			// 非空白且不是缩进行 → 属于非 task 文本，停止收集
+			if raw[0] != ' ' && raw[0] != '\t' {
+				break
+			}
+			taskParts = append(taskParts, trimmed)
 		}
 
 		fullTask := strings.TrimSpace(strings.Join(taskParts, " "))

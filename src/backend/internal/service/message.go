@@ -195,7 +195,10 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
 		mentions := ParseMentions(content)
 		if len(mentions) > 0 {
+			// 广播 agent typing 状态
+			s.broadcastAgentTyping(convID, userID, true)
 			orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+			s.broadcastAgentTyping(convID, userID, false)
 			if err != nil {
 				slog.Warn("mention routing failed", "convID", convID, "error", err)
 			} else if orchResult != nil && len(orchResult.AgentMessages) > 0 {
@@ -639,4 +642,27 @@ func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*mo
 		case <-ticker.C:
 		}
 	}
+}
+
+// broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
+func (s *MessageService) broadcastAgentTyping(convID, userID string, typing bool) {
+	if s.notifier == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(memberIDs) == 0 {
+		return
+	}
+
+	eventType := "agent.typing_stop"
+	if typing {
+		eventType = "agent.typing_start"
+	}
+
+	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
+		"conversation_id": convID,
+	})
 }

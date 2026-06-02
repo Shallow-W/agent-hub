@@ -11,16 +11,20 @@ interface WsState {
   wsClient: WebSocketClient | null;
   /** conversationId → typing users */
   typingUsers: Record<string, TypingUser[]>;
+  /** conversationId → whether an agent is currently processing */
+  agentTyping: Record<string, boolean>;
   connect: (token: string) => WebSocketClient | null;
   disconnect: () => void;
   addTypingUser: (conversationId: string, userId: string, username?: string) => void;
   removeTypingUser: (conversationId: string, userId: string) => void;
+  setAgentTyping: (conversationId: string, typing: boolean) => void;
 }
 
 export const useWsStore = create<WsState>((set, get) => ({
   status: 'disconnected',
   wsClient: null,
   typingUsers: {},
+  agentTyping: {},
 
   connect: (token: string) => {
     // 避免重复连接
@@ -69,5 +73,14 @@ export const useWsStore = create<WsState>((set, get) => ({
         },
       };
     });
+  },
+
+  setAgentTyping: (conversationId, typing) => {
+    set((state) => ({
+      agentTyping: {
+        ...state.agentTyping,
+        [conversationId]: typing,
+      },
+    }));
   },
 }));
