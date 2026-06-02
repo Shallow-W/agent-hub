@@ -284,7 +284,9 @@ function truncateStr(s, max) {
 }
 
 function buildPrompt(task) {
-  const ctx = task.context_messages || '';
+  let ctx = task.context_messages;
+  ctx = typeof ctx === 'string' ? ctx : '';
+
   const parts = [];
 
   if (ctx) {

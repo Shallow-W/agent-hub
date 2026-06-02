@@ -165,13 +165,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	dispatchCtx, err := s.buildDispatchContext(ctx, convID, DispatchTask{}, nil, "")
-	if err != nil {
-		slog.Warn("build dispatch context failed", "conv_id", convID, "error", err)
-		dispatchCtx = ""
-	}
-
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, dispatchCtx)
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, "")
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
