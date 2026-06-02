@@ -23,6 +23,7 @@ type OrchAgentRepo interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
+	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
 }
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
@@ -151,6 +152,13 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
 func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string) (*model.Message, error) {
 	if agent.UserID != nil && *agent.UserID != userID {
+		return nil, ErrMsgAgentNoPerm
+	}
+	ok, err := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check conversation agent: %w", err)
+	}
+	if !ok {
 		return nil, ErrMsgAgentNoPerm
 	}
 	if agent.MachineID == nil || *agent.MachineID == "" {

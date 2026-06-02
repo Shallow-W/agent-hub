@@ -29,6 +29,7 @@ type fakeOrchAgentRepo struct {
 	agentErr error
 	task     *model.DaemonTask
 	taskErr  error
+	inConv   bool
 }
 
 func (f *fakeOrchAgentRepo) GetByID(_ context.Context, _ string) (*model.Agent, error) {
@@ -41,6 +42,10 @@ func (f *fakeOrchAgentRepo) CreateDaemonTask(_ context.Context, _, _, _, _, _, _
 
 func (f *fakeOrchAgentRepo) GetDaemonTask(_ context.Context, _ string) (*model.DaemonTask, error) {
 	return f.task, f.taskErr
+}
+
+func (f *fakeOrchAgentRepo) IsAgentInConversation(_ context.Context, _, _, _ string) (bool, error) {
+	return f.inConv, nil
 }
 
 // --- RouteMention tests ---

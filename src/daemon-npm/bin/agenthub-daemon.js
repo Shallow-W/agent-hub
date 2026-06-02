@@ -278,13 +278,42 @@ function requestJSON(method, url, body) {
   });
 }
 
+function truncateStr(s, max) {
+  if (!s || s.length <= max) return s || '';
+  return s.slice(0, max) + '...';
+}
+
 function buildPrompt(task) {
-  return [
-    '你是 AgentHub 中被用户选中的机器人，请直接回答用户当前消息。',
-    '不要修改文件，不要执行破坏性操作；如果需要说明限制，请简洁说明。',
-    '',
-    `用户消息：${task.prompt}`,
-  ].join('\n');
+  const ctx = task.context_messages || '';
+  const parts = [];
+
+  if (ctx) {
+    if (ctx.trimStart().startsWith('[')) {
+      // JSON handoffs from direct dispatch
+      parts.push('[历史 Agent 交接]');
+      try {
+        const handoffs = JSON.parse(ctx);
+        for (const h of handoffs) {
+          const req = truncateStr(h.user_request, 100);
+          const res = truncateStr(h.result, 200);
+          parts.push(`- ${h.agent_name}: 用户问 "${req}" → 回复：${res}`);
+        }
+      } catch {
+        parts.push(ctx);
+      }
+      parts.push('');
+      parts.push('你是 AgentHub 群聊中被 @提及的机器人，请参考上述交接上下文回答用户消息。');
+    } else {
+      // Orchestrator dispatch context — already contains instructions
+      parts.push(ctx);
+    }
+  } else {
+    parts.push('你是 AgentHub 群聊中被 @提及的机器人，请直接回答用户当前消息。');
+  }
+
+  parts.push('');
+  parts.push(task.prompt);
+  return parts.join('\n');
 }
 
 function commandForTask(task) {
@@ -324,7 +353,6 @@ function commandForTask(task) {
         'text',
       ],
       stdin: prompt,
-      userStdin: task.prompt,
       sessionId,
     };
   }
@@ -361,7 +389,7 @@ async function executeTask(task) {
       ({ stdout, stderr } = await runProcess(
         spec.command,
         ['--resume', spec.sessionId, ...spec.args],
-        spec.userStdin || spec.stdin,
+        spec.stdin,
       ));
     } catch (_err) {
       ({ stdout, stderr } = await runProcess(

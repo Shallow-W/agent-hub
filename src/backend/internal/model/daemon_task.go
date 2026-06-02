@@ -11,7 +11,8 @@ type DaemonTask struct {
 	MachineID       string     `json:"machine_id" db:"machine_id"`
 	CLITool         string     `json:"cli_tool" db:"cli_tool"`
 	Prompt          string     `json:"prompt" db:"prompt"`
-	// ContextMessages 是最近 40 条对话消息的 JSON 序列化，格式为 []ContextMessage。
+	// ContextMessages 是 Layer 2 上下文：编排调度时为群聊背景+调度指令+依赖输出的纯文本，
+	// 直接 dispatch 时为 agentHandoff 的 JSON 数组（最多 5 条）。
 	// 空字符串表示无历史上下文（首条消息）。
 	ContextMessages string     `json:"context_messages" db:"context_messages"`
 	Status          string     `json:"status" db:"status"`
