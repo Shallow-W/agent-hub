@@ -110,6 +110,40 @@ func (r *AgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, machineI
 	return nil
 }
 
+// SetMachineAndAgentsOnline 标记机器及其 Agent 为在线（仅状态变更时调用）。
+func (r *AgentRepo) SetMachineAndAgentsOnline(ctx context.Context, machineID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET status = 'connected', last_seen_at = NOW(), updated_at = NOW() WHERE id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set machine online: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'online', last_seen_at = NOW(), updated_at = NOW() WHERE machine_id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set agents online: %w", err)
+	}
+	return nil
+}
+
+// SetMachineAndAgentsOffline 标记机器及其 Agent 为离线（仅状态变更时调用）。
+func (r *AgentRepo) SetMachineAndAgentsOffline(ctx context.Context, machineID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET status = 'offline', updated_at = NOW() WHERE id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set machine offline: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'offline', updated_at = NOW() WHERE machine_id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set agents offline: %w", err)
+	}
+	return nil
+}
+
 // UpsertMachineAgent 写入指定电脑上报的 Agent
 func (r *AgentRepo) UpsertMachineAgent(ctx context.Context, userID, machineID, machineName, name, cliTool, version, capabilitiesJSON string) error {
 	_, err := r.db.ExecContext(ctx,

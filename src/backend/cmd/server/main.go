@@ -145,7 +145,8 @@ func main() {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
 		msgSvc.SetCacher(redisMsgRepo)
 	}
-	agentSvc := service.NewAgentService(agentRepo)
+	machineTracker := service.NewMachineTracker(agentRepo, logger)
+	agentSvc := service.NewAgentService(agentRepo, machineTracker)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -313,6 +314,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
+	go machineTracker.Run(ctx)
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

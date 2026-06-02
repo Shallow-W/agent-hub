@@ -72,7 +72,8 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo AgentRepo
+	repo    AgentRepo
+	tracker *MachineTracker
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -84,8 +85,8 @@ type DiscoveredAgent struct {
 }
 
 // NewAgentService 创建 Agent 服务
-func NewAgentService(repo AgentRepo) *AgentService {
-	return &AgentService{repo: repo}
+func NewAgentService(repo AgentRepo, tracker *MachineTracker) *AgentService {
+	return &AgentService{repo: repo, tracker: tracker}
 }
 
 // ListAvailable 查询当前用户可用 Agent
@@ -95,6 +96,28 @@ func (s *AgentService) ListAvailable(ctx context.Context, userID string) ([]mode
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
 	return list, nil
+}
+
+// TouchMachine 更新机器心跳（内存操作，零 DB 开销）。
+func (s *AgentService) TouchMachine(machineID string) {
+	if s.tracker != nil {
+		s.tracker.Touch(machineID)
+	}
+}
+
+// MarkMachineOnline 标记机器上线（daemon register 时调用）。
+func (s *AgentService) MarkMachineOnline(machineID string) {
+	if s.tracker != nil {
+		s.tracker.MarkOnline(machineID)
+	}
+}
+
+// IsMachineOnline 检查机器是否在线（内存读取）。
+func (s *AgentService) IsMachineOnline(machineID string) bool {
+	if s.tracker != nil {
+		return s.tracker.IsOnline(machineID)
+	}
+	return false
 }
 
 // RegisterSystemAgents 保存 daemon 上报的系统 Agent
