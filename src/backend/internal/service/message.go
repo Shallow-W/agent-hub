@@ -186,7 +186,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	// Agent 回复
 	if strings.TrimSpace(agentID) != "" {
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content)
+		contextMessages := ""
+		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 		if err != nil {
 			return nil, err
 		}
@@ -540,7 +541,7 @@ func (s *MessageService) buildAgentHandoffs(ctx context.Context, convID string) 
 }
 
 // createAgentReply 生成 Agent 回复消息
-func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent string) (*model.Message, error) {
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string) (*model.Message, error) {
 	if s.agentRepo == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -565,7 +566,6 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, ErrMsgAgentOffline
 	}
 
-	contextMessages := s.buildAgentHandoffs(ctx, convID)
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)

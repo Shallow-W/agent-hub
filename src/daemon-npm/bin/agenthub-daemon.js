@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync, spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -77,6 +78,19 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function makeSessionId(conversationID, agentID) {
+  const namespace = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  const name = `conv:${conversationID}:agent:${agentID}`;
+  const hash = crypto.createHash('sha1');
+  hash.update(Buffer.from(namespace.replace(/-/g, ''), 'hex'));
+  hash.update(name);
+  const digest = hash.digest();
+  digest[6] = (digest[6] & 0x0f) | 0x50;
+  digest[8] = (digest[8] & 0x3f) | 0x80;
+  const hex = digest.toString('hex', 0, 16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 function commandVersion(command) {
@@ -297,6 +311,9 @@ function commandForTask(task) {
     };
   }
   if (task.cli_tool === 'claude') {
+    const sessionId = task.conversation_id && task.agent_id
+      ? makeSessionId(task.conversation_id, task.agent_id)
+      : null;
     return {
       command,
       args: [
@@ -307,17 +324,21 @@ function commandForTask(task) {
         'text',
       ],
       stdin: prompt,
+      userStdin: task.prompt,
+      sessionId,
     };
   }
   if (task.cli_tool === 'openclaw') {
-    const sessionID = `agenthub-${String(task.agent_id || task.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const sessionId = task.conversation_id && task.agent_id
+      ? makeSessionId(task.conversation_id, task.agent_id)
+      : `agenthub-${String(task.agent_id || task.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     return {
       command,
       args: [
         'agent',
         '--local',
         '--session-id',
-        sessionID,
+        sessionId,
         '--message',
         prompt,
         '--json',
@@ -332,16 +353,36 @@ function commandForTask(task) {
 
 async function executeTask(task) {
   const spec = commandForTask(task);
-  const output = await runProcess(spec.command, spec.args, spec.stdin);
+
+  let stdout;
+  let stderr;
+  if (spec.sessionId) {
+    try {
+      ({ stdout, stderr } = await runProcess(
+        spec.command,
+        ['--resume', spec.sessionId, ...spec.args],
+        spec.userStdin || spec.stdin,
+      ));
+    } catch (_err) {
+      ({ stdout, stderr } = await runProcess(
+        spec.command,
+        ['--session-id', spec.sessionId, ...spec.args],
+        spec.stdin,
+      ));
+    }
+  } else {
+    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin));
+  }
+
   if (spec.outputFile && fs.existsSync(spec.outputFile)) {
     const text = fs.readFileSync(spec.outputFile, 'utf8').trim();
     fs.rmSync(spec.outputFile, { force: true });
     if (text) return text;
   }
   if (spec.resultFormat === 'openclaw-json') {
-    return parseOpenClawOutput(output.stdout);
+    return parseOpenClawOutput(stdout);
   }
-  const text = `${output.stdout || ''}${output.stderr ? `\n${output.stderr}` : ''}`.trim();
+  const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   return text || '(Agent CLI 没有返回内容)';
 }
 
