@@ -138,7 +138,6 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 	}
 
 	// Now build full task text for each dispatch (dispatch line + continuation lines)
-	dependsRe := regexp.MustCompile(`@([\p{L}\p{N}_\-.]+)`)
 	tasks := make([]DispatchTask, 0, len(dispatches))
 
 	for i, d := range dispatches {
@@ -162,7 +161,7 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 
 		// Extract DependsOn from embedded @references
 		dependsOn := ""
-		subMatches := dependsRe.FindAllStringSubmatch(fullTask, -1)
+		subMatches := mentionRe.FindAllStringSubmatch(fullTask, -1)
 		for _, sm := range subMatches {
 			if sm[1] != d.agentName {
 				dependsOn = sm[1]
@@ -171,7 +170,7 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 		}
 
 		// Strip embedded @references from display task text
-		cleanTask := dependsRe.ReplaceAllString(fullTask, "")
+		cleanTask := mentionRe.ReplaceAllString(fullTask, "")
 		// Collapse multiple spaces left by removal
 		cleanTask = strings.Join(strings.Fields(cleanTask), " ")
 

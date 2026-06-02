@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -43,14 +44,19 @@ type OrchestratorService struct {
 	convRepo  OrchConvRepo
 	agentRepo OrchAgentRepo
 	msgRepo   MsgRepo
+
+	// 编排并发保护：同一对话同时只允许一个编排流程
+	mu          sync.Mutex
+	activeOrchs map[string]struct{} // convID →活跃编排
 }
 
 // NewOrchestratorService creates a new orchestrator service.
 func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
 	return &OrchestratorService{
-		convRepo:  convRepo,
-		agentRepo: agentRepo,
-		msgRepo:   msgRepo,
+		convRepo:    convRepo,
+		agentRepo:   agentRepo,
+		msgRepo:     msgRepo,
+		activeOrchs: make(map[string]struct{}),
 	}
 }
 
@@ -97,7 +103,22 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		}
 
 		if agent.Type == "orchestrator" {
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agentID, content, convAgents)
+			// 并发保护：同一对话同时只允许一个编排
+			s.mu.Lock()
+			if _, active := s.activeOrchs[convID]; active {
+				s.mu.Unlock()
+				slog.Warn("orchestration already active for conversation", "conv_id", convID)
+				continue
+			}
+			s.activeOrchs[convID] = struct{}{}
+			s.mu.Unlock()
+
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents)
+
+			s.mu.Lock()
+			delete(s.activeOrchs, convID)
+			s.mu.Unlock()
+
 			if err != nil {
 				slog.Warn("orchestrated dispatch failed", "agent_id", agentID, "error", err)
 				continue
@@ -109,7 +130,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				Task:      content,
 			})
 		} else {
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agentID, content)
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, content)
 			if err != nil {
 				slog.Warn("direct dispatch failed", "agent_id", agentID, "error", err)
 				continue
@@ -119,6 +140,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				AgentID:   agentID,
 				AgentName: m.AgentName,
 				Task:      content,
+				Parallel:  true,
 			})
 		}
 	}
@@ -127,14 +149,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
-func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID, agentID, content string) (*model.Message, error) {
-	agent, err := s.agentRepo.GetByID(ctx, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("get agent: %w", err)
-	}
-	if agent == nil {
-		return nil, ErrAgentNotFound
-	}
+func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string) (*model.Message, error) {
 	if agent.UserID != nil && *agent.UserID != userID {
 		return nil, ErrMsgAgentNoPerm
 	}
@@ -142,7 +157,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	dispatchCtx, err := s.buildDispatchContext(ctx, convID, DispatchTask{}, nil)
+	dispatchCtx, err := s.buildDispatchContext(ctx, convID, DispatchTask{}, nil, "")
 	if err != nil {
 		slog.Warn("build dispatch context failed", "conv_id", convID, "error", err)
 		dispatchCtx = ""
@@ -175,14 +190,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 }
 
 // handleOrchestratedDispatch runs the full orchestrator flow: dispatch to orchestrator, parse output, fan out to workers.
-func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID, orchAgentID, content string, convAgents []model.ConversationAgent) ([]*model.Message, error) {
-	orchAgent, err := s.agentRepo.GetByID(ctx, orchAgentID)
-	if err != nil {
-		return nil, fmt.Errorf("get orchestrator agent: %w", err)
-	}
-	if orchAgent == nil {
-		return nil, ErrAgentNotFound
-	}
+func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent) ([]*model.Message, error) {
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
@@ -255,18 +263,18 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// Dispatch worker tasks
 	depResults := make(map[string]string) // agentName -> result summary
 
-	// Collect parallel tasks (non-sequential) and process sequential tasks in order
+	// Collect parallel tasks and process sequential/dependent tasks in order
 	var parallelTasks []DispatchTask
 	for _, t := range dispatch.Tasks {
-		if t.Sequential {
+		if t.Sequential || t.DependsOn != "" {
 			// First execute any accumulated parallel tasks
 			if len(parallelTasks) > 0 {
-				workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults)
+				workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name)
 				messages = append(messages, workerMsgs...)
 				parallelTasks = nil
 			}
-			// Execute sequential task
-			workerMsg := s.dispatchSequential(ctx, convID, userID, t, agentNameToID, depResults)
+			// Execute sequential/dependent task
+			workerMsg := s.dispatchSequential(ctx, convID, userID, t, agentNameToID, depResults, orchAgent.Name)
 			if workerMsg != nil {
 				messages = append(messages, workerMsg)
 			}
@@ -276,7 +284,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	}
 	// Flush remaining parallel tasks
 	if len(parallelTasks) > 0 {
-		workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults)
+		workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name)
 		messages = append(messages, workerMsgs...)
 	}
 
@@ -284,17 +292,23 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 }
 
 // dispatchParallel creates daemon tasks for multiple agents simultaneously and waits for all.
-func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string) []*model.Message {
+func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) []*model.Message {
 	type taskResult struct {
 		index     int
 		msg       *model.Message
 		agentName string
 	}
 
+	// 快照 depResults 避免并发 map 读写竞争
+	depSnapshot := make(map[string]string, len(depResults))
+	for k, v := range depResults {
+		depSnapshot[k] = v
+	}
+
 	resultCh := make(chan taskResult, len(tasks))
 	for i, t := range tasks {
 		go func(idx int, task DispatchTask) {
-			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults)
+			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depSnapshot, orchestratorName)
 			if err != nil {
 				slog.Warn("parallel dispatch failed", "agent", task.AgentName, "error", err)
 				resultCh <- taskResult{index: idx, msg: nil}
@@ -316,8 +330,8 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 }
 
 // dispatchSequential creates a daemon task for one agent, waits, then returns.
-func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string) *model.Message {
-	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults)
+func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) *model.Message {
+	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults, orchestratorName)
 	if err != nil {
 		slog.Warn("sequential dispatch failed", "agent", task.AgentName, "error", err)
 		return nil
@@ -327,7 +341,7 @@ func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, us
 }
 
 // dispatchWorker dispatches to a single worker agent and returns its reply message.
-func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string) (*model.Message, error) {
+func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) (*model.Message, error) {
 	agentID, ok := agentNameToID[task.AgentName]
 	if !ok {
 		return nil, fmt.Errorf("agent %q not found in conversation", task.AgentName)
@@ -344,7 +358,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
 
-	dispatchCtx, err := s.buildDispatchContext(ctx, convID, task, depResults)
+	dispatchCtx, err := s.buildDispatchContext(ctx, convID, task, depResults, orchestratorName)
 	if err != nil {
 		slog.Warn("build worker dispatch context failed", "agent", task.AgentName, "error", err)
 		dispatchCtx = ""
@@ -377,7 +391,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 }
 
 // buildDispatchContext builds Layer 2 context for a worker agent dispatch.
-func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID string, task DispatchTask, depResults map[string]string) (string, error) {
+func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID string, task DispatchTask, depResults map[string]string, orchestratorName string) (string, error) {
 	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, 10)
 	if err != nil {
 		return "", fmt.Errorf("list messages: %w", err)
@@ -420,7 +434,10 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		}
 	}
 
-	sb.WriteString("请完成这个任务并在回复末尾 @Orchestrator 表示完成。")
+	if orchestratorName == "" {
+		orchestratorName = "Orchestrator"
+	}
+	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
 
 	return sb.String(), nil
 }
