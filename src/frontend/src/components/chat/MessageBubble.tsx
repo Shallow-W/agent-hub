@@ -8,6 +8,7 @@ import {
   RollbackOutlined,
   UpOutlined,
 } from '@ant-design/icons';
+import { useAuthStore } from '@/store/authStore';
 import type { Message, OptimisticStatus } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
@@ -127,7 +128,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     try { return (JSON.parse(message.artifacts_json) as { agent_name?: string }).agent_name ?? null; } catch { return null; }
   })();
   const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
-  const avatarLetter = agentName ? 'AI' : (message.username?.charAt(0)?.toUpperCase() || '?');
+  // username 在乐观消息中可能为空；依次尝试 username → agentName 缩写 → isOwn 时取 auth 用户名首字母 → 兜底 '?'
+  const avatarLetter = agentName
+    ? 'AI'
+    : (message.username?.charAt(0)?.toUpperCase()
+        || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
   const renderedContent = useMemo(() => renderMarkdown(message.content ?? ''), [message.content]);
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;

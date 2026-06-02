@@ -35,7 +35,15 @@ export const useWsStore = create<WsState>((set, get) => ({
 
     const client = new WebSocketClient();
     client.onStatusChange((status) => {
-      set({ status });
+      if (status === 'disconnected') {
+        // WebSocket 断开时清除所有 agentTyping 状态，防止残留"正在思考"指示器
+        set((prev) => {
+          const hasActive = Object.values(prev.agentTyping).some(Boolean);
+          return hasActive ? { status, agentTyping: {} } : { status };
+        });
+      } else {
+        set({ status });
+      }
     });
     client.connect(token);
     set({ wsClient: client, status: 'connecting' });
