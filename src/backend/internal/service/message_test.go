@@ -91,6 +91,10 @@ func (r *fakeConvRepoForMsg) ListMemberIDs(ctx context.Context, conversationID s
 	return []string{r.conv.UserID}, nil
 }
 
+func (r *fakeConvRepoForMsg) ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error) {
+	return nil, nil
+}
+
 type fakeAgentRepoForMsg struct {
 	agent          *model.Agent
 	task           *model.DaemonTask

@@ -52,6 +52,7 @@ type ConvRepoForMsg interface {
 	UpdateTimestamp(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
+	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 }
 
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
@@ -85,6 +86,7 @@ type MessageService struct {
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
 	cacher    MessageCacher
+	orchSvc   *OrchestratorService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -106,6 +108,11 @@ func (s *MessageService) SetNotifier(n MessageNotifier) {
 // SetCacher 注入消息缓存器
 func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
+}
+
+// SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
+func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
+	s.orchSvc = orchSvc
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -184,9 +191,25 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// Agent 回复
+	// @mention routing — when no explicit agentID, check for @mentions in content
+	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
+		mentions := ParseMentions(content)
+		if len(mentions) > 0 {
+			orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+			if err != nil {
+				slog.Warn("mention routing failed", "convID", convID, "error", err)
+			} else if orchResult != nil && len(orchResult.AgentMessages) > 0 {
+				result.AgentMessage = orchResult.AgentMessages[0]
+				for _, agentMsg := range orchResult.AgentMessages {
+					go s.postPersist(convID, userID, agentMsg)
+				}
+			}
+		}
+	}
+
+	// Agent 回复（显式 agentID 路径，向后兼容）
 	if strings.TrimSpace(agentID) != "" {
-		contextMessages := ""
+		contextMessages := s.buildAgentHandoffs(ctx, convID)
 		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 		if err != nil {
 			return nil, err

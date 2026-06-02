@@ -147,6 +147,8 @@ func main() {
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
+	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
