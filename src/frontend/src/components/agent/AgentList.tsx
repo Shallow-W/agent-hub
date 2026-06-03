@@ -258,9 +258,10 @@ export const AgentList: React.FC<AgentListProps> = ({
                             </div>
                             {capabilities.length > 0 && (
                               <div className={styles.agentTags}>
-                                {capabilities.map((item) => (
-                                  <Tag key={item}>{item}</Tag>
+                                {capabilities.slice(0, 3).map((item) => (
+                                  <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                                 ))}
+                                {capabilities.length > 3 && <Tag>+{capabilities.length - 3}</Tag>}
                               </div>
                             )}
                           </div>

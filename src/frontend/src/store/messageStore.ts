@@ -50,7 +50,7 @@ interface MessageState {
   handleRecallPush: (conversationId: string, messageId: string) => void;
 }
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 200;
 /** Max messages kept per conversation to prevent unbounded memory growth */
 const MAX_MESSAGES = 200;
 

@@ -130,7 +130,7 @@ func (h *MessageHandler) History(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
 	var before time.Time
 	if beforeStr := c.Query("before"); beforeStr != "" {
 		t, err := time.Parse(time.RFC3339, beforeStr)

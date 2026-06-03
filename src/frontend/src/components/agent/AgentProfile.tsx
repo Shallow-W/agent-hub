@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Avatar, Button, Input, Popconfirm, Switch, Tag, message } from 'antd';
+import { Avatar, Button, Input, Popconfirm, Switch, Tag, Typography, message } from 'antd';
 import {
   BellOutlined,
   MessageOutlined,
@@ -8,6 +8,7 @@ import {
   SettingOutlined,
   ToolOutlined,
   DeleteOutlined,
+  LinkOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -63,6 +64,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [toolsConfigValue, setToolsConfigValue] = useState('');
   const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
 
   useEffect(() => {
     if (!agent) return;
@@ -169,6 +172,29 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       message.success('Agent 已删除');
     } catch {
       message.error('删除 Agent 失败');
+    }
+  };
+
+  const handleReconnect = async () => {
+    if (!agent.machine_id) {
+      message.warning('该 Agent 未绑定电脑，无法重连');
+      return;
+    }
+    setReconnecting(true);
+    try {
+      const { getMachineConnectCommand } = await import('@/api/agent');
+      const result = await getMachineConnectCommand(agent.machine_id);
+      if (result.daemon_npm_path) {
+        setReconnectCmd(
+          `npx "@agenthub/daemon@file:${result.daemon_npm_path}" --server-url "${window.location.protocol}//${window.location.hostname}:${window.location.port === '5173' ? '8080' : window.location.port}" --api-key "${result.api_key}"`,
+        );
+      } else {
+        setReconnectCmd(result.command);
+      }
+    } catch {
+      message.error('获取连接命令失败');
+    } finally {
+      setReconnecting(false);
     }
   };
 
@@ -284,9 +310,16 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         <section className={styles.section}>
           <div className={styles.sectionTitle}>ACTIONS</div>
           <div className={styles.actionPanel}>
-            <Button icon={<PlayCircleOutlined />} onClick={() => message.info('启动 Agent 的后端接口接入后即可执行')}>
-              启动 Agent
-            </Button>
+            {!isOnline && agent.machine_id && (
+              <Button icon={<LinkOutlined />} loading={reconnecting} onClick={handleReconnect}>
+                重新连接
+              </Button>
+            )}
+            {isOnline && (
+              <Button icon={<PlayCircleOutlined />} onClick={() => message.info('启动 Agent 的后端接口接入后即可执行')}>
+                启动 Agent
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />} onClick={() => message.info('重启 Agent 的后端接口接入后即可执行')}>
               重启 Agent
             </Button>
@@ -296,6 +329,16 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               </Button>
             </Popconfirm>
           </div>
+          {reconnectCmd && (
+            <div style={{ marginTop: 8, padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                在目标电脑上执行以下命令重新连接：
+              </div>
+              <Typography.Text copyable code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                {reconnectCmd}
+              </Typography.Text>
+            </div>
+          )}
         </section>
 
         <section className={styles.section}>

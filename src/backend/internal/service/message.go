@@ -191,35 +191,17 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// @mention routing — when no explicit agentID, check for @mentions in content
+	// @mention routing — 异步派发，不阻塞 HTTP 响应
 	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
 		mentions := ParseMentions(content)
 		if len(mentions) > 0 {
-			// 广播 agent typing 状态
-			go s.broadcastAgentTyping(convID, true)
-			orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
-			defer func() {
-				go s.broadcastAgentTyping(convID, false)
-			}()
-			if err != nil {
-				slog.Warn("mention routing failed", "convID", convID, "error", err)
-			} else if orchResult != nil && len(orchResult.AgentMessages) > 0 {
-				result.AgentMessage = orchResult.AgentMessages[0]
-				for _, agentMsg := range orchResult.AgentMessages {
-					go s.postPersist(convID, userID, agentMsg)
-				}
-			}
+			go s.asyncMentionDispatch(convID, userID, content)
 		}
 	}
 
-	// Agent 回复（显式 agentID 路径，向后兼容）
+	// Agent 回复（显式 agentID 路径，异步派发）
 	if strings.TrimSpace(agentID) != "" {
-		contextMessages := s.buildAgentHandoffs(ctx, convID)
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
-		if err != nil {
-			return nil, err
-		}
-		result.AgentMessage = agentMsg
+		go s.asyncAgentReply(convID, userID, agentID, content)
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）
@@ -647,6 +629,57 @@ func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*mo
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
+
+// asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncMentionDispatch recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	if err != nil {
+		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		return
+	}
+	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
+		return
+	}
+	for _, agentMsg := range orchResult.AgentMessages {
+		s.postPersist(convID, userID, agentMsg)
+	}
+}
+
+// asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncAgentReply recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	contextMessages := s.buildAgentHandoffs(ctx, convID)
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	if err != nil {
+		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, agentMsg)
+}
+
 func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
 	if s.notifier == nil {
 		return

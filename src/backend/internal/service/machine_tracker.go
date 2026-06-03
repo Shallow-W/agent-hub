@@ -67,6 +67,9 @@ func (t *MachineTracker) IsOnline(machineID string) bool {
 
 // Run 启动后台清扫 goroutine，应在独立 goroutine 中调用。
 func (t *MachineTracker) Run(ctx context.Context) {
+	// 启动时将所有机器标记为离线，清除上次运行残留的 stale 状态
+	t.resetAll(ctx)
+
 	ticker := time.NewTicker(machineSweepInterval)
 	defer ticker.Stop()
 	for {
@@ -76,6 +79,15 @@ func (t *MachineTracker) Run(ctx context.Context) {
 		case <-ticker.C:
 			t.sweep(ctx)
 		}
+	}
+}
+
+// resetAll 将 DB 中所有机器和 Agent 标记为离线（服务启动时调用）。
+func (t *MachineTracker) resetAll(ctx context.Context) {
+	dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := t.repo.SetMachineAndAgentsOffline(dbCtx, ""); err != nil {
+		t.logger.Warn("reset machines on startup failed", "error", err)
 	}
 }
 

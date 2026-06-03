@@ -158,7 +158,21 @@ func (r *AgentRepo) SetMachineAndAgentsOnline(ctx context.Context, machineID str
 }
 
 // SetMachineAndAgentsOffline 标记机器及其 Agent 为离线（仅状态变更时调用）。
+// machineID 为空时标记全部机器和 Agent 为离线（服务启动时使用）。
 func (r *AgentRepo) SetMachineAndAgentsOffline(ctx context.Context, machineID string) error {
+	if machineID == "" {
+		if _, err := r.db.ExecContext(ctx,
+			`UPDATE daemon_machines SET status = 'offline', updated_at = NOW() WHERE status = 'connected'`,
+		); err != nil {
+			return fmt.Errorf("set all machines offline: %w", err)
+		}
+		if _, err := r.db.ExecContext(ctx,
+			`UPDATE agents SET status = 'offline', updated_at = NOW() WHERE status = 'online'`,
+		); err != nil {
+			return fmt.Errorf("set all agents offline: %w", err)
+		}
+		return nil
+	}
 	if _, err := r.db.ExecContext(ctx,
 		`UPDATE daemon_machines SET status = 'offline', updated_at = NOW() WHERE id = $1`,
 		machineID,

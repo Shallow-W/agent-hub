@@ -389,29 +389,29 @@ func (s *AgentService) StopAgent(ctx context.Context, agentID, userID string) er
 }
 
 // GetMachineConnectCommand 获取电脑连接命令。需要重新生成 API Key（原始密钥只存储哈希）。
-func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, userID string) (string, *model.DaemonMachine, error) {
+func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, userID string) (string, *model.DaemonMachine, string, error) {
 	if machineID == "" || userID == "" {
-		return "", nil, ErrAgentInvalidInput
+		return "", nil, "", ErrAgentInvalidInput
 	}
 	machine, err := s.repo.GetDaemonMachineByID(ctx, machineID)
 	if err != nil {
-		return "", nil, fmt.Errorf("get daemon machine: %w", err)
+		return "", nil, "", fmt.Errorf("get daemon machine: %w", err)
 	}
 	if machine == nil || machine.UserID != userID {
-		return "", nil, ErrAgentNotFound
+		return "", nil, "", ErrAgentNotFound
 	}
 	// 生成新的 API Key 并更新哈希
 	apiKey, err := generateMachineAPIKey()
 	if err != nil {
-		return "", nil, fmt.Errorf("generate machine api key: %w", err)
+		return "", nil, "", fmt.Errorf("generate machine api key: %w", err)
 	}
 	if err := s.updateMachineAPIKey(ctx, machineID, hashMachineAPIKey(apiKey)); err != nil {
-		return "", nil, fmt.Errorf("update machine api key: %w", err)
+		return "", nil, "", fmt.Errorf("update machine api key: %w", err)
 	}
 	// 更新 machine 对象以反映新 key（但 APIKeyHash 不返回给前端）
 	machine.APIKeyHash = ""
 	command := fmt.Sprintf("npx @agenthub/daemon --server-url http://localhost:8080 --api-key %s", apiKey)
-	return command, machine, nil
+	return command, machine, apiKey, nil
 }
 
 // updateMachineAPIKey 更新电脑的 API Key 哈希。

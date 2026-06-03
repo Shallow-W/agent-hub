@@ -313,7 +313,7 @@ func (h *AgentHandler) StopAgent(c *gin.Context) {
 func (h *AgentHandler) GetMachineConnect(c *gin.Context) {
 	machineID := c.Param("id")
 	userID := middleware.GetUserID(c)
-	command, machine, err := h.svc.GetMachineConnectCommand(c.Request.Context(), machineID, userID)
+	command, machine, apiKey, err := h.svc.GetMachineConnectCommand(c.Request.Context(), machineID, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentNotFound) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40442, err.Error())
@@ -327,8 +327,10 @@ func (h *AgentHandler) GetMachineConnect(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, map[string]interface{}{
-		"command": command,
-		"machine": machine,
+		"command":         command,
+		"api_key":         apiKey,
+		"daemon_npm_path": resolveDaemonNPMPath(),
+		"machine":         machine,
 	})
 }
 
