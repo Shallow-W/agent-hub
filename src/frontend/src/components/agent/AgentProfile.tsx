@@ -54,7 +54,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('');
-  const [descriptionValue, setDescriptionValue] = useState('');
   const [tagsValue, setTagsValue] = useState('');
   const [skills, setSkills] = useState<Skill[]>([]);
   const [newSkillName, setNewSkillName] = useState('');
@@ -70,7 +69,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setActiveTab(defaultTab);
     setName(agent.name);
     setAvatar(agent.avatar ?? '');
-    setDescriptionValue(agent.system_prompt ?? getAgentDescription(agent));
     setTagsValue(capabilities.join(', '));
     setSkills(parseSkills(agent.capabilities_json));
     setNewSkillName('');
@@ -107,7 +105,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         name: nextName,
         cli_tool: agent.cli_tool,
         avatar: avatar.trim() || undefined,
-        system_prompt: descriptionValue.trim() || undefined,
+        system_prompt: agent.system_prompt ?? '',
         tools_config: agent.tools_config ?? '',
         capabilities_json: JSON.stringify(skills),
       });
@@ -264,12 +262,9 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           </div>
           <div className={styles.field}>
             <span className={styles.label}>DESCRIPTION</span>
-            <Input.TextArea
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              value={descriptionValue}
-              onChange={(event) => setDescriptionValue(event.target.value)}
-              placeholder="描述这个 Agent 的角色、边界和工作风格"
-            />
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {description}
+            </div>
           </div>
           <div className={styles.field}>
             <span className={styles.label}>TAGS</span>
