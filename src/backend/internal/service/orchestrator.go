@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -45,8 +44,6 @@ type DispatchInfo struct {
 // OrchKBResolver resolves knowledge base references from message text.
 type OrchKBResolver interface {
 	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
-	// ReadTextFileContent 读取知识库文件的文本内容（用于注入上下文）
-	ReadTextFileContent(ctx context.Context, filePath string) (string, error)
 }
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
@@ -612,22 +609,8 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 	return sb.String()
 }
 
-// kbTextMaxSize 文本文件内容注入的最大尺寸阈值（200KB）
-const kbTextMaxSize = 200 * 1024
-
-// kbTextExts 可以直接注入内容的文本文件扩展名
-var kbTextExts = map[string]bool{
-	".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true,
-	".html": true, ".htm": true, ".xml": true, ".yaml": true, ".yml": true,
-	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".log": true,
-	".sh": true, ".bat": true, ".ps1": true, ".py": true, ".js": true,
-	".ts": true, ".go": true, ".java": true, ".c": true, ".cpp": true,
-	".rs": true, ".rb": true, ".php": true, ".sql": true, ".env": true,
-	".dockerfile": true, ".makefile": true, ".properties": true, ".gradle": true,
-}
-
 // injectKBContext 解析消息中的 {{用户名/知识库名}} 引用并将知识库内容注入上下文。
-// 对于文本类文件（<200KB），直接注入文件内容；其他文件提供读取工具供 Agent 按需获取。
+// 使用上传时预提取的 preview_text/preview_type，无需运行时读磁盘，加快 Agent 响应速度。
 // 如果没有引用则原样返回 contextStr。
 func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
 	if s.kbResolver == nil {
@@ -640,7 +623,7 @@ func (s *OrchestratorService) injectKBContext(ctx context.Context, content strin
 	}
 
 	var kbSection strings.Builder
-	hasFiles := false // 是否有需要工具读取的文件
+	needTool := false // 是否有需要工具读取的文件
 
 	for _, ref := range refs {
 		kb, files, err := s.kbResolver.ResolveKnowledgeRef(ctx, userID, ref.Username, ref.KBName)
@@ -653,26 +636,22 @@ func (s *OrchestratorService) injectKBContext(ctx context.Context, content strin
 			kbSection.WriteString("（空知识库，无文件）\n")
 		} else {
 			for _, f := range files {
-				ext := strings.ToLower(filepath.Ext(f.Filename))
-				if kbTextExts[ext] && f.FileSize <= int64(kbTextMaxSize) {
-					// 文本文件：直接注入内容
-					fileContent, readErr := s.kbResolver.ReadTextFileContent(ctx, f.FilePath)
-					if readErr != nil {
-						slog.Warn("read kb file content failed", "file", f.Filename, "error", readErr)
-						kbSection.WriteString(fmt.Sprintf("- %s (%s, 读取失败)\n", f.Filename, formatFileSize(f.FileSize)))
-					} else {
-						kbSection.WriteString(fmt.Sprintf("- %s (%s):\n```\n%s\n```\n", f.Filename, formatFileSize(f.FileSize), fileContent))
-					}
-				} else {
-					// 非文本或大文件：仅列出，需要通过工具读取
-					hasFiles = true
-					readHint := ""
-					if !kbTextExts[ext] {
-						readHint = ", 使用 kb_read_file 工具读取"
-					} else {
-						readHint = ", 文件过大，使用 kb_read_file 工具读取"
-					}
-					kbSection.WriteString(fmt.Sprintf("- %s (%s%s)\n", f.Filename, formatFileSize(f.FileSize), readHint))
+				switch f.PreviewType {
+				case "text":
+					// 文本内容已预提取，直接注入
+					kbSection.WriteString(fmt.Sprintf("- %s (%s):\n```\n%s\n```\n", f.Filename, formatFileSize(f.FileSize), f.PreviewText))
+				case "image":
+					// 图片：注入描述信息
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, %s, 使用 kb_read_file 工具获取)\n", f.Filename, formatFileSize(f.FileSize), f.PreviewText))
+					needTool = true
+				case "too_large":
+					// 超大文本文件
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, 文件过大，使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					needTool = true
+				default:
+					// binary 或其他
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, 使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					needTool = true
 				}
 			}
 		}
@@ -688,7 +667,7 @@ func (s *OrchestratorService) injectKBContext(ctx context.Context, content strin
 	sb.WriteString(kbSection.String())
 
 	// 如果有需要工具读取的文件，注入知识库读取工具
-	if hasFiles && s.jwtSecret != "" && s.serverURL != "" {
+	if needTool && s.jwtSecret != "" && s.serverURL != "" {
 		token, _, err := s.generateMgmtToken(userID)
 		if err != nil {
 			slog.Warn("generate kb tool token failed", "error", err)

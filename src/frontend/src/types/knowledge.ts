@@ -7,6 +7,8 @@ export interface KnowledgeFile {
   filename: string;
   size: number;
   mime_type: string;
+  preview_type: 'text' | 'image' | 'binary' | 'too_large';
+  preview_text?: string;
   uploaded_at: string;
 }
 

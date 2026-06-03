@@ -168,24 +168,16 @@ func (s *KnowledgeService) UploadFile(ctx context.Context, userID, kbID string, 
 	// 检测MIME
 	mimeType := detectFileMIME(fileHeader.Filename, fileContent)
 
-	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex)
+	// 上传时预处理：提取文本内容或标记文件类型
+	previewText, previewType := extractPreview(fileHeader.Filename, mimeType, fileContent)
+
+	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex, previewText, previewType)
 	return err
 }
 
 // GetUploadDir 返回上传目录路径
 func (s *KnowledgeService) GetUploadDir() string {
 	return s.uploadDir
-}
-
-// ReadTextFileContent 读取知识库文件的文本内容（用于注入 Agent 上下文）。
-// filePath 是数据库中存储的相对路径（如 "knowledge/{kb_id}/{hash}.ext"）。
-func (s *KnowledgeService) ReadTextFileContent(_ context.Context, filePath string) (string, error) {
-	absPath := filepath.Join(s.uploadDir, filepath.Clean(filePath))
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return "", fmt.Errorf("read kb file: %w", err)
-	}
-	return string(data), nil
 }
 
 // GetFile 获取知识库中的单个文件（含权限验证）
@@ -365,4 +357,56 @@ func detectFileMIME(filename string, content []byte) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// previewTextMaxSize 预览文本的最大字节数（200KB）
+const previewTextMaxSize = 200 * 1024
+
+// previewableTextExts 可以提取文本内容的文件扩展名
+var previewableTextExts = map[string]bool{
+	".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true,
+	".html": true, ".htm": true, ".xml": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".log": true,
+	".sh": true, ".bat": true, ".ps1": true, ".py": true, ".js": true,
+	".ts": true, ".tsx": true, ".jsx": true, ".go": true, ".java": true,
+	".c": true, ".cpp": true, ".h": true, ".hpp": true, ".cs": true,
+	".rs": true, ".rb": true, ".php": true, ".sql": true, ".env": true,
+	".dockerfile": true, ".makefile": true, ".properties": true, ".gradle": true,
+	".swift": true, ".kt": true, ".scala": true, ".r": true, ".lua": true,
+}
+
+// imageExts 图片文件扩展名
+var imageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+	".bmp": true, ".svg": true, ".ico": true,
+}
+
+// extractPreview 上传时预处理文件内容，返回 (previewText, previewType)。
+// - 文本文件（<200KB）: previewType="text", previewText=文件内容
+// - 超大文本文件: previewType="too_large", previewText=""
+// - 图片文件: previewType="image", previewText=文件名+尺寸描述
+// - 其他二进制: previewType="binary", previewText=""
+func extractPreview(filename string, mimeType string, content []byte) (string, string) {
+	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
+
+	// 1. 文本文件
+	if previewableTextExts[ext] || strings.HasPrefix(mimeType, "text/") {
+		if len(content) > previewTextMaxSize {
+			return "", "too_large"
+		}
+		return string(content), "text"
+	}
+
+	// 2. 图片文件：生成描述信息供 Agent 理解图片用途
+	if imageExts[ext] || strings.HasPrefix(mimeType, "image/") {
+		// SVG 是文本格式，直接提取内容
+		if ext == ".svg" && len(content) <= previewTextMaxSize {
+			return string(content), "text"
+		}
+		desc := fmt.Sprintf("[图片: %s, %s, %s]", filename, formatFileSize(int64(len(content))), mimeType)
+		return desc, "image"
+	}
+
+	// 3. PDF 等文档：标记为 binary（未来可扩展文本提取）
+	return "", "binary"
 }

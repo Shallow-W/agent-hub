@@ -103,7 +103,7 @@ func (r *KnowledgeRepo) Delete(ctx context.Context, id string) error {
 func (r *KnowledgeRepo) ListFiles(ctx context.Context, kbID string) ([]model.KnowledgeFile, error) {
 	var files []model.KnowledgeFile
 	err := r.db.SelectContext(ctx, &files,
-		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at
 		 FROM knowledge_files
 		 WHERE knowledge_base_id = $1
 		 ORDER BY created_at DESC`,
@@ -119,13 +119,13 @@ func (r *KnowledgeRepo) ListFiles(ctx context.Context, kbID string) ([]model.Kno
 }
 
 // AddFile 添加文件到知识库
-func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath string, fileSize int64, mimeType, sha256 string) (*model.KnowledgeFile, error) {
+func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath string, fileSize int64, mimeType, sha256, previewText, previewType string) (*model.KnowledgeFile, error) {
 	var f model.KnowledgeFile
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO knowledge_files (knowledge_base_id, filename, file_path, file_size, mime_type, sha256)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at`,
-		kbID, filename, filePath, fileSize, mimeType, sha256,
+		`INSERT INTO knowledge_files (knowledge_base_id, filename, file_path, file_size, mime_type, sha256, preview_text, preview_type)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at`,
+		kbID, filename, filePath, fileSize, mimeType, sha256, previewText, previewType,
 	).StructScan(&f)
 	if err != nil {
 		return nil, fmt.Errorf("insert knowledge file: %w", err)
@@ -207,7 +207,7 @@ func (r *KnowledgeRepo) FindByUserAndName(ctx context.Context, userID, kbName st
 func (r *KnowledgeRepo) GetFileByID(ctx context.Context, kbID, fileID string) (*model.KnowledgeFile, error) {
 	var f model.KnowledgeFile
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at
 		 FROM knowledge_files
 		 WHERE id = $1 AND knowledge_base_id = $2`,
 		fileID, kbID,
