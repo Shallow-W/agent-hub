@@ -65,12 +65,9 @@ export function useMessages(conversationId: string | null) {
       lastFetchedAt[currentId] = now;
       await fetchMessages(currentId);
 
-      // 标记已读
-      markConversationRead(currentId).catch(() => {});
-
-      // 拉取离线/未读消息并合并
+      // 拉取离线/未读消息并合并（必须在 markConversationRead 之前，否则 last_read_at 已更新导致查不到未读）
       try {
-        const unread = await getUnreadMessages(currentId, 100);
+        const unread = await getUnreadMessages(currentId, 200);
         if (currentFetchId !== fetchIdRef.current) return;
         if (unread && unread.length > 0) {
           const store = useMessageStore.getState();
@@ -88,6 +85,9 @@ export function useMessages(conversationId: string | null) {
           }
         }
       } catch { /* ignore */ }
+
+      // 标记已读（放在 getUnreadMessages 之后，确保未读消息已拉取）
+      markConversationRead(currentId).catch(() => {});
     })();
   }, [conversationId, fetchMessages]);
 
