@@ -284,7 +284,7 @@ function truncateStr(s, max) {
   return s.slice(0, max) + '...';
 }
 
-function buildPrompt(task) {
+function buildPromptParts(task) {
   let ctx = task.context_messages;
   ctx = typeof ctx === 'string' ? ctx : '';
 
@@ -296,18 +296,36 @@ function buildPrompt(task) {
     ctx = ctx.slice(0, headLen) + '\n...[上下文已截断]...\n' + ctx.slice(ctx.length - tailLen);
   }
 
+  // 从 context_messages 中提取系统指令和工具配置作为 system prompt
+  let systemPrompt = '';
+  let remainingCtx = ctx;
+
+  const sysSection = remainingCtx.match(/^(\[系统指令\]\n[\s\S]*?)(?=\n\n\[可用工具\]|\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  if (sysSection) {
+    systemPrompt += sysSection[1].replace('[系统指令]\n', '').trim();
+    remainingCtx = remainingCtx.slice(sysSection[0].length);
+  }
+
+  const toolsSection = remainingCtx.match(/^(\[可用工具\]\n[\s\S]*?)(?=\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  if (toolsSection) {
+    systemPrompt += (systemPrompt ? '\n\n' : '') + '# 可用工具\n' + toolsSection[1].replace('[可用工具]\n', '').trim();
+    remainingCtx = remainingCtx.slice(toolsSection[0].length);
+  }
+
+  remainingCtx = remainingCtx.trim();
+
+  // 构建用户 prompt
   const parts = [];
 
-  if (ctx) {
+  if (remainingCtx) {
     let handoffs = null;
     try {
-      handoffs = JSON.parse(ctx);
+      handoffs = JSON.parse(remainingCtx);
     } catch {
       // not JSON — treat as plain text (orchestrator dispatch context)
     }
 
     if (handoffs !== null && Array.isArray(handoffs)) {
-      // JSON handoffs from direct dispatch
       parts.push('[历史 Agent 交接]');
       for (const h of handoffs) {
         const req = truncateStr(h.user_request, 100);
@@ -317,20 +335,20 @@ function buildPrompt(task) {
       parts.push('');
       parts.push('你是 AgentHub 群聊中被 @提及的机器人，请参考上述交接上下文回答用户消息。');
     } else {
-      // Orchestrator dispatch context — already contains instructions
-      parts.push(ctx);
+      parts.push(remainingCtx);
     }
-  } else {
+  } else if (!systemPrompt) {
     parts.push('你是 AgentHub 群聊中被 @提及的机器人，请直接回答用户当前消息。');
   }
 
   parts.push('');
   parts.push(task.prompt);
-  return parts.join('\n');
+
+  return { systemPrompt, userPrompt: parts.join('\n') };
 }
 
 function commandForTask(task) {
-  const prompt = buildPrompt(task);
+  const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
@@ -347,7 +365,7 @@ function commandForTask(task) {
         'never',
         '--output-last-message',
         outputFile,
-        prompt,
+        userPrompt,
       ],
       outputFile,
     };
@@ -356,16 +374,20 @@ function commandForTask(task) {
     const sessionId = task.conversation_id && task.agent_id
       ? makeSessionId(task.conversation_id, task.agent_id)
       : null;
+    const args = [
+      '-p',
+      '--permission-mode',
+      'dontAsk',
+      '--output-format',
+      'text',
+    ];
+    if (systemPrompt) {
+      args.push('--system-prompt', systemPrompt);
+    }
     return {
       command,
-      args: [
-        '-p',
-        '--permission-mode',
-        'dontAsk',
-        '--output-format',
-        'text',
-      ],
-      stdin: prompt,
+      args,
+      stdin: userPrompt,
       sessionId,
     };
   }
@@ -381,7 +403,7 @@ function commandForTask(task) {
         '--session-id',
         sessionId,
         '--message',
-        prompt,
+        userPrompt,
         '--json',
         '--thinking',
         'off',
@@ -389,7 +411,7 @@ function commandForTask(task) {
       resultFormat: 'openclaw-json',
     };
   }
-  return { command, args: [prompt] };
+  return { command, args: [userPrompt] };
 }
 
 async function executeTask(task) {
