@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +23,7 @@ var (
 	ErrKBNameEmpty   = errors.New("知识库名称不能为空")
 	ErrKBNotPublic   = errors.New("该知识库不是公开的")
 	ErrKBFileEmpty   = errors.New("上传文件不能为空")
+	ErrKBFileNotFound = errors.New("文件不存在")
 )
 
 // KnowledgeService 知识库业务逻辑
@@ -161,13 +163,41 @@ func (s *KnowledgeService) UploadFile(ctx context.Context, userID, kbID string, 
 	}
 
 	// 数据库路径使用正斜杠
-	dbPath := "uploads/knowledge/" + kbID + "/" + storedName
+	dbPath := path.Join("knowledge", kbID, storedName)
 
 	// 检测MIME
 	mimeType := detectFileMIME(fileHeader.Filename, fileContent)
 
 	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex)
 	return err
+}
+
+// GetUploadDir 返回上传目录路径
+func (s *KnowledgeService) GetUploadDir() string {
+	return s.uploadDir
+}
+
+// GetFile 获取知识库中的单个文件（含权限验证）
+func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID string) (*model.KnowledgeFile, error) {
+	kb, err := s.kbRepo.GetByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if kb == nil {
+		return nil, ErrKBNotFound
+	}
+	if kb.UserID != userID && kb.Visibility != "public" {
+		return nil, ErrKBNoPermission
+	}
+
+	f, err := s.kbRepo.GetFileByID(ctx, kbID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, ErrKBFileNotFound
+	}
+	return f, nil
 }
 
 // DeleteFile 删除知识库文件
@@ -186,6 +216,9 @@ func (s *KnowledgeService) DeleteFile(ctx context.Context, userID, kbID, fileID 
 	filePath, err := s.kbRepo.DeleteFile(ctx, kbID, fileID)
 	if err != nil {
 		return err
+	}
+	if filePath == "" {
+		return ErrKBFileNotFound
 	}
 	// 删除物理文件
 	_ = os.Remove(filepath.Join(s.uploadDir, filepath.Clean(filePath)))

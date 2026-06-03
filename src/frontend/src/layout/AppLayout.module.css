@@ -60,11 +60,11 @@
 }
 
 .toggleBtnCollapsed {
-  left: calc(var(--settings-width-collapsed) - 11px);
+  left: calc(var(--settings-width-collapsed) + 2px);
 }
 
 .toggleBtnExpanded {
-  left: calc(var(--settings-width) - 11px);
+  left: calc(var(--settings-width) + 2px);
 }
 
 .container:hover .toggleBtn {

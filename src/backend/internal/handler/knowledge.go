@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	middleware "github.com/agent-hub/backend/internal/middleware"
@@ -178,7 +180,7 @@ func (h *KnowledgeHandler) DeleteFile(c *gin.Context) {
 	}
 
 	if err := h.svc.DeleteFile(c.Request.Context(), userID, kbID, fileID); err != nil {
-		if err == service.ErrKBNotFound || err == service.ErrKBNoPermission {
+		if err == service.ErrKBNotFound || err == service.ErrKBNoPermission || err == service.ErrKBFileNotFound {
 			status := http.StatusNotFound
 			code := 40463
 			if err == service.ErrKBNoPermission {
@@ -192,6 +194,67 @@ func (h *KnowledgeHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, nil)
+}
+
+// GetFileContent 获取文件内容（用于预览）
+func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	kbID := c.Param("id")
+	fileID := c.Param("fileId")
+	if kbID == "" || fileID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40069, "缺少知识库 ID 或文件 ID")
+		return
+	}
+
+	f, err := h.svc.GetFile(c.Request.Context(), userID, kbID, fileID)
+	if err != nil {
+		if err == service.ErrKBNotFound || err == service.ErrKBFileNotFound {
+			status := http.StatusNotFound
+			code := 40464
+			if err == service.ErrKBFileNotFound {
+				code = 40465
+			}
+			middleware.ErrorResponse(c, status, code, err.Error())
+			return
+		}
+		if err == service.ErrKBNoPermission {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40364, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50066, "获取文件失败")
+		return
+	}
+
+		if f.FilePath == "" {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
+			return
+		}
+
+		absPath := filepath.Join(h.svc.GetUploadDir(), filepath.Clean(f.FilePath))
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
+		return
+	}
+
+	// 图片和PDF inline预览，其他触发下载
+	contentDisp := "attachment"
+	if isPreviewMIME(f.MimeType) {
+		contentDisp = "inline"
+	}
+	c.Header("Content-Disposition", contentDisp+"; filename=\""+f.Filename+"\"")
+	c.Header("Content-Type", f.MimeType)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.File(absPath)
+}
+
+// isPreviewMIME 判断MIME类型是否支持浏览器内预览
+func isPreviewMIME(mime string) bool {
+	previewTypes := map[string]bool{
+		"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true,
+		"text/plain": true, "text/markdown": true, "text/csv": true, "text/html": true,
+		"application/pdf": true, "application/json": true,
+	}
+	return previewTypes[mime]
 }
 
 // ResolveKnowledgeRef 解析知识库引用（用于群聊中的 "用户名/知识库名" 语法）

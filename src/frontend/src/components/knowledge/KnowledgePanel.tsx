@@ -19,6 +19,7 @@ import {
   InboxOutlined,
 } from '@ant-design/icons';
 import { useKnowledgeStore } from '@/store/knowledgeStore';
+import type { KnowledgeFile } from '@/types/knowledge';
 import { formatFileSize } from '@/types/attachment';
 import styles from './KnowledgePanel.module.css';
 
@@ -27,7 +28,17 @@ function formatBytes(bytes: number): string {
   return formatFileSize(bytes);
 }
 
-const KnowledgePanel: React.FC = () => {
+interface KnowledgePanelProps {
+  onFileSelect?: (file: KnowledgeFile, kbId: string) => void;
+  selectedFileId?: string | null;
+  selectedKbId?: string | null;
+}
+
+const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
+  onFileSelect,
+  selectedFileId,
+  selectedKbId,
+}) => {
   const {
     knowledgeBases,
     loading,
@@ -189,7 +200,7 @@ const KnowledgePanel: React.FC = () => {
                     <div className={styles.kbIcon}>
                       <DatabaseOutlined />
                     </div>
-                    <span className={styles.kbName}>{kb.name}</span>
+                    <span className={styles.kbName} title={kb.name}>{kb.name}</span>
                   </div>
                   <Popconfirm
                     title="确定删除该知识库？"
@@ -246,21 +257,39 @@ const KnowledgePanel: React.FC = () => {
                   </div>
                   {kb.files.length > 0 ? (
                     <div className={styles.fileList}>
-                      {kb.files.map((file) => (
-                        <div className={styles.fileItem} key={file.id}>
-                          <FileOutlined className={styles.fileIcon} />
-                          <span className={styles.fileName}>{file.filename}</span>
-                          <span className={styles.fileSize}>{formatBytes(file.size)}</span>
-                          <button
-                            className={styles.fileDeleteBtn}
-                            type="button"
-                            aria-label="删除文件"
-                            onClick={() => handleFileDelete(kb.id, file.id)}
+                      {kb.files.map((file) => {
+                        const isSelected = selectedFileId === file.id && selectedKbId === kb.id;
+                        return (
+                          <div
+                            className={`${styles.fileItem} ${isSelected ? styles.fileItemSelected : ''}`}
+                            key={file.id}
+                            onClick={() => onFileSelect?.(file, kb.id)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onFileSelect?.(file, kb.id);
+                              }
+                            }}
                           >
-                            <CloseOutlined />
-                          </button>
-                        </div>
-                      ))}
+                            <FileOutlined className={styles.fileIcon} />
+                            <span className={styles.fileName} title={file.filename}>{file.filename}</span>
+                            <span className={styles.fileSize}>{formatBytes(file.size)}</span>
+                            <button
+                              className={styles.fileDeleteBtn}
+                              type="button"
+                              aria-label="删除文件"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFileDelete(kb.id, file.id);
+                              }}
+                            >
+                              <CloseOutlined />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className={styles.emptyFiles}>暂无文件，点击 ↑ 上传</div>

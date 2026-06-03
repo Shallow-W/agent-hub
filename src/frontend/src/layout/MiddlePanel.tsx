@@ -5,6 +5,7 @@ import { ConversationList } from '@/components/sidebar/ConversationList';
 import ContactsPanel from '@/components/contacts/ContactsPanel';
 import { AgentList } from '@/components/agent/AgentList';
 import KnowledgePanel from '@/components/knowledge/KnowledgePanel';
+import type { KnowledgeFile } from '@/types/knowledge';
 import { useAgentStore } from '@/store/agentStore';
 import { parseSkills } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
@@ -29,6 +30,9 @@ interface MiddlePanelProps {
   selectedMachineId: string | null;
   onSelectAgent: (agent: Agent) => void;
   onSelectMachine: (machineId: string) => void;
+  onKnowledgeFileSelect?: (file: KnowledgeFile, kbId: string) => void;
+  selectedKbId?: string | null;
+  selectedFileId?: string | null;
 }
 
 const MiddlePanel: React.FC<MiddlePanelProps> = ({
@@ -48,6 +52,9 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   selectedMachineId,
   onSelectAgent,
   onSelectMachine,
+  onKnowledgeFileSelect,
+  selectedKbId,
+  selectedFileId,
 }) => {
   const renderPanelTools = (onAdd: () => void) => (
     <div className={styles.convPanelTools}>
@@ -80,7 +87,13 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   }
 
   if (activeNav === 'knowledge') {
-    return <KnowledgePanel />;
+    return (
+      <KnowledgePanel
+        onFileSelect={onKnowledgeFileSelect}
+        selectedFileId={selectedFileId}
+        selectedKbId={selectedKbId}
+      />
+    );
   }
 
   if (activeNav === 'contacts') {

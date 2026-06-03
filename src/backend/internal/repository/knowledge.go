@@ -138,7 +138,7 @@ func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath st
 	return &f, nil
 }
 
-// DeleteFile 删除知识库文件
+// DeleteFile 删除知识库文件，返回文件路径用于删除物理文件
 func (r *KnowledgeRepo) DeleteFile(ctx context.Context, kbID, fileID string) (string, error) {
 	// 先获取文件路径以便删除物理文件
 	var filePath string
@@ -146,6 +146,9 @@ func (r *KnowledgeRepo) DeleteFile(ctx context.Context, kbID, fileID string) (st
 		`SELECT file_path FROM knowledge_files WHERE id = $1 AND knowledge_base_id = $2`,
 		fileID, kbID,
 	).Scan(&filePath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil // 文件不存在，返回空路径
+	}
 	if err != nil {
 		return "", fmt.Errorf("get knowledge file path: %w", err)
 	}
@@ -198,6 +201,24 @@ func (r *KnowledgeRepo) FindByUserAndName(ctx context.Context, userID, kbName st
 		return nil, fmt.Errorf("find knowledge base by user and name: %w", err)
 	}
 	return &kb, nil
+}
+
+// GetFileByID 按文件ID获取单个文件记录
+func (r *KnowledgeRepo) GetFileByID(ctx context.Context, kbID, fileID string) (*model.KnowledgeFile, error) {
+	var f model.KnowledgeFile
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at
+		 FROM knowledge_files
+		 WHERE id = $1 AND knowledge_base_id = $2`,
+		fileID, kbID,
+	).StructScan(&f)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get knowledge file: %w", err)
+	}
+	return &f, nil
 }
 
 // GetFileContent 获取知识库文件路径列表（用于Agent引用）

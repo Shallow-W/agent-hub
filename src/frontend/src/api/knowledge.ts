@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client';
+import { get, post, put, del, getAuthHeaders } from './client';
 import type {
   KnowledgeBase,
   CreateKnowledgeBaseRequest,
@@ -32,7 +32,6 @@ export async function deleteKnowledgeBase(id: string): Promise<void> {
 
 /** 上传文件到知识库 */
 export async function uploadKnowledgeFile(kbId: string, file: File): Promise<void> {
-  const { getAuthHeaders } = await import('./client');
   const formData = new FormData();
   formData.append('file', file);
 
@@ -51,4 +50,9 @@ export async function uploadKnowledgeFile(kbId: string, file: File): Promise<voi
 /** 删除知识库中的文件 */
 export async function deleteKnowledgeFile(kbId: string, fileId: string): Promise<void> {
   await del(`${BASE}/${kbId}/files/${fileId}`);
+}
+
+/** 获取知识库文件预览/下载 URL */
+export function getKnowledgeFileUrl(kbId: string, fileId: string): string {
+  return `${BASE}/${kbId}/files/${fileId}/content`;
 }

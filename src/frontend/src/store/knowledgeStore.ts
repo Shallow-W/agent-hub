@@ -58,12 +58,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
 
   removeFile: async (kbId, fileId) => {
     await kbApi.deleteKnowledgeFile(kbId, fileId);
-    set((s) => ({
-      knowledgeBases: s.knowledgeBases.map((kb) =>
-        kb.id === kbId
-          ? { ...kb, files: kb.files.filter((f) => f.id !== fileId), file_count: kb.file_count - 1 }
-          : kb,
-      ),
-    }));
+    // 删除成功后重新拉取列表以同步远端数据
+    await get().fetchKnowledgeBases();
   },
 }));

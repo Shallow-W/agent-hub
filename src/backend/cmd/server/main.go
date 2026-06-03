@@ -242,6 +242,7 @@ func main() {
 			kbRoutes.PUT("/:id", knowledgeHandler.Update)
 			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
+			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
 			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
 		}
