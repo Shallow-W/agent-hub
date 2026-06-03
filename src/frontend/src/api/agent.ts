@@ -52,3 +52,7 @@ export async function addAgentCandidate(
 ): Promise<Agent> {
   return post<Agent>(`/api/daemon/agent-candidates/${id}/add`, body);
 }
+
+export async function getMachineConnectCommand(id: string): Promise<{ command: string; machine: DaemonMachine }> {
+  return get<{ command: string; machine: DaemonMachine }>(`/api/daemon/machines/${id}/connect`);
+}
