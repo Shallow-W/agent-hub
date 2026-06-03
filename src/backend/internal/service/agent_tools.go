@@ -41,6 +41,12 @@ func GenerateManagementTools(serverURL, token string) string {
 - 调用方式：
   `+"`"+`curl -s -X POST %s/api/agents/{agent_id}/stop -H "Authorization: Bearer %s"`+"`"+`
 
+## agent_delete
+- 描述：删除指定 Agent（不可恢复）
+- 参数：agent_id (string)
+- 调用方式：
+  `+"`"+`curl -s -X DELETE %s/api/agents/{agent_id} -H "Authorization: Bearer %s"`+"`"+`
+
 ## machine_list
 - 描述：获取当前用户的所有电脑列表
 - 参数：无
@@ -58,5 +64,5 @@ func GenerateManagementTools(serverURL, token string) string {
 - 参数：machine_id (string)
 - 调用方式：
   `+"`"+`curl -s %s/api/daemon/machines/{machine_id}/connect -H "Authorization: Bearer %s"`+"`"+`
-`, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token)
+`, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token)
 }
