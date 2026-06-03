@@ -104,6 +104,9 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       message.warning('Agent 名称不能为空');
       return;
     }
+    const tagList = tagsValue.split(',').map((t) => t.trim()).filter(Boolean);
+    const skillsByName = new Map(skills.map((s) => [s.name, s]));
+    const merged = tagList.map((tag) => skillsByName.get(tag) || { name: tag });
     setSaving(true);
     try {
       await updateAgent(agent.id, {
@@ -112,7 +115,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         avatar: avatar.trim() || undefined,
         system_prompt: agent.system_prompt ?? '',
         tools_config: agent.tools_config ?? '',
-        capabilities_json: JSON.stringify(skills),
+        capabilities_json: JSON.stringify(merged),
         enable_management_tools: enableManagementTools,
       });
       message.success('Agent Profile 已保存');
