@@ -171,6 +171,36 @@ func (h *KnowledgeHandler) UploadFile(c *gin.Context) {
 	middleware.CreatedResponse(c, gin.H{"message": "上传成功"})
 }
 
+// ListFiles 获取知识库中的文件列表（供 Agent 工具和前端使用）
+func (h *KnowledgeHandler) ListFiles(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	kbID := c.Param("id")
+	if kbID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40073, "缺少知识库 ID")
+		return
+	}
+
+	files, err := h.svc.ListFiles(c.Request.Context(), userID, kbID)
+	if err != nil {
+		if err == service.ErrKBNotFound || err == service.ErrKBNoPermission {
+			status := http.StatusNotFound
+			code := 40467
+			if err == service.ErrKBNoPermission {
+				status = http.StatusForbidden
+				code = 40365
+			}
+			middleware.ErrorResponse(c, status, code, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50069, "获取文件列表失败")
+		return
+	}
+	if files == nil {
+		files = []model.KnowledgeFile{}
+	}
+	middleware.SuccessResponse(c, files)
+}
+
 // DeleteFile 删除知识库文件
 func (h *KnowledgeHandler) DeleteFile(c *gin.Context) {
 	userID := middleware.GetUserID(c)

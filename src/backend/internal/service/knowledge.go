@@ -177,6 +177,17 @@ func (s *KnowledgeService) GetUploadDir() string {
 	return s.uploadDir
 }
 
+// ReadTextFileContent 读取知识库文件的文本内容（用于注入 Agent 上下文）。
+// filePath 是数据库中存储的相对路径（如 "knowledge/{kb_id}/{hash}.ext"）。
+func (s *KnowledgeService) ReadTextFileContent(_ context.Context, filePath string) (string, error) {
+	absPath := filepath.Join(s.uploadDir, filepath.Clean(filePath))
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", fmt.Errorf("read kb file: %w", err)
+	}
+	return string(data), nil
+}
+
 // GetFile 获取知识库中的单个文件（含权限验证）
 func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID string) (*model.KnowledgeFile, error) {
 	kb, err := s.kbRepo.GetByID(ctx, kbID)
@@ -198,6 +209,21 @@ func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID str
 		return nil, ErrKBFileNotFound
 	}
 	return f, nil
+}
+
+// ListFiles 获取知识库中的文件列表（含权限验证）
+func (s *KnowledgeService) ListFiles(ctx context.Context, userID, kbID string) ([]model.KnowledgeFile, error) {
+	kb, err := s.kbRepo.GetByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if kb == nil {
+		return nil, ErrKBNotFound
+	}
+	if kb.UserID != userID && kb.Visibility != "public" {
+		return nil, ErrKBNoPermission
+	}
+	return s.kbRepo.ListFiles(ctx, kbID)
 }
 
 // DeleteFile 删除知识库文件
