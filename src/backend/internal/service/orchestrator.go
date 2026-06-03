@@ -381,6 +381,9 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		dispatchCtx = ""
 	}
 
+	// 注入 Agent 的系统提示词和工具配置
+	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx)
+
 	daemonTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, task.Task, dispatchCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create worker daemon task: %w", err)
@@ -533,6 +536,23 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 		case <-ticker.C:
 		}
 	}
+}
+
+// injectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
+func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string) string {
+	var sb strings.Builder
+	if agent.SystemPrompt != "" {
+		sb.WriteString("[系统指令]\n")
+		sb.WriteString(agent.SystemPrompt)
+		sb.WriteString("\n\n")
+	}
+	if agent.ToolsConfig != "" {
+		sb.WriteString("[可用工具]\n")
+		sb.WriteString(agent.ToolsConfig)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(contextStr)
+	return sb.String()
 }
 
 // truncateString truncates s to maxRunes runes, appending "..." if truncated.

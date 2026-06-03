@@ -5,6 +5,8 @@ import {
   MessageOutlined,
   RobotOutlined,
   SafetyOutlined,
+  SettingOutlined,
+  ToolOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -36,6 +38,8 @@ const tabItems = [
   { key: 'profile', label: 'PROFILE' },
   { key: 'skills', label: 'SKILLS' },
   { key: 'permissions', label: 'PERMISSIONS', icon: <SafetyOutlined /> },
+  { key: 'system_prompt', label: '系统提示词', icon: <SettingOutlined /> },
+  { key: 'tools_config', label: '工具配置', icon: <ToolOutlined /> },
   { key: 'dms', label: 'AGENT DMS', icon: <MessageOutlined /> },
   { key: 'reminders', label: 'REMINDERS', icon: <BellOutlined /> },
 ];
@@ -56,6 +60,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [newSkillName, setNewSkillName] = useState('');
   const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
   const [editingSkillName, setEditingSkillName] = useState('');
+  const [systemPromptValue, setSystemPromptValue] = useState('');
+  const [toolsConfigValue, setToolsConfigValue] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -70,6 +76,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setNewSkillName('');
     setEditingSkillIdx(null);
     setEditingSkillName('');
+    setSystemPromptValue(agent.system_prompt ?? '');
+    setToolsConfigValue(agent.tools_config ?? '');
   }, [agent]);
 
   if (!agent) {
@@ -100,6 +108,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         cli_tool: agent.cli_tool,
         avatar: avatar.trim() || undefined,
         system_prompt: descriptionValue.trim() || undefined,
+        tools_config: agent.tools_config ?? '',
         capabilities_json: JSON.stringify(skills),
       });
       message.success('Agent Profile 已保存');
@@ -159,6 +168,42 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       message.success('Agent 已删除');
     } catch {
       message.error('删除 Agent 失败');
+    }
+  };
+
+  const handleSaveSystemPrompt = async () => {
+    setSaving(true);
+    try {
+      await updateAgent(agent.id, {
+        name: agent.name,
+        cli_tool: agent.cli_tool,
+        system_prompt: systemPromptValue.trim() || undefined,
+        tools_config: agent.tools_config ?? '',
+        capabilities_json: agent.capabilities_json ?? '',
+      });
+      message.success('系统提示词已保存');
+    } catch {
+      message.error('保存系统提示词失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveToolsConfig = async () => {
+    setSaving(true);
+    try {
+      await updateAgent(agent.id, {
+        name: agent.name,
+        cli_tool: agent.cli_tool,
+        system_prompt: agent.system_prompt ?? '',
+        tools_config: toolsConfigValue.trim() || undefined,
+        capabilities_json: agent.capabilities_json ?? '',
+      });
+      message.success('工具配置已保存');
+    } catch {
+      message.error('保存工具配置失败');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -363,6 +408,42 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               />
               <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
                 添加
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'system_prompt' && (
+          <section className={styles.section}>
+            <div className={styles.sectionTitle}>系统提示词 (System Prompt)</div>
+            <Input.TextArea
+              autoSize={{ minRows: 8, maxRows: 24 }}
+              value={systemPromptValue}
+              onChange={(e) => setSystemPromptValue(e.target.value)}
+              placeholder="设定 Agent 的角色、人格、行为准则和工作风格。&#10;&#10;示例：&#10;你是一个资深的 Go 后端工程师，擅长代码审查和架构设计。&#10;- 使用中文回复&#10;- 代码注释使用英文&#10;- 遵循 SOLID 原则"
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div className={styles.actionPanel}>
+              <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveSystemPrompt}>
+                保存提示词
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'tools_config' && (
+          <section className={styles.section}>
+            <div className={styles.sectionTitle}>工具配置 (Tools Config)</div>
+            <Input.TextArea
+              autoSize={{ minRows: 8, maxRows: 24 }}
+              value={toolsConfigValue}
+              onChange={(e) => setToolsConfigValue(e.target.value)}
+              placeholder="以 Markdown 格式描述 Agent 可用的工具和调用方式。&#10;&#10;示例：&#10;## web_search&#10;- 描述：搜索互联网获取最新信息&#10;- 参数：query (string) - 搜索关键词&#10;&#10;## code_run&#10;- 描述：在沙箱中执行代码片段&#10;- 参数：language, code"
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div className={styles.actionPanel}>
+              <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>
+                保存工具配置
               </Button>
             </div>
           </section>

@@ -27,6 +27,7 @@ type AgentRequest struct {
 	Name             string `json:"name" binding:"required,max=100"`
 	CLITool          string `json:"cli_tool" binding:"required,max=50"`
 	SystemPrompt     string `json:"system_prompt"`
+	ToolsConfig      string `json:"tools_config"`
 	Avatar           string `json:"avatar"`
 	CapabilitiesJSON string `json:"capabilities_json"`
 }
@@ -168,6 +169,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		req.Name,
 		req.CLITool,
 		req.SystemPrompt,
+		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
 	)
@@ -199,6 +201,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		req.Name,
 		req.CLITool,
 		req.SystemPrompt,
+		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
 	)

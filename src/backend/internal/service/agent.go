@@ -31,8 +31,8 @@ type AgentRepo interface {
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error)
-	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error)
-	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error)
+	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error)
+	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error)
 	DeleteOwned(ctx context.Context, id, userID string) (bool, error)
 }
 
@@ -261,13 +261,13 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 }
 
 // CreateCustom 创建自建 Agent
-func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
 	name = strings.TrimSpace(name)
 	cliTool = strings.TrimSpace(cliTool)
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON)
+	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("create custom agent: %w", err)
 	}
@@ -275,7 +275,7 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 }
 
 // UpdateCustom 更新自建 Agent
-func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
 	name = strings.TrimSpace(name)
 	cliTool = strings.TrimSpace(cliTool)
 	if id == "" || name == "" || cliTool == "" {
@@ -284,7 +284,7 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if err := syncSkillFiles(capabilitiesJSON); err != nil {
 		return nil, err
 	}
-	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON)
+	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
 	}

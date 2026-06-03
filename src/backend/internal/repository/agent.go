@@ -24,7 +24,7 @@ func NewAgentRepo(db *sqlx.DB) *AgentRepo {
 func (r *AgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
 	list := make([]model.Agent, 0)
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, user_id, name, type, cli_tool, system_prompt, avatar,
+		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		        capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
 		        created_at, updated_at
 		 FROM agents
@@ -88,7 +88,7 @@ func (r *AgentRepo) IsAgentInConversation(ctx context.Context, conversationID, a
 func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, name, type, cli_tool, system_prompt, avatar,
+		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		        capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
 		        created_at, updated_at
 		 FROM agents WHERE id = $1`,
@@ -188,15 +188,15 @@ func (r *AgentRepo) CompleteDaemonTask(ctx context.Context, id, machineID, resul
 }
 
 // CreateCustom 创建用户自建 Agent
-func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, avatar, capabilities_json, source, status)
-		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, 'manual', 'offline')
-		 RETURNING id, user_id, name, type, cli_tool, system_prompt, avatar,
+		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, source, status)
+		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, $7, 'manual', 'offline')
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		           capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
 		           created_at, updated_at`,
-		userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON,
+		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON,
 	).StructScan(&a)
 	if err != nil {
 		return nil, fmt.Errorf("insert custom agent: %w", err)
@@ -205,17 +205,17 @@ func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, sys
 }
 
 // UpdateCustom 更新用户自建 Agent
-func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
 		`UPDATE agents
-		 SET name = $3, cli_tool = $4, system_prompt = $5, avatar = $6,
-		     capabilities_json = $7, updated_at = NOW()
+		 SET name = $3, cli_tool = $4, system_prompt = $5, tools_config = $6, avatar = $7,
+		     capabilities_json = $8, updated_at = NOW()
 		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
-		 RETURNING id, user_id, name, type, cli_tool, system_prompt, avatar,
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		           capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
 		           created_at, updated_at`,
-		id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON,
+		id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON,
 	).StructScan(&a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

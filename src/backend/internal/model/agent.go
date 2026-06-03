@@ -10,6 +10,7 @@ type Agent struct {
 	Type             string     `json:"type" db:"type"`
 	CLITool          string     `json:"cli_tool" db:"cli_tool"`
 	SystemPrompt     string     `json:"system_prompt,omitempty" db:"system_prompt"`
+	ToolsConfig      string     `json:"tools_config,omitempty" db:"tools_config"`
 	Avatar           string     `json:"avatar,omitempty" db:"avatar"`
 	CapabilitiesJSON string     `json:"capabilities_json,omitempty" db:"capabilities_json"`
 	Source           string     `json:"source" db:"source"`

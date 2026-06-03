@@ -8,6 +8,7 @@ export interface Agent {
   type: AgentType;
   cli_tool: string;
   system_prompt?: string;
+  tools_config?: string;
   avatar?: string;
   capabilities_json?: string;
   source: string;
@@ -24,6 +25,7 @@ export interface AgentRequest {
   name: string;
   cli_tool: string;
   system_prompt?: string;
+  tools_config?: string;
   avatar?: string;
   capabilities_json?: string;
 }
