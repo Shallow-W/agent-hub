@@ -172,7 +172,10 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, "")
+	// 注入 Agent 系统提示词和工具配置到 context
+	agentCtx := s.injectAgentConfig(agent, "")
+
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
