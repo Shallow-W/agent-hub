@@ -16,7 +16,6 @@ const activeSessions = new Map();
 function killSessionProcess(sessionId) {
   const child = activeSessions.get(sessionId);
   if (!child) return;
-  activeSessions.delete(sessionId);
   try {
     if (process.platform === 'win32') {
       spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
@@ -24,6 +23,7 @@ function killSessionProcess(sessionId) {
       process.kill(-child.pid, 'SIGKILL');
     }
   } catch { /* already dead */ }
+  activeSessions.delete(sessionId);
 }
 
 const CANDIDATES = [
@@ -456,7 +456,7 @@ async function executeTask(task) {
           spec.sessionId,
         ));
       } catch (_err2) {
-        const freshId = `agenthub-${task.id}`;
+        const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         ({ stdout, stderr } = await runProcess(
           spec.command,
           ['--session-id', freshId, ...spec.args],
