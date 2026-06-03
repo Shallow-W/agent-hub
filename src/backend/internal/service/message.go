@@ -217,9 +217,11 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		contextMessages := s.buildAgentHandoffs(ctx, convID)
 		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 		if err != nil {
-			return nil, err
+			slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		} else {
+			result.AgentMessage = agentMsg
+			go s.postPersist(convID, userID, agentMsg)
 		}
-		result.AgentMessage = agentMsg
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）

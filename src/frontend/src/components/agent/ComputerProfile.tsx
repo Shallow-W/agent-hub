@@ -194,9 +194,10 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   </div>
                   {capabilityList.length > 0 && (
                     <div className={styles.baseTags}>
-                      {capabilityList.map((item) => (
-                        <Tag key={item}>{item}</Tag>
+                      {capabilityList.slice(0, 3).map((item) => (
+                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                       ))}
+                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
                     </div>
                   )}
                 </div>
@@ -256,9 +257,10 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   </div>
                   {capabilityList.length > 0 && (
                     <div className={styles.agentTags}>
-                      {capabilityList.map((item) => (
-                        <Tag key={item}>{item}</Tag>
+                      {capabilityList.slice(0, 3).map((item) => (
+                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                       ))}
+                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
                     </div>
                   )}
                 </div>
