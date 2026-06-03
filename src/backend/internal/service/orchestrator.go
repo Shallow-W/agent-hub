@@ -114,7 +114,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 
 	// 在入口处预解析原始用户消息中的知识库引用，
 	// 避免 Orchestrator 改写任务描述后丢失 {{用户名/KB}} 语法
-	kbPreload := s.preloadKBContext(ctx, content, userID)
+	kbPreload := s.PreloadKBContext(ctx, content, userID)
 
 	result := &RouteResult{}
 
@@ -151,11 +151,14 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			s.activeOrchs[convID] = struct{}{}
 			s.mu.Unlock()
 
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
+			// 确保 panic 时也能清理 activeOrchs，避免对话永久被锁
+			defer func() {
+				s.mu.Lock()
+				delete(s.activeOrchs, convID)
+				s.mu.Unlock()
+			}()
 
-			s.mu.Lock()
-			delete(s.activeOrchs, convID)
-			s.mu.Unlock()
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
 
 			if err != nil {
 				slog.Warn("orchestrated dispatch failed", "agent_id", agentID, "error", err)
@@ -209,7 +212,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.injectAgentConfig(agent, kbCtx, userID)
+	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
 	if err != nil {
@@ -262,7 +265,12 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 
 	fullPrompt := BuildOrchestratorPrompt(convTitle, agentNames, recentSummary, content)
 
-	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, "")
+	// 将 KB 上下文和 orchestrator 自身的 Agent 配置注入到 contextMessages，
+	// 确保 orchestrator 能感知知识库内容和自身工具配置
+	orchCtx := kbPreload
+	orchCtx = s.InjectAgentConfig(orchAgent, orchCtx, userID)
+
+	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
@@ -415,6 +423,18 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
 
+	// 权限校验：与 dispatchSingleAgent 保持一致
+	if agent.UserID != nil && *agent.UserID != userID {
+		return nil, ErrMsgAgentNoPerm
+	}
+	inConv, checkErr := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
+	if checkErr != nil {
+		return nil, fmt.Errorf("check worker conversation agent: %w", checkErr)
+	}
+	if !inConv {
+		return nil, ErrMsgAgentNoPerm
+	}
+
 	dispatchCtx, err := s.buildDispatchContext(ctx, convID, task, depResults, orchestratorName)
 	if err != nil {
 		slog.Warn("build worker dispatch context failed", "agent", task.AgentName, "error", err)
@@ -429,7 +449,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 	}
 
 	// 注入 Agent 的系统提示词和工具配置
-	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx, userID)
+	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID)
 
 	daemonTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, task.Task, dispatchCtx)
 	if err != nil {
@@ -585,10 +605,10 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	}
 }
 
-// injectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
+// InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
 // 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
 // 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
-func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
+func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
 		sb.WriteString("[系统指令]\n")
@@ -624,10 +644,10 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
 const kbMaxInlineChars = 4000
 
-// preloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
+// PreloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
 // 生成 KB 上下文字符串。确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
 // 返回空字符串表示无引用或解析失败。
-func (s *OrchestratorService) preloadKBContext(ctx context.Context, content string, userID string) string {
+func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content string, userID string) string {
 	if s.kbResolver == nil {
 		return ""
 	}
@@ -700,7 +720,7 @@ func (s *OrchestratorService) preloadKBContext(ctx context.Context, content stri
 // injectKBContext 是 preloadKBContext 的包装，将预加载内容拼接到 contextStr 前面。
 // 注意：该方法仅在未使用 preloadKBContext 的回退路径中调用。
 func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
-	preload := s.preloadKBContext(ctx, content, userID)
+	preload := s.PreloadKBContext(ctx, content, userID)
 	if preload == "" {
 		return contextStr
 	}

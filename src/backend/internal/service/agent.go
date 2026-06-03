@@ -31,7 +31,6 @@ type AgentRepo interface {
 	GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash string) (*model.DaemonMachine, error)
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
-	UpsertMachineAgent(ctx context.Context, userID, machineID, machineName, name, cliTool, version, capabilitiesJSON string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error)
@@ -73,6 +72,7 @@ func (s *AgentService) CompleteDaemonTask(ctx context.Context, machine *model.Da
 var (
 	ErrAgentNotFound     = errors.New("Agent 不存在")
 	ErrAgentInvalidInput = errors.New("Agent 参数无效")
+	ErrAgentOffline      = errors.New("agent offline")
 )
 
 const machineAPIKeyPrefix = "sk_machine_"
@@ -82,6 +82,7 @@ type AgentService struct {
 	repo     AgentRepo
 	tracker  *MachineTracker
 	jwtSecret string
+	serverURL string
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -100,6 +101,11 @@ func NewAgentService(repo AgentRepo, tracker *MachineTracker) *AgentService {
 // SetJWTSecret 设置 JWT 密钥（用于生成 Agent Token）
 func (s *AgentService) SetJWTSecret(secret string) {
 	s.jwtSecret = secret
+}
+
+// SetServerURL 设置服务端 URL（用于生成 daemon 连接命令）
+func (s *AgentService) SetServerURL(url string) {
+	s.serverURL = url
 }
 
 // ListAvailable 查询当前用户可用 Agent
@@ -280,6 +286,9 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
+	if err := syncSkillFiles(capabilitiesJSON); err != nil {
+		return nil, err
+	}
 	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("create custom agent: %w", err)
@@ -360,7 +369,7 @@ func (s *AgentService) RestartAgent(ctx context.Context, agentID, userID string)
 		return ErrAgentNotFound
 	}
 	if agent.MachineID == nil || *agent.MachineID == "" {
-		return errors.New("agent offline")
+		return ErrAgentOffline
 	}
 	// 创建重启任务，conversation_id 和 prompt 留空，仅作为控制指令
 	_, err = s.repo.CreateDaemonTask(ctx, userID, "", agentID, *agent.MachineID, agent.CLITool, "__restart__", "")
@@ -410,7 +419,11 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	}
 	// 更新 machine 对象以反映新 key（但 APIKeyHash 不返回给前端）
 	machine.APIKeyHash = ""
-	command := fmt.Sprintf("npx @agenthub/daemon --server-url http://localhost:8080 --api-key %s", apiKey)
+	serverURL := s.serverURL
+		if serverURL == "" {
+			serverURL = "http://localhost:8080" // fallback when not configured
+		}
+		command := fmt.Sprintf("npx @agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
 	return command, machine, apiKey, nil
 }
 

@@ -279,7 +279,7 @@ func (h *AgentHandler) RestartAgent(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40041, err.Error())
 			return
 		}
-		if err.Error() == "agent offline" {
+		if errors.Is(err, service.ErrAgentOffline) {
 			middleware.ErrorResponse(c, http.StatusConflict, 40940, "Agent 不在线，无法重启")
 			return
 		}

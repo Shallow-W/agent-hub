@@ -162,7 +162,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		return nil, err
 	}
 
-	if role == "" {
+	// 强制角色约束：客户端只允许发送 user 角色消息，防止伪造 assistant 消息
+	if role == "" || role != "assistant" {
 		role = "user"
 	}
 
@@ -193,8 +194,9 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	// @mention routing — 异步派发，不阻塞 HTTP 响应
 	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
-		mentions := ParseMentions(content)
-		if len(mentions) > 0 {
+		// 优先使用调用方传入的 mentions 参数，仅在为空时从 content 中解析
+		parsedMentions := ParseMentions(content)
+		if len(mentions) > 0 || len(parsedMentions) > 0 {
 			go s.asyncMentionDispatch(convID, userID, content)
 		}
 	}
@@ -206,11 +208,6 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	// 异步推送和缓存（失败不影响消息持久化）
 	go s.postPersist(convID, userID, msg)
-
-	// 刷新对话的 updated_at
-	if err := s.convRepo.UpdateTimestamp(ctx, convID); err != nil {
-		return nil, fmt.Errorf("update conversation timestamp: %w", err)
-	}
 
 	return result, nil
 }
@@ -672,7 +669,22 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	defer cancel()
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
-	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+
+		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
+		if s.orchSvc != nil {
+			agent, err := s.agentRepo.GetByID(ctx, agentID)
+			if err == nil && agent != nil {
+				// KB 优先从消息内容中预解析，回退到实时解析
+				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
+				// 注入 SystemPrompt + ToolsConfig + ManagementTools（当启用时）
+				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+				if kbCtx != "" {
+					contextMessages = kbCtx + contextMessages
+				}
+			}
+		}
+
+		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
 		return
