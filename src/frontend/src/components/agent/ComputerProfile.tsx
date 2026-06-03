@@ -95,7 +95,14 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(machine.id);
-      setReconnectCmd(result.command);
+      // Use daemon_npm_path to build a working local command
+      if (result.daemon_npm_path) {
+        setReconnectCmd(
+          `npx "@agenthub/daemon@file:${result.daemon_npm_path}" --server-url "${window.location.protocol}//${window.location.hostname}:${window.location.port === '5173' ? '8080' : window.location.port}" --api-key "${result.api_key}"`,
+        );
+      } else {
+        setReconnectCmd(result.command);
+      }
     } catch {
       message.error('获取连接命令失败');
     } finally {

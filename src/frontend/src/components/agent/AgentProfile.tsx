@@ -184,7 +184,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(agent.machine_id);
-      setReconnectCmd(result.command);
+      if (result.daemon_npm_path) {
+        setReconnectCmd(
+          `npx "@agenthub/daemon@file:${result.daemon_npm_path}" --server-url "${window.location.protocol}//${window.location.hostname}:${window.location.port === '5173' ? '8080' : window.location.port}" --api-key "${result.api_key}"`,
+        );
+      } else {
+        setReconnectCmd(result.command);
+      }
     } catch {
       message.error('获取连接命令失败');
     } finally {

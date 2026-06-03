@@ -53,6 +53,13 @@ export async function addAgentCandidate(
   return post<Agent>(`/api/daemon/agent-candidates/${id}/add`, body);
 }
 
-export async function getMachineConnectCommand(id: string): Promise<{ command: string; machine: DaemonMachine }> {
-  return get<{ command: string; machine: DaemonMachine }>(`/api/daemon/machines/${id}/connect`);
+export interface MachineConnectResponse {
+  command: string;
+  api_key: string;
+  daemon_npm_path: string;
+  machine: DaemonMachine;
+}
+
+export async function getMachineConnectCommand(id: string): Promise<MachineConnectResponse> {
+  return get<MachineConnectResponse>(`/api/daemon/machines/${id}/connect`);
 }
