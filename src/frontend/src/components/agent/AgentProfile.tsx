@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Avatar, Button, Input, Popconfirm, Tag, message } from 'antd';
+import { Avatar, Button, Input, Popconfirm, Switch, Tag, message } from 'antd';
 import {
   BellOutlined,
   MessageOutlined,
@@ -61,6 +61,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [editingSkillName, setEditingSkillName] = useState('');
   const [systemPromptValue, setSystemPromptValue] = useState('');
   const [toolsConfigValue, setToolsConfigValue] = useState('');
+  const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -76,6 +77,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setEditingSkillName('');
     setSystemPromptValue(agent.system_prompt ?? '');
     setToolsConfigValue(agent.tools_config ?? '');
+    setEnableManagementTools(agent.enable_management_tools ?? false);
   }, [agent]);
 
   if (!agent) {
@@ -108,6 +110,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: agent.system_prompt ?? '',
         tools_config: agent.tools_config ?? '',
         capabilities_json: JSON.stringify(skills),
+        enable_management_tools: enableManagementTools,
       });
       message.success('Agent Profile 已保存');
     } catch {
@@ -196,6 +199,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: agent.system_prompt ?? '',
         tools_config: toolsConfigValue.trim() || undefined,
         capabilities_json: agent.capabilities_json ?? '',
+        enable_management_tools: enableManagementTools,
       });
       message.success('工具配置已保存');
     } catch {
@@ -429,6 +433,17 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'tools_config' && (
           <section className={styles.section}>
             <div className={styles.sectionTitle}>工具配置 (Tools Config)</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <Switch
+                checked={enableManagementTools}
+                onChange={setEnableManagementTools}
+                checkedChildren="管理工具已启用"
+                unCheckedChildren="管理工具已关闭"
+              />
+              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                启用后 Agent 可自动管理平台上的 Agent 和电脑资源
+              </span>
+            </div>
             <Input.TextArea
               autoSize={{ minRows: 8, maxRows: 24 }}
               value={toolsConfigValue}

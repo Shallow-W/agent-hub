@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // OrchConvRepo queries conversation agents for @mention resolution.
@@ -46,9 +47,22 @@ type OrchestratorService struct {
 	agentRepo OrchAgentRepo
 	msgRepo   MsgRepo
 
+	jwtSecret string
+	serverURL string
+
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
 	activeOrchs map[string]struct{} // convID →活跃编排
+}
+
+// SetJWTSecret sets the JWT secret for generating management tool tokens.
+func (s *OrchestratorService) SetJWTSecret(secret string) {
+	s.jwtSecret = secret
+}
+
+// SetServerURL sets the server base URL for management tool API calls.
+func (s *OrchestratorService) SetServerURL(url string) {
+	s.serverURL = url
 }
 
 // NewOrchestratorService creates a new orchestrator service.
@@ -173,7 +187,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.injectAgentConfig(agent, "")
+	agentCtx := s.injectAgentConfig(agent, "", userID)
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
 	if err != nil {
@@ -385,7 +399,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 	}
 
 	// 注入 Agent 的系统提示词和工具配置
-	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx)
+	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx, userID)
 
 	daemonTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, task.Task, dispatchCtx)
 	if err != nil {
@@ -542,7 +556,8 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 }
 
 // injectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
-func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string) string {
+// 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
+func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
 		sb.WriteString("[系统指令]\n")
@@ -554,8 +569,35 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString(agent.ToolsConfig)
 		sb.WriteString("\n\n")
 	}
+	if agent.EnableManagementTools && s.jwtSecret != "" && s.serverURL != "" {
+		token, _, err := s.generateMgmtToken(userID)
+		if err != nil {
+			slog.Warn("generate management token failed", "agent_id", agent.ID, "error", err)
+		} else {
+			sb.WriteString("[可用工具]\n")
+			sb.WriteString(GenerateManagementTools(s.serverURL, token))
+			sb.WriteString("\n\n")
+		}
+	}
 	sb.WriteString(contextStr)
 	return sb.String()
+}
+
+// generateMgmtToken generates a scoped JWT token for management tool usage.
+func (s *OrchestratorService) generateMgmtToken(userID string) (string, time.Time, error) {
+	now := time.Now()
+	expiresAt := now.Add(1 * time.Hour)
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"iat":     now.Unix(),
+		"exp":     expiresAt.Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString([]byte(s.jwtSecret))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign management token: %w", err)
+	}
+	return tokenStr, expiresAt, nil
 }
 
 // truncateString truncates s to maxRunes runes, appending "..." if truncated.

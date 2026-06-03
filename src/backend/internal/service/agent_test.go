@@ -99,11 +99,11 @@ func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidate
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: name, CLITool: cliTool, Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	return r.updateResult, nil
 }
 
@@ -111,9 +111,34 @@ func (r *fakeAgentRepo) DeleteOwned(ctx context.Context, id, userID string) (boo
 	return r.deleted, nil
 }
 
+func (r *fakeAgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
+	return &model.DaemonTask{ID: "task-1", AgentID: agentID, MachineID: machineID, Status: "pending"}, nil
+}
+
+func (r *fakeAgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error) {
+	for i := range r.machines {
+		if r.machines[i].ID == id {
+			return &r.machines[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
+	return nil
+}
+
+func (r *fakeAgentRepo) ClearAgentMachine(ctx context.Context, id string) error {
+	return nil
+}
+
+func (r *fakeAgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error {
+	return nil
+}
+
 func TestCreateCustomRejectsEmptyName(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "")
+	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
@@ -219,7 +244,7 @@ func strconvQuote(value string) string {
 
 func TestUpdateCustomReturnsNotFound(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "")
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}

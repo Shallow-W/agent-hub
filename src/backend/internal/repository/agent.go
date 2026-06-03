@@ -25,8 +25,8 @@ func (r *AgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.A
 	list := make([]model.Agent, 0)
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		        capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
-		        created_at, updated_at
+		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        last_seen_at, created_at, updated_at
 		 FROM agents
 		 WHERE user_id IS NULL OR user_id = $1
 		 ORDER BY type ASC, updated_at DESC`,
@@ -89,8 +89,8 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		        capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
-		        created_at, updated_at
+		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        last_seen_at, created_at, updated_at
 		 FROM agents WHERE id = $1`,
 		id,
 	).StructScan(&a)
@@ -188,15 +188,15 @@ func (r *AgentRepo) CompleteDaemonTask(ctx context.Context, id, machineID, resul
 }
 
 // CreateCustom 创建用户自建 Agent
-func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, source, status)
-		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, $7, 'manual', 'offline')
+		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, enable_management_tools, source, status)
+		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, $7, $8, 'manual', 'offline')
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
-		           created_at, updated_at`,
-		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON,
+		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
 	).StructScan(&a)
 	if err != nil {
 		return nil, fmt.Errorf("insert custom agent: %w", err)
@@ -205,17 +205,17 @@ func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, sys
 }
 
 // UpdateCustom 更新用户自建 Agent
-func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
 		`UPDATE agents
 		 SET name = $3, cli_tool = $4, system_prompt = $5, tools_config = $6, avatar = $7,
-		     capabilities_json = $8, updated_at = NOW()
+		     capabilities_json = $8, enable_management_tools = $9, updated_at = NOW()
 		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
-		           created_at, updated_at`,
-		id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON,
+		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
 	).StructScan(&a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -224,6 +224,30 @@ func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool,
 		return nil, fmt.Errorf("update custom agent: %w", err)
 	}
 	return &a, nil
+}
+
+// UpdateAgentStatus 更新 Agent 状态
+func (r *AgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = $2, updated_at = NOW() WHERE id = $1`,
+		id, status,
+	)
+	if err != nil {
+		return fmt.Errorf("update agent status: %w", err)
+	}
+	return nil
+}
+
+// ClearAgentMachine 清除 Agent 的 machine_id 并设为离线
+func (r *AgentRepo) ClearAgentMachine(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'offline', machine_id = NULL, updated_at = NOW() WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("clear agent machine: %w", err)
+	}
+	return nil
 }
 
 // DeleteOwned 删除当前用户拥有的 Agent，包括自建 Agent 和电脑上报的系统 Agent。

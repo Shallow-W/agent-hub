@@ -16,6 +16,7 @@ export interface Agent {
   version?: string;
   machine_id?: string;
   machine_name?: string;
+  enable_management_tools?: boolean;
   last_seen_at?: string;
   created_at: string;
   updated_at: string;
@@ -28,6 +29,7 @@ export interface AgentRequest {
   tools_config?: string;
   avatar?: string;
   capabilities_json?: string;
+  enable_management_tools?: boolean;
 }
 
 export interface DaemonMachine {

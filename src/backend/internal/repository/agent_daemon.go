@@ -96,6 +96,36 @@ func (r *AgentRepo) GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash
 	return &m, nil
 }
 
+// UpdateMachineAPIKey 更新电脑的 API Key 哈希（用于重新生成连接命令）。
+func (r *AgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET api_key_hash = $2, updated_at = NOW() WHERE id = $1`,
+		id, apiKeyHash,
+	)
+	if err != nil {
+		return fmt.Errorf("update machine api key: %w", err)
+	}
+	return nil
+}
+
+// GetDaemonMachineByID 按 ID 查询电脑连接
+func (r *AgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error) {
+	var m model.DaemonMachine
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, user_id, name, api_key_hash, machine_id, status,
+		        last_seen_at, created_at, updated_at
+		 FROM daemon_machines WHERE id = $1`,
+		id,
+	).StructScan(&m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get daemon machine by id: %w", err)
+	}
+	return &m, nil
+}
+
 // MarkDaemonMachineConnected 标记电脑在线
 func (r *AgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error {
 	_, err := r.db.ExecContext(ctx,
