@@ -283,7 +283,7 @@ func TestDispatchSequential_EmptyDepResults_NoPanic(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{} // empty
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 
 	if msg == nil {
 		t.Fatal("expected non-nil message from sequential dispatch")
@@ -439,7 +439,7 @@ func TestDispatchSequential_FailedTask_WritesFailureToDepResults(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 
 	// dispatchSequential returns nil on failure
 	if msg != nil {
@@ -534,7 +534,7 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {
 		t.Fatal("expected non-nil message")
 	}
@@ -578,7 +578,7 @@ func TestBuildDispatchContext_TotalLengthProtected(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {
 		t.Fatal("expected non-nil message")
 	}

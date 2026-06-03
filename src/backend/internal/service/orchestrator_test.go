@@ -146,7 +146,7 @@ func TestDispatchSingleAgent_NotInConversation_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	_, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello", "")
 	if err == nil {
 		t.Fatal("expected error when agent not in conversation, got nil")
 	}
@@ -175,7 +175,7 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	msg, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	msg, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
