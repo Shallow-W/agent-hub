@@ -48,6 +48,7 @@ Desktop.ini
 # === 前端缓存 ===
 *.tsbuildinfo
 .vite/
+.vite-cache/
 
 # === Go 调试文件 ===
 debug
