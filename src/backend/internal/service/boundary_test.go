@@ -407,7 +407,6 @@ func TestSendMessage_NilAttachmentsEmptyContent_ReturnsError(t *testing.T) {
 	}
 }
 
-
 // ---------------------------------------------------------------------------
 // Bug 2: Failed parallel dispatch writes [任务失败] to depResults
 // ---------------------------------------------------------------------------
@@ -524,7 +523,7 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 
 	// Build a task description that is way over 2000 characters
 	base := strings.Repeat("很长的任务描述", 200) // ~1400 chars, doubled
-	longTask := base + base // ~2800 chars, > 2000 limit
+	longTask := base + base                // ~2800 chars, > 2000 limit
 
 	dispatchTask := DispatchTask{
 		AgentName: "Worker",
