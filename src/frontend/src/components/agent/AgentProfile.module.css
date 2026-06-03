@@ -438,3 +438,20 @@
 :global(html.dark) .skillCard {
   border-color: rgba(255, 255, 255, 0.08);
 }
+
+/* 重连命令：去除 antd Typography 自动链接的蓝色 */
+.reconnectBox :global(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* 暗色模式：重连命令代码块 */
+:global(html.dark) .reconnectBox :global(code) {
+  color: #e2e8f0 !important;
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(html.dark) .reconnectBox :global(a) {
+  color: #94a3b8 !important;
+}

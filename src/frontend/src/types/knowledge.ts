@@ -22,7 +22,17 @@ export interface KnowledgeBase {
   updated_at: string;
 }
 
-/** 创建知识库请求 */
+/** 群组中可用的知识库（含 owner 信息） */
+export interface GroupKnowledgeBase {
+  id: string;
+  name: string;
+  description?: string;
+  visibility: KnowledgeVisibility;
+  username: string;
+  file_count: number;
+  created_at: string;
+  updated_at: string;
+}
 export interface CreateKnowledgeBaseRequest {
   name: string;
   description?: string;

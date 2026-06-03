@@ -225,3 +225,35 @@ func (r *KnowledgeRepo) GetFileByID(ctx context.Context, kbID, fileID string) (*
 func (r *KnowledgeRepo) GetFileContent(ctx context.Context, kbID string) ([]model.KnowledgeFile, error) {
 	return r.ListFiles(ctx, kbID)
 }
+
+// ListPublicByUsers 列出指定用户列表中其他用户的公开知识库。
+// excludeUserID 用于排除当前用户（当前用户的 KB 通过 ListByUser 单独获取）。
+func (r *KnowledgeRepo) ListPublicByUsers(ctx context.Context, userIDs []string, excludeUserID string) ([]model.KnowledgeBase, error) {
+	if len(userIDs) == 0 {
+		return []model.KnowledgeBase{}, nil
+	}
+
+	query, args, err := sqlx.In(
+		`SELECT kb.id, kb.user_id, kb.name, kb.description, kb.visibility, kb.created_at, kb.updated_at,
+		        u.username,
+		        (SELECT COUNT(*) FROM knowledge_files kf WHERE kf.knowledge_base_id = kb.id) AS file_count
+		 FROM knowledge_bases kb
+		 JOIN users u ON u.id = kb.user_id
+		 WHERE kb.user_id IN (?) AND kb.visibility = 'public' AND kb.user_id != ?
+		 ORDER BY kb.updated_at DESC`,
+		userIDs, excludeUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build in query for list public by users: %w", err)
+	}
+	query = r.db.Rebind(query)
+
+	var kbs []model.KnowledgeBase
+	if err := r.db.SelectContext(ctx, &kbs, query, args...); err != nil {
+		return nil, fmt.Errorf("list public knowledge bases by users: %w", err)
+	}
+	if kbs == nil {
+		kbs = []model.KnowledgeBase{}
+	}
+	return kbs, nil
+}

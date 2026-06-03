@@ -187,9 +187,14 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(agent.machine_id);
+      // 后端返回的 command 包含正确的 --server-url，前端不自行拼接，
+      // 仅在 daemon_npm_path 存在时将 npm 包替换为本地 file: 路径
       if (result.daemon_npm_path) {
         setReconnectCmd(
-          `npx "@agenthub/daemon@file:${result.daemon_npm_path}" --server-url "${window.location.protocol}//${window.location.hostname}:${window.location.port === '5173' ? '8080' : window.location.port}" --api-key "${result.api_key}"`,
+          result.command.replace(
+            /npx\s+@agenthub\/daemon(\S+)?/,
+            `npx "@agenthub/daemon@file:${result.daemon_npm_path}"`,
+          ),
         );
       } else {
         setReconnectCmd(result.command);
@@ -333,7 +338,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </Popconfirm>
           </div>
           {reconnectCmd && (
-            <div style={{ marginTop: 8, padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
+            <div className={styles.reconnectBox} style={{ marginTop: 8, padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                 在目标电脑上执行以下命令重新连接：
               </div>

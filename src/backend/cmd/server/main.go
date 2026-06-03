@@ -168,7 +168,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 	taskHandler := handler.NewTaskHandler(taskSvc)
-	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -244,6 +244,7 @@ func main() {
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
 			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
+			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
 			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
 		}
 

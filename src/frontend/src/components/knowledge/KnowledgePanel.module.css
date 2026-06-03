@@ -255,6 +255,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--color-text-secondary);
 }
 
 .fileSize {
@@ -484,6 +485,16 @@
   border-top-color: rgba(255, 255, 255, 0.06);
 }
 
+/* 暗色模式：文件标签"文件 N" */
+:global(html.dark) .fileLabel {
+  color: #94a3b8;
+}
+
+/* 暗色模式：文件列表项 — 链接式文字用灰色 */
+:global(html.dark) .fileItem {
+  color: #94a3b8;
+}
+
 :global(html.dark) .fileItem:hover {
   background: var(--color-primary-bg);
 }
@@ -493,10 +504,38 @@
   color: var(--color-primary);
 }
 
+:global(html.dark) .fileName {
+  color: #94a3b8;
+}
+
+:global(html.dark) .fileItemSelected .fileName {
+  color: var(--color-primary);
+}
+
+:global(html.dark) .fileSize {
+  color: #64748b;
+}
+
 :global(html.dark) .emptyFiles {
   color: #94a3b8;
 }
 
+/* 暗色模式：可见性标签"公开/私有" */
+:global(html.dark) .visibilityLabel {
+  color: #94a3b8;
+}
+
+/* 暗色模式：antd Switch 内部文字颜色 */
+:global(html.dark) .visibilityRow :global(.ant-switch-inner-checked),
+:global(html.dark) .visibilityRow :global(.ant-switch-inner-unchecked) {
+  color: #64748b !important;
+}
+
+:global(html.dark) .visibilityRow :global(.ant-switch) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 暗色模式：弹窗 */
 :global(html.dark) .modalInput {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
@@ -511,13 +550,4 @@
 :global(html.dark) .modalCancelBtn:hover {
   border-color: rgba(255, 255, 255, 0.15);
   color: var(--color-text);
-}
-
-/* antd Switch 暗色模式下 checkedChildren/unCheckedChildren 文字颜色 */
-:global(html.dark) .visibilityRow :global(.ant-switch-inner) {
-  color: var(--color-text);
-}
-
-:global(html.dark) .visibilityRow :global(.ant-switch) {
-  background: rgba(255, 255, 255, 0.12);
 }

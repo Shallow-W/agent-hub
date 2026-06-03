@@ -225,6 +225,47 @@ func (s *KnowledgeService) DeleteFile(ctx context.Context, userID, kbID, fileID 
 	return nil
 }
 
+
+// ListGroupKnowledgeBases 返回群组中当前用户可用的知识库列表：
+// 自己的全部 KB（含私有和公开） + 其他群成员的公开 KB。
+func (s *KnowledgeService) ListGroupKnowledgeBases(ctx context.Context, currentUserID string, memberUserIDs []string) ([]model.KnowledgeBase, error) {
+	// 1. 获取自己的全部 KB
+	ownKBs, err := s.List(ctx, currentUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list own knowledge bases: %w", err)
+	}
+	// 填充 username
+	user, err := s.userRepo.GetUserByID(ctx, currentUserID)
+	if err != nil || user == nil {
+		return nil, fmt.Errorf("get current user: %w", err)
+	}
+	for i := range ownKBs {
+		ownKBs[i].Username = user.Username
+		ownKBs[i].Files = nil // 列表场景不需要文件内容
+	}
+
+	// 2. 获取其他成员的公开 KB
+	otherIDs := make([]string, 0, len(memberUserIDs))
+	for _, id := range memberUserIDs {
+		if id != currentUserID {
+			otherIDs = append(otherIDs, id)
+		}
+	}
+	if len(otherIDs) == 0 {
+		return ownKBs, nil
+	}
+
+	publicKBs, err := s.kbRepo.ListPublicByUsers(ctx, otherIDs, currentUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list public knowledge bases: %w", err)
+	}
+
+	result := make([]model.KnowledgeBase, 0, len(ownKBs)+len(publicKBs))
+	result = append(result, ownKBs...)
+	result = append(result, publicKBs...)
+	return result, nil
+}
+
 // ResolveKnowledgeRef 解析群聊中的知识库引用 "用户名/知识库名"
 // 当前用户可以引用自己的（私有/公开）或他人的（仅公开）知识库
 func (s *KnowledgeService) ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error) {

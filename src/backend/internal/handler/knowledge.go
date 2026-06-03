@@ -8,18 +8,20 @@ import (
 
 	middleware "github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 // KnowledgeHandler 知识库接口处理器
 type KnowledgeHandler struct {
-	svc *service.KnowledgeService
+	svc       *service.KnowledgeService
+	groupRepo *repository.GroupRepo
 }
 
 // NewKnowledgeHandler 创建知识库处理器
-func NewKnowledgeHandler(svc *service.KnowledgeService) *KnowledgeHandler {
-	return &KnowledgeHandler{svc: svc}
+func NewKnowledgeHandler(svc *service.KnowledgeService, groupRepo *repository.GroupRepo) *KnowledgeHandler {
+	return &KnowledgeHandler{svc: svc, groupRepo: groupRepo}
 }
 
 // CreateKnowledgeBaseRequest 创建知识库请求体
@@ -255,6 +257,39 @@ func isPreviewMIME(mime string) bool {
 		"application/pdf": true, "application/json": true,
 	}
 	return previewTypes[mime]
+}
+
+// ListGroup 获取群组中当前用户可用的知识库列表（自己的全部 + 其他成员的公开 KB）。
+func (h *KnowledgeHandler) ListGroup(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	groupID := c.Param("groupId")
+	if groupID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40072, "缺少群组 ID")
+		return
+	}
+
+	members, err := h.groupRepo.ListMembers(c.Request.Context(), groupID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50067, "获取群组成员失败")
+		return
+	}
+
+	memberIDs := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.UserID != "" {
+			memberIDs = append(memberIDs, m.UserID)
+		}
+	}
+
+	kbs, err := h.svc.ListGroupKnowledgeBases(c.Request.Context(), userID, memberIDs)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50068, "获取群组知识库列表失败")
+		return
+	}
+	if kbs == nil {
+		kbs = []model.KnowledgeBase{}
+	}
+	middleware.SuccessResponse(c, kbs)
 }
 
 // ResolveKnowledgeRef 解析知识库引用（用于群聊中的 "用户名/知识库名" 语法）
