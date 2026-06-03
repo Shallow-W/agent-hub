@@ -35,6 +35,11 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
 }
 
+/* ── 暗色模式 ── */
+:global(html.dark) .machineAvatar {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
 .titleRow {
   display: flex;
   align-items: center;
@@ -214,7 +219,7 @@
   align-items: center;
   justify-content: center;
   min-height: 92px;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 

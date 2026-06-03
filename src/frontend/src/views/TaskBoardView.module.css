@@ -176,6 +176,15 @@
   transform: translateY(-1px);
 }
 
+/* ── 暗色模式 ── */
+:global(html.dark) .taskCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .taskCard:hover {
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.4);
+}
+
 .cardHeader,
 .cardFooter,
 .cardMeta {

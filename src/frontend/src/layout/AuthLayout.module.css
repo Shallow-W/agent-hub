@@ -112,3 +112,24 @@
     font-size: 24px;
   }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .container {
+  background: linear-gradient(145deg, #0f172a 0%, #1a2332 25%, #1b2432 50%, #1a2744 75%, #1b1b2f 100%);
+}
+
+:global(html.dark) .container::before {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+}
+
+:global(html.dark) .container::after {
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+}
+
+:global(html.dark) .card {
+  background: rgba(31, 41, 55, 0.92);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}

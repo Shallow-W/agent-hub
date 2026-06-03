@@ -404,3 +404,37 @@
     display: none;
   }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .actions :global(.ant-btn) {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .tab:hover {
+  background: var(--color-surface-muted);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .tabActive {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .runtimeBadge {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .reasoningBadge {
+  color: #fbbf24;
+}
+
+:global(html.dark) .envValue {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .capabilityItem {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .skillCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}

@@ -85,3 +85,8 @@
   font-size: 13px;
   text-align: center;
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .searchPanel {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
