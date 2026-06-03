@@ -41,6 +41,11 @@ type DispatchInfo struct {
 	Parallel  bool
 }
 
+// OrchKBResolver resolves knowledge base references from message text.
+type OrchKBResolver interface {
+	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
+}
+
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
 	convRepo  OrchConvRepo
@@ -49,6 +54,8 @@ type OrchestratorService struct {
 
 	jwtSecret string
 	serverURL string
+
+	kbResolver OrchKBResolver
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
@@ -63,6 +70,11 @@ func (s *OrchestratorService) SetJWTSecret(secret string) {
 // SetServerURL sets the server base URL for management tool API calls.
 func (s *OrchestratorService) SetServerURL(url string) {
 	s.serverURL = url
+}
+
+// SetKBResolver sets the knowledge base resolver for injecting KB context.
+func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
+	s.kbResolver = resolver
 }
 
 // NewOrchestratorService creates a new orchestrator service.
@@ -186,8 +198,11 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
+	// 注入知识库上下文
+	kbCtx := s.injectKBContext(ctx, content, "", userID)
+
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.injectAgentConfig(agent, "", userID)
+	agentCtx := s.injectAgentConfig(agent, kbCtx, userID)
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
 	if err != nil {
@@ -398,6 +413,9 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		dispatchCtx = ""
 	}
 
+	// 注入知识库上下文
+	dispatchCtx = s.injectKBContext(ctx, task.Task, dispatchCtx, userID)
+
 	// 注入 Agent 的系统提示词和工具配置
 	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx, userID)
 
@@ -557,6 +575,7 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 
 // injectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
 // 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
+// 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
 func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
@@ -581,6 +600,62 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 	}
 	sb.WriteString(contextStr)
 	return sb.String()
+}
+
+// injectKBContext 解析消息中的 {{用户名/知识库名}} 引用并将文件列表注入到上下文中。
+// 如果没有引用则原样返回 contextStr。
+func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
+	if s.kbResolver == nil {
+		return contextStr
+	}
+
+	refs := ParseKnowledgeRefs(content)
+	if len(refs) == 0 {
+		return contextStr
+	}
+
+	var kbSection strings.Builder
+	for _, ref := range refs {
+		kb, files, err := s.kbResolver.ResolveKnowledgeRef(ctx, userID, ref.Username, ref.KBName)
+		if err != nil {
+			slog.Warn("resolve knowledge ref failed", "ref", ref.Raw, "error", err)
+			continue
+		}
+		kbSection.WriteString(fmt.Sprintf("[知识库: %s/%s (%s)]\n", ref.Username, ref.KBName, kb.Visibility))
+		if len(files) == 0 {
+			kbSection.WriteString("（空知识库，无文件）\n")
+		} else {
+			for _, f := range files {
+				kbSection.WriteString(fmt.Sprintf("- %s (%s)\n", f.Filename, formatFileSize(f.FileSize)))
+			}
+		}
+		kbSection.WriteString("\n")
+	}
+
+	if kbSection.Len() == 0 {
+		return contextStr
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[引用的知识库]\n")
+	sb.WriteString(kbSection.String())
+	sb.WriteString(contextStr)
+	return sb.String()
+}
+
+func formatFileSize(size int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+	)
+	switch {
+	case size >= MB:
+		return fmt.Sprintf("%.1fMB", float64(size)/float64(MB))
+	case size >= KB:
+		return fmt.Sprintf("%.1fKB", float64(size)/float64(KB))
+	default:
+		return fmt.Sprintf("%dB", size)
+	}
 }
 
 // generateMgmtToken generates a scoped JWT token for management tool usage.

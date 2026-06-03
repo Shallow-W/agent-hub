@@ -122,6 +122,7 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
+	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
@@ -151,6 +152,7 @@ func main() {
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
+	orchSvc.SetKBResolver(knowledgeSvc)
 	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
@@ -166,6 +168,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -230,6 +233,18 @@ func main() {
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
+
+		// 知识库路由（需要鉴权）
+		kbRoutes := apiGroup.Group("/knowledge-bases")
+		{
+			kbRoutes.GET("", knowledgeHandler.List)
+			kbRoutes.POST("", knowledgeHandler.Create)
+			kbRoutes.PUT("/:id", knowledgeHandler.Update)
+			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
+			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
+			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
+			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
+		}
 
 		// 会话路由（需要鉴权）
 		convRoutes := apiGroup.Group("/conversations")

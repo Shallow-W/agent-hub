@@ -214,3 +214,37 @@ func FindMentionedAgentID(mentions []MentionResult, conversationAgents []model.C
 	}
 	return result
 }
+
+// KnowledgeRef 表示消息中的一个知识库引用
+type KnowledgeRef struct {
+	Username string // 引用的用户名
+	KBName   string // 引用的知识库名称
+	Raw      string // 原始文本 "{{username/kbname}}"
+}
+
+// kbRefRe 匹配 {{用户名/知识库名}} 格式的知识库引用
+// 用户名和知识库名必须为非空且不含 / {} 和换行符
+var kbRefRe = regexp.MustCompile(`\{\{([^/{}\s][^/{}]*?)/([^/{}\s][^/{}]*?)\}\}`)
+
+// ParseKnowledgeRefs 从消息文本中提取所有知识库引用
+func ParseKnowledgeRefs(text string) []KnowledgeRef {
+	matches := kbRefRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var results []KnowledgeRef
+	for _, m := range matches {
+		ref := KnowledgeRef{
+			Username: strings.TrimSpace(m[1]),
+			KBName:   strings.TrimSpace(m[2]),
+			Raw:      m[0],
+		}
+		key := ref.Username + "/" + ref.KBName
+		if !seen[key] {
+			seen[key] = true
+			results = append(results, ref)
+		}
+	}
+	return results
+}
