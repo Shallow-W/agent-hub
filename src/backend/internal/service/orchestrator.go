@@ -584,11 +584,14 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 }
 
 // generateMgmtToken generates a scoped JWT token for management tool usage.
+// Token has a short 5-minute lifetime and "agent_management" scope to distinguish
+// from regular user tokens.
 func (s *OrchestratorService) generateMgmtToken(userID string) (string, time.Time, error) {
 	now := time.Now()
-	expiresAt := now.Add(1 * time.Hour)
+	expiresAt := now.Add(5 * time.Minute)
 	claims := jwt.MapClaims{
 		"user_id": userID,
+		"scope":   "agent_management",
 		"iat":     now.Unix(),
 		"exp":     expiresAt.Unix(),
 	}

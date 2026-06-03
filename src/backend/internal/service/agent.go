@@ -322,15 +322,16 @@ func (s *AgentService) DeleteOwned(ctx context.Context, id, userID string) error
 	return nil
 }
 
-// GenerateAgentToken 生成 Agent 专用 JWT，有效期 1 小时。
+// GenerateAgentToken 生成 Agent 专用 JWT，带 agent_management scope，有效期 5 分钟。
 func (s *AgentService) GenerateAgentToken(ctx context.Context, userID string) (string, time.Time, error) {
 	if userID == "" {
 		return "", time.Time{}, ErrAgentInvalidInput
 	}
 	now := time.Now()
-	expiresAt := now.Add(1 * time.Hour)
+	expiresAt := now.Add(5 * time.Minute)
 	claims := jwt.MapClaims{
 		"user_id": userID,
+		"scope":   "agent_management",
 		"iat":     now.Unix(),
 		"exp":     expiresAt.Unix(),
 	}
