@@ -11,6 +11,21 @@ const POLL_INTERVAL_MS = 1500;
 const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 
+const activeSessions = new Map();
+
+function killSessionProcess(sessionId) {
+  const child = activeSessions.get(sessionId);
+  if (!child) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      process.kill(-child.pid, 'SIGKILL');
+    }
+  } catch { /* already dead */ }
+  activeSessions.delete(sessionId);
+}
+
 const CANDIDATES = [
   {
     name: 'Claude Code',
@@ -420,18 +435,35 @@ async function executeTask(task) {
   let stdout;
   let stderr;
   if (spec.sessionId) {
+    killSessionProcess(spec.sessionId);
+    await sleep(1000);
+
     try {
       ({ stdout, stderr } = await runProcess(
         spec.command,
         ['--resume', spec.sessionId, ...spec.args],
         spec.stdin,
+        spec.sessionId,
       ));
     } catch (_err) {
-      ({ stdout, stderr } = await runProcess(
-        spec.command,
-        ['--session-id', spec.sessionId, ...spec.args],
-        spec.stdin,
-      ));
+      killSessionProcess(spec.sessionId);
+      await sleep(500);
+      try {
+        ({ stdout, stderr } = await runProcess(
+          spec.command,
+          ['--session-id', spec.sessionId, ...spec.args],
+          spec.stdin,
+          spec.sessionId,
+        ));
+      } catch (_err2) {
+        const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        ({ stdout, stderr } = await runProcess(
+          spec.command,
+          ['--session-id', freshId, ...spec.args],
+          spec.stdin,
+          freshId,
+        ));
+      }
     }
   } else {
     ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin));
@@ -509,17 +541,33 @@ function parseOpenClawOutput(stdout) {
   return text;
 }
 
-function runProcess(command, args, stdin) {
+function runProcess(command, args, stdin, sessionId) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
+    const detached = process.platform !== 'win32';
     const child = spawn(spec.command, spec.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached,
     });
+    if (sessionId) {
+      activeSessions.set(sessionId, child);
+      child.on('close', () => {
+        if (activeSessions.get(sessionId) === child) {
+          activeSessions.delete(sessionId);
+        }
+      });
+    }
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill();
+      try {
+        if (detached) {
+          process.kill(-child.pid, 'SIGKILL');
+        } else {
+          child.kill();
+        }
+      } catch { /* ignore */ }
       reject(new Error(`CLI execution timed out after ${EXEC_TIMEOUT_MS / 1000}s`));
     }, EXEC_TIMEOUT_MS);
 

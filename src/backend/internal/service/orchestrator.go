@@ -583,21 +583,28 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString(agent.SystemPrompt)
 		sb.WriteString("\n\n")
 	}
-	if agent.ToolsConfig != "" {
+
+	hasTools := agent.ToolsConfig != ""
+	hasMgmt := agent.EnableManagementTools && s.jwtSecret != "" && s.serverURL != ""
+
+	if hasTools || hasMgmt {
 		sb.WriteString("[可用工具]\n")
-		sb.WriteString(agent.ToolsConfig)
-		sb.WriteString("\n\n")
-	}
-	if agent.EnableManagementTools && s.jwtSecret != "" && s.serverURL != "" {
-		token, _, err := s.generateMgmtToken(userID)
-		if err != nil {
-			slog.Warn("generate management token failed", "agent_id", agent.ID, "error", err)
-		} else {
-			sb.WriteString("[可用工具]\n")
-			sb.WriteString(GenerateManagementTools(s.serverURL, token))
+		if hasTools {
+			sb.WriteString(agent.ToolsConfig)
 			sb.WriteString("\n\n")
 		}
+		if hasMgmt {
+			token, _, err := s.generateMgmtToken(userID)
+			if err != nil {
+				slog.Warn("generate management token failed", "agent_id", agent.ID, "error", err)
+			} else {
+				sb.WriteString(GenerateManagementTools(s.serverURL, token))
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("\n")
 	}
+
 	sb.WriteString(contextStr)
 	return sb.String()
 }
