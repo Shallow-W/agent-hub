@@ -163,9 +163,7 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	}
 
 	// 强制角色约束：客户端只允许发送 user 角色消息，防止伪造 assistant 消息
-	if role == "" || role != "assistant" {
-		role = "user"
-	}
+	role = "user"
 
 	// 校验 reply_to 引用的消息
 	if replyTo != nil {
@@ -674,13 +672,14 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 		if s.orchSvc != nil {
 			agent, err := s.agentRepo.GetByID(ctx, agentID)
 			if err == nil && agent != nil {
-				// KB 优先从消息内容中预解析，回退到实时解析
+				// KB 优先从消息内容中预解析
 				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-				// 注入 SystemPrompt + ToolsConfig + ManagementTools（当启用时）
-				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
 				if kbCtx != "" {
 					contextMessages = kbCtx + contextMessages
 				}
+				// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
+				// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
+				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
 			}
 		}
 
