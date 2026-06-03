@@ -142,6 +142,18 @@ func (h *DaemonHandler) CompleteTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
 }
 
+// Heartbeat 接收 daemon 任务心跳，保持机器在线状态。
+func (h *DaemonHandler) Heartbeat(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil || machine == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40123, "message": "无效 machine key", "data": nil})
+		return
+	}
+	h.agentSvc.TouchMachine(machine.ID)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
+}
+
 func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (*model.DaemonMachine, error) {
 	if token == "" {
 		return nil, service.ErrAgentInvalidInput
