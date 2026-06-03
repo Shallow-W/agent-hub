@@ -18,18 +18,18 @@ import (
 )
 
 var (
-	ErrKBNotFound    = errors.New("知识库不存在")
+	ErrKBNotFound     = errors.New("知识库不存在")
 	ErrKBNoPermission = errors.New("无权访问该知识库")
-	ErrKBNameEmpty   = errors.New("知识库名称不能为空")
-	ErrKBNotPublic   = errors.New("该知识库不是公开的")
-	ErrKBFileEmpty   = errors.New("上传文件不能为空")
+	ErrKBNameEmpty    = errors.New("知识库名称不能为空")
+	ErrKBNotPublic    = errors.New("该知识库不是公开的")
+	ErrKBFileEmpty    = errors.New("上传文件不能为空")
 	ErrKBFileNotFound = errors.New("文件不存在")
 )
 
 // KnowledgeService 知识库业务逻辑
 type KnowledgeService struct {
-	kbRepo   *repository.KnowledgeRepo
-	userRepo *repository.UserRepo
+	kbRepo    *repository.KnowledgeRepo
+	userRepo  *repository.UserRepo
 	uploadDir string
 }
 
@@ -250,7 +250,6 @@ func (s *KnowledgeService) DeleteFile(ctx context.Context, userID, kbID, fileID 
 	_ = os.Remove(filepath.Join(s.uploadDir, filepath.Clean(filePath)))
 	return nil
 }
-
 
 // ListGroupKnowledgeBases 返回群组中当前用户可用的知识库列表：
 // 自己的全部 KB（含私有和公开） + 其他群成员的公开 KB。

@@ -257,12 +257,12 @@ func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 		return
 	}
 
-		if f.FilePath == "" {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
-			return
-		}
+	if f.FilePath == "" {
+		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
+		return
+	}
 
-		absPath := filepath.Join(h.svc.GetUploadDir(), filepath.Clean(f.FilePath))
+	absPath := filepath.Join(h.svc.GetUploadDir(), filepath.Clean(f.FilePath))
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
 		return
