@@ -298,7 +298,13 @@ const AppLayout: React.FC = () => {
 
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'skills' ? (
+        {activeNav === 'knowledge' ? (
+          <div className={styles.emptyRightPanel}>
+            <div className={styles.emptyRightIcon}>📚</div>
+            <div className={styles.emptyRightTitle}>知识库管理</div>
+            <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+          </div>
+        ) : activeNav === 'skills' ? (
           selectedAgent ? (
             <AgentSkillsPanel agent={selectedAgent} />
           ) : (

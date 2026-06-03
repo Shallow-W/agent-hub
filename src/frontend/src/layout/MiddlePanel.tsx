@@ -4,6 +4,7 @@ import { PlusOutlined, ReloadOutlined, RobotOutlined, UploadOutlined } from '@an
 import { ConversationList } from '@/components/sidebar/ConversationList';
 import ContactsPanel from '@/components/contacts/ContactsPanel';
 import { AgentList } from '@/components/agent/AgentList';
+import KnowledgePanel from '@/components/knowledge/KnowledgePanel';
 import { useAgentStore } from '@/store/agentStore';
 import { parseSkills } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
@@ -76,6 +77,10 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
         </div>
       </>
     );
+  }
+
+  if (activeNav === 'knowledge') {
+    return <KnowledgePanel />;
   }
 
   if (activeNav === 'contacts') {
