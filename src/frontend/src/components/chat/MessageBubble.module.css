@@ -163,6 +163,67 @@
   text-align: left;
 }
 
+/* ── Markdown element styles (rendered by react-markdown) ── */
+
+/* Headings */
+.markdownBody :global(h1), .markdownBody :global(h2), .markdownBody :global(h3),
+.markdownBody :global(h4), .markdownBody :global(h5), .markdownBody :global(h6) {
+  margin: 12px 0 6px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.markdownBody :global(h1) { font-size: 18px; }
+.markdownBody :global(h2) { font-size: 16px; }
+.markdownBody :global(h3) { font-size: 14.5px; }
+.markdownBody :global(h4), .markdownBody :global(h5), .markdownBody :global(h6) { font-size: 13.5px; }
+
+/* Lists */
+.markdownBody :global(ul), .markdownBody :global(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.markdownBody :global(li) { margin: 2px 0; }
+
+/* Blockquotes */
+.markdownBody :global(blockquote) {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--color-primary);
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+}
+
+/* Horizontal rule */
+.markdownBody :global(hr) {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Paragraphs */
+.markdownBody :global(p) {
+  margin: 4px 0;
+}
+
+/* Task list checkboxes */
+.markdownBody :global(input[type="checkbox"]) {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Images inside markdown */
+.markdownBody :global(img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+/* Strikethrough */
+.markdownBody :global(del) {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
 .systemMessage {
   display: flex;
   justify-content: center;

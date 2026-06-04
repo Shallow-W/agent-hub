@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown, message as antMessage } from 'antd';
 import type { MenuProps } from 'antd';
 import {
+  CheckOutlined,
   CloseOutlined,
   CopyOutlined,
   DownOutlined,
@@ -11,6 +12,9 @@ import {
   RollbackOutlined,
   UpOutlined,
 } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import typescript from 'highlight.js/lib/languages/typescript';
@@ -60,10 +64,6 @@ const LANG_DISPLAY: Record<string, string> = {
   sh: 'Shell', shell: 'Shell', zsh: 'Shell', yml: 'YAML', md: 'Markdown',
 };
 
-// Inline SVGs for copy buttons (rendered inside dangerouslySetInnerHTML)
-const COPY_ICON_SVG = '<svg viewBox="64 64 896 896" focusable="false" width="1em" height="1em" fill="currentColor" aria-hidden="true"><path d="M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V144c0-44.2-35.8-80-80-80z"/><path d="M704 816H168c-4.4 0-8-3.6-8-8V168c0-4.4 3.6-8 8-8h536c4.4 0 8 3.6 8 8v640c0 4.4-3.6 8-8 8zm168-8V144c0-44.2-35.8-80-80-80H168c-44.2 0-80 35.8-80 80v664c0 44.2 35.8 80 80 80h624c44.2 0 80-35.8 80-80z"/></svg>';
-const CHECK_ICON_SVG = '<svg viewBox="64 64 896 896" focusable="false" width="1em" height="1em" fill="currentColor" aria-hidden="true"><path d="M912 190h-69.9c-9.8 0-19.1 4.5-25.1 12.2L404.7 724.5 207 474a32 32 0 0 0-25.1-12.2H112c-6.7 0-10.4 7.7-6.3 12.9l281.9 358.9c12.8 16.2 37.4 16.2 50.3 0l508.1-643.7c4-5.2.4-12.9-6.3-12.9z"/></svg>';
-
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
@@ -77,7 +77,7 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Highlight code string, returning highlighted HTML. Falls back to escaped text. */
+/** Highlight code string, returning highlighted HTML. Falls back to plain text. */
 function highlightCode(code: string, lang?: string): string {
   const trimmed = code.replace(/\n$/, '');
   try {
@@ -86,65 +86,137 @@ function highlightCode(code: string, lang?: string): string {
     }
     return hljs.highlightAuto(trimmed).value;
   } catch {
-    return escapeHtml(trimmed);
+    return trimmed;
   }
 }
 
-function renderMarkdown(text: string): string {
-  // 1. Extract fenced code blocks first to protect them from other transforms.
-  const codeBlocks: string[] = [];
-  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang, code) => {
-    const idx = codeBlocks.length;
-    const highlighted = highlightCode(code, lang || undefined);
-    const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
-    const copyBtn = `<button class="${styles.codeCopyBtn}" data-code-idx="${idx}" type="button" title="复制代码"><span class="${styles.codeCopyIcon}">${COPY_ICON_SVG}</span><span class="${styles.codeCopyText}">复制</span></button>`;
-    const header = `<div class="${styles.codeHeader}"><span>${escapeHtml(displayLang)}</span>${copyBtn}</div>`;
-    const block = `<pre class="${styles.codeBlock}"><code>${highlighted}</code></pre>`;
+// ── ReactMarkdown custom components ──
 
-    codeBlocks.push(
-      `<div class="${styles.codeBlockWrapper}">${header}${block}</div>`,
+const MENTION_RE = /(^|\s)@([\p{L}\p{N}_\-.]{2,20})(?=\s|$)/gu;
+
+/** Split text nodes so @mentions get highlighted spans. */
+function renderTextWithMentions(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  MENTION_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = MENTION_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[1]) parts.push(match[1]);
+    parts.push(
+      <span key={`m${key++}`} className={styles.mention}>
+        @{match[2]}
+      </span>,
     );
-    return `\x00CODEBLOCK${idx}\x00`;
-  });
-
-  // 2. Extract inline code spans.
-  const inlineCodes: string[] = [];
-  result = result.replace(/`([^`]+)`/g, (_match, code) => {
-    const idx = inlineCodes.length;
-    inlineCodes.push(`<code class="${styles.inlineCode}">${escapeHtml(code)}</code>`);
-    return `\x00INLINE${idx}\x00`;
-  });
-
-  // 3. Escape HTML outside of code.
-  result = escapeHtml(result);
-
-  // 4. Markdown: bold, italic, explicit links.
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  result = result.replace(/\[([^\]]+)\]\(([^()\s]+(?:\([^()]*\)[^()\s]*)*)\)/g, (_match, linkText, href) => {
-    const safeHref = /^https?:\/\//i.test(href) || /^mailto:/i.test(href) ? href : '#';
-    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
-  });
-
-  // 5. Auto-link bare URLs that are not already inside href=""
-  result = result.replace(
-    /(?<![="])(https?:\/\/[^\s<>&"')\]]+)/g,
-    (_match, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
-  );
-
-  // 6. Preserve line breaks.
-  result = result.replace(/\n/g, '<br/>');
-
-  // 7. Highlight @mentions.
-  result = result.replace(/(^|\s)@([\p{L}\p{N}_\-.]{2,20})(?=\s|$)/gu,
-    `$1<span class="${styles.mention}">@$2</span>`);
-
-  // 8. Restore code blocks and inline code.
-  result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, idx: string) => codeBlocks[Number(idx)] ?? '');
-  result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, idx: string) => inlineCodes[Number(idx)] ?? '');
-
-  return result;
+    lastIndex = MENTION_RE.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
 }
+
+/** Walk ReactNode tree, split string leaves for @mention highlighting. */
+function renderChildrenWithMentions(children: ReactNode): ReactNode {
+  if (typeof children === 'string') {
+    const parts = renderTextWithMentions(children);
+    return parts.length === 1 ? parts[0] : <>{parts}</>;
+  }
+  if (Array.isArray(children)) {
+    return <>{children.map((c, i) => <React.Fragment key={i}>{renderChildrenWithMentions(c)}</React.Fragment>)}</>;
+  }
+  return children;
+}
+
+/** Fenced code block with language header and copy button. */
+const CodeBlock: React.FC<{ className?: string; children?: ReactNode }> = ({
+  className,
+  children,
+}) => {
+  const lang = className?.replace('language-', '') || '';
+  const codeStr = String(children).replace(/\n$/, '');
+  const [copied, setCopied] = useState(false);
+
+  const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
+  const highlighted = highlightCode(codeStr, lang || undefined);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeStr).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => { /* clipboard unavailable */ });
+  };
+
+  return (
+    <div className={styles.codeBlockWrapper}>
+      <div className={styles.codeHeader}>
+        <span>{displayLang}</span>
+        <button
+          className={`${styles.codeCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
+          type="button"
+          title="复制代码"
+          onClick={handleCopy}
+        >
+          <span className={styles.codeCopyIcon}>
+            {copied ? <CheckOutlined /> : <CopyOutlined />}
+          </span>
+          <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <pre className={styles.codeBlock}>
+        <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+      </pre>
+    </div>
+  );
+};
+
+const markdownComponents: Components = {
+  code({ className, children, ...rest }) {
+    const isBlock = className?.startsWith('language-');
+    if (isBlock) {
+      return <CodeBlock className={className}>{children}</CodeBlock>;
+    }
+    return (
+      <code className={styles.inlineCode} {...rest}>
+        {children}
+      </code>
+    );
+  },
+  pre({ children }) {
+    // Let the code component handle the wrapper; strip the extra <pre>
+    return <>{children}</>;
+  },
+  a({ href, children, ...rest }) {
+    const safeHref =
+      href && (/^https?:\/\//i.test(href) || /^mailto:/i.test(href))
+        ? href
+        : '#';
+    return (
+      <a href={safeHref} target="_blank" rel="noopener noreferrer" {...rest}>
+        {children}
+      </a>
+    );
+  },
+  p({ children }) {
+    return <p>{renderChildrenWithMentions(children)}</p>;
+  },
+  li({ children }) {
+    return <li>{renderChildrenWithMentions(children)}</li>;
+  },
+  td({ children }) {
+    return <td>{renderChildrenWithMentions(children)}</td>;
+  },
+};
+
+/** Renders markdown content with full GFM support. */
+const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  );
+};
 
 interface MessageBubbleProps {
   message: Message;
@@ -202,7 +274,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
-  const renderedContent = useMemo(() => renderMarkdown(message.content ?? ''), [message.content]);
   const contentLength = message.content?.length ?? 0;
   const lineCount = message.content?.split('\n').length ?? 0;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
@@ -262,33 +333,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       setTimeout(() => { el.style.boxShadow = ''; }, 1500);
     }
   };
-
-  // Handle code-block copy buttons via event delegation
-  const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const target = (e.target as HTMLElement).closest<HTMLElement>(`.${styles.codeCopyBtn}`);
-    if (!target) return;
-
-    const idx = target.dataset.codeIdx;
-    if (idx === undefined) return;
-
-    const wrapper = target.closest(`.${styles.codeBlockWrapper}`);
-    const codeEl = wrapper?.querySelector('code');
-    if (!codeEl) return;
-
-    const codeText = codeEl.textContent ?? '';
-    navigator.clipboard.writeText(codeText).then(() => {
-      const iconEl = target.querySelector(`.${styles.codeCopyIcon}`);
-      const textEl = target.querySelector(`.${styles.codeCopyText}`);
-      if (iconEl) iconEl.innerHTML = CHECK_ICON_SVG;
-      if (textEl) textEl.textContent = '已复制';
-      target.classList.add(styles.codeCopyBtnCopied!);
-      setTimeout(() => {
-        if (iconEl) iconEl.innerHTML = COPY_ICON_SVG;
-        if (textEl) textEl.textContent = '复制';
-        target.classList.remove(styles.codeCopyBtnCopied!);
-      }, 2000);
-    }).catch(() => { /* clipboard unavailable */ });
-  }, []);
 
   const displayAttachments = useMemo((): MessageAttachment[] => {
     if (message.attachments && message.attachments.length > 0) return message.attachments;
@@ -406,11 +450,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <MessageAttachmentView attachments={displayAttachments} />
             )}
             {message.content && (
-              <div
-                className={styles.markdownBody}
-                dangerouslySetInnerHTML={{ __html: renderedContent }}
-                onClick={handleContentClick}
-              />
+              <div className={styles.markdownBody}>
+                <MarkdownRenderer content={message.content ?? ''} />
+              </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}
             {streaming && <span className={styles.streamingCursor} />}
