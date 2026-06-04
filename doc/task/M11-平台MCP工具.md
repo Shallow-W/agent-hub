@@ -53,8 +53,13 @@
 - [x] 5 个工具均真实命中后端，且携带换取的 JWT
 - [x] 派发 claude 任务时自动注入平台 MCP（命令参数验证通过）
 - [x] daemon 启动时为 OpenClaw 幂等写入全局 MCP 配置（set/show/unset 实测通过）
-- [x] Codex 全局注入代码就绪（本机未安装 codex，逻辑随安装后自动生效，待真机验证）
+- [x] daemon 为 Codex 幂等写入全局 MCP 配置（用 VSCode 扩展自带 codex.exe，add/get/remove 实测通过）
 - [ ] 在真实 Agent 聊天任务中实际调用工具的端到端验证（需有效 machine key）
+
+## 备注：Codex 可用性
+
+- daemon `resolveCommand('codex')` 已自动定位 VSCode ChatGPT 扩展自带的 `codex.exe`（`~/.vscode/extensions/openai.chatgpt-*/bin/windows-x86_64/codex.exe`），无需 codex 在 PATH。
+- codex CLI 自身的 ChatGPT 登录独立于 openclaw 的 openai-codex provider 配置；前者有效即可作为 agent 与平台 MCP 使用。
 
 ## 依赖
 
