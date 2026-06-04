@@ -34,3 +34,8 @@
 .requestAvatar {
   background: linear-gradient(135deg, #2f8fd0, #31a873) !important;
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .managerButton {
+  background: var(--color-surface-muted);
+}

@@ -11,16 +11,20 @@ interface WsState {
   wsClient: WebSocketClient | null;
   /** conversationId → typing users */
   typingUsers: Record<string, TypingUser[]>;
+  /** conversationId → whether an agent is currently processing */
+  agentTyping: Record<string, boolean>;
   connect: (token: string) => WebSocketClient | null;
   disconnect: () => void;
   addTypingUser: (conversationId: string, userId: string, username?: string) => void;
   removeTypingUser: (conversationId: string, userId: string) => void;
+  setAgentTyping: (conversationId: string, typing: boolean) => void;
 }
 
 export const useWsStore = create<WsState>((set, get) => ({
   status: 'disconnected',
   wsClient: null,
   typingUsers: {},
+  agentTyping: {},
 
   connect: (token: string) => {
     // 避免重复连接
@@ -31,7 +35,15 @@ export const useWsStore = create<WsState>((set, get) => ({
 
     const client = new WebSocketClient();
     client.onStatusChange((status) => {
-      set({ status });
+      if (status === 'disconnected') {
+        // WebSocket 断开时清除所有 agentTyping 状态，防止残留"正在思考"指示器
+        set((prev) => {
+          const hasActive = Object.values(prev.agentTyping).some(Boolean);
+          return hasActive ? { status, agentTyping: {} } : { status };
+        });
+      } else {
+        set({ status });
+      }
     });
     client.connect(token);
     set({ wsClient: client, status: 'connecting' });
@@ -69,5 +81,23 @@ export const useWsStore = create<WsState>((set, get) => ({
         },
       };
     });
+  },
+
+  setAgentTyping: (conversationId, typing) => {
+    set((state) => ({
+      agentTyping: {
+        ...state.agentTyping,
+        [conversationId]: typing,
+      },
+    }));
+    // Auto-clear after 60s to handle cases where typing_stop is never received
+    if (typing) {
+      setTimeout(() => {
+        const current = useWsStore.getState().agentTyping[conversationId];
+        if (current) {
+          useWsStore.getState().setAgentTyping(conversationId, false);
+        }
+      }, 60_000);
+    }
   },
 }));

@@ -1,0 +1,553 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  height: 52px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.headerTools {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.headerTools :global(.ant-btn) {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 8px;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+}
+
+.headerTools :global(.ant-btn:hover) {
+  background: rgba(22, 163, 101, 0.08) !important;
+  color: var(--color-primary) !important;
+}
+
+.scrollArea {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* 知识库卡片网格 */
+.cardGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+/* 知识库卡片 */
+.kbCard {
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  background: var(--color-bg-white);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  overflow: hidden;
+}
+
+.kbCard:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+  box-shadow: 0 6px 16px rgba(47, 143, 107, 0.1);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.kbIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--gradient-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.kbName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.deleteBtn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.deleteBtn:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* 可见性开关行 */
+.visibilityRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.visibilityLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.visibilityIcon {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+/* 文件区域 */
+.fileSection {
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fileSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.fileLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.fileCount {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.uploadBtn {
+  width: 22px;
+  height: 22px;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  transition: all var(--transition-fast);
+}
+
+.uploadBtn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+/* 文件列表 */
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: background-color var(--transition-fast);
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+
+.fileItem:hover {
+  background: var(--color-primary-bg);
+}
+
+.fileItemSelected {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.fileItemSelected .fileIcon {
+  color: var(--color-primary);
+}
+
+.fileIcon {
+  font-size: 12px;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.fileName {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
+}
+
+.fileSize {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.fileDeleteBtn {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: all var(--transition-fast);
+}
+
+.fileItem:hover .fileDeleteBtn {
+  opacity: 1;
+}
+
+.fileDeleteBtn:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.emptyFiles {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  padding: 6px 0;
+}
+
+/* 空状态 */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 12px;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.emptyDesc {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* 加载状态 */
+.loadingWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+/* Ant Switch 覆盖 */
+.visibilityRow :global(.ant-switch) {
+  min-width: 32px;
+  height: 18px;
+  min-width: 32px;
+}
+
+.visibilityRow :global(.ant-switch .ant-switch-handle) {
+  width: 14px;
+  height: 14px;
+}
+
+.visibilityRow :global(.ant-switch::after) {
+  top: 2px;
+  width: 14px;
+  height: 14px;
+}
+
+/* 创建按钮样式 */
+.createBtn {
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+/* ===================== 创建知识库弹窗 ===================== */
+
+/* 遮罩层 */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 弹窗内容 */
+.modalContent {
+  width: 360px;
+  background: var(--color-bg-white);
+  border-radius: var(--border-radius-xl, 14px);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  animation: scaleIn 0.2s ease;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 16px;
+}
+
+.modalInput {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.modalInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.modalInput:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-bg);
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.modalCancelBtn {
+  height: 34px;
+  min-width: 68px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modalCancelBtn:hover {
+  border-color: var(--color-text-tertiary);
+  color: var(--color-text);
+}
+
+.modalOkBtn {
+  height: 34px;
+  min-width: 68px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modalOkBtn:hover {
+  background: var(--color-primary-hover);
+}
+
+/* ── 暗色模式覆盖 ── */
+:global(html.dark) .header {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .kbCard {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .kbCard:hover {
+  border-color: rgba(52, 211, 153, 0.3);
+  box-shadow: 0 6px 16px rgba(52, 211, 153, 0.15);
+}
+
+:global(html.dark) .fileSection {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+/* 暗色模式：文件标签"文件 N" */
+:global(html.dark) .fileLabel {
+  color: #94a3b8;
+}
+
+/* 暗色模式：文件列表项 — 链接式文字用灰色 */
+:global(html.dark) .fileItem {
+  color: #94a3b8;
+}
+
+:global(html.dark) .fileItem:hover {
+  background: var(--color-primary-bg);
+}
+
+:global(html.dark) .fileItemSelected {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+:global(html.dark) .fileName {
+  color: #94a3b8;
+}
+
+:global(html.dark) .fileItemSelected .fileName {
+  color: var(--color-primary);
+}
+
+:global(html.dark) .fileSize {
+  color: #64748b;
+}
+
+:global(html.dark) .emptyFiles {
+  color: #94a3b8;
+}
+
+/* 暗色模式：可见性标签"公开/私有" */
+:global(html.dark) .visibilityLabel {
+  color: #94a3b8;
+}
+
+/* 暗色模式：antd Switch 内部文字颜色 */
+:global(html.dark) .visibilityRow :global(.ant-switch-inner-checked),
+:global(html.dark) .visibilityRow :global(.ant-switch-inner-unchecked) {
+  color: #64748b !important;
+}
+
+:global(html.dark) .visibilityRow :global(.ant-switch) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 暗色模式：弹窗 */
+:global(html.dark) .modalInput {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .modalCancelBtn {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+:global(html.dark) .modalCancelBtn:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--color-text);
+}

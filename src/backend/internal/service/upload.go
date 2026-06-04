@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -84,7 +86,8 @@ type UploadResult struct {
 	Height        int    `json:"height,omitempty"`
 }
 
-// ProcessUpload 处理上传文件：验证 → 保存 → 生成缩略图
+// ProcessUpload 处理上传文件：验证 → 去重检查 → 保存 → 生成缩略图
+// 基于文件内容 SHA256 去重，相同内容的文件复用已有物理文件，避免重复存储
 func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart.FileHeader) (*UploadResult, error) {
 	if fileHeader == nil || fileHeader.Size == 0 {
 		return nil, ErrUploadEmpty
@@ -120,47 +123,75 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, fmt.Errorf("create originals dir: %w", err)
 	}
 
-	// 生成安全文件名（crypto/rand）
-	id, err := generateFileID()
-	if err != nil {
-		return nil, fmt.Errorf("generate file id: %w", err)
-	}
-	filePath := filepath.Join("originals", id+ext)
-	fullPath := filepath.Join(s.cfg.Dir, filePath)
-
-	// 保存文件
+	// 读取文件内容并计算 SHA256 哈希用于去重
 	src, err := fileHeader.Open()
 	if err != nil {
 		return nil, fmt.Errorf("open upload: %w", err)
 	}
 	defer src.Close()
 
-	dst, err := os.Create(fullPath)
+	fileContent, err := io.ReadAll(src)
 	if err != nil {
-		return nil, fmt.Errorf("create file: %w", err)
+		return nil, fmt.Errorf("read upload: %w", err)
 	}
 
-	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
-		os.Remove(fullPath)
-		return nil, fmt.Errorf("save file: %w", err)
+	hash := sha256.Sum256(fileContent)
+	hashHex := hex.EncodeToString(hash[:])
+	contentBasedName := hashHex + ext
+
+	// 检查去重：如果同哈希文件已存在，直接复用
+	existingPath := filepath.Join(origDir, contentBasedName)
+	if fi, err := os.Stat(existingPath); err == nil {
+		// 文件已存在，复用
+		mimeType, _ := detectMIME(existingPath)
+		result := &UploadResult{
+			FileName: safeName,
+			MimeType: mimeType,
+			FileSize: fi.Size(),
+			FilePath: path.Join("uploads", "originals", contentBasedName),
+		}
+
+		// 检查缩略图是否也已存在
+		if isImageMIME(mimeType) {
+			thumbName := hashHex + ".jpg"
+			existingThumb := filepath.Join(thumbDir, thumbName)
+			if _, err := os.Stat(existingThumb); err == nil {
+					result.ThumbnailPath = path.Join("uploads", "thumbnails", thumbName)
+				// 从已有图片读取宽高
+				if img, err := imaging.Open(existingPath); err == nil {
+					bounds := img.Bounds()
+					result.Width = bounds.Dx()
+					result.Height = bounds.Dy()
+				}
+			} else {
+				// 缩略图不存在，生成
+				thumbPath, w, h, thumbErr := s.generateImageThumbnail(existingPath, hashHex, thumbDir)
+				if thumbErr == nil {
+					result.ThumbnailPath = thumbPath
+					result.Width = w
+					result.Height = h
+				}
+			}
+		}
+
+		return result, nil
 	}
-	if err := dst.Close(); err != nil {
-		os.Remove(fullPath)
-		return nil, fmt.Errorf("close file: %w", err)
+
+	// 新文件：写入磁盘
+	if err := os.WriteFile(existingPath, fileContent, 0o644); err != nil {
+		return nil, fmt.Errorf("save file: %w", err)
 	}
 
 	// 用实际文件内容检测 MIME 类型（不信任客户端）
-	mimeType, err := detectMIME(fullPath)
+	mimeType, err := detectMIME(existingPath)
 	if err != nil || !allowedMIMETypes[mimeType] {
-		os.Remove(fullPath)
+		os.Remove(existingPath)
 		return nil, ErrUploadTypeInvalid
 	}
 
-	// 用实际磁盘大小校验（不信任 fileHeader.Size）
-	fi, err := os.Stat(fullPath)
+	fi, err := os.Stat(existingPath)
 	if err != nil {
-		os.Remove(fullPath)
+		os.Remove(existingPath)
 		return nil, fmt.Errorf("stat file: %w", err)
 	}
 	maxSize := int64(s.cfg.MaxPDFMB) << 20
@@ -168,7 +199,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		maxSize = int64(s.cfg.MaxImageMB) << 20
 	}
 	if fi.Size() > maxSize {
-		os.Remove(fullPath)
+		os.Remove(existingPath)
 		return nil, ErrUploadTooBig
 	}
 
@@ -176,12 +207,12 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		FileName: safeName,
 		MimeType: mimeType,
 		FileSize: fi.Size(),
-		FilePath: filePath,
+		FilePath: path.Join("uploads", "originals", contentBasedName),
 	}
 
 	// 图片缩略图
 	if isImageMIME(mimeType) {
-		thumbPath, w, h, thumbErr := s.generateImageThumbnail(fullPath, id, thumbDir)
+		thumbPath, w, h, thumbErr := s.generateImageThumbnail(existingPath, hashHex, thumbDir)
 		if thumbErr == nil {
 			result.ThumbnailPath = thumbPath
 			result.Width = w
@@ -208,8 +239,9 @@ func (s *UploadService) generateImageThumbnail(srcPath, id, thumbDir string) (st
 		return "", w, h, fmt.Errorf("create thumb dir: %w", err)
 	}
 
-	thumbRelPath := filepath.Join("thumbnails", id+".jpg")
-	thumbFullPath := filepath.Join(s.cfg.Dir, thumbRelPath)
+	// 使用 path.Join（总是正斜杠），确保 URL 路径在所有操作系统上正确
+	thumbRelPath := path.Join("uploads", "thumbnails", id+".jpg")
+	thumbFullPath := filepath.Join(s.cfg.Dir, "thumbnails", id+".jpg")
 	if err := imaging.Save(thumb, thumbFullPath); err != nil {
 		return "", w, h, fmt.Errorf("save thumbnail: %w", err)
 	}

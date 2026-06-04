@@ -188,7 +188,7 @@ export const AgentList: React.FC<AgentListProps> = ({
                 aria-expanded={isExpanded}
               >
                 <div className={styles.machineLeft}>
-                  <Avatar className={styles.machineAvatar} icon={<DesktopOutlined />} />
+                  <Avatar size={36} className={styles.machineAvatar} icon={<DesktopOutlined />} />
                   <div className={styles.machineMeta}>
                     <div className={styles.machineTitleRow}>
                       <span className={styles.machineTitle}>{group.name}</span>
@@ -220,7 +220,7 @@ export const AgentList: React.FC<AgentListProps> = ({
                       <div className={styles.machineEmpty}>暂无 Agent</div>
                     ) : (
                       machineAgents.map((agent) => {
-                        const skillCount = parseSkills(agent.capabilities_json).length;
+                        const capabilities = parseSkills(agent.capabilities_json).map((skill) => skill.name);
                         return (
                           <div
                             key={agent.id}
@@ -256,10 +256,14 @@ export const AgentList: React.FC<AgentListProps> = ({
                                 </Popconfirm>
                               )}
                             </div>
-                            <div className={styles.agentSummary}>
-                              <span>{skillCount} skills</span>
-                              <span>右侧查看详情</span>
-                            </div>
+                            {capabilities.length > 0 && (
+                              <div className={styles.agentTags}>
+                                {capabilities.slice(0, 3).map((item) => (
+                                  <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
+                                ))}
+                                {capabilities.length > 3 && <Tag>+{capabilities.length - 3}</Tag>}
+                              </div>
+                            )}
                           </div>
                         );
                       })

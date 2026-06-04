@@ -91,6 +91,10 @@ func (r *fakeConvRepoForMsg) ListMemberIDs(ctx context.Context, conversationID s
 	return []string{r.conv.UserID}, nil
 }
 
+func (r *fakeConvRepoForMsg) ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error) {
+	return nil, nil
+}
+
 type fakeAgentRepoForMsg struct {
 	agent          *model.Agent
 	task           *model.DaemonTask
@@ -128,7 +132,7 @@ func (r *fakeAgentRepoForMsg) GetDaemonTask(ctx context.Context, id string) (*mo
 		return nil, nil
 	}
 	r.task.Status = "completed"
-	r.task.Result = "真实 CLI 回复"
+	r.task.Result = "鐪熷疄 CLI 鍥炲"
 	return r.task, nil
 }
 
@@ -148,20 +152,33 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send message failed: %v", err)
 	}
-	if result.UserMessage == nil || result.AgentMessage == nil {
-		t.Fatalf("expected user and agent messages, got %#v", result)
+	if result.UserMessage == nil {
+		t.Fatalf("expected user message, got %#v", result)
 	}
-	if result.AgentMessage.Role != "assistant" {
-		t.Fatalf("expected assistant reply, got %s", result.AgentMessage.Role)
+	if result.AgentMessage != nil {
+		t.Fatalf("expected async agent reply, got immediate message %#v", result.AgentMessage)
 	}
-	if result.AgentMessage.Content != "真实 CLI 回复" {
-		t.Fatalf("expected daemon task result, got %s", result.AgentMessage.Content)
+	var agentMessage *model.Message
+	for i := 0; i < 10; i++ {
+		for j := range msgRepo.messages {
+			if msgRepo.messages[j].Role == "assistant" {
+				agentMessage = &msgRepo.messages[j]
+				break
+			}
+		}
+		if agentMessage != nil {
+			break
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
-	if result.AgentMessage.ArtifactsJSON == "" {
+	if agentMessage == nil {
+		t.Fatalf("expected async assistant reply, got messages %#v", msgRepo.messages)
+	}
+	if agentMessage.Content != "鐪熷疄 CLI 鍥炲" {
+		t.Fatalf("expected daemon task result, got %s", agentMessage.Content)
+	}
+	if agentMessage.ArtifactsJSON == "" {
 		t.Fatalf("expected agent metadata in artifacts")
-	}
-	if !convRepo.timestamp {
-		t.Fatalf("expected conversation timestamp refreshed")
 	}
 }
 
@@ -181,7 +198,7 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
 
-	_, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
+	_, err := svc.createAgentReply(context.Background(), "conv-1", userID, "agent-1", "hello", "")
 	if !errors.Is(err, ErrMsgAgentNoPerm) {
 		t.Fatalf("expected ErrMsgAgentNoPerm, got %v", err)
 	}

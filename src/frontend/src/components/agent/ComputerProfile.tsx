@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, message } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, message, Typography } from 'antd';
 import {
   DeleteOutlined,
   DesktopOutlined,
+  LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -56,6 +57,8 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   const refreshAgents = useAgentStore((s) => s.fetchAgents);
   const addAgentCandidate = useAgentStore((s) => s.addAgentCandidate);
   const [createOpen, setCreateOpen] = useState(false);
+  const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
 
   const machine = machines.find((item) => item.id === machineId) ?? null;
   const machineAgents = useMemo(
@@ -83,6 +86,30 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       onClearSelection?.();
     } catch {
       message.error('删除电脑失败');
+    }
+  };
+
+  const handleReconnect = async () => {
+    if (!machine) return;
+    setReconnecting(true);
+    try {
+      const { getMachineConnectCommand } = await import('@/api/agent');
+      const result = await getMachineConnectCommand(machine.id);
+      // 后端返回的 command 包含正确的 --server-url，前端不自行拼接
+      if (result.daemon_npm_path) {
+        setReconnectCmd(
+          result.command.replace(
+            /npx\s+@agenthub\/daemon(\S+)?/,
+            `npx "@agenthub/daemon@file:${result.daemon_npm_path}"`,
+          ),
+        );
+      } else {
+        setReconnectCmd(result.command);
+      }
+    } catch {
+      message.error('获取连接命令失败');
+    } finally {
+      setReconnecting(false);
     }
   };
 
@@ -116,6 +143,16 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           </div>
         </div>
         <div className={styles.headerActions}>
+          {machine.status !== 'connected' && (
+            <Button
+              size="small"
+              icon={<LinkOutlined />}
+              loading={reconnecting}
+              onClick={handleReconnect}
+            >
+              重新连接
+            </Button>
+          )}
           <Button
             size="small"
             icon={<ReloadOutlined />}
@@ -136,6 +173,20 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           </Popconfirm>
         </div>
       </div>
+      {reconnectCmd && (
+        <div className={styles.reconnectBox} style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            在目标电脑上执行以下命令重新连接：
+          </div>
+          <Typography.Text
+            copyable
+            code
+            style={{ fontSize: 12, wordBreak: 'break-all' }}
+          >
+            {reconnectCmd}
+          </Typography.Text>
+        </div>
+      )}
 
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
@@ -183,15 +234,26 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           <div className={styles.emptyRow}>暂无底座</div>
         ) : (
           <div className={styles.baseList}>
-            {machineCandidates.map((candidate: AgentCandidate) => (
+            {machineCandidates.map((candidate: AgentCandidate) => {
+              const capabilityList = parseCapabilities(candidate.capabilities_json);
+              return (
                 <div className={styles.baseCard} key={candidate.id}>
                   <div className={styles.baseName}>{candidate.name}</div>
                   <div className={styles.baseMeta}>
                     {candidate.cli_tool}
                     {candidate.version ? ` · ${candidate.version}` : ''}
                   </div>
+                  {capabilityList.length > 0 && (
+                    <div className={styles.baseTags}>
+                      {capabilityList.slice(0, 3).map((item) => (
+                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
+                      ))}
+                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
+                    </div>
+                  )}
                 </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -246,9 +308,10 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   </div>
                   {capabilityList.length > 0 && (
                     <div className={styles.agentTags}>
-                      {capabilityList.map((item) => (
-                        <Tag key={item}>{item}</Tag>
+                      {capabilityList.slice(0, 3).map((item) => (
+                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                       ))}
+                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
                     </div>
                   )}
                 </div>

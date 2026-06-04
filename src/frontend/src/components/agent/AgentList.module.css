@@ -61,6 +61,11 @@
 }
 
 .machineAvatar {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 50% !important;
   background: var(--color-primary-light) !important;
   color: var(--color-primary);
 }
@@ -271,4 +276,22 @@
   text-align: center;
   color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .machineHeader:hover {
+  background: var(--color-surface-muted);
+}
+
+:global(html.dark) .agentRow {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .agentRow:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+}
+
+:global(html.dark) .candidateRow {
+  background: var(--color-surface-muted);
 }

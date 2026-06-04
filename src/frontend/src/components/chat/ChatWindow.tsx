@@ -23,6 +23,7 @@ import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ChatSearchPanel } from './ChatSearchPanel';
+import { ForwardModal } from './ForwardModal';
 import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
@@ -46,10 +47,12 @@ export const ChatWindow: React.FC = () => {
   const markAllRead = useMessageStore((s) => s.markAllRead);
   const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wsClient = useWsStore((s) => s.wsClient);
@@ -116,6 +119,7 @@ export const ChatWindow: React.FC = () => {
     setSearchOpen(false);
     setSearchResults([]);
     setHasSearched(false);
+    setSearchKeyword('');
   }, [activeId, markAllRead]);
 
   // Join WebSocket room when switching conversations so real-time messages arrive
@@ -132,6 +136,7 @@ export const ChatWindow: React.FC = () => {
       if (prev) {
         setSearchResults([]);
         setHasSearched(false);
+        setSearchKeyword('');
       }
       return !prev;
     });
@@ -141,6 +146,7 @@ export const ChatWindow: React.FC = () => {
     async (value: string) => {
       const keyword = value.trim();
       if (!keyword || !activeConv) return;
+      setSearchKeyword(keyword);
       setSearchLoading(true);
       try {
         const results = await searchMessages(activeConv.id, keyword);
@@ -341,17 +347,25 @@ export const ChatWindow: React.FC = () => {
           searchLoading={searchLoading}
           searchResults={searchResults}
           hasSearched={hasSearched}
+          keyword={searchKeyword}
           onSearch={handleSearch}
           onClose={toggleSearch}
           onSelectMessage={handleSelectSearchResult}
         />
       )}
-      <MessageList conversationId={activeConv.id} onReply={setReplyTo} />
+      <MessageList conversationId={activeConv.id} onReply={setReplyTo} onForward={setForwardMessage} />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
-          {otherTyping.length === 1
-            ? `${otherTyping[0]?.username || otherTyping[0]?.userId || '用户'} 正在输入...`
-            : `${otherTyping.length} 人正在输入...`}
+          <span className={styles.typingDots}>
+            <span className={styles.typingDot} />
+            <span className={styles.typingDot} />
+            <span className={styles.typingDot} />
+          </span>
+          <span>
+            {otherTyping.length === 1
+              ? `${otherTyping[0]?.username || otherTyping[0]?.userId || '用户'} 正在输入`
+              : `${otherTyping.length} 人正在输入`}
+          </span>
         </div>
       )}
       <ChatInput
@@ -375,6 +389,12 @@ export const ChatWindow: React.FC = () => {
           conversationId={activeId}
         />
       )}
+      <ForwardModal
+        open={!!forwardMessage}
+        onClose={() => setForwardMessage(null)}
+        message={forwardMessage}
+        currentConversationId={activeId ?? undefined}
+      />
     </div>
   );
 };

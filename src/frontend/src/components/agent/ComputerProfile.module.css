@@ -6,7 +6,7 @@
   padding: 18px 22px;
   background:
     radial-gradient(circle at 18% 0%, rgba(22, 163, 101, 0.08), transparent 30%),
-    linear-gradient(180deg, #f7fafb 0%, #eef4f7 100%);
+    linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg) 100%);
 }
 
 .header {
@@ -15,10 +15,10 @@
   justify-content: space-between;
   gap: 18px;
   padding: 16px 18px;
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .titleBlock {
@@ -33,6 +33,11 @@
   background: var(--gradient-agent) !important;
   color: #fff;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .machineAvatar {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
 .titleRow {
@@ -55,7 +60,7 @@
   max-width: 520px;
   overflow: hidden;
   margin-top: 2px;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-family: 'SF Mono', Menlo, monospace;
   font-size: 12px;
   text-overflow: ellipsis;
@@ -79,10 +84,10 @@
 .section {
   margin-top: 12px;
   padding: 16px 18px;
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.028);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .sectionHeader {
@@ -100,15 +105,15 @@
 }
 
 .sectionHint {
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 12px;
 }
 
 .infoGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid rgba(15, 23, 42, 0.055);
-  border-left: 1px solid rgba(15, 23, 42, 0.055);
+  border-top: 1px solid var(--color-border-light);
+  border-left: 1px solid var(--color-border-light);
 }
 
 .infoItem {
@@ -117,12 +122,12 @@
   flex-direction: column;
   gap: 4px;
   padding: 12px;
-  border-right: 1px solid rgba(15, 23, 42, 0.055);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.055);
+  border-right: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .infoLabel {
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 12px;
 }
 
@@ -146,9 +151,9 @@
 .agentRow {
   min-width: 0;
   padding: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.065);
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: #fff;
+  background: var(--color-bg-white);
 }
 
 .baseName,
@@ -166,7 +171,7 @@
 .agentPrompt {
   overflow: hidden;
   margin-top: 3px;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -214,7 +219,7 @@
   align-items: center;
   justify-content: center;
   min-height: 92px;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 
@@ -222,7 +227,7 @@
   height: 100%;
   background:
     radial-gradient(circle at 18% 0%, rgba(22, 163, 101, 0.08), transparent 30%),
-    linear-gradient(180deg, #f7fafb 0%, #eef4f7 100%);
+    linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg) 100%);
 }
 
 @media (max-width: 900px) {
@@ -239,4 +244,21 @@
   .agentList {
     grid-template-columns: 1fr;
   }
+}
+
+/* 重连命令：去除 antd Typography 自动链接的蓝色 */
+.reconnectBox :global(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* 暗色模式：重连命令代码块 */
+:global(html.dark) .reconnectBox :global(code) {
+  color: #e2e8f0 !important;
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(html.dark) .reconnectBox :global(a) {
+  color: #94a3b8 !important;
 }

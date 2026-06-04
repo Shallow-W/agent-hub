@@ -19,22 +19,25 @@ type JWTConfig struct {
 // Auth 返回 JWT 鉴权中间件
 func Auth(cfg JWTConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 优先从 Authorization header 取 token，fallback 到 query parameter（用于 <img>/<a> 等无法带 header 的场景）
+		tokenStr := ""
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenStr = parts[1]
+			}
+		}
+		if tokenStr == "" {
+			tokenStr = c.Query("token")
+		}
+		if tokenStr == "" {
 			ErrorResponse(c, http.StatusUnauthorized, 40101, "缺少 Authorization 头")
 			c.Abort()
 			return
 		}
 
-		// 提取 Bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			ErrorResponse(c, http.StatusUnauthorized, 40102, "Authorization 格式错误，应为 Bearer <token>")
-			c.Abort()
-			return
-		}
-
-		token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}

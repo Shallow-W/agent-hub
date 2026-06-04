@@ -11,6 +11,7 @@ import styles from './MessageList.module.css';
 interface MessageListProps {
   conversationId: string;
   onReply?: (message: Message) => void;
+  onForward?: (message: Message) => void;
 }
 
 /** Check if two messages from the same sender are within 5 minutes */
@@ -47,12 +48,15 @@ function formatDividerTime(dateStr: string): string {
   if (msgDate.getTime() === yesterday.getTime()) {
     return `昨天 ${hh}:${mm}`;
   }
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}-${day} ${hh}:${mm}`;
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${month}月${day}日 ${hh}:${mm}`;
+  }
+  return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply }) => {
+export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply, onForward }) => {
   const {
     messages,
     streamingContent,
@@ -186,6 +190,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   isGrouped={grouped}
                   isOwn={isOwn}
                   onReply={onReply}
+                  onForward={onForward}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                 />
               </React.Fragment>

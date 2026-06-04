@@ -26,8 +26,8 @@ func (r *AttachmentRepo) CreateAttachments(ctx context.Context, tx *sqlx.Tx, mes
 	for i := range attachments {
 		attachments[i].MessageID = messageID
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO message_attachments (id, message_id, file_name, mime_type, file_size, file_path, thumbnail_path, width, height)
-			 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+			`INSERT INTO message_attachments (id, message_id, file_name, mime_type, file_size, file_path, thumbnail_path, width, height, sort_order)
+			 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 			messageID,
 			attachments[i].FileName,
 			attachments[i].MimeType,
@@ -36,6 +36,7 @@ func (r *AttachmentRepo) CreateAttachments(ctx context.Context, tx *sqlx.Tx, mes
 			attachments[i].ThumbnailPath,
 			attachments[i].Width,
 			attachments[i].Height,
+			i,
 		)
 		if err != nil {
 			return fmt.Errorf("insert attachment %d: %w", i, err)
@@ -51,8 +52,9 @@ func (r *AttachmentRepo) ListByMessageIDs(ctx context.Context, messageIDs []stri
 	}
 
 	query, args, err := sqlx.In(
-		`SELECT id, message_id, file_name, mime_type, file_size, file_path, thumbnail_path, width, height, created_at
-		 FROM message_attachments WHERE message_id IN (?)`,
+		`SELECT id, message_id, file_name, mime_type, file_size, file_path, thumbnail_path, width, height, sort_order, created_at
+		 FROM message_attachments WHERE message_id IN (?)
+		 ORDER BY sort_order, id`,
 		messageIDs,
 	)
 	if err != nil {

@@ -52,3 +52,12 @@
   color: var(--color-danger);
   font-weight: 500;
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .input {
+  background-color: var(--color-bg-tertiary);
+}
+
+:global(html.dark) .input:hover {
+  border-color: var(--color-text-tertiary);
+}

@@ -96,6 +96,36 @@ func (r *AgentRepo) GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash
 	return &m, nil
 }
 
+// UpdateMachineAPIKey 更新电脑的 API Key 哈希（用于重新生成连接命令）。
+func (r *AgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET api_key_hash = $2, updated_at = NOW() WHERE id = $1`,
+		id, apiKeyHash,
+	)
+	if err != nil {
+		return fmt.Errorf("update machine api key: %w", err)
+	}
+	return nil
+}
+
+// GetDaemonMachineByID 按 ID 查询电脑连接
+func (r *AgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error) {
+	var m model.DaemonMachine
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, user_id, name, api_key_hash, machine_id, status,
+		        last_seen_at, created_at, updated_at
+		 FROM daemon_machines WHERE id = $1`,
+		id,
+	).StructScan(&m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get daemon machine by id: %w", err)
+	}
+	return &m, nil
+}
+
 // MarkDaemonMachineConnected 标记电脑在线
 func (r *AgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error {
 	_, err := r.db.ExecContext(ctx,
@@ -106,6 +136,54 @@ func (r *AgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, machineI
 	)
 	if err != nil {
 		return fmt.Errorf("mark daemon machine connected: %w", err)
+	}
+	return nil
+}
+
+// SetMachineAndAgentsOnline 标记机器及其 Agent 为在线（仅状态变更时调用）。
+func (r *AgentRepo) SetMachineAndAgentsOnline(ctx context.Context, machineID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET status = 'connected', last_seen_at = NOW(), updated_at = NOW() WHERE id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set machine online: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'online', last_seen_at = NOW(), updated_at = NOW() WHERE machine_id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set agents online: %w", err)
+	}
+	return nil
+}
+
+// SetMachineAndAgentsOffline 标记机器及其 Agent 为离线（仅状态变更时调用）。
+// machineID 为空时标记全部机器和 Agent 为离线（服务启动时使用）。
+func (r *AgentRepo) SetMachineAndAgentsOffline(ctx context.Context, machineID string) error {
+	if machineID == "" {
+		if _, err := r.db.ExecContext(ctx,
+			`UPDATE daemon_machines SET status = 'offline', updated_at = NOW() WHERE status = 'connected'`,
+		); err != nil {
+			return fmt.Errorf("set all machines offline: %w", err)
+		}
+		if _, err := r.db.ExecContext(ctx,
+			`UPDATE agents SET status = 'offline', updated_at = NOW() WHERE status = 'online'`,
+		); err != nil {
+			return fmt.Errorf("set all agents offline: %w", err)
+		}
+		return nil
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET status = 'offline', updated_at = NOW() WHERE id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set machine offline: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'offline', updated_at = NOW() WHERE machine_id = $1`,
+		machineID,
+	); err != nil {
+		return fmt.Errorf("set agents offline: %w", err)
 	}
 	return nil
 }

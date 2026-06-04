@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
+import { useWsStore } from '@/store/wsStore';
 
 export function useAuth() {
-  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const loading = useAuthStore((s) => s.loading);
@@ -18,8 +17,13 @@ export function useAuth() {
   }, [loadFromStorage]);
 
   const handleLogout = () => {
+    useWsStore.getState().disconnect();
     logout();
-    navigate('/login');
+    // 清除所有用户相关的 localStorage 键
+    localStorage.removeItem('agenthub_active_conv');
+    localStorage.removeItem('agenthub_direct_agent_chats');
+    // 强制刷新页面，彻底清空所有 zustand 内存状态
+    window.location.href = '/login';
   };
 
   return {

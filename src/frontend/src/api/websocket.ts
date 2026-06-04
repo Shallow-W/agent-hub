@@ -100,12 +100,15 @@ export class WebSocketClient {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event: CloseEvent) => {
       this.setStatus('disconnected');
       if (!this.intentionalClose) {
+        if (event.code === 1008) {
+          // Server rejected (e.g. max connections) — long backoff to avoid storm
+          this.retryDelay = 30_000;
+        }
         this.scheduleReconnect();
       }
-      // intentionalClose 仅在 doConnect() 开头重置，不在此处
     };
 
     this.ws.onerror = () => {

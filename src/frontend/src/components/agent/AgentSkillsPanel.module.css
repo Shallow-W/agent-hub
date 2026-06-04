@@ -289,3 +289,12 @@
     max-height: 260px;
   }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .skillCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .detailPane {
+  border-color: rgba(255, 255, 255, 0.08);
+}

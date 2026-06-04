@@ -52,6 +52,7 @@ type ConvRepoForMsg interface {
 	UpdateTimestamp(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
+	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 }
 
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
@@ -85,6 +86,7 @@ type MessageService struct {
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
 	cacher    MessageCacher
+	orchSvc   *OrchestratorService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -106,6 +108,11 @@ func (s *MessageService) SetNotifier(n MessageNotifier) {
 // SetCacher 注入消息缓存器
 func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
+}
+
+// SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
+func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
+	s.orchSvc = orchSvc
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -139,7 +146,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
-	if strings.TrimSpace(content) == "" {
+	// 允许纯附件消息（无文字内容），仅当内容为空且无附件时拒绝
+	if strings.TrimSpace(content) == "" && len(attachments) == 0 {
 		return nil, ErrMsgEmptyContent
 	}
 
@@ -154,9 +162,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		return nil, err
 	}
 
-	if role == "" {
-		role = "user"
-	}
+	// 强制角色约束：客户端只允许发送 user 角色消息，防止伪造 assistant 消息
+	role = "user"
 
 	// 校验 reply_to 引用的消息
 	if replyTo != nil {
@@ -183,22 +190,22 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// Agent 回复
-	if strings.TrimSpace(agentID) != "" {
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content)
-		if err != nil {
-			return nil, err
+	// @mention routing — 异步派发，不阻塞 HTTP 响应
+	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
+		// 优先使用调用方传入的 mentions 参数，仅在为空时从 content 中解析
+		parsedMentions := ParseMentions(content)
+		if len(mentions) > 0 || len(parsedMentions) > 0 {
+			go s.asyncMentionDispatch(convID, userID, content)
 		}
-		result.AgentMessage = agentMsg
+	}
+
+	// Agent 回复（显式 agentID 路径，异步派发）
+	if strings.TrimSpace(agentID) != "" {
+		go s.asyncAgentReply(convID, userID, agentID, content)
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）
 	go s.postPersist(convID, userID, msg)
-
-	// 刷新对话的 updated_at
-	if err := s.convRepo.UpdateTimestamp(ctx, convID); err != nil {
-		return nil, fmt.Errorf("update conversation timestamp: %w", err)
-	}
 
 	return result, nil
 }
@@ -539,7 +546,7 @@ func (s *MessageService) buildAgentHandoffs(ctx context.Context, convID string) 
 }
 
 // createAgentReply 生成 Agent 回复消息
-func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent string) (*model.Message, error) {
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string) (*model.Message, error) {
 	if s.agentRepo == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -564,7 +571,6 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, ErrMsgAgentOffline
 	}
 
-	contextMessages := s.buildAgentHandoffs(ctx, convID)
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
@@ -615,4 +621,94 @@ func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*mo
 		case <-ticker.C:
 		}
 	}
+}
+
+// broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
+
+// asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncMentionDispatch recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	if err != nil {
+		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		return
+	}
+	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
+		return
+	}
+	for _, agentMsg := range orchResult.AgentMessages {
+		s.postPersist(convID, userID, agentMsg)
+	}
+}
+
+// asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncAgentReply recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	contextMessages := s.buildAgentHandoffs(ctx, convID)
+
+		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
+		if s.orchSvc != nil {
+			agent, err := s.agentRepo.GetByID(ctx, agentID)
+			if err == nil && agent != nil {
+				// KB 优先从消息内容中预解析
+				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
+				if kbCtx != "" {
+					contextMessages = kbCtx + contextMessages
+				}
+				// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
+				// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
+				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+			}
+		}
+
+		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	if err != nil {
+		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
+	if s.notifier == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(memberIDs) == 0 {
+		return
+	}
+
+	eventType := "agent.typing_stop"
+	if typing {
+		eventType = "agent.typing_start"
+	}
+
+	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
+		"conversation_id": convID,
+	})
 }
