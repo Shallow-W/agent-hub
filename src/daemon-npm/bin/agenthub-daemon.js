@@ -904,13 +904,18 @@ function runProcess(command, args, stdin, sessionId) {
 
 async function register(serverURL, apiKey) {
   const agents = scanAgents();
-  console.log(JSON.stringify(agents, null, 2));
+  console.log(`AgentHub daemon 发现 ${agents.length} 个 Agent：`);
+  for (const agent of agents) {
+    const version = agent.version ? ` ${String(agent.version).split('\n')[0].trim()}` : '';
+    const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
+    console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
+  }
   await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
     agents,
   });
-  console.log(`AgentHub daemon reported ${agents.length} candidate agent(s).`);
-  console.log('AgentHub daemon is running. Keep this terminal open to execute chat tasks.');
+  console.log('详细能力已上报，请在 AgentHub 网页端查看。');
+  console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
 }
 
 // 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
