@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index for applicable UI development guidelines."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for pre-change checks."}
-{"file": "doc/conventions/frontend-conventions.md", "reason": "Project-specific React, TypeScript, Zustand, and CSS Modules rules."}
