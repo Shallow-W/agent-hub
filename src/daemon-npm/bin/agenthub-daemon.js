@@ -566,9 +566,11 @@ function encodeWSFrame(opcode, payload) {
 
 function connectWS(targetURL) {
   const transport = targetURL.protocol === 'wss:' ? https : http;
+  const requestURL = new URL(targetURL);
+  requestURL.protocol = targetURL.protocol === 'wss:' ? 'https:' : 'http:';
   const key = crypto.randomBytes(16).toString('base64');
   return new Promise((resolve, reject) => {
-    const req = transport.request(targetURL, {
+    const req = transport.request(requestURL, {
       headers: {
         Connection: 'Upgrade',
         Upgrade: 'websocket',
@@ -870,7 +872,7 @@ async function executeTask(task) {
           spec.sessionId,
         ));
       } catch (_err2) {
-        const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        const freshId = crypto.randomUUID();
         ({ stdout, stderr } = await runProcess(
           spec.command,
           ['--session-id', freshId, ...spec.args],
@@ -1126,6 +1128,13 @@ function startWSHeartbeat(ws, taskId) {
   return () => clearInterval(timer);
 }
 
+function startDaemonHeartbeat(ws) {
+  const timer = setInterval(() => {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }, 10000);
+  return () => clearInterval(timer);
+}
+
 function enqueueWSTask(ws, task) {
   if (!task || !task.id) return;
   wsTaskQueue.push({ ws, task });
@@ -1177,6 +1186,7 @@ async function runDaemonWS(serverURL, apiKey) {
       const ws = await connectWS(daemonWSURL(serverURL, apiKey));
       retry = 1000;
       await new Promise((resolve) => {
+        const stopDaemonHeartbeat = startDaemonHeartbeat(ws);
         ws.onMessage((line) => {
           let msg = null;
           try {
@@ -1193,7 +1203,10 @@ async function runDaemonWS(serverURL, apiKey) {
             console.error(`AgentHub daemon task ${taskId} result rejected${detail}`);
           }
         });
-        ws.onClose(resolve);
+        ws.onClose(() => {
+          stopDaemonHeartbeat();
+          resolve();
+        });
         registerOnWS(ws);
       });
       console.error('AgentHub daemon WebSocket disconnected, reconnecting...');

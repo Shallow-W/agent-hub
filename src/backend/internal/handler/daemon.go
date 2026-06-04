@@ -57,6 +57,7 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "disconnect")
+	conn.SetReadLimit(4 << 20)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -105,67 +106,6 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
-}
-
-// ClaimTask 让已连接电脑领取一条待执行的真实 CLI 任务。
-func (h *DaemonHandler) ClaimTask(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40121, "message": "无效 machine key", "data": nil})
-		return
-	}
-
-	taskCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	defer cancel()
-	task, err := h.agentSvc.ClaimDaemonTask(taskCtx, machine)
-	if err != nil {
-		h.logger.Error("claim daemon task failed", "machine", machine.ID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 50042, "message": "领取 daemon 任务失败", "data": nil})
-		return
-	}
-	h.agentSvc.TouchMachine(machine.ID)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": task})
-}
-
-// CompleteTask 接收电脑 daemon 对真实 CLI 任务的执行结果。
-func (h *DaemonHandler) CompleteTask(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40122, "message": "无效 machine key", "data": nil})
-		return
-	}
-
-	var req struct {
-		Result string `json:"result"`
-		Error  string `json:"error"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 40041, "message": "任务结果参数错误: " + err.Error(), "data": nil})
-		return
-	}
-
-	taskCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-	defer cancel()
-	if err := h.agentSvc.CompleteDaemonTask(taskCtx, machine, c.Param("id"), req.Result, req.Error); err != nil {
-		h.logger.Error("complete daemon task failed", "machine", machine.ID, "task", c.Param("id"), "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 50043, "message": "提交 daemon 任务结果失败", "data": nil})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
-}
-
-// Heartbeat 接收 daemon 任务心跳，保持机器在线状态。
-func (h *DaemonHandler) Heartbeat(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40123, "message": "无效 machine key", "data": nil})
-		return
-	}
-	h.agentSvc.TouchMachine(machine.ID)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
 }
 
 // IssueAgentToken 用机器 api-key 换取该机器所属用户的 agent_management scoped JWT，
@@ -234,6 +174,9 @@ func (h *DaemonHandler) readLoop(ctx context.Context, daemonConn *daemonConn, ma
 		case "task.heartbeat":
 			h.handleTaskHeartbeat(envelope.Data, machine)
 		case "ping":
+			if machine != nil {
+				h.agentSvc.TouchMachine(machine.ID)
+			}
 			if err := daemonConn.write(ctx, []byte(`{"type":"pong"}`)); err != nil {
 				h.logger.Warn("daemon pong failed", "error", err)
 				return

@@ -40,7 +40,7 @@ func NewMachineTracker(repo MachineStatusRepo, logger *slog.Logger) *MachineTrac
 	}
 }
 
-// Touch 更新心跳（ClaimTask 每 1.5s 调用一次，纯内存操作）。
+// Touch 更新心跳（daemon WebSocket 心跳/任务事件触发，纯内存操作）。
 // 若机器之前不在线（dbOnline=false），同步写 DB 保证状态一致。
 func (t *MachineTracker) Touch(machineID string) {
 	now := time.Now()
