@@ -54,7 +54,7 @@
 - [x] 派发 claude 任务时自动注入平台 MCP（命令参数验证通过）
 - [x] daemon 启动时为 OpenClaw 幂等写入全局 MCP 配置（set/show/unset 实测通过）
 - [x] daemon 为 Codex 幂等写入全局 MCP 配置（用 VSCode 扩展自带 codex.exe，add/get/remove 实测通过）
-- [ ] 在真实 Agent 聊天任务中实际调用工具的端到端验证（需有效 machine key）
+- [x] 真实端到端：真 daemon(--mcp) + 真后端 + 真 machine key，`list_agents`/`list_conversations` 返回真实后端数据（换 token → 带 JWT 调 REST 全链路打通）
 
 ## 备注：Codex 可用性
 
