@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execFileSync, spawn } = require('node:child_process');
+const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -77,6 +77,7 @@ function npmWrapperScript(command) {
   if (!root) return null;
   const scripts = {
     claude: path.join(root, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+    codex: path.join(root, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
     openclaw: path.join(root, 'npm', 'node_modules', 'openclaw', 'openclaw.mjs'),
   };
   const script = scripts[command];
@@ -127,18 +128,39 @@ function makeSessionId(conversationID, agentID) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-function commandVersion(command) {
+function commandOutput(command, args, timeout = 5000) {
   try {
-    const spec = processSpec(command, ['--version']);
+    const spec = processSpec(command, args);
     return execFileSync(spec.command, spec.args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
+      timeout,
       windowsHide: true,
     }).trim();
   } catch {
     return null;
   }
+}
+
+function commandVersion(command) {
+  return commandOutput(command, ['--version']);
+}
+
+function codexLoginStatus(command) {
+  const spec = processSpec(command, ['login', 'status']);
+  const result = spawnSync(spec.command, spec.args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 5000,
+    windowsHide: true,
+  });
+  if (result.status !== 0) return null;
+  return `${result.stdout || ''}${result.stderr || ''}`.trim();
+}
+
+function isCodexAuthenticated(command) {
+  const status = codexLoginStatus(command);
+  return status !== null && /\blogged in\b/i.test(status);
 }
 
 function codexExtensionPath() {
@@ -162,7 +184,10 @@ function codexExtensionPath() {
 }
 
 function resolveCommand(cliTool) {
-  if (cliTool === 'codex') return codexExtensionPath() || 'codex';
+  if (cliTool === 'codex') {
+    // Prefer the user's npm Codex auth cache before the VS Code extension binary.
+    return commandVersion('codex') !== null ? 'codex' : (codexExtensionPath() || 'codex');
+  }
   return cliTool;
 }
 
@@ -172,6 +197,7 @@ function scanAgents() {
       const command = resolveCommand(candidate.cli_tool);
       const version = commandVersion(command);
       if (version === null) return null;
+      if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
       const skills = scanSkills(candidate.cli_tool);
       return {
         name: candidate.name,
