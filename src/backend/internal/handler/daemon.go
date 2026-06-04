@@ -24,7 +24,7 @@ type DaemonHandler struct {
 	conns          map[string]*daemonConn
 	dispatchMu     sync.Mutex
 	dispatching    map[string]bool
-	dispatchAgain  map[string]bool
+	inFlight       map[string]string
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
@@ -36,7 +36,7 @@ func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog
 		allowedOrigins: allowedOrigins,
 		conns:          make(map[string]*daemonConn),
 		dispatching:    make(map[string]bool),
-		dispatchAgain:  make(map[string]bool),
+		inFlight:       make(map[string]string),
 	}
 }
 

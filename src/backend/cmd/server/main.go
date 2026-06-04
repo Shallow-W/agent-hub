@@ -338,9 +338,6 @@ func main() {
 	router.GET("/daemon/ws", daemonHandler.Handle)
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
-	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())

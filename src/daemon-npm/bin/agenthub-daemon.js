@@ -11,8 +11,10 @@ const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 
 const activeSessions = new Map();
+const wsTaskQueue = [];
+let wsTaskRunning = false;
 
-// 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
+// 常驻 daemon 的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '' };
 
 // buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
@@ -35,7 +37,7 @@ function buildPlatformMcpArgs() {
 
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
-// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   registerOpenClawMcp(mcpArgs);
@@ -1124,6 +1126,25 @@ function startWSHeartbeat(ws, taskId) {
   return () => clearInterval(timer);
 }
 
+function enqueueWSTask(ws, task) {
+  if (!task || !task.id) return;
+  wsTaskQueue.push({ ws, task });
+  void runNextWSTask();
+}
+
+async function runNextWSTask() {
+  if (wsTaskRunning) return;
+  const next = wsTaskQueue.shift();
+  if (!next) return;
+  wsTaskRunning = true;
+  try {
+    await handleWSTask(next.ws, next.task);
+  } finally {
+    wsTaskRunning = false;
+    void runNextWSTask();
+  }
+}
+
 async function handleWSTask(ws, task) {
   if (!task || !task.id) return;
   console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool}`);
@@ -1164,7 +1185,7 @@ async function runDaemonWS(serverURL, apiKey) {
             return;
           }
           if (msg.type === 'task.execute') {
-            void handleWSTask(ws, msg.data);
+            enqueueWSTask(ws, msg.data);
           }
         });
         ws.onClose(resolve);
