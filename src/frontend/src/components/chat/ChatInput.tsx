@@ -15,8 +15,10 @@ import { useAgentStore } from '@/store/agentStore';
 import { uploadFile } from '@/api/upload';
 import { getGroupMembers } from '@/api/group';
 import { getConversationAgents } from '@/api/conversation';
+import { getGroupKnowledgeBases } from '@/api/knowledge';
 import type { GroupMember } from '@/types/group';
 import type { ConversationAgent } from '@/types/conversation';
+import type { GroupKnowledgeBase } from '@/types/knowledge';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message, ReplyToPreview } from '@/types/message';
@@ -32,6 +34,13 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 type MentionTarget =
   | { id: string; label: string; kind: 'user'; user: GroupMember }
   | { id: string; label: string; kind: 'agent'; agent: ConversationAgent };
+
+interface KBTarget {
+  username: string;
+  kbName: string;
+  kbId: string;
+  visibility: string;
+}
 
 interface ChatInputProps {
   conversationId: string;
@@ -58,6 +67,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const [mentionTargetsLoaded, setMentionTargetsLoaded] = useState(false);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
   const textareaRef = useRef<TextAreaRef>(null);
+
+  // KB reference state
+  const [kbVisible, setKbVisible] = useState(false);
+  const [kbQuery, setKbQuery] = useState('');
+  const [kbIndex, setKbIndex] = useState(0);
+  const [kbStart, setKbStart] = useState(-1);
+  const [knowledgeBases, setKnowledgeBases] = useState<GroupKnowledgeBase[]>([]);
+  const [kbLoaded, setKbLoaded] = useState(false);
 
   const conversation = useConversationStore((s) =>
     s.conversations.find((c) => c.id === conversationId),
@@ -88,10 +105,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     fetchMentionTargets().catch((err) => console.error('Failed to load mention targets:', err));
   }, [fetchMentionTargets, isGroup, mentionTargetsLoaded]);
 
+  const fetchKnowledgeBases = useCallback(async () => {
+    if (!isGroup) return;
+    try {
+      const kbs = await getGroupKnowledgeBases(conversationId);
+      setKnowledgeBases(kbs ?? []);
+      setKbLoaded(true);
+    } catch (err) {
+      console.error('Failed to load knowledge bases:', err);
+    }
+  }, [conversationId, isGroup]);
+
+  const loadKnowledgeBases = useCallback(() => {
+    if (!isGroup || kbLoaded) return;
+    fetchKnowledgeBases();
+  }, [fetchKnowledgeBases, isGroup, kbLoaded]);
+
   useEffect(() => {
     setMembers([]);
     setAgentMembers([]);
     setMentionTargetsLoaded(false);
+    setKnowledgeBases([]);
+    setKbLoaded(false);
+    setKbVisible(false);
   }, [conversationId]);
 
   // Proactively load agent names when there's an active target (for the target bar display)
@@ -156,11 +192,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
       sendTypingStop();
     }, 2000);
 
-    // Detect @ mention trigger in group chats
+    // Detect @ mention and # KB reference triggers in group chats
     if (isGroup) {
       const el = e.target as HTMLTextAreaElement;
       const cursorPos = el.selectionStart;
       const textBeforeCursor = val.slice(0, cursorPos);
+
+      // @ takes priority
       const atMatch = textBeforeCursor.match(/@(\S*)$/);
       if (atMatch) {
         const query = atMatch[1] ?? '';
@@ -168,14 +206,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         setMentionStart(cursorPos - query.length - 1); // position of @
         setMentionIndex(0);
         if (!mentionVisible) {
+          setKbVisible(false);
           setMentionVisible(true);
           loadMentionTargets();
         }
-      } else if (mentionVisible) {
-        setMentionVisible(false);
+        return;
       }
+
+      // # KB reference (only when @ not matched)
+      const hashMatch = textBeforeCursor.match(/#(\S*)$/);
+      if (hashMatch) {
+        const query = hashMatch[1] ?? '';
+        setKbQuery(query);
+        setKbStart(cursorPos - query.length - 1); // position of #
+        setKbIndex(0);
+        if (!kbVisible) {
+          setMentionVisible(false);
+          setKbVisible(true);
+          loadKnowledgeBases();
+        }
+        return;
+      }
+
+      // Neither matched — close both
+      if (mentionVisible) setMentionVisible(false);
+      if (kbVisible) setKbVisible(false);
     }
-  }, [sendTypingStart, sendTypingStop, isGroup, mentionVisible, loadMentionTargets]);
+  }, [sendTypingStart, sendTypingStop, isGroup, mentionVisible, kbVisible, loadMentionTargets, loadKnowledgeBases]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -228,17 +285,60 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const insertMention = useCallback((target: MentionTarget) => {
     const before = value.slice(0, mentionStart);
     const after = value.slice(mentionStart + mentionQuery.length + 1); // +1 for @
-    const newValue = `${before}@${target.label} ${after}`;
+    // Append " #" to auto-trigger KB selection after choosing an agent
+    const hashPos = mentionStart + target.label.length + 2; // position of the new #
+    const newValue = `${before}@${target.label} #${after}`;
     setValue(newValue);
     setMentionVisible(false);
+
+    // Auto-trigger KB selection
+    setKbQuery('');
+    setKbIndex(0);
+    setKbStart(hashPos);
+    setKbVisible(true);
+    loadKnowledgeBases();
+
     // Focus back on textarea
     setTimeout(() => textareaRef.current?.focus(), 0);
-  }, [value, mentionStart, mentionQuery]);
+  }, [value, mentionStart, mentionQuery, loadKnowledgeBases]);
 
   const hasMention = useCallback((content: string, label: string) => {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(^|\\s)@${escaped}(?=\\s|$)`, 'i').test(content);
   }, []);
+
+  // KB targets with dedup
+  const kbTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return knowledgeBases.filter((kb) => {
+      const key = `${kb.username}/${kb.name}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [knowledgeBases]);
+
+  const filteredKBTargets = useMemo(() => {
+    return kbTargets.filter((kb) =>
+      kb.name.toLowerCase().includes(kbQuery.toLowerCase()) ||
+      kb.username.toLowerCase().includes(kbQuery.toLowerCase())
+    );
+  }, [kbTargets, kbQuery]);
+
+  const insertKB = useCallback((target: KBTarget | null) => {
+    const before = value.slice(0, kbStart);
+    const after = value.slice(kbStart + kbQuery.length + 1); // +1 for #
+    if (target === null) {
+      // "不使用知识库" — remove the # trigger text
+      setValue(`${before}${after}`);
+    } else {
+      // Insert {{username/kbname}}
+      const ref = `{{${target.username}/${target.kbName}}}`;
+      setValue(`${before}${ref} ${after}`);
+    }
+    setKbVisible(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [value, kbStart, kbQuery]);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
@@ -305,6 +405,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // KB dropdown navigation (takes priority when visible)
+      if (kbVisible) {
+        const total = filteredKBTargets.length + 1; // +1 for "不使用知识库"
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setKbIndex((i) => (i + 1) % total);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setKbIndex((i) => (i - 1 + total) % total);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          if (kbIndex === 0) {
+            insertKB(null);
+          } else {
+            const target = filteredKBTargets[kbIndex - 1];
+            if (target) insertKB({ username: target.username, kbName: target.name, kbId: target.id, visibility: target.visibility });
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setKbVisible(false);
+          return;
+        }
+      }
+
       // Mention dropdown navigation
       if (mentionVisible && filteredTargets.length > 0) {
         if (e.key === 'ArrowDown') {
@@ -334,23 +464,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         handleSubmit();
       }
     },
-    [handleSubmit, mentionVisible, filteredTargets, mentionIndex, insertMention],
+    [handleSubmit, mentionVisible, kbVisible, filteredTargets, filteredKBTargets, mentionIndex, kbIndex, insertMention, insertKB],
   );
 
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
-  // 点击下拉列表外部关闭 mention 下拉
+  // 点击下拉列表外部关闭 mention 和 KB 下拉
   useEffect(() => {
-    if (!mentionVisible) return;
+    if (!mentionVisible && !kbVisible) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest(`.${styles.mentionDropdown}`)) {
         setMentionVisible(false);
+        setKbVisible(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [mentionVisible]);
+  }, [mentionVisible, kbVisible]);
 
   return (
     <div className={styles.container}>
@@ -452,6 +583,48 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
               {target.kind === 'agent' ? ' · Agent' : ''}
             </button>
           ))}
+        </div>
+      )}
+      {kbVisible && (
+        <div className={styles.mentionDropdown}>
+          {/* "不使用知识库" option at index 0 */}
+          <button
+            className={`${styles.mentionItem} ${0 === kbIndex ? styles.mentionItemActive : ''}`}
+            style={{ color: 'var(--color-text-tertiary)' }}
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              insertKB(null);
+            }}
+          >
+            不使用知识库
+          </button>
+          {filteredKBTargets.length > 0 ? (
+            filteredKBTargets.map((kb, i) => {
+              const idx = i + 1; // offset by 1 for "不使用" option
+              return (
+                <button
+                  key={`${kb.username}/${kb.name}`}
+                  className={`${styles.mentionItem} ${idx === kbIndex ? styles.mentionItemActive : ''}`}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    insertKB({ username: kb.username, kbName: kb.name, kbId: kb.id, visibility: kb.visibility });
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>{kb.username}/{kb.name}</span>
+                  {kb.visibility === 'public' ? ' · 公开' : ' · 私有'}
+                  <span style={{ color: 'var(--color-text-tertiary)', fontSize: 12, marginLeft: 6 }}>
+                    ({kb.file_count} 个文件)
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className={styles.mentionItem} style={{ color: 'var(--color-text-tertiary)', cursor: 'default' }}>
+              {kbLoaded ? '没有可用的知识库' : '加载中...'}
+            </div>
+          )}
         </div>
       )}
     </div>

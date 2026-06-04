@@ -455,3 +455,13 @@
   border-radius: 8px;
   line-height: 1.5;
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .innerAssistant {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .innerAssistant .mention {
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.15);
+}

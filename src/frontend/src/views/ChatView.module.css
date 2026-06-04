@@ -83,3 +83,19 @@
     transform: translateY(-6px);
   }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .empty {
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(52, 211, 153, 0.08), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(52, 211, 153, 0.1), transparent 45%),
+    radial-gradient(circle, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+:global(html.dark) .empty::before {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+:global(html.dark) .empty::after {
+  background: rgba(52, 211, 153, 0.15);
+}

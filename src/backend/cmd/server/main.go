@@ -149,6 +149,7 @@ func main() {
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
 	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
@@ -168,7 +169,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 	taskHandler := handler.NewTaskHandler(taskSvc)
-	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -242,7 +243,10 @@ func main() {
 			kbRoutes.PUT("/:id", knowledgeHandler.Update)
 			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
+			kbRoutes.GET("/:id/files", knowledgeHandler.ListFiles)
+			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
+			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
 			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
 		}
 
@@ -333,7 +337,7 @@ func main() {
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
 	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-		router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())

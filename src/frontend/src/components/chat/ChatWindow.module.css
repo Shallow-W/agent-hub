@@ -140,3 +140,19 @@
   0% { background-color: rgba(47, 143, 107, 0.2); }
   100% { background-color: transparent; }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .container {
+  background-image:
+    radial-gradient(circle at 12% 0%, rgba(52, 211, 153, 0.06), transparent 40%),
+    radial-gradient(circle at 100% 80%, rgba(52, 211, 153, 0.04), transparent 35%);
+}
+
+:global(html.dark) .header {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .headerActions {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: var(--color-surface-muted);
+}

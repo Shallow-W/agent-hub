@@ -404,3 +404,54 @@
     display: none;
   }
 }
+
+/* ── 暗色模式 ── */
+:global(html.dark) .actions :global(.ant-btn) {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .tab:hover {
+  background: var(--color-surface-muted);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .tabActive {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .runtimeBadge {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .reasoningBadge {
+  color: #fbbf24;
+}
+
+:global(html.dark) .envValue {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .capabilityItem {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .skillCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 重连命令：去除 antd Typography 自动链接的蓝色 */
+.reconnectBox :global(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* 暗色模式：重连命令代码块 */
+:global(html.dark) .reconnectBox :global(code) {
+  color: #e2e8f0 !important;
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(html.dark) .reconnectBox :global(a) {
+  color: #94a3b8 !important;
+}

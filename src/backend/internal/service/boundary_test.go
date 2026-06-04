@@ -283,7 +283,7 @@ func TestDispatchSequential_EmptyDepResults_NoPanic(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{} // empty
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 
 	if msg == nil {
 		t.Fatal("expected non-nil message from sequential dispatch")
@@ -407,7 +407,6 @@ func TestSendMessage_NilAttachmentsEmptyContent_ReturnsError(t *testing.T) {
 	}
 }
 
-
 // ---------------------------------------------------------------------------
 // Bug 2: Failed parallel dispatch writes [任务失败] to depResults
 // ---------------------------------------------------------------------------
@@ -439,7 +438,7 @@ func TestDispatchSequential_FailedTask_WritesFailureToDepResults(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 
 	// dispatchSequential returns nil on failure
 	if msg != nil {
@@ -524,7 +523,7 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 
 	// Build a task description that is way over 2000 characters
 	base := strings.Repeat("很长的任务描述", 200) // ~1400 chars, doubled
-	longTask := base + base // ~2800 chars, > 2000 limit
+	longTask := base + base                // ~2800 chars, > 2000 limit
 
 	dispatchTask := DispatchTask{
 		AgentName: "Worker",
@@ -534,7 +533,7 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {
 		t.Fatal("expected non-nil message")
 	}
@@ -578,7 +577,7 @@ func TestBuildDispatchContext_TotalLengthProtected(t *testing.T) {
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
 
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch")
+	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {
 		t.Fatal("expected non-nil message")
 	}

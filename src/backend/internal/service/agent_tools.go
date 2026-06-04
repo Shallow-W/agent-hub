@@ -75,3 +75,33 @@ curl -s %s/api/daemon/machines/{machine_id}/connect -H "Authorization: Bearer %s
 `+"```"+`
 `, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token, serverURL, token)
 }
+
+// GenerateKBReadTool 生成知识库文件读取工具的 markdown 定义。
+// 当消息引用了知识库且其中包含非文本或大文件时自动注入。
+// 使用与 management tools 相同的 scope=agent_management JWT 进行鉴权。
+func GenerateKBReadTool(serverURL, token string) string {
+	return fmt.Sprintf(`# 知识库文件读取工具
+
+用户消息引用了知识库，部分文件无法直接内联到上下文中（非文本格式或文件过大）。你可以使用以下工具按需读取。
+
+## kb_read_file
+读取知识库中指定文件的内容。返回文件的原始内容（文本文件返回文本，二进制文件返回 Base64 编码）。
+参数:
+- kb_id (string, 必填): 知识库 ID
+- file_id (string, 必填): 文件 ID
+
+以上方引用的知识库为例，文件 ID 在上面文件列表中（需要从 API 获取）。
+
+### 获取知识库文件列表
+`+"```bash"+`
+curl -s %s/api/knowledge-bases/{kb_id}/files -H "Authorization: Bearer %s"
+`+"```"+`
+
+### 读取文件内容（文本文件）
+`+"```bash"+`
+curl -s %s/api/knowledge-bases/{kb_id}/files/{file_id}/content -H "Authorization: Bearer %s"
+`+"```"+`
+
+注意：token 已嵌入上方命令中，直接复制替换 {kb_id} 和 {file_id} 即可执行。
+`, serverURL, token, serverURL, token)
+}

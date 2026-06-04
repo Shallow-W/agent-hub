@@ -112,6 +112,10 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		return nil, nil
 	}
 
+	// 在入口处预解析原始用户消息中的知识库引用，
+	// 避免 Orchestrator 改写任务描述后丢失 {{用户名/KB}} 语法
+	kbPreload := s.PreloadKBContext(ctx, content, userID)
+
 	result := &RouteResult{}
 
 	for _, m := range mentions {
@@ -147,11 +151,14 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			s.activeOrchs[convID] = struct{}{}
 			s.mu.Unlock()
 
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents)
+			// 确保 panic 时也能清理 activeOrchs，避免对话永久被锁
+			defer func() {
+				s.mu.Lock()
+				delete(s.activeOrchs, convID)
+				s.mu.Unlock()
+			}()
 
-			s.mu.Lock()
-			delete(s.activeOrchs, convID)
-			s.mu.Unlock()
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
 
 			if err != nil {
 				slog.Warn("orchestrated dispatch failed", "agent_id", agentID, "error", err)
@@ -164,7 +171,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				Task:      content,
 			})
 		} else {
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, content)
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, content, kbPreload)
 			if err != nil {
 				slog.Warn("direct dispatch failed", "agent_id", agentID, "error", err)
 				continue
@@ -183,7 +190,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
-func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string) (*model.Message, error) {
+func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string, kbPreload string) (*model.Message, error) {
 	if agent.UserID != nil && *agent.UserID != userID {
 		return nil, ErrMsgAgentNoPerm
 	}
@@ -198,11 +205,14 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	// 注入知识库上下文
-	kbCtx := s.injectKBContext(ctx, content, "", userID)
+	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
+	kbCtx := kbPreload
+	if kbCtx == "" {
+		kbCtx = s.injectKBContext(ctx, content, "", userID)
+	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.injectAgentConfig(agent, kbCtx, userID)
+	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
 	if err != nil {
@@ -231,7 +241,8 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 }
 
 // handleOrchestratedDispatch runs the full orchestrator flow: dispatch to orchestrator, parse output, fan out to workers.
-func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent) ([]*model.Message, error) {
+// kbPreload 是从原始用户消息预解析的知识库上下文，确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
+func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent, kbPreload string) ([]*model.Message, error) {
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
@@ -254,7 +265,12 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 
 	fullPrompt := BuildOrchestratorPrompt(convTitle, agentNames, recentSummary, content)
 
-	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, "")
+	// 将 KB 上下文和 orchestrator 自身的 Agent 配置注入到 contextMessages，
+	// 确保 orchestrator 能感知知识库内容和自身工具配置
+	orchCtx := kbPreload
+	orchCtx = s.InjectAgentConfig(orchAgent, orchCtx, userID)
+
+	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
@@ -314,12 +330,12 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if t.Sequential || t.DependsOn != "" {
 			// First execute any accumulated parallel tasks
 			if len(parallelTasks) > 0 {
-				workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name)
+				workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name, kbPreload)
 				messages = append(messages, workerMsgs...)
 				parallelTasks = nil
 			}
 			// Execute sequential/dependent task
-			workerMsg := s.dispatchSequential(ctx, convID, userID, t, agentNameToID, depResults, orchAgent.Name)
+			workerMsg := s.dispatchSequential(ctx, convID, userID, t, agentNameToID, depResults, orchAgent.Name, kbPreload)
 			if workerMsg != nil {
 				messages = append(messages, workerMsg)
 			}
@@ -329,7 +345,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	}
 	// Flush remaining parallel tasks
 	if len(parallelTasks) > 0 {
-		workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name)
+		workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name, kbPreload)
 		messages = append(messages, workerMsgs...)
 	}
 
@@ -337,7 +353,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 }
 
 // dispatchParallel creates daemon tasks for multiple agents simultaneously and waits for all.
-func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) []*model.Message {
+func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) []*model.Message {
 	type taskResult struct {
 		index     int
 		msg       *model.Message
@@ -354,7 +370,7 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 	resultCh := make(chan taskResult, len(tasks))
 	for i, t := range tasks {
 		go func(idx int, task DispatchTask) {
-			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depSnapshot, orchestratorName)
+			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depSnapshot, orchestratorName, kbPreload)
 			if err != nil {
 				slog.Warn("parallel dispatch failed", "agent", task.AgentName, "error", err)
 				resultCh <- taskResult{index: idx, msg: nil, agentName: task.AgentName, failed: true}
@@ -378,8 +394,8 @@ func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, user
 }
 
 // dispatchSequential creates a daemon task for one agent, waits, then returns.
-func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) *model.Message {
-	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults, orchestratorName)
+func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) *model.Message {
+	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults, orchestratorName, kbPreload)
 	if err != nil {
 		slog.Warn("sequential dispatch failed", "agent", task.AgentName, "error", err)
 		depResults[task.AgentName] = "[任务失败]"
@@ -390,7 +406,7 @@ func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, us
 }
 
 // dispatchWorker dispatches to a single worker agent and returns its reply message.
-func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string) (*model.Message, error) {
+func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) (*model.Message, error) {
 	agentID, ok := agentNameToID[task.AgentName]
 	if !ok {
 		return nil, fmt.Errorf("agent %q not found in conversation", task.AgentName)
@@ -407,17 +423,33 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
 
+	// 权限校验：与 dispatchSingleAgent 保持一致
+	if agent.UserID != nil && *agent.UserID != userID {
+		return nil, ErrMsgAgentNoPerm
+	}
+	inConv, checkErr := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
+	if checkErr != nil {
+		return nil, fmt.Errorf("check worker conversation agent: %w", checkErr)
+	}
+	if !inConv {
+		return nil, ErrMsgAgentNoPerm
+	}
+
 	dispatchCtx, err := s.buildDispatchContext(ctx, convID, task, depResults, orchestratorName)
 	if err != nil {
 		slog.Warn("build worker dispatch context failed", "agent", task.AgentName, "error", err)
 		dispatchCtx = ""
 	}
 
-	// 注入知识库上下文
-	dispatchCtx = s.injectKBContext(ctx, task.Task, dispatchCtx, userID)
+	// 注入知识库上下文：优先使用预加载内容，否则从任务描述中实时解析
+	if kbPreload != "" {
+		dispatchCtx = kbPreload + dispatchCtx
+	} else {
+		dispatchCtx = s.injectKBContext(ctx, task.Task, dispatchCtx, userID)
+	}
 
 	// 注入 Agent 的系统提示词和工具配置
-	dispatchCtx = s.injectAgentConfig(agent, dispatchCtx, userID)
+	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID)
 
 	daemonTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, task.Task, dispatchCtx)
 	if err != nil {
@@ -573,10 +605,10 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	}
 }
 
-// injectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
+// InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
 // 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
 // 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
-func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
+func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
 		sb.WriteString("[系统指令]\n")
@@ -609,19 +641,25 @@ func (s *OrchestratorService) injectAgentConfig(agent *model.Agent, contextStr s
 	return sb.String()
 }
 
-// injectKBContext 解析消息中的 {{用户名/知识库名}} 引用并将文件列表注入到上下文中。
-// 如果没有引用则原样返回 contextStr。
-func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
+// kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
+const kbMaxInlineChars = 4000
+
+// PreloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
+// 生成 KB 上下文字符串。确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
+// 返回空字符串表示无引用或解析失败。
+func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content string, userID string) string {
 	if s.kbResolver == nil {
-		return contextStr
+		return ""
 	}
 
 	refs := ParseKnowledgeRefs(content)
 	if len(refs) == 0 {
-		return contextStr
+		return ""
 	}
 
 	var kbSection strings.Builder
+	needTool := false
+
 	for _, ref := range refs {
 		kb, files, err := s.kbResolver.ResolveKnowledgeRef(ctx, userID, ref.Username, ref.KBName)
 		if err != nil {
@@ -633,21 +671,60 @@ func (s *OrchestratorService) injectKBContext(ctx context.Context, content strin
 			kbSection.WriteString("（空知识库，无文件）\n")
 		} else {
 			for _, f := range files {
-				kbSection.WriteString(fmt.Sprintf("- %s (%s)\n", f.Filename, formatFileSize(f.FileSize)))
+				switch f.PreviewType {
+				case "text":
+					// 文本内容：限制内联长度，防止 context 膨胀导致截断
+					text := f.PreviewText
+					if len(text) > kbMaxInlineChars {
+						text = text[:kbMaxInlineChars] + "\n...[内容已截断，使用 kb_read_file 工具读取完整内容]"
+						needTool = true
+					}
+					kbSection.WriteString(fmt.Sprintf("- %s (%s):\n```\n%s\n```\n", f.Filename, formatFileSize(f.FileSize), text))
+				case "image":
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, %s, 使用 kb_read_file 工具获取)\n", f.Filename, formatFileSize(f.FileSize), f.PreviewText))
+					needTool = true
+				case "too_large":
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, 文件过大，使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					needTool = true
+				default:
+					kbSection.WriteString(fmt.Sprintf("- %s (%s, 使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					needTool = true
+				}
 			}
 		}
 		kbSection.WriteString("\n")
 	}
 
 	if kbSection.Len() == 0 {
-		return contextStr
+		return ""
 	}
 
 	var sb strings.Builder
 	sb.WriteString("[引用的知识库]\n")
 	sb.WriteString(kbSection.String())
-	sb.WriteString(contextStr)
+
+	// 如果有需要工具读取的文件，注入知识库读取工具
+	if needTool && s.jwtSecret != "" && s.serverURL != "" {
+		token, _, err := s.generateMgmtToken(userID)
+		if err != nil {
+			slog.Warn("generate kb tool token failed", "error", err)
+		} else {
+			sb.WriteString(GenerateKBReadTool(s.serverURL, token))
+			sb.WriteString("\n")
+		}
+	}
+
 	return sb.String()
+}
+
+// injectKBContext 是 preloadKBContext 的包装，将预加载内容拼接到 contextStr 前面。
+// 注意：该方法仅在未使用 preloadKBContext 的回退路径中调用。
+func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
+	preload := s.PreloadKBContext(ctx, content, userID)
+	if preload == "" {
+		return contextStr
+	}
+	return preload + contextStr
 }
 
 func formatFileSize(size int64) string {
