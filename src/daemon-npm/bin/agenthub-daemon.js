@@ -10,8 +10,21 @@ const path = require('node:path');
 const POLL_INTERVAL_MS = 1500;
 const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
+const WS_RECONNECT_DELAY_MS = 3000;
+const WS_PING_INTERVAL_MS = 30000;
+
+let WebSocket;
+try {
+  WebSocket = require('ws');
+} catch {
+  // Node 22+ has global WebSocket
+  if (typeof globalThis.WebSocket !== 'undefined') {
+    WebSocket = globalThis.WebSocket;
+  }
+}
 
 const activeSessions = new Map();
+const runningAgents = new Map(); // agentID → { process, sessionId, cliTool }
 
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '' };
@@ -658,9 +671,9 @@ function commandForTask(task) {
     };
   }
   if (task.cli_tool === 'claude') {
-    const sessionId = task.conversation_id && task.agent_id
+    const sessionId = task._sessionId || (task.conversation_id && task.agent_id
       ? makeSessionId(task.conversation_id, task.agent_id)
-      : null;
+      : null);
     const args = [
       '-p',
       '--permission-mode',
@@ -680,9 +693,9 @@ function commandForTask(task) {
     };
   }
   if (task.cli_tool === 'openclaw') {
-    const sessionId = task.conversation_id && task.agent_id
+    const sessionId = task._sessionId || (task.conversation_id && task.agent_id
       ? makeSessionId(task.conversation_id, task.agent_id)
-      : `agenthub-${String(task.agent_id || task.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      : `agenthub-${String(task.agent_id || task.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`);
     return {
       command,
       args: [
@@ -1024,6 +1037,217 @@ async function pollTasks(serverURL, apiKey) {
   }
 }
 
+function stopAgentProcess(agent_id) {
+  const entry = runningAgents.get(agent_id);
+  if (!entry) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(entry.process.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      process.kill(-entry.process.pid, 'SIGKILL');
+    }
+  } catch { /* already dead */ }
+  runningAgents.delete(agent_id);
+}
+
+function handleAgentStart(ws, payload) {
+  const { agent_id, cli_tool, system_prompt } = payload;
+  if (!agent_id || !cli_tool) return;
+
+  // Stop existing process if any
+  stopAgentProcess(agent_id);
+
+  const sessionId = `agenthub-${agent_id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const command = resolveCommand(cli_tool);
+  const mcpArgs = buildPlatformMcpArgs();
+
+  let args;
+  if (cli_tool === 'claude') {
+    args = [
+      '--dangerously-skip-permissions',
+      '--output-format', 'text',
+      ...mcpArgs,
+    ];
+    if (system_prompt) {
+      args.push('--system-prompt', system_prompt);
+    }
+    args.push('--session-id', sessionId);
+  } else {
+    // For other CLI tools, just note they don't support persistent mode
+    console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
+    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
+    return;
+  }
+
+  try {
+    const spec = processSpec(command, args);
+    const child = spawn(spec.command, spec.args, {
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    runningAgents.set(agent_id, { process: child, sessionId, cliTool: cli_tool });
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk) => {
+      console.log(`[agent:${agent_id}] ${chunk.trim()}`);
+    });
+    child.stderr?.on('data', (chunk) => {
+      console.error(`[agent:${agent_id}:err] ${chunk.trim()}`);
+    });
+    child.on('close', (code) => {
+      console.log(`Agent ${agent_id} process exited with code ${code}`);
+      if (runningAgents.get(agent_id)?.process === child) {
+        runningAgents.delete(agent_id);
+      }
+      ws.send(JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
+    });
+
+    console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
+    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id } }));
+  } catch (error) {
+    console.error(`Agent ${agent_id} start failed: ${error.message}`);
+    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id, error: error.message } }));
+  }
+}
+
+function handleAgentStop(ws, payload) {
+  const { agent_id } = payload;
+  if (!agent_id) return;
+  stopAgentProcess(agent_id);
+  console.log(`Agent ${agent_id} stopped`);
+  ws.send(JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
+}
+
+function handleAgentRestart(ws, payload) {
+  handleAgentStop(ws, payload);
+  handleAgentStart(ws, payload);
+}
+
+async function connectWS(serverURL, apiKey) {
+  if (!WebSocket) {
+    console.error('WebSocket not available. Please install ws: npm install ws, or use Node.js 22+');
+    console.log('Falling back to HTTP polling...');
+    return pollTasks(serverURL, apiKey);
+  }
+
+  const url = new URL(serverURL);
+  const wsPath = `${url.pathname.replace(/\/$/, '')}/daemon/ws`;
+  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsURL = `${protocol}//${url.host}${wsPath}?token=${encodeURIComponent(apiKey)}`;
+
+  let reconnectAttempts = 0;
+
+  function connect() {
+    console.log(`AgentHub daemon connecting to ${protocol}//${url.host}/daemon/ws ...`);
+    const ws = new WebSocket(wsURL);
+    let pingTimer = null;
+
+    ws.on('open', () => {
+      reconnectAttempts = 0;
+      console.log('AgentHub daemon WS connected.');
+      // Send register message over WS
+      const agents = scanAgents();
+      ws.send(JSON.stringify({
+        type: 'daemon.register',
+        data: { machine_id: os.hostname(), agents },
+      }));
+      // Start ping interval
+      pingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, WS_PING_INTERVAL_MS);
+    });
+
+    ws.on('message', async (data) => {
+      let envelope;
+      try {
+        envelope = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+
+      if (envelope.type === 'pong') return;
+
+      if (envelope.type === 'agent.start') {
+        handleAgentStart(ws, envelope.data);
+        return;
+      }
+      if (envelope.type === 'agent.stop') {
+        handleAgentStop(ws, envelope.data);
+        return;
+      }
+      if (envelope.type === 'agent.restart') {
+        handleAgentRestart(ws, envelope.data);
+        return;
+      }
+
+      if (envelope.type === 'task.dispatch') {
+        const d = envelope.data;
+        const task = {
+          id: d.task_id,
+          cli_tool: d.cli_tool,
+          prompt: d.prompt,
+          context_messages: d.context_messages,
+          agent_id: d.agent_id,
+          conversation_id: d.conversation_id,
+        };
+        if (!task.id) return;
+
+        // If agent is running persistently, use session resume
+        const runningAgent = runningAgents.get(task.agent_id);
+        if (runningAgent) {
+          task._sessionId = runningAgent.sessionId;
+        }
+
+        console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
+        const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
+        try {
+          const result = await executeTask(task);
+          stopHeartbeat();
+          ws.send(JSON.stringify({
+            type: 'task.complete',
+            data: { task_id: task.id, result },
+          }));
+          console.log(`AgentHub daemon task ${task.id} completed.`);
+        } catch (error) {
+          stopHeartbeat();
+          ws.send(JSON.stringify({
+            type: 'task.complete',
+            data: {
+              task_id: task.id,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }));
+          console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
+        }
+        return;
+      }
+
+      console.log(`AgentHub daemon unknown WS message: ${envelope.type}`);
+    });
+
+    ws.on('close', (code, reason) => {
+      if (pingTimer) clearInterval(pingTimer);
+      console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
+      setTimeout(connect, WS_RECONNECT_DELAY_MS);
+    });
+
+    ws.on('error', (error) => {
+      console.error(`AgentHub daemon WS error: ${error.message}`);
+      // close handler will trigger reconnect
+    });
+  }
+
+  connect();
+
+  // Keep process alive
+  return new Promise(() => {});
+}
+
 // ── MCP 模式 ──────────────────────────────────────────────────────────────
 // 以 stdio JSON-RPC（换行分隔）对外暴露一个 agenthub-platform MCP server，
 // 让本机 Agent（Claude Code / Codex 等）可通过 MCP 工具操作 AgentHub 平台。
@@ -1261,7 +1485,7 @@ async function main() {
   daemonConn.apiKey = apiKey;
   await register(serverURL, apiKey);
   ensureGlobalMcpConfigs(serverURL, apiKey);
-  await pollTasks(serverURL, apiKey);
+  await connectWS(serverURL, apiKey);
 }
 
 main().catch((error) => {

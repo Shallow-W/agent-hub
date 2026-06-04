@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, message, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, message, Tooltip, Typography } from 'antd';
 import {
+  CaretRightOutlined,
   DeleteOutlined,
   DesktopOutlined,
   LinkOutlined,
   PlusOutlined,
+  PoweroffOutlined,
   ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
@@ -33,6 +35,22 @@ const machineStatusColor: Record<DaemonMachine['status'], string> = {
   offline: 'default',
 };
 
+const agentStatusLabel: Record<Agent['status'], string> = {
+  online: '运行中',
+  offline: '离线',
+  busy: '忙碌',
+  error: '异常',
+  stopped: '已停止',
+};
+
+const agentStatusColor: Record<Agent['status'], string> = {
+  online: 'green',
+  offline: 'default',
+  busy: 'processing',
+  error: 'red',
+  stopped: 'default',
+};
+
 function inferOS(machine: DaemonMachine): string {
   const text = `${machine.name} ${machine.machine_id}`.toLowerCase();
   if (text.includes('darwin') || text.includes('mac')) return 'macOS';
@@ -56,9 +74,13 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   const refreshCandidates = useAgentStore((s) => s.fetchAgentCandidates);
   const refreshAgents = useAgentStore((s) => s.fetchAgents);
   const addAgentCandidate = useAgentStore((s) => s.addAgentCandidate);
+  const startAgent = useAgentStore((s) => s.startAgent);
+  const stopAgent = useAgentStore((s) => s.stopAgent);
+  const restartAgent = useAgentStore((s) => s.restartAgent);
   const [createOpen, setCreateOpen] = useState(false);
   const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [lifecycleLoading, setLifecycleLoading] = useState<Record<string, boolean>>({});
 
   const machine = machines.find((item) => item.id === machineId) ?? null;
   const machineAgents = useMemo(
@@ -115,6 +137,42 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
 
   const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string) => {
     await addAgentCandidate(candidateId, name, systemPrompt);
+  };
+
+  const handleStartAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await startAgent(agentId);
+      message.success('Agent 已启动');
+    } catch {
+      message.error('启动 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
+  };
+
+  const handleStopAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await stopAgent(agentId);
+      message.success('Agent 已停止');
+    } catch {
+      message.error('停止 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
+  };
+
+  const handleRestartAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await restartAgent(agentId);
+      message.success('Agent 已重启');
+    } catch {
+      message.error('重启 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
   };
 
   if (!machine) {
@@ -296,7 +354,12 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   <div className={styles.agentMain}>
                     <Avatar size={32} icon={<RobotOutlined />} />
                     <div className={styles.agentInfo}>
-                      <div className={styles.agentName}>{agent.name}</div>
+                      <div className={styles.agentName}>
+                        {agent.name}
+                        <Tag color={agentStatusColor[agent.status]} style={{ marginLeft: 6, fontSize: 10 }}>
+                          {agentStatusLabel[agent.status]}
+                        </Tag>
+                      </div>
                       <div className={styles.agentMeta}>
                         {agent.cli_tool}
                         {agent.version ? ` · ${agent.version}` : ''}
@@ -305,6 +368,51 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                         <div className={styles.agentPrompt}>{agent.system_prompt}</div>
                       )}
                     </div>
+                  </div>
+                  <div className={styles.agentActions}>
+                    {(agent.status === 'stopped' || agent.status === 'offline' || agent.status === 'error') && (
+                      <Tooltip title="启动">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CaretRightOutlined />}
+                          loading={lifecycleLoading[agent.id]}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartAgent(agent.id);
+                          }}
+                        />
+                      </Tooltip>
+                    )}
+                    {(agent.status === 'online' || agent.status === 'busy') && (
+                      <>
+                        <Tooltip title="重启">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={lifecycleLoading[agent.id]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRestartAgent(agent.id);
+                            }}
+                          />
+                        </Tooltip>
+                        <Tooltip title="停止">
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<PoweroffOutlined />}
+                            loading={lifecycleLoading[agent.id]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStopAgent(agent.id);
+                            }}
+                          />
+                        </Tooltip>
+                      </>
+                    )}
                   </div>
                   {capabilityList.length > 0 && (
                     <div className={styles.agentTags}>

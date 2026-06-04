@@ -155,6 +155,24 @@ func (t *MachineTracker) sweep() {
 	}
 }
 
+// MarkOffline 标记单个机器离线（WS 断开时调用，内存 + 同步 DB）。
+func (t *MachineTracker) MarkOffline(machineID string) {
+	t.mu.Lock()
+	entry, exists := t.machines[machineID]
+	if exists {
+		entry.dbOnline = false
+		delete(t.machines, machineID)
+	}
+	t.mu.Unlock()
+
+	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := t.repo.SetMachineAndAgentsOffline(dbCtx, machineID); err != nil {
+		t.logger.Error("mark machine offline failed", "machine_id", machineID, "error", err)
+	}
+	cancel()
+	t.logger.Info("machine went offline (ws disconnect)", "machine_id", machineID)
+}
+
 func (t *MachineTracker) markOnlineSync(machineID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

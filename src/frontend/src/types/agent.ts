@@ -1,5 +1,5 @@
 export type AgentType = 'system' | 'custom';
-export type AgentStatus = 'online' | 'offline' | 'busy' | 'error';
+export type AgentStatus = 'online' | 'offline' | 'busy' | 'error' | 'stopped';
 
 export interface Agent {
   id: string;

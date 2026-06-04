@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -56,6 +57,7 @@ type OrchestratorService struct {
 	serverURL string
 
 	kbResolver OrchKBResolver
+	daemonHub  *ws.DaemonHub
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
@@ -75,6 +77,11 @@ func (s *OrchestratorService) SetServerURL(url string) {
 // SetKBResolver sets the knowledge base resolver for injecting KB context.
 func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 	s.kbResolver = resolver
+}
+
+// SetDaemonHub sets the daemon WebSocket hub for task dispatch.
+func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
+	s.daemonHub = hub
 }
 
 // NewOrchestratorService creates a new orchestrator service.
@@ -219,6 +226,22 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
+	// If daemon is connected via WS, register promise and push task immediately
+	if s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
+		s.daemonHub.RegisterTaskPromise(task.ID)
+		_ = s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+			Type: "task.dispatch",
+			Data: map[string]interface{}{
+				"task_id":          task.ID,
+				"cli_tool":         agent.CLITool,
+				"prompt":           content,
+				"context_messages": agentCtx,
+				"agent_id":         agent.ID,
+				"conversation_id":  convID,
+			},
+		})
+	}
+
 	task, err = s.waitDaemonTask(ctx, task.ID)
 	if err != nil {
 		return nil, err
@@ -273,6 +296,22 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
+	}
+
+	// If orchestrator daemon is connected via WS, register promise and push task
+	if s.daemonHub != nil && s.daemonHub.IsConnected(*orchAgent.MachineID) {
+		s.daemonHub.RegisterTaskPromise(orchTask.ID)
+		_ = s.daemonHub.SendToMachine(*orchAgent.MachineID, ws.WSMessage{
+			Type: "task.dispatch",
+			Data: map[string]interface{}{
+				"task_id":          orchTask.ID,
+				"cli_tool":         orchAgent.CLITool,
+				"prompt":           fullPrompt,
+				"context_messages": orchCtx,
+				"agent_id":         orchAgent.ID,
+				"conversation_id":  convID,
+			},
+		})
 	}
 
 	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
@@ -456,6 +495,22 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("create worker daemon task: %w", err)
 	}
 
+	// If worker daemon is connected via WS, register promise and push task
+	if s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
+		s.daemonHub.RegisterTaskPromise(daemonTask.ID)
+		_ = s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+			Type: "task.dispatch",
+			Data: map[string]interface{}{
+				"task_id":          daemonTask.ID,
+				"cli_tool":         agent.CLITool,
+				"prompt":           task.Task,
+				"context_messages": dispatchCtx,
+				"agent_id":         agent.ID,
+				"conversation_id":  convID,
+			},
+		})
+	}
+
 	daemonTask, err = s.waitDaemonTask(ctx, daemonTask.ID)
 	if err != nil {
 		return nil, err
@@ -580,11 +635,35 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 	return sb.String(), agentNames, nil
 }
 
-// waitDaemonTask polls for daemon task completion (600ms interval, 120s timeout).
+// waitDaemonTask waits for a daemon task to complete, preferring channel-based
+// notification via DaemonHub when available, falling back to DB polling otherwise.
 func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
+	// Try channel-based wait if DaemonHub is available
+	if s.daemonHub != nil {
+		if ch := s.daemonHub.AwaitTaskResult(taskID); ch != nil {
+			defer s.daemonHub.RemoveTaskPromise(taskID)
+			select {
+			case result := <-ch:
+				task := &model.DaemonTask{
+					ID:     result.TaskID,
+					Status: "completed",
+					Result: result.Result,
+				}
+				if result.Error != "" {
+					task.Status = "failed"
+					task.Error = result.Error
+				}
+				return task, nil
+			case <-ctx.Done():
+				return nil, ErrMsgAgentTimeout
+			}
+		}
+	}
+
+	// Fallback: DB polling (for HTTP-only daemons)
 	ticker := time.NewTicker(600 * time.Millisecond)
 	defer ticker.Stop()
 

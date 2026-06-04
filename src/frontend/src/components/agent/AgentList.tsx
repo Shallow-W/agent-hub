@@ -26,6 +26,7 @@ const statusColor: Record<AgentStatus, string> = {
   offline: 'default',
   busy: 'processing',
   error: 'red',
+  stopped: 'default',
 };
 
 const machineStatusLabel: Record<DaemonMachine['status'], string> = {

@@ -158,6 +158,9 @@ func main() {
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
+	daemonHub := ws.NewDaemonHub(logger)
+	orchSvc.SetDaemonHub(daemonHub)
+	agentSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
@@ -167,7 +170,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
@@ -279,7 +282,8 @@ func main() {
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
-		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
+		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
+			apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
@@ -345,6 +349,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
+	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
 
 	// 启动 HTTP 服务器
@@ -374,7 +379,8 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	cancel() // 停止 Hub
+	cancel() // stops Hub, DaemonHub, and MachineTracker
+	daemonHub.Shutdown(shutdownCtx)
 
 	if rdb != nil {
 		if err := rdb.Close(); err != nil {

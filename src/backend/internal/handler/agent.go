@@ -265,6 +265,26 @@ func (h *AgentHandler) GenerateAgentToken(c *gin.Context) {
 	})
 }
 
+// StartAgent 启动 Agent
+func (h *AgentHandler) StartAgent(c *gin.Context) {
+	agentID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	err := h.svc.StartAgent(c.Request.Context(), agentID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40443, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentOffline) {
+			middleware.ErrorResponse(c, http.StatusConflict, 40941, "Agent 所在电脑不在线，无法启动")
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50044, "启动 Agent 失败")
+		return
+	}
+	middleware.SuccessResponse(c, map[string]string{"message": "agent started"})
+}
+
 // RestartAgent 重启 Agent
 func (h *AgentHandler) RestartAgent(c *gin.Context) {
 	agentID := c.Param("id")

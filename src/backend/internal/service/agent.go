@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -79,10 +81,11 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo     AgentRepo
-	tracker  *MachineTracker
+	repo      AgentRepo
+	tracker   *MachineTracker
 	jwtSecret string
 	serverURL string
+	daemonHub *ws.DaemonHub
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -96,6 +99,11 @@ type DiscoveredAgent struct {
 // NewAgentService 创建 Agent 服务
 func NewAgentService(repo AgentRepo, tracker *MachineTracker) *AgentService {
 	return &AgentService{repo: repo, tracker: tracker}
+}
+
+// SetDaemonHub 注入 DaemonHub（用于通过 WS 向 daemon 发送控制命令）
+func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
+	s.daemonHub = hub
 }
 
 // SetJWTSecret 设置 JWT 密钥（用于生成 Agent Token）
@@ -128,6 +136,13 @@ func (s *AgentService) TouchMachine(machineID string) {
 func (s *AgentService) MarkMachineOnline(machineID string) {
 	if s.tracker != nil {
 		s.tracker.MarkOnline(machineID)
+	}
+}
+
+// MarkMachineOffline 标记机器离线（daemon WS 断开时调用）。
+func (s *AgentService) MarkMachineOffline(machineID string) {
+	if s.tracker != nil {
+		s.tracker.MarkOffline(machineID)
 	}
 }
 
@@ -368,7 +383,45 @@ func (s *AgentService) GenerateAgentToken(ctx context.Context, userID string) (s
 	return tokenStr, expiresAt, nil
 }
 
-// RestartAgent 重启 Agent：通过 daemon task 通知远端电脑重新启动对应 CLI 进程。
+// StartAgent 启动 Agent 进程：通过 WS 通知远端 daemon 启动对应 CLI 进程。
+func (s *AgentService) StartAgent(ctx context.Context, agentID, userID string) error {
+	if agentID == "" || userID == "" {
+		return ErrAgentInvalidInput
+	}
+	agent, err := s.repo.GetByID(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("get agent: %w", err)
+	}
+	if agent == nil {
+		return ErrAgentNotFound
+	}
+	if agent.UserID != nil && *agent.UserID != userID {
+		return ErrAgentNotFound
+	}
+	if agent.MachineID == nil || *agent.MachineID == "" {
+		return ErrAgentOffline
+	}
+
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return ErrAgentOffline
+	}
+
+	// Update status to indicate starting
+	if err := s.repo.UpdateAgentStatus(ctx, agentID, "online"); err != nil {
+		return fmt.Errorf("update agent status: %w", err)
+	}
+
+	return s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "agent.start",
+		Data: map[string]interface{}{
+			"agent_id":      agent.ID,
+			"cli_tool":      agent.CLITool,
+			"system_prompt": agent.SystemPrompt,
+		},
+	})
+}
+
+// RestartAgent 重启 Agent：优先通过 WS 通知远端 daemon，否则回退到 task-based 重启。
 func (s *AgentService) RestartAgent(ctx context.Context, agentID, userID string) error {
 	if agentID == "" || userID == "" {
 		return ErrAgentInvalidInput
@@ -387,7 +440,20 @@ func (s *AgentService) RestartAgent(ctx context.Context, agentID, userID string)
 	if agent.MachineID == nil || *agent.MachineID == "" {
 		return ErrAgentOffline
 	}
-	// 创建重启任务，conversation_id 和 prompt 留空，仅作为控制指令
+
+	// Try WS first
+	if s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
+		return s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+			Type: "agent.restart",
+			Data: map[string]interface{}{
+				"agent_id":      agent.ID,
+				"cli_tool":      agent.CLITool,
+				"system_prompt": agent.SystemPrompt,
+			},
+		})
+	}
+
+	// Fallback: old task-based restart (for HTTP-only daemons)
 	_, err = s.repo.CreateDaemonTask(ctx, userID, "", agentID, *agent.MachineID, agent.CLITool, "__restart__", "")
 	if err != nil {
 		return fmt.Errorf("create restart task: %w", err)
@@ -395,7 +461,7 @@ func (s *AgentService) RestartAgent(ctx context.Context, agentID, userID string)
 	return nil
 }
 
-// StopAgent 停止 Agent：将状态设为 offline 并清除 machine_id。
+// StopAgent 停止 Agent：优先通过 WS 通知 daemon 停止进程，然后更新状态。
 func (s *AgentService) StopAgent(ctx context.Context, agentID, userID string) error {
 	if agentID == "" || userID == "" {
 		return ErrAgentInvalidInput
@@ -410,7 +476,21 @@ func (s *AgentService) StopAgent(ctx context.Context, agentID, userID string) er
 	if agent.UserID != nil && *agent.UserID != userID {
 		return ErrAgentNotFound
 	}
-	return s.repo.ClearAgentMachine(ctx, agentID)
+
+	// Try WS stop command first
+	if agent.MachineID != nil && *agent.MachineID != "" && s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
+		if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+			Type: "agent.stop",
+			Data: map[string]interface{}{
+				"agent_id": agent.ID,
+			},
+		}); err != nil {
+			slog.Warn("WS stop agent failed, falling back to DB", "agent_id", agentID, "error", err)
+		}
+	}
+
+	// Update status in DB
+	return s.repo.UpdateAgentStatus(ctx, agentID, "offline")
 }
 
 // GetMachineConnectCommand 获取电脑连接命令。需要重新生成 API Key（原始密钥只存储哈希）。

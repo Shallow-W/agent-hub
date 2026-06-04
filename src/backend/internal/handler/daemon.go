@@ -9,6 +9,7 @@ import (
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
 	"nhooyr.io/websocket"
 )
@@ -19,15 +20,17 @@ type DaemonHandler struct {
 	token          string
 	logger         *slog.Logger
 	allowedOrigins []string
+	daemonHub      *ws.DaemonHub
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
-func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog.Logger, allowedOrigins []string) *DaemonHandler {
+func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub) *DaemonHandler {
 	return &DaemonHandler{
 		agentSvc:       agentSvc,
 		token:          token,
 		logger:         logger,
 		allowedOrigins: allowedOrigins,
+		daemonHub:      daemonHub,
 	}
 }
 
@@ -49,9 +52,28 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "disconnect")
 
+	// 创建 DaemonClient 并注册到 DaemonHub
+	machineID := ""
+	if machine != nil {
+		machineID = machine.ID
+	}
+	client := ws.NewDaemonClient(conn, machineID)
+	h.daemonHub.Register(client)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// 启动写泵，用于向 daemon 发送消息
+	go client.WritePump(ctx)
+
+	// 读取循环
 	h.readLoop(ctx, conn, machine)
+
+	// 断开连接时注销
+	h.daemonHub.Unregister(client)
+	if machine != nil {
+		h.agentSvc.MarkMachineOffline(machine.ID)
+	}
 }
 
 // RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
@@ -213,6 +235,8 @@ func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, mach
 		switch envelope.Type {
 		case "daemon.register":
 			h.handleRegister(ctx, envelope.Data, machine)
+		case "task.complete":
+			h.handleTaskComplete(envelope.Data, machine)
 		case "ping":
 			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`)); err != nil {
 				h.logger.Warn("daemon pong failed", "error", err)
@@ -220,6 +244,32 @@ func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, mach
 			}
 		default:
 			h.logger.Warn("unknown daemon message", "type", envelope.Type)
+		}
+	}
+}
+
+func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.DaemonMachine) {
+	var req struct {
+		TaskID string `json:"task_id"`
+		Result string `json:"result"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid task.complete data", "error", err)
+		return
+	}
+	// Resolve WS promise first (for orchestrator channel-based wait)
+	h.daemonHub.ResolveTask(req.TaskID, &ws.TaskResult{
+		TaskID: req.TaskID,
+		Result: req.Result,
+		Error:  req.Error,
+	})
+	// Also persist to DB (for HTTP fallback and audit)
+	if machine != nil {
+		taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.agentSvc.CompleteDaemonTask(taskCtx, machine, req.TaskID, req.Result, req.Error); err != nil {
+			h.logger.Warn("persist task result failed", "task_id", req.TaskID, "error", err)
 		}
 	}
 }

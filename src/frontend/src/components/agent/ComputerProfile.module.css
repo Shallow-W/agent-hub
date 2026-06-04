@@ -213,6 +213,19 @@
   flex: 1;
 }
 
+.agentActions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.agentRow:hover .agentActions {
+  opacity: 1;
+}
+
 .emptyRow,
 .empty {
   display: flex;
