@@ -8,6 +8,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { parseCapabilities } from './agentPresentation';
 import type {
   Agent,
   AgentCandidate,
@@ -286,7 +287,9 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                   : '电脑连接成功后，会在这里显示可用 CLI。你可以基于同一个 CLI 添加多个 Agent。'}
               </div>
             ) : (
-              safeCandidates.map((candidate) => (
+              safeCandidates.map((candidate) => {
+                      const capabilities = parseCapabilities(candidate.capabilities_json);
+                      return (
                   <div className={styles.candidateItem} key={candidate.id}>
                     <div className={styles.candidateMeta}>
                       <strong>{candidate.name}</strong>
@@ -320,7 +323,8 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                       添加 Agent
                     </Button>
                   </div>
-              ))
+              );
+              })
             )}
           </div>
         </div>
