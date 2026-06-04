@@ -34,11 +34,17 @@
 | `create_group` | `POST /api/groups` |
 | `list_agents` | `GET /api/agents` |
 
-### M11-4 派发任务自动注入（claude 已完成）
+### M11-4 自动注入（已完成，全 CLI 覆盖）
 
-- daemon 派发 claude 任务时（[agenthub-daemon.js](../../src/daemon-npm/bin/agenthub-daemon.js) `commandForTask`）自动追加 `--mcp-config <inline JSON>` + `--allowedTools mcp__agenthub-platform`，把本 daemon 以 `--mcp` 作为 stdio MCP server 挂上，聊天任务原生可调平台工具，无需手动 `claude mcp add`。
-- 凭证复用轮询 daemon 自身的 machine key（`daemonConn`）。
-- OpenClaw / Codex 的 `agent`/`exec` 子命令无按次注入能力，需走各自全局 MCP 配置（如 `openclaw mcp add`），不在自动注入范围内。
+按各 CLI 的能力分两条路径，凭证统一复用轮询 daemon 自身的 machine key：
+
+- **Claude Code（按次注入）**：`commandForTask` 的 claude 分支自动追加
+  `--mcp-config <inline JSON>` + `--allowedTools mcp__agenthub-platform`，每个聊天任务挂载本 daemon 的 `--mcp` server。
+- **OpenClaw / Codex（启动时全局注入）**：`agent`/`exec` 无按次 flag，故 daemon 启动（轮询模式）时 `ensureGlobalMcpConfigs` 幂等写入各自全局 MCP 配置：
+  - OpenClaw：`openclaw mcp set agenthub-platform <json>`
+  - Codex：`codex mcp remove`（忽略错误）+ `codex mcp add agenthub-platform -- node <daemon> ... --mcp`
+  - 仅对本机已安装的 CLI 执行，失败仅告警、不阻断轮询。
+- **MCP server 命令统一用 `node`（PATH 解析）而非 `process.execPath`**，规避 `C:\Program Files\nodejs` 空格在子进程参数转义中被拆断的问题。
 
 ## 验收标准
 
@@ -46,7 +52,9 @@
 - [x] MCP 握手、`tools/list`、`tools/call` 全流程可用
 - [x] 5 个工具均真实命中后端，且携带换取的 JWT
 - [x] 派发 claude 任务时自动注入平台 MCP（命令参数验证通过）
-- [ ] 在真实 Claude Code 聊天任务中由 Agent 实际调用端到端验证
+- [x] daemon 启动时为 OpenClaw 幂等写入全局 MCP 配置（set/show/unset 实测通过）
+- [x] Codex 全局注入代码就绪（本机未安装 codex，逻辑随安装后自动生效，待真机验证）
+- [ ] 在真实 Agent 聊天任务中实际调用工具的端到端验证（需有效 machine key）
 
 ## 依赖
 

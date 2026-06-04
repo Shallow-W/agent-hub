@@ -24,12 +24,55 @@ function buildPlatformMcpArgs() {
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
-        command: process.execPath,
+        // 用 'node'（PATH 解析）而非 process.execPath，避免 "Program Files" 空格在
+        // 子进程参数转义中被拆断；daemon 始终在 node 下运行，PATH 必有 node。
+        command: 'node',
         args: [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'],
       },
     },
   });
   return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
+}
+
+// ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
+// 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+function ensureGlobalMcpConfigs(serverURL, apiKey) {
+  const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
+  registerOpenClawMcp(mcpArgs);
+  registerCodexMcp(mcpArgs);
+}
+
+function registerOpenClawMcp(mcpArgs) {
+  const command = 'openclaw';
+  if (commandVersion(command) === null) return;
+  const value = JSON.stringify({ command: 'node', args: mcpArgs });
+  const spec = processSpec(command, ['mcp', 'set', 'agenthub-platform', value]);
+  const result = spawnSync(spec.command, spec.args, {
+    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) {
+    console.log('已为 OpenClaw 配置平台 MCP（agenthub-platform）。');
+  } else {
+    console.error(`OpenClaw MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+  }
+}
+
+function registerCodexMcp(mcpArgs) {
+  const command = resolveCommand('codex');
+  if (commandVersion(command) === null) return;
+  // 幂等：先移除旧条目（忽略不存在的报错），再新增。
+  const remove = processSpec(command, ['mcp', 'remove', 'agenthub-platform']);
+  spawnSync(remove.command, remove.args, { timeout: 15000, windowsHide: true, stdio: 'ignore' });
+  const add = processSpec(command, ['mcp', 'add', 'agenthub-platform', '--', 'node', ...mcpArgs]);
+  const result = spawnSync(add.command, add.args, {
+    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) {
+    console.log('已为 Codex 配置平台 MCP（agenthub-platform）。');
+  } else {
+    console.error(`Codex MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+  }
 }
 
 function killSessionProcess(sessionId) {
@@ -1217,6 +1260,7 @@ async function main() {
   daemonConn.serverURL = serverURL;
   daemonConn.apiKey = apiKey;
   await register(serverURL, apiKey);
+  ensureGlobalMcpConfigs(serverURL, apiKey);
   await pollTasks(serverURL, apiKey);
 }
 
