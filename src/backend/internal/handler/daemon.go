@@ -43,6 +43,9 @@ func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog
 // Handle 处理 daemon WebSocket 连接
 func (h *DaemonHandler) Handle(c *gin.Context) {
 	token := c.Query("token")
+	if token == "" {
+		token = c.Query("key")
+	}
 	machine, err := h.authenticateMachine(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 40120, "message": "无效 daemon token", "data": nil})
@@ -66,6 +69,7 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 		h.registerDaemonConn(machine.ID, daemonConn)
 		defer h.unregisterDaemonConn(machine.ID, daemonConn)
 	}
+	go h.serverPingLoop(ctx, daemonConn, machine)
 	h.readLoop(ctx, daemonConn, machine)
 }
 
@@ -181,8 +185,29 @@ func (h *DaemonHandler) readLoop(ctx context.Context, daemonConn *daemonConn, ma
 				h.logger.Warn("daemon pong failed", "error", err)
 				return
 			}
+		case "pong":
+			if machine != nil {
+				h.agentSvc.TouchMachine(machine.ID)
+			}
 		default:
 			h.logger.Warn("unknown daemon message", "type", envelope.Type)
+		}
+	}
+}
+
+func (h *DaemonHandler) serverPingLoop(ctx context.Context, daemonConn *daemonConn, machine *model.DaemonMachine) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := daemonConn.write(ctx, []byte(`{"type":"ping"}`)); err != nil {
+				h.logger.Warn("daemon ping failed", "error", err)
+				_ = daemonConn.conn.Close(websocket.StatusInternalError, "daemon ping failed")
+				return
+			}
 		}
 	}
 }

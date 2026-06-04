@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
+const INBOUND_WATCHDOG_MS = 70000;
 
 const activeSessions = new Map();
 const wsTaskQueue = [];
@@ -533,8 +534,8 @@ function apiURL(serverURL, apiKey, pathname) {
 function daemonWSURL(serverURL, apiKey) {
   const url = new URL(serverURL);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = `${url.pathname.replace(/\/$/, '')}/daemon/ws`;
-  url.searchParams.set('token', apiKey);
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/daemon/connect`;
+  url.searchParams.set('key', apiKey);
   url.hash = '';
   return url;
 }
@@ -1128,13 +1129,6 @@ function startWSHeartbeat(ws, taskId) {
   return () => clearInterval(timer);
 }
 
-function startDaemonHeartbeat(ws) {
-  const timer = setInterval(() => {
-    ws.send(JSON.stringify({ type: 'ping' }));
-  }, 10000);
-  return () => clearInterval(timer);
-}
-
 function enqueueWSTask(ws, task) {
   if (!task || !task.id) return;
   wsTaskQueue.push({ ws, task });
@@ -1186,13 +1180,26 @@ async function runDaemonWS(serverURL, apiKey) {
       const ws = await connectWS(daemonWSURL(serverURL, apiKey));
       retry = 1000;
       await new Promise((resolve) => {
-        const stopDaemonHeartbeat = startDaemonHeartbeat(ws);
+        let watchdog = null;
+        const resetWatchdog = () => {
+          if (watchdog) clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            console.error(`AgentHub daemon ${INBOUND_WATCHDOG_MS / 1000}s 未收到服务端消息，正在重连...`);
+            ws.close();
+          }, INBOUND_WATCHDOG_MS);
+        };
+        resetWatchdog();
         ws.onMessage((line) => {
+          resetWatchdog();
           let msg = null;
           try {
             msg = JSON.parse(line);
           } catch {
             return;
+          }
+          if (msg.type === 'ping') {
+            console.log('AgentHub daemon received ping.');
+            ws.send(JSON.stringify({ type: 'pong' }));
           }
           if (msg.type === 'task.execute') {
             enqueueWSTask(ws, msg.data);
@@ -1204,7 +1211,7 @@ async function runDaemonWS(serverURL, apiKey) {
           }
         });
         ws.onClose(() => {
-          stopDaemonHeartbeat();
+          if (watchdog) clearTimeout(watchdog);
           resolve();
         });
         registerOnWS(ws);

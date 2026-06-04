@@ -336,6 +336,7 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
+	router.GET("/daemon/connect", daemonHandler.Handle)
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
 
