@@ -48,14 +48,16 @@ AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，
 | 你想做什么 | 去哪里看 |
 |-----------|---------|
 | 了解产品需求 | `doc/需求文档.md`，原始PDF：`doc/AgentHub-_多Agent协作平台设计.pdf` |
-| 了解系统架构和目录结构 | `doc/conventions/project-structure.md` |
+| 了解系统架构 | `doc/architecture/overview.md` |
+| 了解项目目录结构 | `doc/conventions/project-structure.md` |
 | 了解前端编码规范 | `doc/conventions/frontend-conventions.md` |
 | 了解后端编码规范 | `doc/conventions/backend-conventions.md` |
 | 了解 Git 分支和提交规范 | `doc/conventions/git-conventions.md` |
 | 了解文档编写规范 | `doc/conventions/doc-conventions.md` |
+| 了解开发流程经验教训 | `doc/conventions/process-lessons.md` |
+| 了解 API 接口设计 | `doc/reference/api.md` |
+| 了解模块任务详情 | `doc/task/M0-基础设施.md` ~ `doc/task/M10-Pin上下文.md` |
 | 了解当前任务进度 | `doc/TASKLIST.md` |
-| 了解 API 设计 | `doc/design/api-*.md` |
-| 了解数据模型 | `doc/design/data-model.md` |
 
 ## 优先级
 - **P0**：IM 聊天核心体验、单聊/群聊、多 Agent 接入（≥2 个）、Orchestrator
@@ -85,7 +87,9 @@ AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，
 14. 接口在消费方定义，保持小（1-3 个方法）
 
 ### 工作流
-15. 有实质性改动则直接 commit，格式：`type(scope): 中文描述`
-16. Commit 后自动启动 2 个并行 sub-agent review，最少 3 轮最多 8 轮
-17. Review 修复 commit 不再触发 review（避免反馈循环）
-18. 文档更新 commit 不触发 review
+15. **无明确指令时**，按 `doc/TASKLIST.md` 顺序解决未完成任务（按依赖关系，优先最短跑通路径）
+16. **提出新任务时**，在 `doc/TASKLIST.md` 添加索引行，在 `doc/task/` 下创建详情文件，遵循 `doc/conventions/` 中的文件命名和格式规范
+17. **完成任务时**，将 TASKLIST.md 中对应状态改为 `[x]`
+18. **每次任务完成后，自行判断是否需要提交代码。有实质性改动则直接 commit**，严格遵守 `doc/conventions/git-conventions.md` 中的 commit 格式：`type(scope): 中文描述`。不要主动询问用户是否提交
+19. **提交后自动 Review + 测试**：commit 后启动 3 个并行 sub-agent：（a）代码质量/逻辑缺陷审查——侧重代码可读性、潜在 bug、边界处理、SOLID 原则；（b）功能验证——扮演产品经理角色，验证功能是否完整实现、交互流程是否合理、用户体验是否达标、是否有遗漏场景；（c）端到端测试——根据变更内容编写并执行实际测试（API 调用、UI 操作），验证核心流程可跑通，发现的 bug 记录到 `doc/TASKLIST.md`。最少迭代 3 轮，最多 8 轮，收敛即提前停止。review/测试修复产生的 commit 不再触发本条规则（避免反馈循环）。**测试环节必须覆盖正常路径和边界情况，不得仅依赖编译通过作为验证手段**
+20. **Review 通过后更新文档**：检查本次任务是否涉及需要文档化的内容（新增结构体/接口、API 变更、架构调整等），如有则同步更新 `doc/` 下的设计文档、API 文档或数据模型文档。文档更新产生的 commit 不再触发步骤 19

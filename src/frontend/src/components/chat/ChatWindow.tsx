@@ -356,9 +356,16 @@ export const ChatWindow: React.FC = () => {
       <MessageList conversationId={activeConv.id} onReply={setReplyTo} onForward={setForwardMessage} />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
-          {otherTyping.length === 1
-            ? `${otherTyping[0]?.username || otherTyping[0]?.userId || '用户'} 正在输入...`
-            : `${otherTyping.length} 人正在输入...`}
+          <span className={styles.typingDots}>
+            <span className={styles.typingDot} />
+            <span className={styles.typingDot} />
+            <span className={styles.typingDot} />
+          </span>
+          <span>
+            {otherTyping.length === 1
+              ? `${otherTyping[0]?.username || otherTyping[0]?.userId || '用户'} 正在输入`
+              : `${otherTyping.length} 人正在输入`}
+          </span>
         </div>
       )}
       <ChatInput

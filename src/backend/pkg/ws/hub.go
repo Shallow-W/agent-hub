@@ -55,7 +55,7 @@ const (
 	pingInterval     = 30 * time.Second
 	pongTimeout      = 60 * time.Second
 	cleanupInterval  = 15 * time.Second
-	maxConnsPerUser  = 15 // per-user max WS connections (dev tool, multiple tabs expected)
+	maxConnsPerUser  = 50 // per-user max WS connections (dev tool, multiple tabs expected)
 )
 
 // Client 封装单个 WebSocket 连接及其元数据

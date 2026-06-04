@@ -54,15 +54,18 @@
 }
 
 .timeDivider {
+  position: relative;
   width: fit-content;
-  margin: 8px auto 12px;
-  padding: 4px 12px;
+  margin: 16px auto 14px;
+  padding: 3px 14px;
   border-radius: 999px;
   color: var(--color-text-tertiary);
   background: var(--color-surface);
   box-shadow: var(--shadow-sm);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  z-index: 1;
 }
 
 .empty {

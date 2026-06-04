@@ -118,11 +118,58 @@
 }
 
 .typingIndicator {
-  padding: 6px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
   font-size: 12px;
-  color: var(--color-primary);
+  color: var(--color-text-secondary);
   background-color: var(--color-surface);
-  font-weight: 500;
+  animation: typingSlideIn 0.2s ease;
+}
+
+.typingDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.typingDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typingDot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes typingSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .headerActions :global(.ant-btn) {

@@ -26,7 +26,6 @@ type AgentRepo interface {
 	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
 	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error
 	CreateDaemonMachine(ctx context.Context, userID, name, apiKeyHash string) (*model.DaemonMachine, error)
-	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	ListDaemonMachines(ctx context.Context, userID string) ([]model.DaemonMachine, error)
 	DeleteDaemonMachine(ctx context.Context, id, userID string) (bool, error)
 	GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash string) (*model.DaemonMachine, error)
