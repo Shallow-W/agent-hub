@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"testing"
+
+	"github.com/agent-hub/backend/internal/model"
 )
 
 // 内存版 daemon 任务队列：不依赖 DB，db 字段保持 nil。
@@ -44,6 +46,29 @@ func TestDaemonTask_Lifecycle(t *testing.T) {
 	done, _ := r.GetDaemonTask(ctx, created.ID)
 	if done.Status != "completed" || done.Result != "done!" || done.CompletedAt == nil {
 		t.Fatalf("completed task: %+v", done)
+	}
+}
+
+func TestDaemonTask_DispatcherCalledAfterCreate(t *testing.T) {
+	r := newTaskRepo()
+	ctx := context.Background()
+	called := make(chan string, 1)
+	r.SetDaemonTaskDispatcher(func(task *model.DaemonTask) {
+		called <- task.ID
+	})
+
+	created, err := r.CreateDaemonTask(ctx, "u1", "c1", "a1", "m1", "claude", "hi", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	select {
+	case got := <-called:
+		if got != created.ID {
+			t.Fatalf("dispatcher got task %s, want %s", got, created.ID)
+		}
+	default:
+		t.Fatalf("dispatcher was not called")
 	}
 }
 

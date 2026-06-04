@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -19,6 +20,11 @@ type DaemonHandler struct {
 	token          string
 	logger         *slog.Logger
 	allowedOrigins []string
+	connMu         sync.RWMutex
+	conns          map[string]*daemonConn
+	dispatchMu     sync.Mutex
+	dispatching    map[string]bool
+	dispatchAgain  map[string]bool
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
@@ -28,6 +34,9 @@ func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog
 		token:          token,
 		logger:         logger,
 		allowedOrigins: allowedOrigins,
+		conns:          make(map[string]*daemonConn),
+		dispatching:    make(map[string]bool),
+		dispatchAgain:  make(map[string]bool),
 	}
 }
 
@@ -51,7 +60,12 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h.readLoop(ctx, conn, machine)
+	daemonConn := &daemonConn{conn: conn}
+	if machine != nil {
+		h.registerDaemonConn(machine.ID, daemonConn)
+		defer h.unregisterDaemonConn(machine.ID, daemonConn)
+	}
+	h.readLoop(ctx, daemonConn, machine)
 }
 
 // RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
@@ -80,7 +94,7 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
 			return
 		}
-			h.agentSvc.MarkMachineOnline(machine.ID)
+		h.agentSvc.MarkMachineOnline(machine.ID)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
 		return
 	}
@@ -193,9 +207,9 @@ func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (
 	return h.agentSvc.GetDaemonMachineByAPIKey(authCtx, token)
 }
 
-func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, machine *model.DaemonMachine) {
+func (h *DaemonHandler) readLoop(ctx context.Context, daemonConn *daemonConn, machine *model.DaemonMachine) {
 	for {
-		_, data, err := conn.Read(ctx)
+		_, data, err := daemonConn.conn.Read(ctx)
 		if err != nil {
 			h.logger.Debug("daemon websocket read end", "error", err)
 			return
@@ -213,8 +227,14 @@ func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, mach
 		switch envelope.Type {
 		case "daemon.register":
 			h.handleRegister(ctx, envelope.Data, machine)
+		case "task.done":
+			h.handleTaskDone(ctx, envelope.Data, machine, false)
+		case "task.error":
+			h.handleTaskDone(ctx, envelope.Data, machine, true)
+		case "task.heartbeat":
+			h.handleTaskHeartbeat(envelope.Data, machine)
 		case "ping":
-			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`)); err != nil {
+			if err := daemonConn.write(ctx, []byte(`{"type":"pong"}`)); err != nil {
 				h.logger.Warn("daemon pong failed", "error", err)
 				return
 			}
@@ -241,8 +261,9 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			return
 		}
-			h.agentSvc.MarkMachineOnline(machine.ID)
+		h.agentSvc.MarkMachineOnline(machine.ID)
 		h.logger.Info("daemon machine agents registered", "machine_id", req.MachineID, "machine", machine.ID, "count", len(req.Agents))
+		h.startDaemonDispatch(machine.ID)
 		return
 	}
 
