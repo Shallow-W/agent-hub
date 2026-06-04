@@ -77,7 +77,6 @@ function npmWrapperScript(command) {
   if (!root) return null;
   const scripts = {
     claude: path.join(root, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
-    codex: path.join(root, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
     openclaw: path.join(root, 'npm', 'node_modules', 'openclaw', 'openclaw.mjs'),
   };
   const script = scripts[command];
@@ -185,8 +184,7 @@ function codexExtensionPath() {
 
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
-    // Prefer the user's npm Codex auth cache before the VS Code extension binary.
-    return commandVersion('codex') !== null ? 'codex' : (codexExtensionPath() || 'codex');
+    return codexExtensionPath() || 'codex';
   }
   return cliTool;
 }
