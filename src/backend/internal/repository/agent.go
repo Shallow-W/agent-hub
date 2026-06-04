@@ -276,6 +276,19 @@ func (r *AgentRepo) ClearAgentMachine(ctx context.Context, id string) error {
 	return nil
 }
 
+// MarkMachineAgentsStopped 批量将指定 machine_id 下所有 online 的 Agent 状态设为 stopped。
+// 在 daemon WS 断开时调用，防止 Agent 状态在 daemon 离线后仍显示 online。
+func (r *AgentRepo) MarkMachineAgentsStopped(ctx context.Context, machineID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET status = 'stopped', updated_at = NOW() WHERE machine_id = $1 AND status = 'online'`,
+		machineID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark machine agents stopped: %w", err)
+	}
+	return nil
+}
+
 // DeleteOwned 删除当前用户拥有的 Agent，包括自建 Agent 和电脑上报的系统 Agent。
 func (r *AgentRepo) DeleteOwned(ctx context.Context, id, userID string) (bool, error) {
 	res, err := r.db.ExecContext(ctx,

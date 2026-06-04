@@ -67,7 +67,7 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	go client.WritePump(ctx)
 
 	// 读取循环
-	h.readLoop(ctx, conn, machine)
+	h.readLoop(ctx, client, machine)
 
 	// 断开连接时注销
 	h.daemonHub.Unregister(client)
@@ -215,7 +215,8 @@ func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (
 	return h.agentSvc.GetDaemonMachineByAPIKey(authCtx, token)
 }
 
-func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, machine *model.DaemonMachine) {
+func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, machine *model.DaemonMachine) {
+	conn := client.Conn
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -237,8 +238,12 @@ func (h *DaemonHandler) readLoop(ctx context.Context, conn *websocket.Conn, mach
 			h.handleRegister(ctx, envelope.Data, machine)
 		case "task.complete":
 			h.handleTaskComplete(envelope.Data, machine)
+		case "agent.started":
+			h.handleAgentStarted(envelope.Data)
+		case "agent.stopped":
+			h.handleAgentStopped(envelope.Data)
 		case "ping":
-			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"pong"}`)); err != nil {
+			if err := client.Send(ws.WSMessage{Type: "pong"}); err != nil {
 				h.logger.Warn("daemon pong failed", "error", err)
 				return
 			}
@@ -301,4 +306,50 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage
 		return
 	}
 	h.logger.Info("daemon agents registered", "machine_id", req.MachineID, "count", len(req.Agents))
+}
+
+func (h *DaemonHandler) handleAgentStarted(data json.RawMessage) {
+	var req struct {
+		AgentID string `json:"agent_id"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid agent.started data", "error", err)
+		return
+	}
+	if req.AgentID == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	status := "online"
+	if req.Error != "" {
+		status = "error"
+		h.logger.Warn("agent started with error", "agent_id", req.AgentID, "error", req.Error)
+	}
+	if err := h.agentSvc.SetAgentStatus(ctx, req.AgentID, status); err != nil {
+		h.logger.Warn("update agent status after started failed", "agent_id", req.AgentID, "error", err)
+	}
+}
+
+func (h *DaemonHandler) handleAgentStopped(data json.RawMessage) {
+	var req struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid agent.stopped data", "error", err)
+		return
+	}
+	if req.AgentID == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := h.agentSvc.SetAgentStatus(ctx, req.AgentID, "stopped"); err != nil {
+		h.logger.Warn("update agent status after stopped failed", "agent_id", req.AgentID, "error", err)
+	}
 }

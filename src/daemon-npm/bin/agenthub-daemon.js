@@ -32,7 +32,7 @@ function safeSend(ws, data) {
 }
 
 const activeSessions = new Map();
-const runningAgents = new Map(); // agentID → { process, sessionId, cliTool }
+const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
 
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '' };
@@ -682,22 +682,31 @@ function commandForTask(task) {
     const sessionId = task._sessionId || (task.conversation_id && task.agent_id
       ? makeSessionId(task.conversation_id, task.agent_id)
       : null);
+    // Check if this agent is in persistent mode (registered via agent.start)
+    const persistent = task.agent_id && runningAgents.has(task.agent_id);
     const args = [
       '-p',
-      '--permission-mode',
-      'dontAsk',
       '--output-format',
       'text',
       ...buildPlatformMcpArgs(),
     ];
+    if (persistent) {
+      args.push('--dangerously-skip-permissions');
+    } else {
+      args.push('--permission-mode', 'dontAsk');
+    }
     if (systemPrompt) {
       args.push('--system-prompt', systemPrompt);
     }
+    // For persistent agents, use the registered sessionId
+    const effectiveSessionId = persistent
+      ? runningAgents.get(task.agent_id).sessionId
+      : sessionId;
     return {
       command,
       args,
       stdin: userPrompt,
-      sessionId,
+      sessionId: effectiveSessionId,
     };
   }
   if (task.cli_tool === 'openclaw') {
@@ -1062,29 +1071,27 @@ function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
-  // Stop existing process if any
   stopAgentProcess(agent_id);
+
+  if (cli_tool !== 'claude') {
+    console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
+    return;
+  }
 
   const sessionId = `agenthub-${agent_id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const command = resolveCommand(cli_tool);
   const mcpArgs = buildPlatformMcpArgs();
 
-  let args;
-  if (cli_tool === 'claude') {
-    args = [
-      '--dangerously-skip-permissions',
-      '--output-format', 'text',
-      ...mcpArgs,
-    ];
-    if (system_prompt) {
-      args.push('--system-prompt', system_prompt);
-    }
-    args.push('--session-id', sessionId);
-  } else {
-    // For other CLI tools, just note they don't support persistent mode
-    console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
-    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
-    return;
+  const args = [
+    '--dangerously-skip-permissions',
+    '--output-format', 'stream-json',
+    '--input-format', 'stream-json',
+    ...mcpArgs,
+    '--session-id', sessionId,
+  ];
+  if (system_prompt) {
+    args.push('--system-prompt', system_prompt);
   }
 
   try {
@@ -1095,24 +1102,94 @@ function handleAgentStart(ws, payload) {
       windowsHide: true,
     });
 
-    runningAgents.set(agent_id, { process: child, sessionId, cliTool: cli_tool });
+    // Stdout line buffer for stream-json parsing
+    let stdoutBuf = '';
+    let resultResolver = null;
 
-    child.stdin.end();
-
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk) => {
-      console.log(`[agent:${agent_id}] ${chunk.trim()}`);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk;
+      const lines = stdoutBuf.split('\n');
+      stdoutBuf = lines.pop(); // keep incomplete last line
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === 'result') {
+            // Turn complete — resolve pending promise
+            const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
+            if (event.is_error || event.subtype === 'error_during_execution') {
+              if (resultResolver) {
+                const r = resultResolver;
+                resultResolver = null;
+                r({ error: text || 'Agent execution failed' });
+              }
+            } else {
+              if (resultResolver) {
+                const r = resultResolver;
+                resultResolver = null;
+                r({ result: text || '' });
+              }
+            }
+          }
+        } catch { /* ignore non-JSON lines */ }
+      }
     });
-    child.stderr?.on('data', (chunk) => {
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
       console.error(`[agent:${agent_id}:err] ${chunk.trim()}`);
     });
+
     child.on('close', (code) => {
       console.log(`Agent ${agent_id} process exited with code ${code}`);
+      // Reject any pending result promise
+      if (resultResolver) {
+        const r = resultResolver;
+        resultResolver = null;
+        r({ error: `Agent process exited (code=${code})` });
+      }
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
+    });
+
+    // sendPrompt: write user message to stdin, return promise that resolves on result event
+    const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
+      if (child.exitCode !== null) {
+        reject(new Error('Agent process not running'));
+        return;
+      }
+      resultResolver = resolve;
+      const msg = JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: prompt }] },
+      });
+      child.stdin.write(msg + '\n');
+      // Timeout after 120s
+      setTimeout(() => {
+        if (resultResolver === resolve) {
+          resultResolver = null;
+          reject(new Error('Agent task timed out (120s)'));
+        }
+      }, 120000);
+    });
+
+    // Queue to serialize concurrent sendPrompt calls for the same agent.
+    // Each call chains onto the previous promise so only one is active at a time.
+    let queueTail = Promise.resolve();
+    const sendPrompt = (prompt) => {
+      const run = () => sendPromptRaw(prompt);
+      queueTail = queueTail.then(run, run);
+      return queueTail;
+    };
+
+    runningAgents.set(agent_id, {
+      process: child,
+      sessionId,
+      cliTool: cli_tool,
+      sendPrompt,
     });
 
     console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
@@ -1127,6 +1204,7 @@ function handleAgentStop(ws, payload) {
   const { agent_id } = payload;
   if (!agent_id) return;
   stopAgentProcess(agent_id);
+  runningAgents.delete(agent_id);
   console.log(`Agent ${agent_id} stopped`);
   safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
 }
@@ -1207,25 +1285,34 @@ async function connectWS(serverURL, apiKey) {
         };
         if (!task.id) return;
 
-        // If agent is running persistently, use session resume
         const runningAgent = runningAgents.get(task.agent_id);
-        if (runningAgent) {
-          task._sessionId = runningAgent.sessionId;
-        }
+        const { systemPrompt, userPrompt } = buildPromptParts(task);
 
         console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
         const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
         try {
-          const result = await executeTask(task);
+          let result;
+          if (runningAgent?.sendPrompt) {
+            // Persistent process: send prompt via stdin, wait for result
+            const response = await runningAgent.sendPrompt(userPrompt);
+            if (response.error) {
+              throw new Error(response.error);
+            }
+            result = response.result;
+          } else {
+            // No persistent process: spawn per task
+            task._sessionId = runningAgent?.sessionId || null;
+            result = await executeTask(task);
+          }
           stopHeartbeat();
-          ws.send(JSON.stringify({
+          safeSend(ws, JSON.stringify({
             type: 'task.complete',
             data: { task_id: task.id, result },
           }));
           console.log(`AgentHub daemon task ${task.id} completed.`);
         } catch (error) {
           stopHeartbeat();
-          ws.send(JSON.stringify({
+          safeSend(ws, JSON.stringify({
             type: 'task.complete',
             data: {
               task_id: task.id,
@@ -1242,10 +1329,11 @@ async function connectWS(serverURL, apiKey) {
 
     ws.on('close', (code, reason) => {
       if (pingTimer) clearInterval(pingTimer);
-      // Kill all running agent processes on disconnect
+      // Clean up all running agent entries on disconnect
       for (const [agentId] of runningAgents) {
         stopAgentProcess(agentId);
       }
+      runningAgents.clear();
       console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });

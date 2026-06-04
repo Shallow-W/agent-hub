@@ -40,6 +40,7 @@ type AgentRepo interface {
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
+	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
 	UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error
 	DeleteOwned(ctx context.Context, id, userID string) (bool, error)
 }
@@ -144,6 +145,20 @@ func (s *AgentService) MarkMachineOffline(machineID string) {
 	if s.tracker != nil {
 		s.tracker.MarkOffline(machineID)
 	}
+	// 将该机器下所有 online 的 Agent 状态设为 stopped，
+	// 因为 daemon 断开后无法再发送 agent.stopped 事件。
+	if machineID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.repo.MarkMachineAgentsStopped(ctx, machineID); err != nil {
+			slog.Warn("mark machine agents stopped on disconnect failed", "machine_id", machineID, "error", err)
+		}
+	}
+}
+
+// SetAgentStatus 更新 Agent 状态（daemon 报告 agent.started/agent.stopped 时调用）。
+func (s *AgentService) SetAgentStatus(ctx context.Context, agentID, status string) error {
+	return s.repo.UpdateAgentStatus(ctx, agentID, status)
 }
 
 // IsMachineOnline 检查机器是否在线（内存读取）。

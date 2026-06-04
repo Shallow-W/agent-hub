@@ -299,6 +299,12 @@ func (dh *DaemonHub) RemoveTaskPromise(taskID string) {
 	dh.resultChans.Delete(taskID)
 }
 
+// RegisterTestClient inserts a client directly into the clients map.
+// For use in tests only — bypasses the bus and avoids needing a real WebSocket.
+func (dh *DaemonHub) RegisterTestClient(machineID string, client *DaemonClient) {
+	dh.clients.Store(machineID, client)
+}
+
 // Shutdown 外部调用关闭 DaemonHub（委托给内部 shutdown，sync.Once 保证幂等）
 func (dh *DaemonHub) Shutdown(ctx context.Context) {
 	dh.shutdown()

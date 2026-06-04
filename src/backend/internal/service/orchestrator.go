@@ -226,20 +226,23 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
-	// If daemon is connected via WS, register promise and push task immediately
-	if s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
-		s.daemonHub.RegisterTaskPromise(task.ID)
-		_ = s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-			Type: "task.dispatch",
-			Data: map[string]interface{}{
-				"task_id":          task.ID,
-				"cli_tool":         agent.CLITool,
-				"prompt":           content,
-				"context_messages": agentCtx,
-				"agent_id":         agent.ID,
-				"conversation_id":  convID,
-			},
-		})
+	// Daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(task.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           content,
+			"context_messages": agentCtx,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
 
 	task, err = s.waitDaemonTask(ctx, task.ID)
@@ -298,20 +301,23 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
 
-	// If orchestrator daemon is connected via WS, register promise and push task
-	if s.daemonHub != nil && s.daemonHub.IsConnected(*orchAgent.MachineID) {
-		s.daemonHub.RegisterTaskPromise(orchTask.ID)
-		_ = s.daemonHub.SendToMachine(*orchAgent.MachineID, ws.WSMessage{
-			Type: "task.dispatch",
-			Data: map[string]interface{}{
-				"task_id":          orchTask.ID,
-				"cli_tool":         orchAgent.CLITool,
-				"prompt":           fullPrompt,
-				"context_messages": orchCtx,
-				"agent_id":         orchAgent.ID,
-				"conversation_id":  convID,
-			},
-		})
+	// Orchestrator daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*orchAgent.MachineID) {
+		return nil, fmt.Errorf("orchestrator agent %q 的 daemon 未通过 WS 连接", orchAgent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(orchTask.ID)
+	if err := s.daemonHub.SendToMachine(*orchAgent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          orchTask.ID,
+			"cli_tool":         orchAgent.CLITool,
+			"prompt":           fullPrompt,
+			"context_messages": orchCtx,
+			"agent_id":         orchAgent.ID,
+			"conversation_id":  convID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to orchestrator daemon: %w", err)
 	}
 
 	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
@@ -495,20 +501,23 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("create worker daemon task: %w", err)
 	}
 
-	// If worker daemon is connected via WS, register promise and push task
-	if s.daemonHub != nil && s.daemonHub.IsConnected(*agent.MachineID) {
-		s.daemonHub.RegisterTaskPromise(daemonTask.ID)
-		_ = s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-			Type: "task.dispatch",
-			Data: map[string]interface{}{
-				"task_id":          daemonTask.ID,
-				"cli_tool":         agent.CLITool,
-				"prompt":           task.Task,
-				"context_messages": dispatchCtx,
-				"agent_id":         agent.ID,
-				"conversation_id":  convID,
-			},
-		})
+	// Worker daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("worker agent %q 的 daemon 未通过 WS 连接", agent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(daemonTask.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          daemonTask.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           task.Task,
+			"context_messages": dispatchCtx,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to worker daemon: %w", err)
 	}
 
 	daemonTask, err = s.waitDaemonTask(ctx, daemonTask.ID)
@@ -635,52 +644,37 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 	return sb.String(), agentNames, nil
 }
 
-// waitDaemonTask waits for a daemon task to complete, preferring channel-based
-// notification via DaemonHub when available, falling back to DB polling otherwise.
+// waitDaemonTask waits for a daemon task to complete via channel-based
+// notification through DaemonHub. Returns an error if the daemon is not
+// connected or the context times out.
 func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
+	if s.daemonHub == nil {
+		return nil, fmt.Errorf("daemon hub not available")
+	}
+
+	ch := s.daemonHub.AwaitTaskResult(taskID)
+	if ch == nil {
+		return nil, fmt.Errorf("daemon not connected for task %s", taskID)
+	}
+	defer s.daemonHub.RemoveTaskPromise(taskID)
+
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	// Try channel-based wait if DaemonHub is available
-	if s.daemonHub != nil {
-		if ch := s.daemonHub.AwaitTaskResult(taskID); ch != nil {
-			defer s.daemonHub.RemoveTaskPromise(taskID)
-			select {
-			case result := <-ch:
-				task := &model.DaemonTask{
-					ID:     result.TaskID,
-					Status: "completed",
-					Result: result.Result,
-				}
-				if result.Error != "" {
-					task.Status = "failed"
-					task.Error = result.Error
-				}
-				return task, nil
-			case <-ctx.Done():
-				return nil, ErrMsgAgentTimeout
-			}
+	select {
+	case result := <-ch:
+		task := &model.DaemonTask{
+			ID:     result.TaskID,
+			Status: "completed",
+			Result: result.Result,
 		}
-	}
-
-	// Fallback: DB polling (for HTTP-only daemons)
-	ticker := time.NewTicker(600 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get daemon task: %w", err)
+		if result.Error != "" {
+			task.Status = "failed"
+			task.Error = result.Error
 		}
-		if task != nil && (task.Status == "completed" || task.Status == "failed") {
-			return task, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ErrMsgAgentTimeout
-		case <-ticker.C:
-		}
+		return task, nil
+	case <-ctx.Done():
+		return nil, ErrMsgAgentTimeout
 	}
 }
 

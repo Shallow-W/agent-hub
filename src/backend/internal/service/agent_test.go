@@ -147,6 +147,10 @@ func (r *fakeAgentRepo) ClearAgentMachine(ctx context.Context, id string) error 
 	return nil
 }
 
+func (r *fakeAgentRepo) MarkMachineAgentsStopped(ctx context.Context, machineID string) error {
+	return nil
+}
+
 func (r *fakeAgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error {
 	return nil
 }
