@@ -27,6 +27,7 @@ type DaemonClient struct {
 	MachineID string // DaemonMachine.ID（DB 主键，非 hostname）
 	sendCh    chan []byte
 	closeOnce sync.Once
+	closed    atomic.Bool
 	mu        sync.Mutex
 }
 
@@ -61,6 +62,9 @@ func (dc *DaemonClient) WritePump(ctx context.Context) {
 
 // Send 向 daemon 发送 JSON 消息（通过写缓冲区）
 func (dc *DaemonClient) Send(msg WSMessage) error {
+	if dc.closed.Load() {
+		return errors.New("daemon client closed: " + dc.MachineID)
+	}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -91,19 +95,13 @@ func (dc *DaemonClient) Send(msg WSMessage) error {
 type daemonBusKind int
 
 const (
-	daemonBusRegister       daemonBusKind = iota
+	daemonBusRegister daemonBusKind = iota
 	daemonBusUnregister
-	daemonBusSendToMachine
 )
 
 type daemonBusMsg struct {
 	kind    daemonBusKind
 	payload interface{}
-}
-
-type daemonSendPayload struct {
-	MachineID string
-	Msg       WSMessage
 }
 
 // DaemonHub 管理所有 daemon WebSocket 连接，基于消息总线模式。
@@ -146,8 +144,6 @@ func (dh *DaemonHub) dispatch(msg daemonBusMsg) {
 		dh.handleRegister(msg)
 	case daemonBusUnregister:
 		dh.handleUnregister(msg)
-	case daemonBusSendToMachine:
-		dh.handleSendToMachine(msg)
 	}
 }
 
@@ -156,6 +152,7 @@ func (dh *DaemonHub) handleRegister(msg daemonBusMsg) {
 	// 若同一 machineID 已有旧连接，先关闭
 	if old, loaded := dh.clients.LoadAndDelete(client.MachineID); loaded {
 		oldClient := old.(*DaemonClient)
+		oldClient.closed.Store(true)
 		oldClient.closeOnce.Do(func() { close(oldClient.sendCh) })
 		oldClient.Conn.Close(websocket.StatusNormalClosure, "replaced by new connection")
 		if !dh.draining.Load() {
@@ -173,24 +170,13 @@ func (dh *DaemonHub) handleUnregister(msg daemonBusMsg) {
 	if loaded, ok := dh.clients.Load(client.MachineID); ok && loaded == client {
 		dh.clients.Delete(client.MachineID)
 	}
+	client.closed.Store(true)
 	client.closeOnce.Do(func() { close(client.sendCh) })
 	client.Conn.Close(websocket.StatusNormalClosure, "disconnect")
 	if !dh.draining.Load() {
 		dh.wg.Done()
 	}
 	dh.logger.Info("daemon disconnected", "machine_id", client.MachineID)
-}
-
-func (dh *DaemonHub) handleSendToMachine(msg daemonBusMsg) {
-	payload := msg.payload.(*daemonSendPayload)
-	val, ok := dh.clients.Load(payload.MachineID)
-	if !ok {
-		return
-	}
-	client := val.(*DaemonClient)
-	if err := client.Send(payload.Msg); err != nil {
-		dh.logger.Warn("send to daemon failed", "machine_id", payload.MachineID, "error", err)
-	}
 }
 
 // shutdown 优雅关闭：排空消息、关闭所有连接（通过 sync.Once 保证只执行一次）
@@ -215,6 +201,7 @@ func (dh *DaemonHub) shutdown() {
 		// 关闭所有 daemon 连接
 		dh.clients.Range(func(key, value interface{}) bool {
 			client := value.(*DaemonClient)
+			client.closed.Store(true)
 			client.closeOnce.Do(func() { close(client.sendCh) })
 			client.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
 			dh.wg.Done()
@@ -251,8 +238,12 @@ func (dh *DaemonHub) Unregister(client *DaemonClient) {
 	case dh.bus <- daemonBusMsg{kind: daemonBusUnregister, payload: client}:
 	default:
 		dh.logger.Warn("daemon hub bus full, force-closing connection", "machine_id", client.MachineID)
+		client.closed.Store(true)
 		client.closeOnce.Do(func() { close(client.sendCh) })
 		client.Conn.Close(websocket.StatusNormalClosure, "disconnect")
+		if !dh.draining.Load() {
+			dh.wg.Done()
+		}
 	}
 }
 

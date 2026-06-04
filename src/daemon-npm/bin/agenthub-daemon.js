@@ -23,6 +23,14 @@ try {
   }
 }
 
+function safeSend(ws, data) {
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  } catch { /* connection already closed */ }
+}
+
 const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool }
 
@@ -1075,7 +1083,7 @@ function handleAgentStart(ws, payload) {
   } else {
     // For other CLI tools, just note they don't support persistent mode
     console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
-    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
     return;
   }
 
@@ -1088,6 +1096,8 @@ function handleAgentStart(ws, payload) {
     });
 
     runningAgents.set(agent_id, { process: child, sessionId, cliTool: cli_tool });
+
+    child.stdin.end();
 
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -1102,14 +1112,14 @@ function handleAgentStart(ws, payload) {
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
-      ws.send(JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
+      safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
 
     console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
-    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id } }));
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id } }));
   } catch (error) {
     console.error(`Agent ${agent_id} start failed: ${error.message}`);
-    ws.send(JSON.stringify({ type: 'agent.started', data: { agent_id, error: error.message } }));
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: error.message } }));
   }
 }
 
@@ -1118,7 +1128,7 @@ function handleAgentStop(ws, payload) {
   if (!agent_id) return;
   stopAgentProcess(agent_id);
   console.log(`Agent ${agent_id} stopped`);
-  ws.send(JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
+  safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
 }
 
 function handleAgentRestart(ws, payload) {
@@ -1232,6 +1242,10 @@ async function connectWS(serverURL, apiKey) {
 
     ws.on('close', (code, reason) => {
       if (pingTimer) clearInterval(pingTimer);
+      // Kill all running agent processes on disconnect
+      for (const [agentId] of runningAgents) {
+        stopAgentProcess(agentId);
+      }
       console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
