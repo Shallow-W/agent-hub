@@ -55,7 +55,7 @@ const (
 	pingInterval     = 30 * time.Second
 	pongTimeout      = 60 * time.Second
 	cleanupInterval  = 15 * time.Second
-	maxConnsPerUser  = 5 // per-user max WS connections
+	maxConnsPerUser  = 15 // per-user max WS connections (dev tool, multiple tabs expected)
 )
 
 // Client 封装单个 WebSocket 连接及其元数据
@@ -182,6 +182,8 @@ type Hub struct {
 	draining     atomic.Bool    // shutdown drain 阶段为 true，阻止新 wg.Add
 	shutdownOnce sync.Once
 	logger       *slog.Logger
+
+	lastEvict sync.Map // userID -> time.Time of last eviction (rate limit)
 }
 
 // NewHub 创建 Hub 实例
@@ -265,14 +267,30 @@ func (h *Hub) handleRegister(msg BusMessage) {
 	}
 	list := val.(*[]*Client)
 	if len(*list) >= maxConnsPerUser {
-		h.logger.Warn("max connections per user reached, closing",
-			"user_id", client.UserID, "current", len(*list), "max", maxConnsPerUser)
-		client.closeOnce.Do(func() { close(client.sendCh) })
-		client.Conn.Close(websocket.StatusPolicyViolation, "too many connections")
+		// Rate-limit eviction: if we evicted for this user <10s ago, reject instead
+		if last, ok := h.lastEvict.Load(client.UserID); ok {
+			if time.Since(last.(time.Time)) < 30*time.Second {
+				h.logger.Warn("max connections, eviction rate-limited",
+					"user_id", client.UserID, "current", len(*list), "max", maxConnsPerUser)
+				client.closeOnce.Do(func() { close(client.sendCh) })
+				client.Conn.Close(websocket.StatusPolicyViolation, "too many connections")
+				if !h.draining.Load() {
+					h.wg.Done()
+				}
+				return
+			}
+		}
+		// Evict oldest connection — newest tab always wins
+		oldest := (*list)[0]
+		*list = append((*list)[:0], (*list)[1:]...)
+		oldest.closeOnce.Do(func() { close(oldest.sendCh) })
+		oldest.Conn.Close(websocket.StatusPolicyViolation, "evicted: newer connection")
 		if !h.draining.Load() {
 			h.wg.Done()
 		}
-		return
+		h.lastEvict.Store(client.UserID, time.Now())
+		h.logger.Info("evicted oldest connection for user",
+			"user_id", client.UserID, "evicted_connected_at", oldest.ConnectedAt)
 	}
 	*list = append(*list, client)
 	h.logger.Info("websocket connected", "user_id", client.UserID)
@@ -290,11 +308,18 @@ func (h *Hub) handleUnregister(msg BusMessage) {
 		return
 	}
 	list := val.(*[]*Client)
+	found := false
 	for i, c := range *list {
 		if c == client {
 			*list = append((*list)[:i], (*list)[i+1:]...)
+			found = true
 			break
 		}
+	}
+
+	// client 不在列表中（可能是被 max-conns 踢出后重复 unregister），直接跳过
+	if !found {
+		return
 	}
 
 	// 所有连接断开时广播离线状态

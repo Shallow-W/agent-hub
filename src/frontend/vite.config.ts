@@ -9,6 +9,7 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  cacheDir: '.vite-cache',
   server: {
     host: '0.0.0.0',
     proxy: {

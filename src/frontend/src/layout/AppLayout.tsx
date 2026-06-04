@@ -9,6 +9,7 @@ import SettingsPanel from '@/components/settings/SettingsPanel';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
 import {
+  addConversationAgent,
   getArchivedConversations,
   getOrCreateAgentChat,
   getOrCreatePrivateChat,
@@ -26,6 +27,7 @@ import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
+import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
@@ -296,7 +298,19 @@ const AppLayout: React.FC = () => {
 
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'models' ? (
+        {activeNav === 'knowledge' ? (
+          <div className={styles.emptyRightPanel}>
+            <div className={styles.emptyRightIcon}>📚</div>
+            <div className={styles.emptyRightTitle}>知识库管理</div>
+            <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+          </div>
+        ) : activeNav === 'skills' ? (
+          selectedAgent ? (
+            <AgentSkillsPanel agent={selectedAgent} />
+          ) : (
+            <div style={{ padding: 32, color: 'var(--color-text-secondary)' }}>← 选择一个 Agent 管理技能</div>
+          )
+        ) : activeNav === 'models' ? (
           selectedAgent ? (
             <AgentProfile agent={selectedAgent} />
           ) : (
@@ -320,9 +334,36 @@ const AppLayout: React.FC = () => {
       <NewConversationModal
         open={newConvModalOpen}
         onCancel={() => setNewConvModalOpen(false)}
-        onCreate={async (title) => {
-          await create('single', title);
-          setNewConvModalOpen(false);
+        onCreate={async (title, memberIds, agentIds) => {
+          try {
+            if (memberIds.length > 0 || agentIds.length > 0) {
+              const conv = await createGroup({ name: title, member_ids: memberIds });
+              const results = await Promise.allSettled(
+                agentIds.map((agentId) => addConversationAgent(conv.id, agentId)),
+              );
+              const failed = results.filter((result) => result.status === 'rejected').length;
+              await fetchConversations();
+              setActive(conv.id);
+              setActiveNav('chat');
+              if (location.pathname !== '/') {
+                navigate('/');
+              }
+              useConversationStore.getState().setMemberPanelOpen(true);
+              if (failed > 0) {
+                antMessage.warning(`对话已创建，${failed} 个智能体拉入失败`);
+              }
+            } else {
+              await create('single', title);
+              setActiveNav('chat');
+              if (location.pathname !== '/') {
+                navigate('/');
+              }
+            }
+            setNewConvModalOpen(false);
+          } catch {
+            antMessage.error('创建对话失败');
+            throw new Error('创建对话失败');
+          }
         }}
       />
       <ArchivedConversationsModal

@@ -91,6 +91,10 @@ func (r *fakeConvRepoForMsg) ListMemberIDs(ctx context.Context, conversationID s
 	return []string{r.conv.UserID}, nil
 }
 
+func (r *fakeConvRepoForMsg) ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error) {
+	return nil, nil
+}
+
 type fakeAgentRepoForMsg struct {
 	agent          *model.Agent
 	task           *model.DaemonTask
@@ -108,16 +112,17 @@ func (r *fakeAgentRepoForMsg) IsAgentInConversation(ctx context.Context, convers
 	return r.inConversation, nil
 }
 
-func (r *fakeAgentRepoForMsg) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error) {
+func (r *fakeAgentRepoForMsg) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
 	r.task = &model.DaemonTask{
-		ID:             "task-1",
-		UserID:         userID,
-		ConversationID: conversationID,
-		AgentID:        agentID,
-		MachineID:      machineID,
-		CLITool:        cliTool,
-		Prompt:         prompt,
-		Status:         "pending",
+		ID:              "task-1",
+		UserID:          userID,
+		ConversationID:  conversationID,
+		AgentID:         agentID,
+		MachineID:       machineID,
+		CLITool:         cliTool,
+		Prompt:          prompt,
+		ContextMessages: contextMessages,
+		Status:          "pending",
 	}
 	return r.task, nil
 }

@@ -52,13 +52,14 @@ type ConvRepoForMsg interface {
 	UpdateTimestamp(ctx context.Context, id string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
+	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 }
 
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
 type AgentRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
-	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt string) (*model.DaemonTask, error)
+	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
 }
 
@@ -85,6 +86,7 @@ type MessageService struct {
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
 	cacher    MessageCacher
+	orchSvc   *OrchestratorService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -106,6 +108,11 @@ func (s *MessageService) SetNotifier(n MessageNotifier) {
 // SetCacher 注入消息缓存器
 func (s *MessageService) SetCacher(c MessageCacher) {
 	s.cacher = c
+}
+
+// SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
+func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
+	s.orchSvc = orchSvc
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -139,7 +146,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if len(content) > maxMessageLen {
 		return nil, ErrMsgTooLong
 	}
-	if strings.TrimSpace(content) == "" {
+	// 允许纯附件消息（无文字内容），仅当内容为空且无附件时拒绝
+	if strings.TrimSpace(content) == "" && len(attachments) == 0 {
 		return nil, ErrMsgEmptyContent
 	}
 
@@ -183,13 +191,17 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// Agent 回复
-	if strings.TrimSpace(agentID) != "" {
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content)
-		if err != nil {
-			return nil, err
+	// @mention routing — 异步派发，不阻塞 HTTP 响应
+	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
+		mentions := ParseMentions(content)
+		if len(mentions) > 0 {
+			go s.asyncMentionDispatch(convID, userID, content)
 		}
-		result.AgentMessage = agentMsg
+	}
+
+	// Agent 回复（显式 agentID 路径，异步派发）
+	if strings.TrimSpace(agentID) != "" {
+		go s.asyncAgentReply(convID, userID, agentID, content)
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）
@@ -464,8 +476,82 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	return nil
 }
 
+// agentHandoff 表示一条 agent 的任务交接单，只收集 agent 的回复摘要。
+type agentHandoff struct {
+	AgentName   string `json:"agent_name"`
+	AgentID     string `json:"agent_id"`
+	UserRequest string `json:"user_request"`
+	Result      string `json:"result"`
+}
+
+// buildAgentHandoffs 只收集其他 agent 的回复摘要，构建精简交接单。
+// 遍历最近消息，找到每条 assistant 消息（含 agent_name），向前找触发它的最近一条
+// user 消息作为 user_request，结果截断到 500 字符，最多保留 5 条。
+func (s *MessageService) buildAgentHandoffs(ctx context.Context, convID string) string {
+	const fetchLimit = 40
+	const maxHandoffs = 5
+	const maxResultLen = 500
+
+	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, fetchLimit)
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+	// ListByConversation 返回倒序（最新在前），需要反转为时间正序
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+
+	handoffs := make([]agentHandoff, 0, maxHandoffs)
+	for i, m := range msgs {
+		if m.Role != "assistant" || m.ArtifactsJSON == "" {
+			continue
+		}
+		var a struct {
+			AgentID   string `json:"agent_id"`
+			AgentName string `json:"agent_name"`
+		}
+		if err := json.Unmarshal([]byte(m.ArtifactsJSON), &a); err != nil || a.AgentName == "" {
+			continue
+		}
+
+		// 向前找触发该 agent 的最近一条 user 消息
+		userRequest := ""
+		for j := i - 1; j >= 0; j-- {
+			if msgs[j].Role == "user" {
+				userRequest = msgs[j].Content
+				break
+			}
+		}
+
+		result := m.Content
+		if len([]rune(result)) > maxResultLen {
+			runes := []rune(result)
+			result = string(runes[:maxResultLen]) + "..."
+		}
+
+		handoffs = append(handoffs, agentHandoff{
+			AgentName:   a.AgentName,
+			AgentID:     a.AgentID,
+			UserRequest: userRequest,
+			Result:      result,
+		})
+		if len(handoffs) >= maxHandoffs {
+			break
+		}
+	}
+
+	if len(handoffs) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(handoffs)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // createAgentReply 生成 Agent 回复消息
-func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent string) (*model.Message, error) {
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string) (*model.Message, error) {
 	if s.agentRepo == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -490,7 +576,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, ErrMsgAgentOffline
 	}
 
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent)
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
@@ -540,4 +626,78 @@ func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*mo
 		case <-ticker.C:
 		}
 	}
+}
+
+// broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
+
+// asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncMentionDispatch recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	if err != nil {
+		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		return
+	}
+	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
+		return
+	}
+	for _, agentMsg := range orchResult.AgentMessages {
+		s.postPersist(convID, userID, agentMsg)
+	}
+}
+
+// asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncAgentReply recovered", "panic", r)
+		}
+	}()
+
+	s.broadcastAgentTyping(convID, true)
+	defer s.broadcastAgentTyping(convID, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	contextMessages := s.buildAgentHandoffs(ctx, convID)
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	if err != nil {
+		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
+	if s.notifier == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(memberIDs) == 0 {
+		return
+	}
+
+	eventType := "agent.typing_stop"
+	if typing {
+		eventType = "agent.typing_start"
+	}
+
+	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
+		"conversation_id": convID,
+	})
 }

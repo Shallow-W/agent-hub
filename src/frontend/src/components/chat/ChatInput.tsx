@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Input, Button, Tooltip, Spin, message } from 'antd';
 import {
   CloseOutlined,
   LinkOutlined,
+  RobotOutlined,
   SendOutlined,
   UpOutlined,
   DownOutlined,
@@ -10,9 +11,12 @@ import {
 import { useMessages } from '@/hooks/useMessages';
 import { useWsStore } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
+import { useAgentStore } from '@/store/agentStore';
 import { uploadFile } from '@/api/upload';
 import { getGroupMembers } from '@/api/group';
+import { getConversationAgents } from '@/api/conversation';
 import type { GroupMember } from '@/types/group';
+import type { ConversationAgent } from '@/types/conversation';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message, ReplyToPreview } from '@/types/message';
@@ -24,6 +28,10 @@ const { TextArea } = Input;
 
 const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+type MentionTarget =
+  | { id: string; label: string; kind: 'user'; user: GroupMember }
+  | { id: string; label: string; kind: 'agent'; agent: ConversationAgent };
 
 interface ChatInputProps {
   conversationId: string;
@@ -38,6 +46,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const { send, streamingContent } = useMessages(conversationId);
   const isStreaming = (streamingContent ?? '').length > 0;
   const wsClient = useWsStore((s) => s.wsClient);
+  const agentTyping = useWsStore((s) => conversationId ? (s.agentTyping[conversationId] ?? false) : false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [sending, setSending] = useState(false);
@@ -45,6 +54,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
+  const [mentionTargetsLoaded, setMentionTargetsLoaded] = useState(false);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position where @ was typed
   const textareaRef = useRef<TextAreaRef>(null);
 
@@ -52,8 +63,56 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     s.conversations.find((c) => c.id === conversationId),
   );
   const boundAgentId = useConversationStore((s) => s.directAgentChats[conversationId]);
+  const bindDirectAgentChat = useConversationStore((s) => s.bindDirectAgentChat);
+  const unbindDirectAgentChat = useConversationStore((s) => s.unbindDirectAgentChat);
   const directAgentId = conversation?.type === 'agent' ? conversation.peer_id : boundAgentId;
   const isGroup = conversation?.type === 'group';
+  const globalAgents = useAgentStore((s) => s.agents);
+
+  const fetchMentionTargets = useCallback(async () => {
+    if (!isGroup) return { members, agentMembers };
+    const [nextMembers, nextAgents] = await Promise.all([
+      getGroupMembers(conversationId),
+      getConversationAgents(conversationId),
+    ]);
+    const safeMembers = nextMembers ?? [];
+    const safeAgents = nextAgents ?? [];
+    setMembers(safeMembers);
+    setAgentMembers(safeAgents);
+    setMentionTargetsLoaded(true);
+    return { members: safeMembers, agentMembers: safeAgents };
+  }, [agentMembers, conversationId, isGroup, members]);
+
+  const loadMentionTargets = useCallback(() => {
+    if (!isGroup || mentionTargetsLoaded) return;
+    fetchMentionTargets().catch((err) => console.error('Failed to load mention targets:', err));
+  }, [fetchMentionTargets, isGroup, mentionTargetsLoaded]);
+
+  useEffect(() => {
+    setMembers([]);
+    setAgentMembers([]);
+    setMentionTargetsLoaded(false);
+  }, [conversationId]);
+
+  // Proactively load agent names when there's an active target (for the target bar display)
+  useEffect(() => {
+    if (isGroup && boundAgentId && !mentionTargetsLoaded) {
+      loadMentionTargets();
+    }
+  }, [isGroup, boundAgentId, mentionTargetsLoaded, loadMentionTargets]);
+
+  // Resolve the display name for the currently targeted agent
+  const targetAgentName = useMemo(() => {
+    if (!directAgentId) return null;
+    // Group chat: check loaded group agents first, then fall back to global list
+    const fromGroup = agentMembers.find((a) => a.agent_id === directAgentId)?.name;
+    if (fromGroup) return fromGroup;
+    const fromGlobal = globalAgents.find((a) => a.id === directAgentId)?.name;
+    if (fromGlobal) return fromGlobal;
+    // Direct agent chat: peer_name is always available
+    if (!isGroup) return conversation?.peer_name ?? null;
+    return null;
+  }, [directAgentId, agentMembers, globalAgents, isGroup, conversation]);
 
   // Typing broadcast state
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -110,18 +169,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         setMentionIndex(0);
         if (!mentionVisible) {
           setMentionVisible(true);
-          // Fetch members if not already loaded
-          if (members.length === 0) {
-            getGroupMembers(conversationId).then((list) => {
-              if (list) setMembers(list);
-            }).catch((err) => console.error('Failed to load group members:', err));
-          }
+          loadMentionTargets();
         }
       } else if (mentionVisible) {
         setMentionVisible(false);
       }
     }
-  }, [sendTypingStart, sendTypingStop, isGroup, conversationId, mentionVisible, members.length]);
+  }, [sendTypingStart, sendTypingStop, isGroup, mentionVisible, loadMentionTargets]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -160,21 +214,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     setPendingFiles((prev) => prev.filter((p) => p.uid !== uid));
   }, []);
 
-  // Filtered members for mention dropdown
-  const filteredMembers = members.filter(
-    (m) => m.username && m.username.toLowerCase().includes(mentionQuery.toLowerCase()),
+  const mentionTargets: MentionTarget[] = [
+    ...members
+      .filter((m) => !!m.username)
+      .map((m) => ({ id: m.user_id, label: m.username ?? 'unknown', kind: 'user' as const, user: m })),
+    ...agentMembers.map((agent) => ({ id: agent.agent_id, label: agent.name, kind: 'agent' as const, agent })),
+  ];
+
+  const filteredTargets = mentionTargets.filter(
+    (target) => target.label.toLowerCase().includes(mentionQuery.toLowerCase()),
   );
 
-  const insertMention = useCallback((member: GroupMember) => {
-    const username = member.username ?? 'unknown';
+  const insertMention = useCallback((target: MentionTarget) => {
     const before = value.slice(0, mentionStart);
     const after = value.slice(mentionStart + mentionQuery.length + 1); // +1 for @
-    const newValue = `${before}@${username} ${after}`;
+    const newValue = `${before}@${target.label} ${after}`;
     setValue(newValue);
     setMentionVisible(false);
     // Focus back on textarea
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [value, mentionStart, mentionQuery]);
+
+  const hasMention = useCallback((content: string, label: string) => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|\\s)@${escaped}(?=\\s|$)`, 'i').test(content);
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
@@ -187,29 +251,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
 
     // Extract mentions from content for group chats
     let mentions: string[] | undefined;
-    if (isGroup && members.length > 0) {
-      const mentionRegex = /(^|\s)@([a-zA-Z0-9_一-龥-]{2,20})(?=\s|$)/g;
-      const mentionedUsernames: string[] = [];
-      let match;
-      while ((match = mentionRegex.exec(trimmed)) !== null) {
-        mentionedUsernames.push(match[2] ?? '');
-      }
-      if (mentionedUsernames.length > 0) {
-        const usernameSet = new Set(members.map((m) => m.username?.toLowerCase()));
-        mentions = mentionedUsernames
-          .filter((u) => usernameSet.has(u.toLowerCase()))
-          .map((u) => {
-            const member = members.find((m) => m.username?.toLowerCase() === u.toLowerCase());
-            return member?.user_id ?? '';
-          })
-          .filter(Boolean);
-        if (mentions.length === 0) mentions = undefined;
-      }
+    let mentionedAgentId: string | undefined;
+    if (isGroup) {
+      const targetLists = trimmed.includes('@') && !mentionTargetsLoaded
+        ? await fetchMentionTargets()
+        : { members, agentMembers };
+      const userMentions = targetLists.members
+        .filter((member) => member.username && hasMention(trimmed, member.username))
+        .map((member) => member.user_id);
+      mentions = userMentions.length > 0 ? userMentions : undefined;
+      mentionedAgentId = targetLists.agentMembers.find((agent) => hasMention(trimmed, agent.name))?.agent_id;
     }
 
     setSending(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     sendTypingStop();
+
+    // 立即清空输入框，给用户即时反馈
+    setValue('');
+    setPendingFiles([]);
+    onCancelReply?.();
+
     try {
       const replyPreview: ReplyToPreview | undefined = replyTo
         ? {
@@ -220,34 +282,44 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
-      await send(trimmed, attachments.length ? attachments : undefined, replyTo?.id, replyPreview, mentions, directAgentId);
-      setValue('');
-      setPendingFiles([]);
-      onCancelReply?.();
+      await send(
+        trimmed,
+        attachments.length ? attachments : undefined,
+        replyTo?.id,
+        replyPreview,
+        mentions,
+        mentionedAgentId ?? directAgentId,
+      );
+      // Persist the @mentioned agent as sticky target for subsequent messages
+      if (isGroup && mentionedAgentId) {
+        bindDirectAgentChat(conversationId, mentionedAgentId);
+      }
     } catch {
+      // 发送失败时恢复输入内容，方便用户重试
+      setValue(trimmed);
       message.error('发送失败，请稍后重试');
     } finally {
       setSending(false);
     }
-  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, members, directAgentId]);
+  }, [value, pendingFiles, isStreaming, send, sendTypingStop, replyTo, onCancelReply, isGroup, mentionTargetsLoaded, fetchMentionTargets, members, agentMembers, hasMention, directAgentId, bindDirectAgentChat, conversationId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // Mention dropdown navigation
-      if (mentionVisible && filteredMembers.length > 0) {
+      if (mentionVisible && filteredTargets.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setMentionIndex((i) => (i + 1) % filteredMembers.length);
+          setMentionIndex((i) => (i + 1) % filteredTargets.length);
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setMentionIndex((i) => (i - 1 + filteredMembers.length) % filteredMembers.length);
+          setMentionIndex((i) => (i - 1 + filteredTargets.length) % filteredTargets.length);
           return;
         }
         if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault();
-          insertMention(filteredMembers[mentionIndex]!);
+          insertMention(filteredTargets[mentionIndex]!);
           return;
         }
         if (e.key === 'Escape') {
@@ -262,17 +334,45 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         handleSubmit();
       }
     },
-    [handleSubmit, mentionVisible, filteredMembers, mentionIndex, insertMention],
+    [handleSubmit, mentionVisible, filteredTargets, mentionIndex, insertMention],
   );
 
   const canSend = (value.trim() || pendingFiles.some((p) => p.status === 'done')) && !isStreaming;
 
+  // 点击下拉列表外部关闭 mention 下拉
+  useEffect(() => {
+    if (!mentionVisible) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(`.${styles.mentionDropdown}`)) {
+        setMentionVisible(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mentionVisible]);
+
   return (
     <div className={styles.container}>
-      {isStreaming && (
+      {(isStreaming || agentTyping) && (
         <div className={styles.typingIndicator}>
           <Spin size="small" />
-          <span>Agent 正在输入</span>
+          <span>{targetAgentName ?? (conversation?.peer_name ?? 'Agent')} 正在思考...</span>
+        </div>
+      )}
+      {isGroup && boundAgentId && (
+        <div className={styles.targetBar}>
+          <RobotOutlined className={styles.targetBarIcon} />
+          <span className={styles.targetBarName}>{targetAgentName ?? 'Agent'}</span>
+          <Tooltip title="停止@此智能体" mouseEnterDelay={0.8}>
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseOutlined />}
+              className={styles.targetBarClear}
+              onClick={() => unbindDirectAgentChat(conversationId)}
+            />
+          </Tooltip>
         </div>
       )}
       {replyTo && (
@@ -336,19 +436,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
           className={styles.sendBtn}
         />
       </div>
-      {mentionVisible && filteredMembers.length > 0 && (
+      {mentionVisible && filteredTargets.length > 0 && (
         <div className={styles.mentionDropdown}>
-          {filteredMembers.map((m, i) => (
+          {filteredTargets.map((target, i) => (
             <button
-              key={m.user_id}
+              key={`${target.kind}-${target.id}`}
               className={`${styles.mentionItem} ${i === mentionIndex ? styles.mentionItemActive : ''}`}
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault();
-                insertMention(m);
+                insertMention(target);
               }}
             >
-              @{m.username}
+              @{target.label}
+              {target.kind === 'agent' ? ' · Agent' : ''}
             </button>
           ))}
         </div>

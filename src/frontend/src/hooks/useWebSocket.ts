@@ -129,6 +129,14 @@ export function useWebSocket() {
           }
           break;
         }
+        case 'agent.typing_start': {
+          useWsStore.getState().setAgentTyping(convId, true);
+          break;
+        }
+        case 'agent.typing_stop': {
+          useWsStore.getState().setAgentTyping(convId, false);
+          break;
+        }
         case 'message.recall': {
           const recallConvId = msg.data.conversation_id ?? msg.data.conversationId;
           const recallMsgId = msg.data.message_id ?? msg.data.messageId;

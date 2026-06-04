@@ -90,14 +90,15 @@
 }
 
 .actions {
-  display: none;
+  display: flex;
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-fast);
 }
 
-.item:hover .actions {
+.item:hover .actions,
+.item.active .actions {
   opacity: 1;
   pointer-events: auto;
 }

@@ -289,6 +289,112 @@
   border: none;
 }
 
+.skillsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.skillsHeader .sectionTitle {
+  margin-bottom: 0;
+}
+
+.skillsEmpty {
+  padding: 16px 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.skillGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.skillCard {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  background: var(--color-bg-white);
+  border-radius: 12px;
+  cursor: default;
+}
+
+.skillDelete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.skillCard:hover .skillDelete {
+  opacity: 1;
+}
+
+.skillDelete:hover {
+  background: rgba(255, 77, 79, 0.12);
+  color: #ff4d4f;
+}
+
+.skillBadge {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.skillName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+
+.skillName:hover {
+  background: rgba(47, 143, 107, 0.08);
+  color: var(--color-primary);
+}
+
+.skillNameInput {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.skillDesc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.skillAddRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
 @media (max-width: 900px) {
   .infoGrid,
   .formGrid {

@@ -48,6 +48,7 @@ Desktop.ini
 # === 前端缓存 ===
 *.tsbuildinfo
 .vite/
+.vite-cache/
 
 # === Go 调试文件 ===
 debug
@@ -76,3 +77,16 @@ src/frontend/screenshot.mjs
 # === Claude Code 会话数据 ===
 .claude/sessions/
 .claude/state/
+.claude/state.backup/
+src/backend/uploads/originals/
+src/backend/uploads/thumbnails/
+
+# === Playwright MCP 测试产物 ===
+.playwright-mcp/
+
+# === 本地上传文件（运行时生成） ===
+uploads/
+
+# === 测试时从 src/backend 复制到根目录的文件（防止误提交） ===
+/config/
+/migrations/

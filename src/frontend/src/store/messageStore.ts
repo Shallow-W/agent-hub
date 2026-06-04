@@ -50,7 +50,7 @@ interface MessageState {
   handleRecallPush: (conversationId: string, messageId: string) => void;
 }
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 200;
 /** Max messages kept per conversation to prevent unbounded memory growth */
 const MAX_MESSAGES = 200;
 
@@ -82,7 +82,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       set((state) => {
         // before 有值表示翻页加载更多，拼在前面；否则是首次加载，覆盖旧数据
         const existing = before ? (state.messages[conversationId] ?? []) : [];
-        const merged = [...list, ...existing];
+        // 后端返回 DESC，需要按 created_at ASC 排序保证旧消息在前
+        const merged = [...list, ...existing].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
         // 只在首次加载时裁剪；加载更多时保留历史消息
         const trimmed = (!before && merged.length > MAX_MESSAGES) ? merged.slice(merged.length - MAX_MESSAGES) : merged;
         return {

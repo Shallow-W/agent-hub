@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
@@ -24,11 +25,13 @@ func NewAgentHandler(svc *service.AgentService) *AgentHandler {
 
 // AgentRequest 自建 Agent 请求体
 type AgentRequest struct {
-	Name             string `json:"name" binding:"required,max=100"`
-	CLITool          string `json:"cli_tool" binding:"required,max=50"`
-	SystemPrompt     string `json:"system_prompt"`
-	Avatar           string `json:"avatar"`
-	CapabilitiesJSON string `json:"capabilities_json"`
+	Name                  string `json:"name" binding:"required,max=100"`
+	CLITool               string `json:"cli_tool" binding:"required,max=50"`
+	SystemPrompt          string `json:"system_prompt"`
+	ToolsConfig           string `json:"tools_config"`
+	Avatar                string `json:"avatar"`
+	CapabilitiesJSON      string `json:"capabilities_json"`
+	EnableManagementTools bool   `json:"enable_management_tools"`
 }
 
 // CreateDaemonMachineRequest 创建远端电脑连接请求体
@@ -168,8 +171,10 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		req.Name,
 		req.CLITool,
 		req.SystemPrompt,
+		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
+		req.EnableManagementTools,
 	)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentInvalidInput) {
@@ -199,8 +204,10 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		req.Name,
 		req.CLITool,
 		req.SystemPrompt,
+		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
+		req.EnableManagementTools,
 	)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentInvalidInput) {
@@ -236,6 +243,95 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, nil)
+}
+
+// AgentTokenResponse Agent Token 响应体
+type AgentTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// GenerateAgentToken 生成 Agent 专用 JWT
+func (h *AgentHandler) GenerateAgentToken(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	token, expiresAt, err := h.svc.GenerateAgentToken(c.Request.Context(), userID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50040, "生成 Agent Token 失败")
+		return
+	}
+	middleware.SuccessResponse(c, AgentTokenResponse{
+		Token:     token,
+		ExpiresAt: expiresAt.Format(time.RFC3339),
+	})
+}
+
+// RestartAgent 重启 Agent
+func (h *AgentHandler) RestartAgent(c *gin.Context) {
+	agentID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	err := h.svc.RestartAgent(c.Request.Context(), agentID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40440, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40041, err.Error())
+			return
+		}
+		if err.Error() == "agent offline" {
+			middleware.ErrorResponse(c, http.StatusConflict, 40940, "Agent 不在线，无法重启")
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50041, "重启 Agent 失败")
+		return
+	}
+	middleware.SuccessResponse(c, map[string]string{"message": "restart task created"})
+}
+
+// StopAgent 停止 Agent
+func (h *AgentHandler) StopAgent(c *gin.Context) {
+	agentID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	err := h.svc.StopAgent(c.Request.Context(), agentID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40441, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40042, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50042, "停止 Agent 失败")
+		return
+	}
+	middleware.SuccessResponse(c, map[string]string{"message": "agent stopped"})
+}
+
+// GetMachineConnect 获取电脑连接命令
+func (h *AgentHandler) GetMachineConnect(c *gin.Context) {
+	machineID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	command, machine, apiKey, err := h.svc.GetMachineConnectCommand(c.Request.Context(), machineID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40442, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40043, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50043, "获取连接命令失败")
+		return
+	}
+	middleware.SuccessResponse(c, map[string]interface{}{
+		"command":         command,
+		"api_key":         apiKey,
+		"daemon_npm_path": resolveDaemonNPMPath(),
+		"machine":         machine,
+	})
 }
 
 func resolveDaemonSourcePath() string {

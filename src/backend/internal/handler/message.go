@@ -26,7 +26,7 @@ func NewMessageHandler(svc *service.MessageService) *MessageHandler {
 // SendMessageRequest 发送消息请求体
 type SendMessageRequest struct {
 	Role          string                    `json:"role"`
-	Content       string                    `json:"content" binding:"required"`
+	Content       string                    `json:"content"`
 	ArtifactsJSON string                    `json:"artifacts_json"`
 	Attachments   []model.MessageAttachment `json:"attachments"`
 	ReplyTo       *string                   `json:"reply_to"`
@@ -130,7 +130,7 @@ func (h *MessageHandler) History(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
 	var before time.Time
 	if beforeStr := c.Query("before"); beforeStr != "" {
 		t, err := time.Parse(time.RFC3339, beforeStr)

@@ -128,7 +128,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	middleware.SuccessResponse(c, list)
 }
 
-// Delete 删除对话（仅私聊，移除当前用户的成员记录）
+// Delete 删除当前用户可见的对话。
 func (h *ConversationHandler) Delete(c *gin.Context) {
 	convID := c.Param("id")
 	if convID == "" {
@@ -143,12 +143,8 @@ func (h *ConversationHandler) Delete(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusNotFound, 40410, err.Error())
 			return
 		}
-		if errors.Is(err, service.ErrConvNoPerm) {
+		if errors.Is(err, service.ErrConvNoPerm) || errors.Is(err, service.ErrConvNotMember) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40310, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrConvNotGroup) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40014, "仅私聊会话可删除")
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50012, "删除对话失败")

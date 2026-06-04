@@ -19,7 +19,8 @@ type ThemeMode = 'light' | 'dark' | 'system';
 function getInitialTheme(): ThemeMode {
   const saved = localStorage.getItem('theme');
   if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
-  return 'light';
+  // 首次访问默认跟随系统，与 SettingsPanel.tsx 的初始化逻辑一致
+  return 'system';
 }
 
 function applyTheme(mode: ThemeMode) {

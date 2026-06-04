@@ -122,6 +122,7 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
+	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
@@ -145,7 +146,14 @@ func main() {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
 		msgSvc.SetCacher(redisMsgRepo)
 	}
-	agentSvc := service.NewAgentService(agentRepo)
+	machineTracker := service.NewMachineTracker(agentRepo, logger)
+	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
+	orchSvc.SetJWTSecret(cfg.JWT.Secret)
+	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
+	orchSvc.SetKBResolver(knowledgeSvc)
+	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -160,6 +168,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -206,13 +215,36 @@ func main() {
 				c.Status(http.StatusForbidden)
 				return
 			}
-			c.Header("Content-Disposition", "inline")
+
+			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
+			isThumbnail := strings.HasPrefix(filepath.Clean(filePath), string(os.PathSeparator)+"thumbnails")
+			ext := strings.ToLower(filepath.Ext(absPath))
+			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
+			if isThumbnail || isImage {
+				c.Header("Content-Disposition", "inline")
+			} else {
+				// 非图片文件触发浏览器下载，使用原始文件名
+				fileName := filepath.Base(absPath)
+				c.Header("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+			}
 			c.Header("X-Content-Type-Options", "nosniff")
 			c.File(absPath)
 		})
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
+
+		// 知识库路由（需要鉴权）
+		kbRoutes := apiGroup.Group("/knowledge-bases")
+		{
+			kbRoutes.GET("", knowledgeHandler.List)
+			kbRoutes.POST("", knowledgeHandler.Create)
+			kbRoutes.PUT("/:id", knowledgeHandler.Update)
+			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
+			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
+			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
+			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
+		}
 
 		// 会话路由（需要鉴权）
 		convRoutes := apiGroup.Group("/conversations")
@@ -242,9 +274,13 @@ func main() {
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
+		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
+		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
+		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
+		apiGroup.GET("/daemon/machines/:id/connect", agentHandler.GetMachineConnect)
 		apiGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
 		apiGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
 		taskRoutes := apiGroup.Group("/tasks")
@@ -297,11 +333,13 @@ func main() {
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
 	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
+		router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
+	go machineTracker.Run(ctx)
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

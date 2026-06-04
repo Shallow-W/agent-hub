@@ -80,6 +80,7 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
 			return
 		}
+			h.agentSvc.MarkMachineOnline(machine.ID)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
 		return
 	}
@@ -109,6 +110,7 @@ func (h *DaemonHandler) ClaimTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 50042, "message": "领取 daemon 任务失败", "data": nil})
 		return
 	}
+	h.agentSvc.TouchMachine(machine.ID)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": task})
 }
 
@@ -137,6 +139,18 @@ func (h *DaemonHandler) CompleteTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 50043, "message": "提交 daemon 任务结果失败", "data": nil})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
+}
+
+// Heartbeat 接收 daemon 任务心跳，保持机器在线状态。
+func (h *DaemonHandler) Heartbeat(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil || machine == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40123, "message": "无效 machine key", "data": nil})
+		return
+	}
+	h.agentSvc.TouchMachine(machine.ID)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
 }
 
@@ -201,6 +215,7 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			return
 		}
+			h.agentSvc.MarkMachineOnline(machine.ID)
 		h.logger.Info("daemon machine agents registered", "machine_id", req.MachineID, "machine", machine.ID, "count", len(req.Agents))
 		return
 	}

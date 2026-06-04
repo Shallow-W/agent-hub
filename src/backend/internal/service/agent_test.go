@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -96,11 +99,11 @@ func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidate
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: name, CLITool: cliTool, Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, avatar, capabilitiesJSON string) (*model.Agent, error) {
+func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
 	return r.updateResult, nil
 }
 
@@ -108,9 +111,34 @@ func (r *fakeAgentRepo) DeleteOwned(ctx context.Context, id, userID string) (boo
 	return r.deleted, nil
 }
 
+func (r *fakeAgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
+	return &model.DaemonTask{ID: "task-1", AgentID: agentID, MachineID: machineID, Status: "pending"}, nil
+}
+
+func (r *fakeAgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error) {
+	for i := range r.machines {
+		if r.machines[i].ID == id {
+			return &r.machines[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
+	return nil
+}
+
+func (r *fakeAgentRepo) ClearAgentMachine(ctx context.Context, id string) error {
+	return nil
+}
+
+func (r *fakeAgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error {
+	return nil
+}
+
 func TestCreateCustomRejectsEmptyName(t *testing.T) {
-	svc := NewAgentService(&fakeAgentRepo{})
-	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "")
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
@@ -118,9 +146,9 @@ func TestCreateCustomRejectsEmptyName(t *testing.T) {
 
 func TestRegisterSystemAgentsSkipsInvalidItems(t *testing.T) {
 	repo := &fakeAgentRepo{}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	err := svc.RegisterSystemAgents(context.Background(), []DiscoveredAgent{
-		{Name: "Claude Code", CLITool: "claude", Capabilities: []string{"coding"}},
+		{Name: "Claude Code", CLITool: "claude", Capabilities: []DiscoveredSkill{{Name: "coding"}}},
 		{Name: "", CLITool: "codex"},
 		{Name: "OpenCode", CLITool: ""},
 	})
@@ -134,7 +162,7 @@ func TestRegisterSystemAgentsSkipsInvalidItems(t *testing.T) {
 
 func TestCreateDaemonMachineReturnsMachineKey(t *testing.T) {
 	repo := &fakeAgentRepo{}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	machine, apiKey, err := svc.CreateDaemonMachine(context.Background(), "user-1", "my-computer")
 	if err != nil {
 		t.Fatalf("create daemon machine failed: %v", err)
@@ -159,14 +187,14 @@ func TestCreateDaemonMachineReturnsMachineKey(t *testing.T) {
 
 func TestRegisterMachineAgentsMarksMachineConnected(t *testing.T) {
 	repo := &fakeAgentRepo{}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	machine, _, err := svc.CreateDaemonMachine(context.Background(), "user-1", "remote-pc")
 	if err != nil {
 		t.Fatalf("create daemon machine failed: %v", err)
 	}
 
 	err = svc.RegisterMachineAgents(context.Background(), machine, "DESKTOP-1", []DiscoveredAgent{
-		{Name: "Codex", CLITool: "codex", Capabilities: []string{"coding"}},
+		{Name: "Codex", CLITool: "codex", Capabilities: []DiscoveredSkill{{Name: "coding"}}},
 		{Name: "", CLITool: "broken"},
 	})
 	if err != nil {
@@ -180,9 +208,43 @@ func TestRegisterMachineAgentsMarksMachineConnected(t *testing.T) {
 	}
 }
 
+func TestDiscoveredSkillAcceptsLegacyString(t *testing.T) {
+	var skill DiscoveredSkill
+	if err := skill.UnmarshalJSON([]byte(`"coding"`)); err != nil {
+		t.Fatalf("unmarshal legacy skill: %v", err)
+	}
+	if skill.Name != "coding" || !skill.Auto {
+		t.Fatalf("unexpected skill: %#v", skill)
+	}
+}
+
+func TestSyncSkillFilesWritesExistingSkillMD(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	payload := `[{"name":"coding","detail":"new content","source_path":` + strconvQuote(path) + `}]`
+	if err := syncSkillFiles(payload); err != nil {
+		t.Fatalf("sync skill file: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if string(content) != "new content" {
+		t.Fatalf("expected synced content, got %q", string(content))
+	}
+}
+
+func strconvQuote(value string) string {
+	data, _ := json.Marshal(value)
+	return string(data)
+}
+
 func TestUpdateCustomReturnsNotFound(t *testing.T) {
-	svc := NewAgentService(&fakeAgentRepo{})
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "")
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}
@@ -190,7 +252,7 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 
 func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "persona")
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
@@ -201,7 +263,7 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 }
 
 func TestDeleteCustomReturnsNotFound(t *testing.T) {
-	svc := NewAgentService(&fakeAgentRepo{})
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
 	err := svc.DeleteOwned(context.Background(), "agent-1", "user-1")
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)

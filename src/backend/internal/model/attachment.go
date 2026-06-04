@@ -13,5 +13,6 @@ type MessageAttachment struct {
 	ThumbnailPath string    `json:"thumbnail_path,omitempty" db:"thumbnail_path"`
 	Width         int       `json:"width,omitempty" db:"width"`
 	Height        int       `json:"height,omitempty" db:"height"`
+	SortOrder     int       `json:"-" db:"sort_order"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }

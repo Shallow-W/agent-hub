@@ -188,7 +188,7 @@ export const AgentList: React.FC<AgentListProps> = ({
                 aria-expanded={isExpanded}
               >
                 <div className={styles.machineLeft}>
-                  <Avatar className={styles.machineAvatar} icon={<DesktopOutlined />} />
+                  <Avatar size={36} className={styles.machineAvatar} icon={<DesktopOutlined />} />
                   <div className={styles.machineMeta}>
                     <div className={styles.machineTitleRow}>
                       <span className={styles.machineTitle}>{group.name}</span>
@@ -258,9 +258,10 @@ export const AgentList: React.FC<AgentListProps> = ({
                             </div>
                             {capabilities.length > 0 && (
                               <div className={styles.agentTags}>
-                                {capabilities.map((item) => (
-                                  <Tag key={item}>{item}</Tag>
+                                {capabilities.slice(0, 3).map((item) => (
+                                  <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                                 ))}
+                                {capabilities.length > 3 && <Tag>+{capabilities.length - 3}</Tag>}
                               </div>
                             )}
                           </div>

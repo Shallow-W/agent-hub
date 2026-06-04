@@ -52,10 +52,15 @@
   max-width: none;
   margin: 0 auto;
   padding: 6px 8px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
+  border: 1px solid var(--color-border-light);
   border-radius: 18px;
   background: var(--color-surface-strong);
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+:global(html.dark) .inputRow {
+  border-color: var(--color-border);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .textarea {
@@ -65,6 +70,14 @@
   background: transparent !important;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
   font-size: 14px !important;
+}
+
+:global(html.dark) .textarea {
+  color: var(--color-text) !important;
+}
+
+:global(html.dark) .textarea::placeholder {
+  color: var(--color-text-tertiary) !important;
 }
 
 .textarea:focus-within {
@@ -112,6 +125,49 @@
 
 .fileInput {
   display: none;
+}
+
+.targetBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  margin-bottom: 6px;
+  background: rgba(47, 143, 107, 0.08);
+  border-radius: 20px;
+  border: 1px solid rgba(47, 143, 107, 0.2);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.targetBarIcon {
+  color: var(--color-primary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.targetBarName {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.targetBarClear {
+  flex-shrink: 0;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  padding: 0 !important;
+  color: var(--color-text-secondary) !important;
+}
+
+.targetBarClear:hover {
+  color: var(--color-primary) !important;
+  background: rgba(47, 143, 107, 0.12) !important;
 }
 
 .replyBar {

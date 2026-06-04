@@ -53,41 +53,42 @@ export function useMessages(conversationId: string | null) {
     const currentId = conversationId;
     const currentFetchId = ++fetchIdRef.current;
 
-    // Skip re-fetch if fetched within CACHE_TTL_MS (regardless of success/failure)
-    const now = Date.now();
-    const lastFetch = lastFetchedAt[currentId];
-    if (lastFetch && now - lastFetch < CACHE_TTL_MS) {
-      // Still mark as read even when using cache
-      markConversationRead(currentId).catch(() => {});
-      return;
-    }
-
-    lastFetchedAt[currentId] = now;
-    fetchMessages(currentId);
-
-    // 标记已读
-    markConversationRead(currentId).catch(() => {});
-
-    // 拉取离线/未读消息并合并
-    getUnreadMessages(currentId, 100).then((unread) => {
-      // stale check：如果用户已切换到其他对话，丢弃结果
-      if (currentFetchId !== fetchIdRef.current) return;
-      if (unread && unread.length > 0) {
-        const store = useMessageStore.getState();
-        const existing = store.messages[currentId] ?? [];
-        const existingIds = new Set(existing.map((m) => m.id));
-        const newMsgs = unread.filter((m) => !existingIds.has(m.id));
-        if (newMsgs.length > 0) {
-          const merged = [...existing, ...newMsgs].sort(
-            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-          );
-          const trimmed = merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
-          useMessageStore.setState((s) => ({
-            messages: { ...s.messages, [currentId]: trimmed },
-          }));
-        }
+    (async () => {
+      // Skip re-fetch if fetched within CACHE_TTL_MS (regardless of success/failure)
+      const now = Date.now();
+      const lastFetch = lastFetchedAt[currentId];
+      if (lastFetch && now - lastFetch < CACHE_TTL_MS) {
+        markConversationRead(currentId).catch(() => {});
+        return;
       }
-    }).catch(() => {});
+
+      lastFetchedAt[currentId] = now;
+      await fetchMessages(currentId);
+
+      // 拉取离线/未读消息并合并（必须在 markConversationRead 之前，否则 last_read_at 已更新导致查不到未读）
+      try {
+        const unread = await getUnreadMessages(currentId, 200);
+        if (currentFetchId !== fetchIdRef.current) return;
+        if (unread && unread.length > 0) {
+          const store = useMessageStore.getState();
+          const existing = store.messages[currentId] ?? [];
+          const existingIds = new Set(existing.map((m) => m.id));
+          const newMsgs = unread.filter((m) => !existingIds.has(m.id));
+          if (newMsgs.length > 0) {
+            const merged = [...existing, ...newMsgs].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+            );
+            const trimmed = merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
+            useMessageStore.setState((s) => ({
+              messages: { ...s.messages, [currentId]: trimmed },
+            }));
+          }
+        }
+      } catch { /* ignore */ }
+
+      // 标记已读（放在 getUnreadMessages 之后，确保未读消息已拉取）
+      markConversationRead(currentId).catch(() => {});
+    })();
   }, [conversationId, fetchMessages]);
 
   const loadMore = useCallback((): Promise<void> => {
