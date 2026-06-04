@@ -154,6 +154,32 @@ func (h *DaemonHandler) Heartbeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
 }
 
+// IssueAgentToken 用机器 api-key 换取该机器所属用户的 agent_management scoped JWT，
+// 供本机 MCP server 调用平台 REST API。仅接受 per-machine key（可映射到用户），
+// 不接受全局 daemon token（无用户归属）。
+func (h *DaemonHandler) IssueAgentToken(c *gin.Context) {
+	token := c.Query("token")
+	machine, err := h.authenticateMachine(c.Request.Context(), token)
+	if err != nil || machine == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 40124, "message": "无效 machine key", "data": nil})
+		return
+	}
+
+	tokenCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	jwtToken, expiresAt, err := h.agentSvc.GenerateAgentToken(tokenCtx, machine.UserID)
+	if err != nil {
+		h.logger.Error("issue agent token failed", "machine", machine.ID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 50044, "message": "签发 agent token 失败", "data": nil})
+		return
+	}
+	h.agentSvc.TouchMachine(machine.ID)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{
+		"token":      jwtToken,
+		"expires_at": expiresAt.Format(time.RFC3339),
+	}})
+}
+
 func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (*model.DaemonMachine, error) {
 	if token == "" {
 		return nil, service.ErrAgentInvalidInput
