@@ -24,7 +24,8 @@ Questions to answer:
 
 <!-- Patterns that should never be used and why -->
 
-(To be filled by the team)
+- Do not commit local backend build outputs such as `src/backend/agenthub-server`, `src/backend/main`, or files under `src/backend/tmp/`. They are machine-specific artifacts and can mask real source changes during branch integration.
+- Do not leave merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) in committed files. Run `git diff --check` and a conflict-marker search before committing merge resolutions.
 
 ---
 
@@ -48,4 +49,4 @@ Questions to answer:
 
 <!-- What reviewers should check -->
 
-(To be filled by the team)
+- For branch integrations, verify that generated backend binaries are ignored or removed from the index, and that `.gitignore` itself contains no conflict markers.
