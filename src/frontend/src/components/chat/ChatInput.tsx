@@ -161,7 +161,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     lastTypingSentRef.current = now;
     wsClient?.send(JSON.stringify({
       type: 'user.typing_start',
-      data: { conversationId },
+      data: { conversation_id: conversationId },
     }));
     isTypingRef.current = true;
   }, [wsClient, conversationId]);
@@ -170,7 +170,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     if (!isTypingRef.current) return;
     wsClient?.send(JSON.stringify({
       type: 'user.typing_stop',
-      data: { conversationId },
+      data: { conversation_id: conversationId },
     }));
     isTypingRef.current = false;
   }, [wsClient, conversationId]);

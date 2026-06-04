@@ -43,6 +43,9 @@ func (s *TaskService) List(ctx context.Context, userID string, filter model.Task
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
+	if tasks == nil {
+		tasks = []*model.WorkspaceTask{}
+	}
 	return tasks, nil
 }
 

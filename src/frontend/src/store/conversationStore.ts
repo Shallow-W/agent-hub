@@ -177,3 +177,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set({ memberPanelOpen: open });
   },
 }));
+
+export function resetConversationStore() {
+  useConversationStore.setState({
+    conversations: [],
+    activeConversationId: null,
+    directAgentChats: {},
+    memberPanelOpen: false,
+    loading: false,
+    _fetching: false,
+  });
+  localStorage.removeItem('agenthub_active_conv');
+  localStorage.removeItem(DIRECT_AGENT_CHATS_KEY);
+}

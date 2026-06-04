@@ -22,8 +22,8 @@ func NewConversationHandler(svc *service.ConversationService) *ConversationHandl
 
 // CreateRequest 创建对话请求体
 type CreateRequest struct {
-	Type  string `json:"type"`
-	Title string `json:"title"`
+	Type  string `json:"type" binding:"required,oneof=single group"`
+	Title string `json:"title" binding:"max=100"`
 }
 
 // RenameRequest 重命名请求体

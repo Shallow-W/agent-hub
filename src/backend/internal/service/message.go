@@ -278,6 +278,8 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 
 	if s.cacher != nil {
 		_ = s.cacher.ClearUnread(ctx, userID, convID)
+		// 同时清空离线消息队列，防止 GetUnreadMessages 再次返回已读消息
+		_, _ = s.cacher.DequeueOfflineAfter(ctx, userID, convID, "+inf")
 	}
 
 	return nil
@@ -299,8 +301,8 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if limit <= 0 {
 		limit = 50
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 200 {
+		limit = 200
 	}
 
 	// 仅在无游标时使用缓存（缓存是最新N条，不含历史分页）
