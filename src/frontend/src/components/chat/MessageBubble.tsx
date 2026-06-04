@@ -86,8 +86,17 @@ function highlightCode(code: string, lang?: string): string {
     }
     return hljs.highlightAuto(trimmed).value;
   } catch {
-    return trimmed;
+    return escapeHtml(trimmed);
   }
+}
+
+/** Recursively extract plain text from ReactNode (handles react-markdown v10 element children). */
+function extractText(node: ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (node && typeof node === 'object' && 'props' in node) return extractText((node as React.ReactElement).props.children);
+  return '';
 }
 
 // ── ReactMarkdown custom components ──
@@ -117,15 +126,23 @@ function renderTextWithMentions(text: string): ReactNode[] {
   return parts;
 }
 
-/** Walk ReactNode tree, split string leaves for @mention highlighting. */
+/** Process top-level string leaves for @mention highlighting — does NOT recurse into React elements. */
 function renderChildrenWithMentions(children: ReactNode): ReactNode {
   if (typeof children === 'string') {
     const parts = renderTextWithMentions(children);
     return parts.length === 1 ? parts[0] : <>{parts}</>;
   }
   if (Array.isArray(children)) {
-    return <>{children.map((c, i) => <React.Fragment key={i}>{renderChildrenWithMentions(c)}</React.Fragment>)}</>;
+    return <>{children.map((c, i) => {
+      if (typeof c === 'string') {
+        const parts = renderTextWithMentions(c);
+        return <React.Fragment key={i}>{parts.length === 1 ? parts[0] : <>{parts}</>}</React.Fragment>;
+      }
+      return <React.Fragment key={i}>{c}</React.Fragment>;
+    })}</>;
   }
+  // Non-string, non-array nodes (elements, null, undefined, numbers, booleans)
+  // pass through unchanged — mentions only highlight in text leaves.
   return children;
 }
 
@@ -135,7 +152,7 @@ const CodeBlock: React.FC<{ className?: string; children?: ReactNode }> = ({
   children,
 }) => {
   const lang = className?.replace('language-', '') || '';
-  const codeStr = String(children).replace(/\n$/, '');
+  const codeStr = extractText(children).replace(/\n$/, '');
   const [copied, setCopied] = useState(false);
 
   const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
@@ -172,7 +189,7 @@ const CodeBlock: React.FC<{ className?: string; children?: ReactNode }> = ({
 };
 
 const markdownComponents: Components = {
-  code({ className, children, ...rest }) {
+  code({ className, children, node, ...rest }) {
     const isBlock = className?.startsWith('language-');
     if (isBlock) {
       return <CodeBlock className={className}>{children}</CodeBlock>;
@@ -187,7 +204,7 @@ const markdownComponents: Components = {
     // Let the code component handle the wrapper; strip the extra <pre>
     return <>{children}</>;
   },
-  a({ href, children, ...rest }) {
+  a({ href, children, node, ...rest }) {
     const safeHref =
       href && (/^https?:\/\//i.test(href) || /^mailto:/i.test(href))
         ? href
