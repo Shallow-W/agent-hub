@@ -5,19 +5,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
 // AgentRepo Agent 数据访问
 type AgentRepo struct {
 	db *sqlx.DB
+
+	// daemon 任务是实时聊天的临时工单，改存内存而非 DB：消除任务的持久化写入与
+	// DB 轮询开销。进程重启会丢弃在途任务（可接受——真正的聊天记录持久化在 messages 表）。
+	taskMu    sync.Mutex
+	tasks     map[string]*model.DaemonTask
+	taskQueue map[string][]string // machineID -> 待领取 taskID FIFO
 }
 
 // NewAgentRepo 创建 Agent 仓库
 func NewAgentRepo(db *sqlx.DB) *AgentRepo {
-	return &AgentRepo{db: db}
+	return &AgentRepo{
+		db:        db,
+		tasks:     make(map[string]*model.DaemonTask),
+		taskQueue: make(map[string][]string),
+	}
 }
 
 // ListAvailable 查询系统 Agent 和当前用户自建 Agent
@@ -103,88 +116,101 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error
 	return &a, nil
 }
 
-// CreateDaemonTask 创建一次等待远端电脑执行的 CLI 任务。
-func (r *AgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
-	var t model.DaemonTask
-	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO daemon_tasks (user_id, conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages)
-		 VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7)
-		 RETURNING id, user_id, COALESCE(conversation_id::text, '') AS conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
-		           status, result, error, claimed_at, completed_at, created_at, updated_at`,
-		userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages,
-	).StructScan(&t)
-	if err != nil {
-		return nil, fmt.Errorf("insert daemon task: %w", err)
+// daemonTaskRetention 是已完成任务在内存中的保留期，用于懒清理，防止无限增长。
+// 远大于任务最长生命周期（waitDaemonTask 超时 120s），不会误删在途任务。
+const daemonTaskRetention = 10 * time.Minute
+
+// CreateDaemonTask 创建一次等待远端电脑执行的 CLI 任务（内存队列，不落库）。
+func (r *AgentRepo) CreateDaemonTask(_ context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
+	now := time.Now()
+	task := &model.DaemonTask{
+		ID:              uuid.NewString(),
+		UserID:          userID,
+		ConversationID:  conversationID,
+		AgentID:         agentID,
+		MachineID:       machineID,
+		CLITool:         cliTool,
+		Prompt:          prompt,
+		ContextMessages: contextMessages,
+		Status:          "pending",
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
-	return &t, nil
+	r.taskMu.Lock()
+	r.sweepDaemonTasksLocked(now)
+	r.tasks[task.ID] = task
+	r.taskQueue[machineID] = append(r.taskQueue[machineID], task.ID)
+	r.taskMu.Unlock()
+	return cloneDaemonTask(task), nil
 }
 
-// GetDaemonTask 按 ID 查询 daemon 任务。
-func (r *AgentRepo) GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error) {
-	var t model.DaemonTask
-	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, COALESCE(conversation_id::text, '') AS conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
-		        status, result, error, claimed_at, completed_at, created_at, updated_at
-		 FROM daemon_tasks WHERE id = $1`,
-		id,
-	).StructScan(&t)
-	if errors.Is(err, sql.ErrNoRows) {
+// GetDaemonTask 按 ID 查询 daemon 任务（内存）。
+func (r *AgentRepo) GetDaemonTask(_ context.Context, id string) (*model.DaemonTask, error) {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	task, ok := r.tasks[id]
+	if !ok {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("get daemon task: %w", err)
-	}
-	return &t, nil
+	return cloneDaemonTask(task), nil
 }
 
-// ClaimDaemonTask 为指定电脑领取一条待执行任务。
-func (r *AgentRepo) ClaimDaemonTask(ctx context.Context, machineID string) (*model.DaemonTask, error) {
-	var t model.DaemonTask
-	err := r.db.QueryRowxContext(ctx,
-		`WITH next_task AS (
-		     SELECT id
-		     FROM daemon_tasks
-		     WHERE machine_id = $1 AND status = 'pending'
-		     ORDER BY created_at ASC
-		     LIMIT 1
-		     FOR UPDATE SKIP LOCKED
-		 )
-		 UPDATE daemon_tasks
-		 SET status = 'running', claimed_at = NOW(), updated_at = NOW()
-		 WHERE id = (SELECT id FROM next_task)
-		 RETURNING id, user_id, COALESCE(conversation_id::text, '') AS conversation_id, agent_id, machine_id, cli_tool, prompt, context_messages,
-		           status, result, error, claimed_at, completed_at, created_at, updated_at`,
-		machineID,
-	).StructScan(&t)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+// ClaimDaemonTask 为指定电脑领取一条待执行任务（内存 FIFO，pending→running）。
+func (r *AgentRepo) ClaimDaemonTask(_ context.Context, machineID string) (*model.DaemonTask, error) {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	queue := r.taskQueue[machineID]
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		task, ok := r.tasks[id]
+		if ok && task.Status == "pending" {
+			now := time.Now()
+			task.Status = "running"
+			task.ClaimedAt = &now
+			task.UpdatedAt = now
+			r.taskQueue[machineID] = queue
+			return cloneDaemonTask(task), nil
+		}
 	}
-	if err != nil {
-		return nil, fmt.Errorf("claim daemon task: %w", err)
-	}
-	return &t, nil
+	r.taskQueue[machineID] = queue
+	return nil, nil
 }
 
-// CompleteDaemonTask 写入远端 CLI 执行结果。
-func (r *AgentRepo) CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error) {
-	status := "completed"
+// CompleteDaemonTask 写入远端 CLI 执行结果（running→completed/failed，内存）。
+func (r *AgentRepo) CompleteDaemonTask(_ context.Context, id, machineID, result, taskError string) (bool, error) {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	task, ok := r.tasks[id]
+	if !ok || task.MachineID != machineID || task.Status != "running" {
+		return false, nil
+	}
+	now := time.Now()
 	if taskError != "" {
-		status = "failed"
+		task.Status = "failed"
+		task.Error = taskError
+	} else {
+		task.Status = "completed"
+		task.Result = result
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE daemon_tasks
-		 SET status = $3, result = $4, error = $5, completed_at = NOW(), updated_at = NOW()
-		 WHERE id = $1 AND machine_id = $2 AND status = 'running'`,
-		id, machineID, status, result, taskError,
-	)
-	if err != nil {
-		return false, fmt.Errorf("complete daemon task: %w", err)
+	task.CompletedAt = &now
+	task.UpdatedAt = now
+	return true, nil
+}
+
+// sweepDaemonTasksLocked 清理已完成且超过保留期的任务。调用方须持有 taskMu。
+func (r *AgentRepo) sweepDaemonTasksLocked(now time.Time) {
+	for id, task := range r.tasks {
+		if task.CompletedAt != nil && now.Sub(*task.CompletedAt) > daemonTaskRetention {
+			delete(r.tasks, id)
+		}
 	}
-	count, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("rows affected: %w", err)
-	}
-	return count > 0, nil
+}
+
+// cloneDaemonTask 返回任务副本，避免调用方读到正在被并发修改的内存对象。
+func cloneDaemonTask(task *model.DaemonTask) *model.DaemonTask {
+	clone := *task
+	return &clone
 }
 
 // CreateCustom 创建用户自建 Agent

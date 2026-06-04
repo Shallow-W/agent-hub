@@ -130,10 +130,6 @@ func (r *fakeAgentRepo) DeleteOwned(ctx context.Context, id, userID string) (boo
 	return r.deleted, nil
 }
 
-func (r *fakeAgentRepo) CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error) {
-	return &model.DaemonTask{ID: "task-1", AgentID: agentID, MachineID: machineID, Status: "pending"}, nil
-}
-
 func (r *fakeAgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error) {
 	for i := range r.machines {
 		if r.machines[i].ID == id {
@@ -308,8 +304,8 @@ func TestUpdateDaemonAgentQueuesSkillSyncTask(t *testing.T) {
 			CapabilitiesJSON: payload,
 		},
 	}
-	svc := NewAgentService(repo)
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", userID, "Agent", "claude", "", "", payload)
+	svc := NewAgentService(repo, nil)
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", userID, "Agent", "claude", "", "", "", payload, false)
 	if err != nil {
 		t.Fatalf("update daemon agent: %v", err)
 	}
@@ -333,7 +329,7 @@ func TestOpenDaemonSkillLocationQueuesOpenTask(t *testing.T) {
 			CapabilitiesJSON: `[{"name":"coding","source_path":"` + strings.ReplaceAll(sourcePath, `\`, `\\`) + `"}]`,
 		},
 	}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	if err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", sourcePath); err != nil {
 		t.Fatalf("open daemon skill location: %v", err)
 	}
@@ -356,7 +352,7 @@ func TestOpenDaemonSkillLocationRejectsUnknownSourcePath(t *testing.T) {
 			CapabilitiesJSON: `[{"name":"coding","source_path":"C:\\skills\\coding\\SKILL.md"}]`,
 		},
 	}
-	svc := NewAgentService(repo)
+	svc := NewAgentService(repo, nil)
 	err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", `C:\other\SKILL.md`)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected invalid input, got %v", err)

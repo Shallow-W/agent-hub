@@ -530,3 +530,8 @@
 :global(html.dark) .markdownBody :global(blockquote) {
   background: rgba(255, 255, 255, 0.04);
 }
+
+/* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
+.innerUser .mention {
+  color: rgba(255, 255, 255, 0.92);
+}

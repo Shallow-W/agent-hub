@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execFileSync, spawn } = require('node:child_process');
+const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -12,6 +12,68 @@ const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 
 const activeSessions = new Map();
+
+// 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
+const daemonConn = { serverURL: '', apiKey: '' };
+
+// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
+// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
+// 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
+function buildPlatformMcpArgs() {
+  if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
+  const mcpConfig = JSON.stringify({
+    mcpServers: {
+      'agenthub-platform': {
+        // 用 'node'（PATH 解析）而非 process.execPath，避免 "Program Files" 空格在
+        // 子进程参数转义中被拆断；daemon 始终在 node 下运行，PATH 必有 node。
+        command: 'node',
+        args: [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'],
+      },
+    },
+  });
+  return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
+}
+
+// ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
+// 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+function ensureGlobalMcpConfigs(serverURL, apiKey) {
+  const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
+  registerOpenClawMcp(mcpArgs);
+  registerCodexMcp(mcpArgs);
+}
+
+function registerOpenClawMcp(mcpArgs) {
+  const command = 'openclaw';
+  if (commandVersion(command) === null) return;
+  const value = JSON.stringify({ command: 'node', args: mcpArgs });
+  const spec = processSpec(command, ['mcp', 'set', 'agenthub-platform', value]);
+  const result = spawnSync(spec.command, spec.args, {
+    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) {
+    console.log('已为 OpenClaw 配置平台 MCP（agenthub-platform）。');
+  } else {
+    console.error(`OpenClaw MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+  }
+}
+
+function registerCodexMcp(mcpArgs) {
+  const command = resolveCommand('codex');
+  if (commandVersion(command) === null) return;
+  // 幂等：先移除旧条目（忽略不存在的报错），再新增。
+  const remove = processSpec(command, ['mcp', 'remove', 'agenthub-platform']);
+  spawnSync(remove.command, remove.args, { timeout: 15000, windowsHide: true, stdio: 'ignore' });
+  const add = processSpec(command, ['mcp', 'add', 'agenthub-platform', '--', 'node', ...mcpArgs]);
+  const result = spawnSync(add.command, add.args, {
+    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) {
+    console.log('已为 Codex 配置平台 MCP（agenthub-platform）。');
+  } else {
+    console.error(`Codex MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+  }
+}
 
 function killSessionProcess(sessionId) {
   const child = activeSessions.get(sessionId);
@@ -127,18 +189,39 @@ function makeSessionId(conversationID, agentID) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-function commandVersion(command) {
+function commandOutput(command, args, timeout = 5000) {
   try {
-    const spec = processSpec(command, ['--version']);
+    const spec = processSpec(command, args);
     return execFileSync(spec.command, spec.args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
+      timeout,
       windowsHide: true,
     }).trim();
   } catch {
     return null;
   }
+}
+
+function commandVersion(command) {
+  return commandOutput(command, ['--version']);
+}
+
+function codexLoginStatus(command) {
+  const spec = processSpec(command, ['login', 'status']);
+  const result = spawnSync(spec.command, spec.args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 5000,
+    windowsHide: true,
+  });
+  if (result.status !== 0) return null;
+  return `${result.stdout || ''}${result.stderr || ''}`.trim();
+}
+
+function isCodexAuthenticated(command) {
+  const status = codexLoginStatus(command);
+  return status !== null && /\blogged in\b/i.test(status);
 }
 
 function codexExtensionPath() {
@@ -162,7 +245,9 @@ function codexExtensionPath() {
 }
 
 function resolveCommand(cliTool) {
-  if (cliTool === 'codex') return codexExtensionPath() || 'codex';
+  if (cliTool === 'codex') {
+    return codexExtensionPath() || 'codex';
+  }
   return cliTool;
 }
 
@@ -172,6 +257,7 @@ function scanAgents() {
       const command = resolveCommand(candidate.cli_tool);
       const version = commandVersion(command);
       if (version === null) return null;
+      if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
       const skills = scanSkills(candidate.cli_tool);
       return {
         name: candidate.name,
@@ -581,6 +667,7 @@ function commandForTask(task) {
       'dontAsk',
       '--output-format',
       'text',
+      ...buildPlatformMcpArgs(),
     ];
     if (systemPrompt) {
       args.push('--system-prompt', systemPrompt);
@@ -880,13 +967,18 @@ function runProcess(command, args, stdin, sessionId) {
 
 async function register(serverURL, apiKey) {
   const agents = scanAgents();
-  console.log(JSON.stringify(agents, null, 2));
+  console.log(`AgentHub daemon 发现 ${agents.length} 个 Agent：`);
+  for (const agent of agents) {
+    const version = agent.version ? ` ${String(agent.version).split('\n')[0].trim()}` : '';
+    const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
+    console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
+  }
   await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
     agents,
   });
-  console.log(`AgentHub daemon reported ${agents.length} candidate agent(s).`);
-  console.log('AgentHub daemon is running. Keep this terminal open to execute chat tasks.');
+  console.log('详细能力已上报，请在 AgentHub 网页端查看。');
+  console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
 }
 
 // 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
@@ -932,15 +1024,243 @@ async function pollTasks(serverURL, apiKey) {
   }
 }
 
+// ── MCP 模式 ──────────────────────────────────────────────────────────────
+// 以 stdio JSON-RPC（换行分隔）对外暴露一个 agenthub-platform MCP server，
+// 让本机 Agent（Claude Code / Codex 等）可通过 MCP 工具操作 AgentHub 平台。
+// 协议要求 stdout 只承载 JSON-RPC 报文，因此本模式所有日志改走 stderr。
+
+const MCP_PROTOCOL_VERSION = '2024-11-05';
+
+let cachedAgentJWT = null;
+let cachedAgentJWTExp = 0;
+
+// getAgentJWT 用机器 api-key 向后端换取 agent_management scoped JWT，并缓存到临近过期。
+async function getAgentJWT(serverURL, apiKey, force) {
+  const now = Date.now();
+  if (!force && cachedAgentJWT && now < cachedAgentJWTExp - 30000) {
+    return cachedAgentJWT;
+  }
+  const res = await requestJSON('GET', apiURL(serverURL, apiKey, '/daemon/agent-token'));
+  const data = res && res.data ? res.data : res;
+  if (!data || !data.token) {
+    throw new Error('agent-token 响应缺少 token');
+  }
+  cachedAgentJWT = data.token;
+  cachedAgentJWTExp = data.expires_at ? Date.parse(data.expires_at) : now + 4 * 60 * 1000;
+  return cachedAgentJWT;
+}
+
+// apiURLWithToken 用指定 JWT 作为 token query 调用 /api（鉴权中间件支持 query token）。
+function apiURLWithToken(serverURL, jwt, pathname, query) {
+  const url = new URL(serverURL);
+  url.pathname = `${url.pathname.replace(/\/$/, '')}${pathname}`;
+  url.searchParams.set('token', jwt);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+    }
+  }
+  url.hash = '';
+  return url;
+}
+
+// callApi 携带 scoped JWT 调用平台 REST API，401 时刷新一次 token 重试。
+async function callApi(serverURL, apiKey, method, pathname, options = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const jwt = await getAgentJWT(serverURL, apiKey, attempt === 1);
+    const url = apiURLWithToken(serverURL, jwt, pathname, options.query);
+    try {
+      return await requestJSON(method, url, options.body);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0 && /HTTP 401/.test(error.message)) {
+        cachedAgentJWT = null;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
+const MCP_TOOLS = [
+  {
+    name: 'list_conversations',
+    description: '列出当前用户的所有会话（私聊与群聊）。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callApi('GET', '/api/conversations'),
+  },
+  {
+    name: 'get_messages',
+    description: '读取指定会话的历史消息，用于获取上下文。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID' },
+        limit: { type: 'integer', description: '返回条数，默认 50' },
+      },
+      required: ['conversation_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi(
+      'GET',
+      `/api/conversations/${encodeURIComponent(args.conversation_id)}/messages`,
+      { query: { limit: args.limit || 50 } },
+    ),
+  },
+  {
+    name: 'send_message',
+    description: '以当前用户身份向指定会话发送一条消息；可用 mentions 传入 agent ID 触发 @机器人。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID' },
+        content: { type: 'string', description: '消息内容' },
+        mentions: { type: 'array', items: { type: 'string' }, description: '被 @ 的 agent ID 列表（可选）' },
+      },
+      required: ['conversation_id', 'content'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi(
+      'POST',
+      `/api/conversations/${encodeURIComponent(args.conversation_id)}/messages`,
+      { body: { role: 'user', content: args.content, mentions: args.mentions || [] } },
+    ),
+  },
+  {
+    name: 'create_group',
+    description: '创建一个群聊。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '群名称（1-50 字符）' },
+        member_ids: { type: 'array', items: { type: 'string' }, description: '初始成员用户 ID 列表（可选）' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('POST', '/api/groups', {
+      body: { name: args.name, member_ids: args.member_ids || [] },
+    }),
+  },
+  {
+    name: 'list_agents',
+    description: '列出当前用户可用的 Agent。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+  },
+];
+
+function writeMcp(message) {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+async function handleMcpMessage(line, toolMap, ctx) {
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const { id, method, params } = msg;
+
+  if (method === 'initialize') {
+    writeMcp({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'agenthub-platform', version: '0.1.0' },
+      },
+    });
+    return;
+  }
+  if (method === 'notifications/initialized' || method === 'initialized') {
+    return;
+  }
+  if (method === 'ping') {
+    writeMcp({ jsonrpc: '2.0', id, result: {} });
+    return;
+  }
+  if (method === 'tools/list') {
+    writeMcp({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+      },
+    });
+    return;
+  }
+  if (method === 'tools/call') {
+    const tool = toolMap.get(params && params.name);
+    if (!tool) {
+      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${params && params.name}` } });
+      return;
+    }
+    try {
+      const res = await tool.run((params && params.arguments) || {}, ctx);
+      const data = res && Object.prototype.hasOwnProperty.call(res, 'data') ? res.data : res;
+      writeMcp({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] },
+      });
+    } catch (error) {
+      writeMcp({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: `调用失败: ${error.message}` }], isError: true },
+      });
+    }
+    return;
+  }
+  if (id !== undefined && id !== null) {
+    writeMcp({ jsonrpc: '2.0', id, error: { code: -32601, message: `方法不存在: ${method}` } });
+  }
+}
+
+async function runMcpServer(serverURL, apiKey) {
+  const ctx = {
+    callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
+  };
+  const toolMap = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
+
+  let buffer = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    buffer += chunk;
+    let index = buffer.indexOf('\n');
+    while (index >= 0) {
+      const line = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 1);
+      if (line) void handleMcpMessage(line, toolMap, ctx);
+      index = buffer.indexOf('\n');
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
+  console.error(`AgentHub MCP server (stdio) 已就绪，暴露 ${MCP_TOOLS.length} 个工具。`);
+}
+
 async function main() {
   const serverURL = readArg('--server-url');
   const apiKey = readArg('--api-key');
   if (!serverURL || !apiKey) {
-    console.error('Usage: npx @agenthub/daemon --server-url <url> --api-key <key>');
+    console.error('Usage: npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]');
     process.exit(2);
   }
 
+  if (process.argv.includes('--mcp')) {
+    await runMcpServer(serverURL, apiKey);
+    return;
+  }
+
+  daemonConn.serverURL = serverURL;
+  daemonConn.apiKey = apiKey;
   await register(serverURL, apiKey);
+  ensureGlobalMcpConfigs(serverURL, apiKey);
   await pollTasks(serverURL, apiKey);
 }
 

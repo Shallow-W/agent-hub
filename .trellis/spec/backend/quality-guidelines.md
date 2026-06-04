@@ -20,3 +20,28 @@
 ### 接口设计
 - 接口在**消费方定义**
 - 保持小（**1-3 个方法**）
+
+---
+
+## Forbidden Patterns
+
+- Do not commit local backend build outputs such as `src/backend/agenthub-server`, `src/backend/main`, or files under `src/backend/tmp/`.
+- Do not leave merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) in committed files.
+
+---
+
+## Required Patterns
+
+(To be filled by the team)
+
+---
+
+## Testing Requirements
+
+(To be filled by the team)
+
+---
+
+## Code Review Checklist
+
+- For branch integrations, verify that generated backend binaries are ignored or removed from the index.
