@@ -228,9 +228,9 @@ func (h *DaemonHandler) readLoop(ctx context.Context, daemonConn *daemonConn, ma
 		case "daemon.register":
 			h.handleRegister(ctx, envelope.Data, machine)
 		case "task.done":
-			h.handleTaskDone(ctx, envelope.Data, machine, false)
+			h.handleTaskDone(ctx, daemonConn, envelope.Data, machine, false)
 		case "task.error":
-			h.handleTaskDone(ctx, envelope.Data, machine, true)
+			h.handleTaskDone(ctx, daemonConn, envelope.Data, machine, true)
 		case "task.heartbeat":
 			h.handleTaskHeartbeat(envelope.Data, machine)
 		case "ping":

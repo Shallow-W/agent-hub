@@ -1187,6 +1187,11 @@ async function runDaemonWS(serverURL, apiKey) {
           if (msg.type === 'task.execute') {
             enqueueWSTask(ws, msg.data);
           }
+          if (msg.type === 'task.nack') {
+            const taskId = msg.data && msg.data.task_id ? msg.data.task_id : 'unknown';
+            const detail = msg.data && msg.data.message ? `: ${msg.data.message}` : '';
+            console.error(`AgentHub daemon task ${taskId} result rejected${detail}`);
+          }
         });
         ws.onClose(resolve);
         registerOnWS(ws);

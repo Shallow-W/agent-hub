@@ -29,12 +29,16 @@ func (h *DaemonHandler) registerDaemonConn(machineID string, conn *daemonConn) {
 }
 
 func (h *DaemonHandler) unregisterDaemonConn(machineID string, conn *daemonConn) {
+	removed := false
 	h.connMu.Lock()
 	if h.conns[machineID] == conn {
 		delete(h.conns, machineID)
+		removed = true
 	}
 	h.connMu.Unlock()
-	h.failInFlightTask(machineID, "daemon websocket disconnected")
+	if removed {
+		h.failInFlightTask(machineID, "daemon websocket disconnected")
+	}
 }
 
 func (h *DaemonHandler) daemonConn(machineID string) *daemonConn {
@@ -111,7 +115,7 @@ func (h *DaemonHandler) sendDaemonTask(conn *daemonConn, task *model.DaemonTask)
 	return conn.write(ctx, data)
 }
 
-func (h *DaemonHandler) handleTaskDone(ctx context.Context, data json.RawMessage, machine *model.DaemonMachine, forceError bool) {
+func (h *DaemonHandler) handleTaskDone(ctx context.Context, conn *daemonConn, data json.RawMessage, machine *model.DaemonMachine, forceError bool) {
 	if machine == nil {
 		h.logger.Warn("daemon task result without machine")
 		return
@@ -133,12 +137,39 @@ func (h *DaemonHandler) handleTaskDone(ctx context.Context, data json.RawMessage
 	if err := h.agentSvc.CompleteDaemonTask(taskCtx, machine, req.TaskID, req.Result, req.Error); err != nil {
 		h.clearInFlightTask(machine.ID, req.TaskID)
 		h.logger.Error("complete daemon task from ws failed", slog.String("machine", machine.ID), slog.String("task", req.TaskID), "error", err)
+		h.writeTaskReceipt(ctx, conn, "task.nack", req.TaskID, err.Error())
 		h.startDaemonDispatch(machine.ID)
 		return
 	}
 	h.clearInFlightTask(machine.ID, req.TaskID)
+	h.writeTaskReceipt(ctx, conn, "task.ack", req.TaskID, "")
 	h.agentSvc.TouchMachine(machine.ID)
 	h.startDaemonDispatch(machine.ID)
+}
+
+func (h *DaemonHandler) writeTaskReceipt(ctx context.Context, conn *daemonConn, msgType, taskID, message string) {
+	if conn == nil || taskID == "" {
+		return
+	}
+	payload := struct {
+		Type string `json:"type"`
+		Data struct {
+			TaskID  string `json:"task_id"`
+			Message string `json:"message,omitempty"`
+		} `json:"data"`
+	}{Type: msgType}
+	payload.Data.TaskID = taskID
+	payload.Data.Message = message
+	data, err := json.Marshal(payload)
+	if err != nil {
+		h.logger.Warn("marshal daemon task receipt failed", "task", taskID, "error", err)
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := conn.write(writeCtx, data); err != nil {
+		h.logger.Warn("write daemon task receipt failed", "task", taskID, "error", err)
+	}
 }
 
 func (h *DaemonHandler) clearInFlightTask(machineID, taskID string) {
