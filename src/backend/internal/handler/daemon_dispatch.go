@@ -89,6 +89,7 @@ func (h *DaemonHandler) dispatchNextTask(machineID string) {
 		h.clearInFlightTask(machineID, task.ID)
 		h.logger.Warn("daemon task ws dispatch failed", "machine", machineID, "task", task.ID, "error", err)
 		h.failTask(machineID, task.ID, "daemon websocket dispatch failed: "+err.Error())
+		conn.conn.Close(websocket.StatusInternalError, "daemon task dispatch failed")
 		return
 	}
 }
