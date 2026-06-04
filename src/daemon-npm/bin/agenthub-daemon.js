@@ -13,6 +13,25 @@ const HEARTBEAT_INTERVAL_MS = 30000;
 
 const activeSessions = new Map();
 
+// 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
+const daemonConn = { serverURL: '', apiKey: '' };
+
+// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
+// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
+// 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
+function buildPlatformMcpArgs() {
+  if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
+  const mcpConfig = JSON.stringify({
+    mcpServers: {
+      'agenthub-platform': {
+        command: process.execPath,
+        args: [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'],
+      },
+    },
+  });
+  return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
+}
+
 function killSessionProcess(sessionId) {
   const child = activeSessions.get(sessionId);
   if (!child) return;
@@ -605,6 +624,7 @@ function commandForTask(task) {
       'dontAsk',
       '--output-format',
       'text',
+      ...buildPlatformMcpArgs(),
     ];
     if (systemPrompt) {
       args.push('--system-prompt', systemPrompt);
@@ -1194,6 +1214,8 @@ async function main() {
     return;
   }
 
+  daemonConn.serverURL = serverURL;
+  daemonConn.apiKey = apiKey;
   await register(serverURL, apiKey);
   await pollTasks(serverURL, apiKey);
 }

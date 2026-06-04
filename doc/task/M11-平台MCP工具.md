@@ -34,17 +34,19 @@
 | `create_group` | `POST /api/groups` |
 | `list_agents` | `GET /api/agents` |
 
-### M11-4 注册到 Agent（待办）
+### M11-4 派发任务自动注入（claude 已完成）
 
-- 在 Claude Code 通过 `claude mcp add agenthub-platform -- node <daemon> --server-url <url> --api-key <key> --mcp` 注册。
-- 后续：在 daemon 派发任务时（[agenthub-daemon.js](../../src/daemon-npm/bin/agenthub-daemon.js) `commandForTask`）自动为 claude/codex 注入该 MCP 配置，使聊天任务原生可用。
+- daemon 派发 claude 任务时（[agenthub-daemon.js](../../src/daemon-npm/bin/agenthub-daemon.js) `commandForTask`）自动追加 `--mcp-config <inline JSON>` + `--allowedTools mcp__agenthub-platform`，把本 daemon 以 `--mcp` 作为 stdio MCP server 挂上，聊天任务原生可调平台工具，无需手动 `claude mcp add`。
+- 凭证复用轮询 daemon 自身的 machine key（`daemonConn`）。
+- OpenClaw / Codex 的 `agent`/`exec` 子命令无按次注入能力，需走各自全局 MCP 配置（如 `openclaw mcp add`），不在自动注入范围内。
 
 ## 验收标准
 
 - [x] 机器 key 可换取带 `user_id` 的 scoped JWT
 - [x] MCP 握手、`tools/list`、`tools/call` 全流程可用
 - [x] 5 个工具均真实命中后端，且携带换取的 JWT
-- [ ] 在真实 Claude Code 中注册并由 Agent 实际调用
+- [x] 派发 claude 任务时自动注入平台 MCP（命令参数验证通过）
+- [ ] 在真实 Claude Code 聊天任务中由 Agent 实际调用端到端验证
 
 ## 依赖
 
