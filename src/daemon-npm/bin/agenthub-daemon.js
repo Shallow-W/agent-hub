@@ -978,6 +978,58 @@ function parseOpenClawOutput(stdout) {
   return text;
 }
 
+// parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
+// 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
+//   { type, language, filename, title, url, content }
+function parseArtifacts(text) {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  const artifacts = [];
+
+  // 1) 提取围栏代码块 ```lang\n...\n```
+  // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
+  const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let match;
+  while ((match = fenceRe.exec(text)) !== null) {
+    const language = (match[1] || '').trim().toLowerCase();
+    let content = match[2];
+    let filename = '';
+    // 识别首行文件名注释：// file: xxx 、# file: xxx 、<!-- file: xxx -->
+    const firstLine = content.split('\n', 1)[0] || '';
+    const fileHint = firstLine.match(/^\s*(?:\/\/|#|<!--)\s*file:\s*(.+?)\s*(?:-->)?\s*$/i);
+    if (fileHint) {
+      filename = fileHint[1].trim();
+      const nl = content.indexOf('\n');
+      // 只在确有换行时剥离首行提示，否则整块就是提示行本身（无正文）
+      content = nl === -1 ? '' : content.slice(nl + 1);
+    }
+    content = content.replace(/\s+$/, '');
+    if (!content) continue;
+
+    // language 为 html 时归类为 webpage（完整 HTML 文档），否则为 code
+    if (language === 'html' && /<\s*(?:html|!doctype|body|head|div)\b/i.test(content)) {
+      artifacts.push({ type: 'webpage', title: filename || 'HTML Preview', content });
+    } else {
+      artifacts.push({ type: 'code', language, filename, content });
+    }
+  }
+
+  // 2) 提取裸 http/https URL（在代码块外，简单去重）
+  // 先剔除围栏代码块，避免把代码里的 import/注释 URL 误当作网页产物
+  const textOutsideFences = text.replace(/```[^\n`]*\n[\s\S]*?```/g, ' ');
+  // 字符类排除空白、闭合括号/尖括号/引号，以及中文标点（。，、；）避免吞掉句末标点
+  const urlRe = /\bhttps?:\/\/[^\s)\]<>"'，。、；：！？]+/g;
+  const seen = new Set();
+  let urlMatch;
+  while ((urlMatch = urlRe.exec(textOutsideFences)) !== null) {
+    const url = urlMatch[0].replace(/[.,;:!?]+$/, ''); // 去掉句末 ASCII 标点
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    artifacts.push({ type: 'webpage', url, title: '' });
+  }
+
+  return artifacts;
+}
+
 function runProcess(command, args, stdin, sessionId) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
@@ -1589,11 +1641,12 @@ async function connectWS(serverURL, apiKey) {
             // Non-claude or missing info — use legacy per-task spawn
             result = await executeTask(task);
           }
+          const artifacts = parseArtifacts(result);
           safeSend(ws, JSON.stringify({
             type: 'task.complete',
-            data: { task_id: task.id, result },
+            data: { task_id: task.id, result, artifacts },
           }));
-          console.log(`AgentHub daemon task ${task.id} completed.`);
+          console.log(`AgentHub daemon task ${task.id} completed (${artifacts.length} artifact(s)).`);
         } catch (error) {
           safeSend(ws, JSON.stringify({
             type: 'task.complete',

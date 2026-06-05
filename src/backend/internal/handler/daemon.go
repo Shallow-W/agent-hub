@@ -292,9 +292,10 @@ func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, m
 
 func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Result string `json:"result"`
-		Error  string `json:"error"`
+		TaskID    string              `json:"task_id"`
+		Result    string              `json:"result"`
+		Error     string              `json:"error"`
+		Artifacts []ws.ArtifactResult `json:"artifacts"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid task.complete data", "error", err)
@@ -302,9 +303,10 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 	}
 	// Resolve WS promise first (for orchestrator channel-based wait)
 	h.daemonHub.ResolveTask(req.TaskID, &ws.TaskResult{
-		TaskID: req.TaskID,
-		Result: req.Result,
-		Error:  req.Error,
+		TaskID:    req.TaskID,
+		Result:    req.Result,
+		Error:     req.Error,
+		Artifacts: req.Artifacts,
 	})
 	// Also persist to DB (for HTTP fallback and audit)
 	if machine != nil {

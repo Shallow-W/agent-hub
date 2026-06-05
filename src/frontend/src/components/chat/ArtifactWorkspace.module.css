@@ -1,0 +1,97 @@
+/* 全屏产物工作区：Preview / Code / Meta 三视图 */
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  height: 72vh;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sourceAgent {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.viewArea {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+/* Preview：iframe 占满 */
+.previewArea {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* Code 视图：CodeBlock 撑满高度 */
+.codeArea {
+  height: 100%;
+  overflow: auto;
+  padding: 0 2px;
+}
+
+/* Meta 视图 */
+.metaTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.metaTable th,
+.metaTable td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.metaTable th {
+  width: 120px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.metaLink {
+  color: var(--color-primary);
+  word-break: break-all;
+}
+
+.emptyHint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

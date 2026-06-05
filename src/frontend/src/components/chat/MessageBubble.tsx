@@ -2,7 +2,6 @@ import React, { useState, useMemo, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown, message as antMessage } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  CheckOutlined,
   CloseOutlined,
   CopyOutlined,
   DownOutlined,
@@ -15,89 +14,18 @@ import {
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import hljs from 'highlight.js/lib/core';
-import javascript from 'highlight.js/lib/languages/javascript';
-import typescript from 'highlight.js/lib/languages/typescript';
-import go from 'highlight.js/lib/languages/go';
-import python from 'highlight.js/lib/languages/python';
-import rust from 'highlight.js/lib/languages/rust';
-import bash from 'highlight.js/lib/languages/bash';
-import json from 'highlight.js/lib/languages/json';
-import yaml from 'highlight.js/lib/languages/yaml';
-import markdown from 'highlight.js/lib/languages/markdown';
-import xml from 'highlight.js/lib/languages/xml';
-import cssLang from 'highlight.js/lib/languages/css';
-import sql from 'highlight.js/lib/languages/sql';
 import { useAuthStore } from '@/store/authStore';
 import type { Message, OptimisticStatus } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
+import { CodeBlock } from './CodeBlock';
+import { ArtifactCard } from './ArtifactCard';
+import { escapeHtml } from './highlight';
 import styles from './MessageBubble.module.css';
-
-// Register only the languages we need — keeps bundle small
-hljs.registerLanguage('javascript', javascript);
-hljs.registerLanguage('js', javascript);
-hljs.registerLanguage('typescript', typescript);
-hljs.registerLanguage('ts', typescript);
-hljs.registerLanguage('go', go);
-hljs.registerLanguage('golang', go);
-hljs.registerLanguage('python', python);
-hljs.registerLanguage('py', python);
-hljs.registerLanguage('rust', rust);
-hljs.registerLanguage('bash', bash);
-hljs.registerLanguage('sh', bash);
-hljs.registerLanguage('shell', bash);
-hljs.registerLanguage('zsh', bash);
-hljs.registerLanguage('json', json);
-hljs.registerLanguage('yaml', yaml);
-hljs.registerLanguage('yml', yaml);
-hljs.registerLanguage('markdown', markdown);
-hljs.registerLanguage('md', markdown);
-hljs.registerLanguage('html', xml);
-hljs.registerLanguage('xml', xml);
-hljs.registerLanguage('css', cssLang);
-hljs.registerLanguage('sql', sql);
-
-// Friendly display names for language tags
-const LANG_DISPLAY: Record<string, string> = {
-  js: 'JavaScript', ts: 'TypeScript', golang: 'Go', py: 'Python',
-  sh: 'Shell', shell: 'Shell', zsh: 'Shell', yml: 'YAML', md: 'Markdown',
-};
 
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/** Highlight code string, returning highlighted HTML. Falls back to plain text. */
-function highlightCode(code: string, lang?: string): string {
-  const trimmed = code.replace(/\n$/, '');
-  try {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(trimmed, { language: lang }).value;
-    }
-    return hljs.highlightAuto(trimmed).value;
-  } catch {
-    return escapeHtml(trimmed);
-  }
-}
-
-/** Recursively extract plain text from ReactNode (handles react-markdown v10 element children). */
-function extractText(node: ReactNode): string {
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join('');
-  if (node && typeof node === 'object' && 'props' in node) return extractText((node as React.ReactElement).props.children);
-  return '';
-}
 
 // ── ReactMarkdown custom components ──
 
@@ -145,48 +73,6 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   // pass through unchanged — mentions only highlight in text leaves.
   return children;
 }
-
-/** Fenced code block with language header and copy button. */
-const CodeBlock: React.FC<{ className?: string; children?: ReactNode }> = ({
-  className,
-  children,
-}) => {
-  const lang = className?.replace('language-', '') || '';
-  const codeStr = extractText(children).replace(/\n$/, '');
-  const [copied, setCopied] = useState(false);
-
-  const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
-  const highlighted = highlightCode(codeStr, lang || undefined);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(codeStr).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable */ });
-  };
-
-  return (
-    <div className={styles.codeBlockWrapper}>
-      <div className={styles.codeHeader}>
-        <span>{displayLang}</span>
-        <button
-          className={`${styles.codeCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
-          type="button"
-          title="复制代码"
-          onClick={handleCopy}
-        >
-          <span className={styles.codeCopyIcon}>
-            {copied ? <CheckOutlined /> : <CopyOutlined />}
-          </span>
-          <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
-        </button>
-      </div>
-      <pre className={styles.codeBlock}>
-        <code dangerouslySetInnerHTML={{ __html: highlighted }} />
-      </pre>
-    </div>
-  );
-};
 
 const markdownComponents: Components = {
   code({ className, children, node, ...rest }) {
@@ -470,6 +356,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <div className={styles.markdownBody}>
                 <MarkdownRenderer content={message.content ?? ''} />
               </div>
+            )}
+            {message.artifacts && message.artifacts.length > 0 && (
+              <ArtifactCard artifacts={message.artifacts} agentName={agentName} />
             )}
             {collapsed && <div className={styles.fadeMask} />}
             {streaming && <span className={styles.streamingCursor} />}

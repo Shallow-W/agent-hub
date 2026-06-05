@@ -45,6 +45,30 @@ type MsgRepo interface {
 	GetMessageSender(ctx context.Context, messageID string) (string, error)
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
+	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+}
+
+// artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
+func artifactsFromTaskResult(results []ws.ArtifactResult) []model.Artifact {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]model.Artifact, 0, len(results))
+	for _, r := range results {
+		if r.Type == "" {
+			continue
+		}
+		out = append(out, model.Artifact{
+			Version:  1,
+			Type:     r.Type,
+			Language: r.Language,
+			Filename: r.Filename,
+			Title:    r.Title,
+			URL:      r.URL,
+			Content:  r.Content,
+		})
+	}
+	return out
 }
 
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
@@ -642,6 +666,15 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
+	}
+
+	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
+	if arts := artifactsFromTaskResult(result.Artifacts); len(arts) > 0 {
+		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
+			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
+		} else {
+			msg.Artifacts = arts
+		}
 	}
 	return msg, nil
 }

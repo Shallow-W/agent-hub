@@ -274,6 +274,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
+	s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -558,7 +559,20 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 	if err != nil {
 		return nil, fmt.Errorf("create worker reply: %w", err)
 	}
+	s.persistArtifacts(ctx, msg, daemonTask.Artifacts)
 	return msg, nil
+}
+
+// persistArtifacts 将 daemon 解析出的产物落到独立 artifacts 表（失败不影响消息）。
+func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
+	if msg == nil || len(artifacts) == 0 {
+		return
+	}
+	if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, artifacts); err != nil {
+		slog.Warn("save orchestrator artifacts failed", "message_id", msg.ID, "error", err)
+		return
+	}
+	msg.Artifacts = artifacts
 }
 
 // buildDispatchContext builds Layer 2 context for a worker agent dispatch.
@@ -684,9 +698,10 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	select {
 	case result := <-ch:
 		task := &model.DaemonTask{
-			ID:     result.TaskID,
-			Status: "completed",
-			Result: result.Result,
+			ID:        result.TaskID,
+			Status:    "completed",
+			Result:    result.Result,
+			Artifacts: artifactsFromTaskResult(result.Artifacts),
 		}
 		if result.Error != "" {
 			task.Status = "failed"

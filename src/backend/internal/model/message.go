@@ -24,6 +24,7 @@ type Message struct {
 	SenderID       *string             `json:"sender_id,omitempty" db:"sender_id"`
 	Username       string              `json:"username,omitempty" db:"username"`
 	Attachments      []MessageAttachment `json:"attachments,omitempty" db:"-"`
+	Artifacts        []Artifact          `json:"artifacts,omitempty" db:"-"` // 结构化产物（独立 artifacts 表关联加载，不占用 artifacts_json）
 	ReplyToMessage   *ReplyToPreview     `json:"reply_to_message,omitempty" db:"-"`
 	Mentions         []string            `json:"mentions,omitempty" db:"-"` // JSON array of user IDs, stored in mentions TEXT column
 }

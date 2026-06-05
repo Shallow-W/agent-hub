@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/guides/workflow-rules.md", "reason": "质检流程规则"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "重点校验 daemon→backend→frontend 产物字段端到端一致，无断链"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "校验是否真的复用 CodeBlock，没有重复造代码卡/重复逻辑"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend 质量基线（测试、错误处理）"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "校验 artifacts 表/迁移合规，artifacts_json 未被破坏"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "frontend 质量基线"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "校验类型契约前后端对齐、无 any"}
