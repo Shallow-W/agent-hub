@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // APIClient 调用 AgentHub 后端 REST API
@@ -21,7 +22,7 @@ func NewAPIClient(baseURL, token string) *APIClient {
 	return &APIClient{
 		baseURL:    baseURL,
 		token:      token,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 

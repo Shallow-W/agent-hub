@@ -8,9 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/agent-hub/daemon/client"
@@ -58,15 +56,7 @@ func runMCP() {
 
 	server := mcp.NewServer("agenthub", "0.1.0", mcp.TaskTools(), handler, logger)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
+	ctx := context.Background()
 
 	logger.Info("MCP server starting", "server", serverURL)
 	if err := server.Serve(ctx); err != nil {

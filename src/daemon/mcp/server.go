@@ -16,7 +16,7 @@ type Server struct {
 	name    string
 	version string
 	tools   []Tool
-	handler func(toolName string, arguments map[string]interface{}) (interface{}, error)
+	handler ToolHandlerFunc
 	transport *stdioTransport
 	logger    *slog.Logger
 }
@@ -63,6 +63,10 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			s.logger.Error("read message", "error", err)
+			// JSON-RPC 2.0: 畸形 JSON 应返回 parse error
+			if wErr := s.transport.writeMessage(makeError(nil, errParseError, "Parse error")); wErr != nil {
+				return wErr
+			}
 			continue
 		}
 		if req == nil {
