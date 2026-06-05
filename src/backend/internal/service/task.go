@@ -127,7 +127,7 @@ func (s *TaskService) Delete(ctx context.Context, userID, id string) error {
 
 func isTaskStatus(status string) bool {
 	switch status {
-	case "todo", "in_progress", "blocked", "done":
+	case "todo", "in_progress", "blocked", "done", "cancelled":
 		return true
 	default:
 		return false

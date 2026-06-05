@@ -108,7 +108,11 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 			return
 		}
 			h.agentSvc.MarkMachineOnline(machine.ID)
-		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": gin.H{"count": len(req.Agents)}})
+		data := gin.H{"count": len(req.Agents)}
+		if h.token != "" {
+			data["daemon_token"] = h.token
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": data})
 		return
 	}
 

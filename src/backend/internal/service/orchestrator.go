@@ -181,7 +181,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				Task:      content,
 			})
 		} else {
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, content, kbPreload)
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload)
 			if err != nil {
 				slog.Warn("direct dispatch failed", "agent_id", agentID, "error", err)
 				continue

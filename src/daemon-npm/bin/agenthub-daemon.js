@@ -92,6 +92,7 @@ function buildPlatformMcpArgs(conversationId, userId) {
 // 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
+  if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
   registerOpenClawMcp(mcpArgs);
   registerCodexMcp(mcpArgs);
 }
@@ -1039,10 +1040,13 @@ async function register(serverURL, apiKey) {
     const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
     console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
   }
-  await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
+  const res = await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
     agents,
   });
+  if (res && res.data && res.data.daemon_token && !daemonConn.daemonToken) {
+    daemonConn.daemonToken = res.data.daemon_token;
+  }
   console.log('详细能力已上报，请在 AgentHub 网页端查看。');
   console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
 }
@@ -1729,25 +1733,6 @@ const MCP_TOOLS = [
       'GET',
       `/api/conversations/${encodeURIComponent(args.conversation_id)}/messages`,
       { query: { limit: args.limit || 50 } },
-    ),
-  },
-  {
-    name: 'send_message',
-    description: '以当前用户身份向指定会话发送一条消息；可用 mentions 传入 agent ID 触发 @机器人。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        conversation_id: { type: 'string', description: '会话 ID' },
-        content: { type: 'string', description: '消息内容' },
-        mentions: { type: 'array', items: { type: 'string' }, description: '被 @ 的 agent ID 列表（可选）' },
-      },
-      required: ['conversation_id', 'content'],
-      additionalProperties: false,
-    },
-    run: (args, ctx) => ctx.callApi(
-      'POST',
-      `/api/conversations/${encodeURIComponent(args.conversation_id)}/messages`,
-      { body: { role: 'user', content: args.content, mentions: args.mentions || [] } },
     ),
   },
   {
