@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -56,10 +57,14 @@ type OrchestratorService struct {
 	serverURL string
 
 	kbResolver OrchKBResolver
+	daemonHub  *ws.DaemonHub
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
 	activeOrchs map[string]time.Time // convID → 锁获取时间
+
+	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
+	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }
 
 // SetJWTSecret sets the JWT secret for generating management tool tokens.
@@ -75,6 +80,11 @@ func (s *OrchestratorService) SetServerURL(url string) {
 // SetKBResolver sets the knowledge base resolver for injecting KB context.
 func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 	s.kbResolver = resolver
+}
+
+// SetDaemonHub sets the daemon WebSocket hub for task dispatch.
+func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
+	s.daemonHub = hub
 }
 
 // NewOrchestratorService creates a new orchestrator service.
@@ -172,7 +182,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				Task:      content,
 			})
 		} else {
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, content, kbPreload)
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload)
 			if err != nil {
 				slog.Warn("direct dispatch failed", "agent_id", agentID, "error", err)
 				continue
@@ -206,6 +216,13 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
+	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
+	newSem := make(chan struct{}, 1)
+	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
+	sem := actual.(chan struct{})
+	sem <- struct{}{} // blocks until slot available
+	defer func() { <-sem }()
+
 	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
 	kbCtx := kbPreload
 	if kbCtx == "" {
@@ -220,7 +237,27 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
-	task, err = waitDaemonTask(ctx, s.agentRepo, task.ID)
+	// Daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(task.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           content,
+			"context_messages": agentCtx,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+			"user_id":          userID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to daemon: %w", err)
+	}
+
+	task, err = s.waitDaemonTask(ctx, task.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +313,27 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
 
-	orchTask, err = waitDaemonTask(ctx, s.agentRepo, orchTask.ID)
+	// Orchestrator daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*orchAgent.MachineID) {
+		return nil, fmt.Errorf("orchestrator agent %q 的 daemon 未通过 WS 连接", orchAgent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(orchTask.ID)
+	if err := s.daemonHub.SendToMachine(*orchAgent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          orchTask.ID,
+			"cli_tool":         orchAgent.CLITool,
+			"prompt":           fullPrompt,
+			"context_messages": orchCtx,
+			"agent_id":         orchAgent.ID,
+			"conversation_id":  convID,
+			"user_id":          userID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to orchestrator daemon: %w", err)
+	}
+
+	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +481,13 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
 
+	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
+	newSem := make(chan struct{}, 1)
+	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
+	sem := actual.(chan struct{})
+	sem <- struct{}{} // blocks until slot available
+	defer func() { <-sem }()
+
 	// 权限校验：与 dispatchSingleAgent 保持一致
 	if agent.UserID != nil && *agent.UserID != userID {
 		return nil, ErrMsgAgentNoPerm
@@ -457,7 +521,27 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("create worker daemon task: %w", err)
 	}
 
-	daemonTask, err = waitDaemonTask(ctx, s.agentRepo, daemonTask.ID)
+	// Worker daemon must be connected via WS to dispatch
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("worker agent %q 的 daemon 未通过 WS 连接", agent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(daemonTask.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          daemonTask.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           task.Task,
+			"context_messages": dispatchCtx,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+			"user_id":          userID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to worker daemon: %w", err)
+	}
+
+	daemonTask, err = s.waitDaemonTask(ctx, daemonTask.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -587,8 +671,42 @@ const orchLockTimeout = 3 * time.Minute
 // orchCleanupInterval 编排锁定期清理间隔
 const orchCleanupInterval = 30 * time.Second
 
+// waitDaemonTask waits for a daemon task to complete via channel-based
+// notification through DaemonHub. Returns an error if the daemon is not
+// connected or the context times out.
+func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
+	if s.daemonHub == nil {
+		return nil, fmt.Errorf("daemon hub not available")
+	}
+
+	ch := s.daemonHub.AwaitTaskResult(taskID)
+	if ch == nil {
+		return nil, fmt.Errorf("daemon not connected for task %s", taskID)
+	}
+	defer s.daemonHub.RemoveTaskPromise(taskID)
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	select {
+	case result := <-ch:
+		task := &model.DaemonTask{
+			ID:     result.TaskID,
+			Status: "completed",
+			Result: result.Result,
+		}
+		if result.Error != "" {
+			task.Status = "failed"
+			task.Error = result.Error
+		}
+		return task, nil
+	case <-ctx.Done():
+		return nil, ErrMsgAgentTimeout
+	}
+}
+
 // InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
-// 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
+// 管理操作（agent/machine CRUD）通过 MCP daemon 工具提供，不在此注入 JWT/curl。
 // 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
 func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
@@ -598,25 +716,10 @@ func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString("\n\n")
 	}
 
-	hasTools := agent.ToolsConfig != ""
-	hasMgmt := agent.EnableManagementTools && s.jwtSecret != "" && s.serverURL != ""
-
-	if hasTools || hasMgmt {
+	if agent.ToolsConfig != "" {
 		sb.WriteString("[可用工具]\n")
-		if hasTools {
-			sb.WriteString(agent.ToolsConfig)
-			sb.WriteString("\n\n")
-		}
-		if hasMgmt {
-			token, _, err := s.generateMgmtToken(userID)
-			if err != nil {
-				slog.Warn("generate management token failed", "agent_id", agent.ID, "error", err)
-			} else {
-				sb.WriteString(GenerateManagementTools(s.serverURL, token))
-				sb.WriteString("\n")
-			}
-		}
-		sb.WriteString("\n")
+		sb.WriteString(agent.ToolsConfig)
+		sb.WriteString("\n\n")
 	}
 
 	sb.WriteString(contextStr)

@@ -57,6 +57,10 @@ func (h *FriendHandler) SendRequest(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusConflict, 40203, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrUserNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40434, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50200, "发送好友申请失败")
 		return
 	}

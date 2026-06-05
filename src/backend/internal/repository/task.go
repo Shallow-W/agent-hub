@@ -31,23 +31,35 @@ func selectTaskSQL(from string) string {
 		LEFT JOIN agents a ON a.id = t.agent_id`
 }
 
-// List 按当前用户和筛选条件列出任务。
+// List 按当前用户和筛选条件列出任务。userID 为空时跳过 user_id 过滤。
 func (r *TaskRepo) List(ctx context.Context, userID string, filter model.TaskFilter) ([]*model.WorkspaceTask, error) {
-	args := []interface{}{userID}
-	conditions := []string{"t.user_id = $1"}
+	var args []interface{}
+	conditions := []string{}
+	argIdx := 0
 
+	if userID != "" {
+		argIdx++
+		args = append(args, userID)
+		conditions = append(conditions, fmt.Sprintf("t.user_id = $%d", argIdx))
+	}
 	if filter.ConversationID != "" {
+		argIdx++
 		args = append(args, filter.ConversationID)
-		conditions = append(conditions, fmt.Sprintf("t.conversation_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("t.conversation_id = $%d", argIdx))
 	}
 	if filter.Status != "" {
+		argIdx++
 		args = append(args, filter.Status)
-		conditions = append(conditions, fmt.Sprintf("t.status = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("t.status = $%d", argIdx))
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	query := selectTaskSQL("workspace_tasks t") +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		" ORDER BY t.updated_at DESC"
+		where + " ORDER BY t.updated_at DESC"
 
 	var tasks []*model.WorkspaceTask
 	if err := r.db.SelectContext(ctx, &tasks, query, args...); err != nil {
@@ -56,7 +68,7 @@ func (r *TaskRepo) List(ctx context.Context, userID string, filter model.TaskFil
 	return tasks, nil
 }
 
-// Create 新建任务。
+// Create 新建任务。userID 为空时 user_id 列写入 NULL。
 func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCreateInput) (*model.WorkspaceTask, error) {
 	var task model.WorkspaceTask
 	err := r.db.QueryRowxContext(ctx,
@@ -65,7 +77,7 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING id, user_id, conversation_id, assignee_id, agent_id, title, description,
 		 status, priority, created_at, updated_at, '' AS assignee_name, '' AS agent_name`,
-		userID, input.ConversationID, input.AssigneeID, input.AgentID, input.Title,
+		nilIfEmpty(userID), input.ConversationID, input.AssigneeID, input.AgentID, input.Title,
 		input.Description, input.Status, input.Priority,
 	).StructScan(&task)
 	if err != nil {
@@ -74,13 +86,19 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 	return &task, nil
 }
 
-// GetByID 查询当前用户名下的任务。
+// GetByID 查询任务。userID 为空时仅按 ID 查询。
 func (r *TaskRepo) GetByID(ctx context.Context, userID, id string) (*model.WorkspaceTask, error) {
+	query := selectTaskSQL("workspace_tasks t")
+	var args []interface{}
+	if userID != "" {
+		query += " WHERE t.user_id = $1 AND t.id = $2"
+		args = append(args, userID, id)
+	} else {
+		query += " WHERE t.id = $1"
+		args = append(args, id)
+	}
 	var task model.WorkspaceTask
-	err := r.db.QueryRowxContext(ctx,
-		selectTaskSQL("workspace_tasks t")+" WHERE t.user_id = $1 AND t.id = $2",
-		userID, id,
-	).StructScan(&task)
+	err := r.db.QueryRowxContext(ctx, query, args...).StructScan(&task)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -90,7 +108,7 @@ func (r *TaskRepo) GetByID(ctx context.Context, userID, id string) (*model.Works
 	return &task, nil
 }
 
-// Update 更新任务内容字段。
+// Update 更新任务内容字段。userID 为空时仅按 ID 匹配。
 func (r *TaskRepo) Update(ctx context.Context, userID, id string, input model.TaskUpdateInput) (*model.WorkspaceTask, error) {
 	sets := make([]string, 0, 6)
 	args := make([]interface{}, 0, 8)
@@ -119,12 +137,16 @@ func (r *TaskRepo) Update(ctx context.Context, userID, id string, input model.Ta
 		return r.GetByID(ctx, userID, id)
 	}
 
-	args = append(args, userID, id)
-	userArg := len(args) - 1
+	args = append(args, id)
 	idArg := len(args)
 	query := `UPDATE workspace_tasks SET ` + strings.Join(sets, ", ") +
-		`, updated_at = NOW() WHERE user_id = $` + fmt.Sprint(userArg) +
-		` AND id = $` + fmt.Sprint(idArg) + ` RETURNING id`
+		`, updated_at = NOW() WHERE id = $` + fmt.Sprint(idArg)
+	if userID != "" {
+		args = append(args, userID)
+		userArg := len(args)
+		query += ` AND user_id = $` + fmt.Sprint(userArg)
+	}
+	query += ` RETURNING id`
 
 	var updatedID string
 	if err := r.db.QueryRowxContext(ctx, query, args...).Scan(&updatedID); err != nil {
@@ -136,16 +158,18 @@ func (r *TaskRepo) Update(ctx context.Context, userID, id string, input model.Ta
 	return r.GetByID(ctx, userID, updatedID)
 }
 
-// MoveStatus 更新任务状态。
+// MoveStatus 更新任务状态。userID 为空时仅按 ID 匹配。
 func (r *TaskRepo) MoveStatus(ctx context.Context, userID, id, status string) (*model.WorkspaceTask, error) {
+	query := `UPDATE workspace_tasks SET status = $1, updated_at = NOW() WHERE id = $2`
+	args := []interface{}{status, id}
+	if userID != "" {
+		query += ` AND user_id = $3`
+		args = append(args, userID)
+	}
+	query += ` RETURNING id`
+
 	var updatedID string
-	err := r.db.QueryRowxContext(ctx,
-		`UPDATE workspace_tasks
-		 SET status = $1, updated_at = NOW()
-		 WHERE user_id = $2 AND id = $3
-		 RETURNING id`,
-		status, userID, id,
-	).Scan(&updatedID)
+	err := r.db.QueryRowxContext(ctx, query, args...).Scan(&updatedID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -155,15 +179,26 @@ func (r *TaskRepo) MoveStatus(ctx context.Context, userID, id, status string) (*
 	return r.GetByID(ctx, userID, updatedID)
 }
 
-// Delete 删除当前用户名下的任务。
+// Delete 删除任务。userID 为空时仅按 ID 匹配。
 func (r *TaskRepo) Delete(ctx context.Context, userID, id string) (bool, error) {
-	res, err := r.db.ExecContext(ctx,
-		`DELETE FROM workspace_tasks WHERE user_id = $1 AND id = $2`,
-		userID, id,
-	)
+	query := `DELETE FROM workspace_tasks WHERE id = $1`
+	args := []interface{}{id}
+	if userID != "" {
+		query += ` AND user_id = $2`
+		args = append(args, userID)
+	}
+	res, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, fmt.Errorf("delete task: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	return rows > 0, nil
+}
+
+// nilIfEmpty 空字符串转为 nil *string（用于 NULLable 列）。
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

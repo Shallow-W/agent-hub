@@ -8,6 +8,8 @@ import "fmt"
 func GenerateManagementTools(serverURL, token string) string {
 	return fmt.Sprintf(`# AgentHub 平台管理工具
 
+**重要：这些工具仅用于管理 Agent 和 Machine。禁止使用这些 API 发送消息到会话或与用户交互。当用户给你发消息时，直接回复即可，不要尝试通过 API 转发消息或调用消息相关接口。**
+
 这些工具通过 Bash 执行 curl 命令调用 REST API，**不要尝试使用 MCP 或其他方式调用**。
 所有 API 调用需要在 HTTP header 中携带 Authorization: Bearer token。token 已嵌入下方命令中，直接复制执行即可。
 

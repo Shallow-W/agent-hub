@@ -25,6 +25,9 @@ interface AgentState {
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
   openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
+  startAgent: (id: string) => Promise<void>;
+  stopAgent: (id: string) => Promise<void>;
+  restartAgent: (id: string) => Promise<void>;
 }
 
 function sortAgents(list: Agent[]): Agent[] {
@@ -134,5 +137,23 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((state) => ({
       agents: state.agents.filter((agent) => agent.id !== id),
     }));
+  },
+
+  startAgent: async (id) => {
+    await agentApi.startAgent(id);
+    const agents = await agentApi.getAgents();
+    set({ agents: sortAgents(agents) });
+  },
+
+  stopAgent: async (id) => {
+    await agentApi.stopAgent(id);
+    const agents = await agentApi.getAgents();
+    set({ agents: sortAgents(agents) });
+  },
+
+  restartAgent: async (id) => {
+    await agentApi.restartAgent(id);
+    const agents = await agentApi.getAgents();
+    set({ agents: sortAgents(agents) });
   },
 }));

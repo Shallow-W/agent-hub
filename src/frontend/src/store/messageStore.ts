@@ -406,3 +406,15 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 }));
+
+export function resetMessageStore() {
+  useMessageStore.setState({
+    messages: {},
+    streamingContent: {},
+    hasMore: {},
+    loading: {},
+    optimisticMessages: {},
+    unreadCounts: {},
+    readConversations: {},
+  });
+}

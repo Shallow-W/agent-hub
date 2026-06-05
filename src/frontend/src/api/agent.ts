@@ -71,3 +71,15 @@ export async function openSkillLocation(
 ): Promise<void> {
   return post<void>(`/api/agents/${id}/skills/open-location`, body);
 }
+
+export async function startAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/start`);
+}
+
+export async function stopAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/stop`);
+}
+
+export async function restartAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/restart`);
+}

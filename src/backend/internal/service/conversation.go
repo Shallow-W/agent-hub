@@ -43,6 +43,8 @@ type ConvRepo interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	AddAgent(ctx context.Context, conversationID, agentID, userID string) (*model.ConversationAgent, error)
 	RemoveAgent(ctx context.Context, conversationID, agentID, userID string) (bool, error)
+	UpdateAgentRole(ctx context.Context, conversationID, agentID, role string) error
+	GetOrchestrator(ctx context.Context, conversationID string) (*model.ConversationAgent, error)
 }
 
 var (
@@ -51,6 +53,7 @@ var (
 	ErrConvNotGroup     = errors.New("私聊会话不支持此操作")
 	ErrConvNotMember    = errors.New("不是该会话成员")
 	ErrConvInvalidTitle = errors.New("标题无效")
+	ErrConvInvalidRole  = errors.New("角色无效，仅支持 orchestrator 或 worker")
 )
 
 // ConversationService 对话业务逻辑
@@ -417,7 +420,40 @@ func (s *ConversationService) RemoveConversationAgent(ctx context.Context, userI
 		return fmt.Errorf("remove conversation agent: %w", err)
 	}
 	if !ok {
+			return ErrConvNotFound
+		}
+		return nil
+	}
+
+// SetConversationAgentRole 设置会话中 Agent 的角色（Orchestrator/Worker）
+func (s *ConversationService) SetConversationAgentRole(ctx context.Context, userID, convID, agentID, role string) error {
+	if role != "orchestrator" && role != "worker" {
+		return ErrConvInvalidRole
+	}
+	conv, err := s.repo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
 		return ErrConvNotFound
+	}
+	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
+		return err
+	}
+	// 设为 Orch 时，先将现有 Orch 降级
+	if role == "orchestrator" {
+		current, err := s.repo.GetOrchestrator(ctx, convID)
+		if err != nil {
+			return fmt.Errorf("get current orchestrator: %w", err)
+		}
+		if current != nil && current.AgentID != agentID {
+			if err := s.repo.UpdateAgentRole(ctx, convID, current.AgentID, "worker"); err != nil {
+				return fmt.Errorf("demote old orchestrator: %w", err)
+			}
+		}
+	}
+	if err := s.repo.UpdateAgentRole(ctx, convID, agentID, role); err != nil {
+		return fmt.Errorf("update agent role: %w", err)
 	}
 	return nil
 }

@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 // ---------------------------------------------------------------------------
@@ -169,9 +171,26 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
+	// Wire up DaemonHub so dispatch path works
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
 	var wg sync.WaitGroup
 	var result1, result2 *RouteResult
 	var err1, err2 error
+
+	// Resolve the task in background after the winning goroutine registers the promise
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-pending", &ws.TaskResult{
+			TaskID: "task-pending",
+			Result: "I'll handle this.",
+		})
+	}()
 
 	wg.Add(2)
 	go func() {
@@ -273,6 +292,14 @@ func TestDispatchSequential_EmptyDepResults_NoPanic(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
+	// Wire up DaemonHub
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
 	dispatchTask := DispatchTask{
 		AgentName:  "Worker",
 		Task:       "do something sequential",
@@ -282,6 +309,15 @@ func TestDispatchSequential_EmptyDepResults_NoPanic(t *testing.T) {
 
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{} // empty
+
+	// Resolve task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-seq-1", &ws.TaskResult{
+			TaskID: "task-seq-1",
+			Result: "task done",
+		})
+	}()
 
 	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 
@@ -484,6 +520,23 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
+	// Wire up DaemonHub
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
+	// Resolve task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-direct", &ws.TaskResult{
+			TaskID: "task-direct",
+			Result: "直接回复，不派发",
+		})
+	}()
+
 	result, err := svc.RouteMention(context.Background(), "c1", userID, "@Orch test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -521,6 +574,14 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
+	// Wire up DaemonHub
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
 	// Build a task description that is way over 2000 characters
 	base := strings.Repeat("很长的任务描述", 200) // ~1400 chars, doubled
 	longTask := base + base                // ~2800 chars, > 2000 limit
@@ -532,6 +593,15 @@ func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
 
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
+
+	// Resolve task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-trunc", &ws.TaskResult{
+			TaskID: "task-trunc",
+			Result: "result",
+		})
+	}()
 
 	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {
@@ -569,6 +639,14 @@ func TestBuildDispatchContext_TotalLengthProtected(t *testing.T) {
 		msgRepo,
 	)
 
+	// Wire up DaemonHub
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
 	dispatchTask := DispatchTask{
 		AgentName: "Worker",
 		Task:      "regular task",
@@ -576,6 +654,15 @@ func TestBuildDispatchContext_TotalLengthProtected(t *testing.T) {
 
 	agentNameToID := map[string]string{"Worker": "worker-1"}
 	depResults := map[string]string{}
+
+	// Resolve task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-total", &ws.TaskResult{
+			TaskID: "task-total",
+			Result: "result",
+		})
+	}()
 
 	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
 	if msg == nil {

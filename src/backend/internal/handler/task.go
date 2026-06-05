@@ -129,11 +129,12 @@ func (h *TaskHandler) MoveStatus(c *gin.Context) {
 
 // Delete 删除任务。
 func (h *TaskHandler) Delete(c *gin.Context) {
-	if err := h.svc.Delete(c.Request.Context(), middleware.GetUserID(c), c.Param("id")); err != nil {
+	taskID := c.Param("id")
+	if err := h.svc.Delete(c.Request.Context(), middleware.GetUserID(c), taskID); err != nil {
 		writeTaskError(c, err, 40404, "删除任务失败")
 		return
 	}
-	middleware.SuccessResponse(c, nil)
+	middleware.SuccessResponse(c, gin.H{"deleted": true, "id": taskID})
 }
 
 func writeTaskError(c *gin.Context, err error, badRequestCode int, fallback string) {

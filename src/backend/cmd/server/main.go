@@ -97,6 +97,10 @@ func main() {
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
+	daemonHub := ws.NewDaemonHub(logger)
+	orchSvc.SetDaemonHub(daemonHub)
+	agentSvc.SetDaemonHub(daemonHub)
+	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
@@ -106,7 +110,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
@@ -245,12 +249,14 @@ func main() {
 		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
 		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
 		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
+		apiGroup.PUT("/conversations/:id/agents/:agentID/role", convHandler.SetAgentRole)
 		apiGroup.GET("/agents", agentHandler.List)
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
-		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
+		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
+			apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
@@ -310,10 +316,35 @@ func main() {
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
 
+	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
+	mcpGroup := router.Group("/mcp")
+	mcpGroup.Use(middleware.MCPAuth(cfg.Daemon.Token))
+	{
+		mcpGroup.GET("/conversations", convHandler.List)
+		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+
+		mcpTaskRoutes := mcpGroup.Group("/tasks")
+		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
+		{
+			mcpTaskRoutes.GET("", taskHandler.List)
+			mcpTaskRoutes.POST("", taskHandler.Create)
+			mcpTaskRoutes.PUT("/:id", taskHandler.Update)
+			mcpTaskRoutes.POST("/:id/status", taskHandler.MoveStatus)
+			mcpTaskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
+		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
+		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
+	}
+
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
+	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
 
 	// 启动 HTTP 服务器
@@ -343,7 +374,8 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	cancel() // 停止 Hub
+	cancel() // stops Hub, DaemonHub, and MachineTracker
+	daemonHub.Shutdown(shutdownCtx)
 
 	if rdb != nil {
 		if err := rdb.Close(); err != nil {

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
+const agentTypingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export interface TypingUser {
   userId: string;
   username?: string;
@@ -55,7 +57,9 @@ export const useWsStore = create<WsState>((set, get) => ({
     if (client) {
       client.disconnect();
     }
-    set({ wsClient: null, status: 'disconnected' });
+    agentTypingTimers.forEach((t) => clearTimeout(t));
+    agentTypingTimers.clear();
+    set({ wsClient: null, status: 'disconnected', typingUsers: {}, agentTyping: {} });
   },
 
   addTypingUser: (conversationId, userId, username) => {
@@ -92,12 +96,17 @@ export const useWsStore = create<WsState>((set, get) => ({
     }));
     // Auto-clear after 60s to handle cases where typing_stop is never received
     if (typing) {
-      setTimeout(() => {
+      // Clear previous timer to prevent accumulation
+      const prev = agentTypingTimers.get(conversationId);
+      if (prev) clearTimeout(prev);
+      const timer = setTimeout(() => {
         const current = useWsStore.getState().agentTyping[conversationId];
         if (current) {
           useWsStore.getState().setAgentTyping(conversationId, false);
         }
+        agentTypingTimers.delete(conversationId);
       }, 60_000);
+      agentTypingTimers.set(conversationId, timer);
     }
   },
 }));

@@ -17,7 +17,6 @@ import { useAuthStore } from '@/store/authStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
-import * as convApi from '@/api/conversation';
 import { leaveGroup, dissolveGroup } from '@/api/group';
 import type { Message } from '@/types/message';
 import { MessageList } from './MessageList';
@@ -114,7 +113,6 @@ export const ChatWindow: React.FC = () => {
   useEffect(() => {
     if (!activeId) return;
     markAllRead(activeId);
-    convApi.markConversationRead(activeId).catch(() => {});
     setReplyTo(null);
     setSearchOpen(false);
     setSearchResults([]);
@@ -123,12 +121,21 @@ export const ChatWindow: React.FC = () => {
   }, [activeId, markAllRead]);
 
   // Join WebSocket room when switching conversations so real-time messages arrive
+  const prevActiveIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!wsClient || !activeId) return;
+    // Leave previous room before joining new one
+    if (prevActiveIdRef.current && prevActiveIdRef.current !== activeId) {
+      wsClient.send(JSON.stringify({
+        type: 'leave_room',
+        data: { conversation_id: prevActiveIdRef.current },
+      }));
+    }
     wsClient.send(JSON.stringify({
       type: 'join_room',
       data: { conversation_id: activeId },
     }));
+    prevActiveIdRef.current = activeId;
   }, [wsClient, activeId]);
 
   const toggleSearch = useCallback(() => {
