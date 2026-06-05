@@ -1,39 +1,42 @@
 import React, { useState } from 'react';
-import { CodeOutlined, ExpandOutlined, GlobalOutlined } from '@ant-design/icons';
+import {
+  ExpandOutlined,
+  FileOutlined,
+  FileTextOutlined,
+  GlobalOutlined,
+} from '@ant-design/icons';
 import type { Artifact } from '@/types/message';
-import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import styles from './ArtifactCard.module.css';
 
 interface Props {
   artifacts: Artifact[];
-  /** 来源 Agent 名称（群聊多 Agent 时标识产物归属） */
+  /** 来源 Agent 名称，用于群聊多 Agent 时标识产物归属。 */
   agentName?: string | null;
 }
 
-function codeTitle(a: Artifact): string {
-  return a.filename || (a.language ? `${a.language} 代码` : '代码产物');
-}
-
-function webTitle(a: Artifact): string {
-  if (a.title) return a.title;
-  if (a.url) {
+function artifactTitle(artifact: Artifact): string {
+  if (artifact.title) return artifact.title;
+  if (artifact.filename) return artifact.filename;
+  if (artifact.url) {
     try {
-      return new URL(a.url).hostname;
+      return new URL(artifact.url).hostname;
     } catch {
-      return a.url;
+      return artifact.url;
     }
   }
+  if (artifact.type === 'document') return '文档产物';
+  if (artifact.type === 'file') return '文件产物';
   return '网页产物';
 }
 
-/**
- * 聊天流内联产物卡片区。
- * - code 产物复用 CodeBlock（高亮+复制+折叠由 CodeBlock 内部承担），不重造代码卡。
- * - webpage 产物展示标题/URL + 缩略 iframe 预览。
- * - 点击展开按钮 / webpage 卡片打开全屏 ArtifactWorkspace。
- */
+function documentSummary(artifact: Artifact): string {
+  if (artifact.language) return artifact.language;
+  if (artifact.filename) return artifact.filename.split('.').pop()?.toUpperCase() || 'DOCUMENT';
+  return artifact.content ? `${artifact.content.length} 字符` : '暂不可预览';
+}
+
 export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
   const [active, setActive] = useState<Artifact | null>(null);
 
@@ -43,60 +46,62 @@ export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
     <div className={styles.container}>
       {artifacts.map((artifact, idx) => {
         const key = artifact.id ?? `artifact-${idx}`;
-        if (artifact.type === 'code') {
+
+        if (artifact.type === 'webpage') {
           return (
-            <div key={key} className={styles.codeCard}>
-              <div className={styles.cardBar}>
-                <span className={styles.cardBarLeft}>
-                  <CodeOutlined />
-                  <span className={styles.cardTitle}>{codeTitle(artifact)}</span>
-                  <span className={styles.cardBadge}>产物</span>
-                </span>
-                <button
-                  type="button"
-                  className={styles.expandBtn}
-                  onClick={() => setActive(artifact)}
-                  title="全屏查看"
-                >
-                  <ExpandOutlined />
-                  展开
-                </button>
+            <div
+              key={key}
+              className={styles.webCard}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActive(artifact)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setActive(artifact);
+                }
+              }}
+            >
+              <div className={styles.webPreview}>
+                {artifact.url ? (
+                  <WebpageFrame url={artifact.url} />
+                ) : artifact.content ? (
+                  <WebpageFrame srcDoc={artifact.content} />
+                ) : null}
               </div>
-              <CodeBlock code={artifact.content ?? ''} language={artifact.language} />
+              <div className={styles.webMeta}>
+                <GlobalOutlined className={styles.webIcon} />
+                <div className={styles.webInfo}>
+                  <span className={styles.webTitle}>{artifactTitle(artifact)}</span>
+                  {artifact.url && <span className={styles.webUrl}>{artifact.url}</span>}
+                </div>
+                <ExpandOutlined />
+              </div>
             </div>
           );
         }
 
-        // webpage 卡片
+        const Icon = artifact.type === 'document' ? FileTextOutlined : FileOutlined;
         return (
           <div
             key={key}
-            className={styles.webCard}
+            className={styles.documentCard}
             role="button"
             tabIndex={0}
             onClick={() => setActive(artifact)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
                 setActive(artifact);
               }
             }}
           >
-            <div className={styles.webPreview}>
-              {artifact.url ? (
-                <WebpageFrame url={artifact.url} />
-              ) : artifact.content ? (
-                <WebpageFrame srcDoc={artifact.content} />
-              ) : null}
+            <Icon className={styles.documentIcon} />
+            <div className={styles.documentInfo}>
+              <span className={styles.documentTitle}>{artifactTitle(artifact)}</span>
+              <span className={styles.documentSummary}>{documentSummary(artifact)}</span>
             </div>
-            <div className={styles.webMeta}>
-              <GlobalOutlined className={styles.webIcon} />
-              <div className={styles.webInfo}>
-                <span className={styles.webTitle}>{webTitle(artifact)}</span>
-                {artifact.url && <span className={styles.webUrl}>{artifact.url}</span>}
-              </div>
-              <ExpandOutlined />
-            </div>
+            <ExpandOutlined />
           </div>
         );
       })}

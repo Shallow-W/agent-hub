@@ -220,9 +220,10 @@ func TestArtifactsFromTaskResult(t *testing.T) {
 		{Type: "code", Language: "go", Filename: "main.go", Content: "package main"},
 		{Type: "", Content: "应被跳过"},
 		{Type: "webpage", URL: "https://example.com", Title: "Demo"},
+		{Type: "document", Language: "markdown", Filename: "notes.md", Title: "Notes", Content: "# Notes"},
 	})
-	if len(got) != 2 {
-		t.Fatalf("expected 2 artifacts, got %d", len(got))
+	if len(got) != 3 {
+		t.Fatalf("expected 3 artifacts, got %d", len(got))
 	}
 	if got[0].Type != "code" || got[0].Language != "go" || got[0].Filename != "main.go" || got[0].Content != "package main" {
 		t.Fatalf("code artifact mismatch: %+v", got[0])
@@ -232,6 +233,9 @@ func TestArtifactsFromTaskResult(t *testing.T) {
 	}
 	if got[1].Type != "webpage" || got[1].URL != "https://example.com" || got[1].Title != "Demo" {
 		t.Fatalf("webpage artifact mismatch: %+v", got[1])
+	}
+	if got[2].Type != "document" || got[2].Language != "markdown" || got[2].Filename != "notes.md" || got[2].Content != "# Notes" {
+		t.Fatalf("document artifact mismatch: %+v", got[2])
 	}
 }
 

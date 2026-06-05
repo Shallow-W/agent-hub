@@ -78,7 +78,7 @@ const markdownComponents: Components = {
   code({ className, children, node, ...rest }) {
     const isBlock = className?.startsWith('language-');
     if (isBlock) {
-      return <CodeBlock className={className}>{children}</CodeBlock>;
+      return <CodeBlock className={className} expandable>{children}</CodeBlock>;
     }
     return (
       <code className={styles.inlineCode} {...rest}>
@@ -177,8 +177,14 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
-  const contentLength = message.content?.length ?? 0;
-  const lineCount = message.content?.split('\n').length ?? 0;
+  // 代码块回到正文原位（散文↔代码交错），仅 webpage 产物走底部卡片
+  const displayContent = message.content ?? '';
+  const cardArtifacts = useMemo(
+    () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
+    [message.artifacts],
+  );
+  const contentLength = displayContent.length;
+  const lineCount = displayContent.split('\n').length;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
@@ -352,13 +358,13 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {displayAttachments.length > 0 && (
               <MessageAttachmentView attachments={displayAttachments} />
             )}
-            {message.content && (
+            {displayContent && (
               <div className={styles.markdownBody}>
-                <MarkdownRenderer content={message.content ?? ''} />
+                <MarkdownRenderer content={displayContent} />
               </div>
             )}
-            {message.artifacts && message.artifacts.length > 0 && (
-              <ArtifactCard artifacts={message.artifacts} agentName={agentName} />
+            {cardArtifacts.length > 0 && (
+              <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
             )}
             {collapsed && <div className={styles.fadeMask} />}
             {streaming && <span className={styles.streamingCursor} />}

@@ -5,6 +5,37 @@
   height: 72vh;
 }
 
+.workspaceModal :global(.ant-modal-content) {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspaceModal :global(.ant-modal-body) {
+  flex: 1;
+  min-height: 0;
+}
+
+.webpageModal :global(.ant-modal-content) {
+  height: calc(100vh - 32px);
+}
+
+.webpageModal :global(.ant-modal-body) {
+  padding: 16px;
+}
+
+.webpageModalBody {
+  height: calc(100vh - 64px);
+  min-height: 0;
+}
+
+.documentModalBody {
+  height: calc(100vh - 96px);
+}
+
+.documentModal :global(.ant-modal-content) {
+  min-height: calc(100vh - 32px);
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -37,11 +68,21 @@
   border-radius: 8px;
 }
 
+.documentViewArea {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
 /* Preview：iframe 占满 */
 .previewArea {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -57,6 +98,80 @@
   height: 100%;
   overflow: auto;
   padding: 0 2px;
+}
+
+.documentArea {
+  min-height: 100%;
+  padding: 32px 40px 56px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.documentArea :global(h1),
+.documentArea :global(h2),
+.documentArea :global(h3) {
+  margin: 0 0 12px;
+  color: var(--color-text);
+}
+
+.documentArea :global(p),
+.documentArea :global(ul),
+.documentArea :global(ol),
+.documentArea :global(blockquote),
+.documentArea :global(pre) {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.documentArea :global(code) {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--color-surface-muted);
+}
+
+.documentArea :global(.contains-task-list) {
+  padding-left: 0;
+  list-style: none;
+}
+
+.documentArea :global(.task-list-item) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.taskCheckbox {
+  width: 16px;
+  height: 16px;
+  margin: 5px 2px 0 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.documentArea :global(pre) {
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1c2128;
+  color: #e6edf3;
+}
+
+.textDocument {
+  box-sizing: border-box;
+  min-height: 100%;
+  margin: 0;
+  padding: 24px 28px;
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 /* Meta 视图 */

@@ -16,7 +16,7 @@ export interface ReplyToPreview {
  * 字段名严格对齐后端 model.Artifact 与 daemon 上行 JSON（三层对齐真源）。
  * `artifacts_json` 字段不动（只放 agent meta），产物经独立 artifacts 表随消息下发。
  */
-export type ArtifactType = 'code' | 'webpage';
+export type ArtifactType = 'code' | 'webpage' | 'document' | 'file';
 
 export interface Artifact {
   id?: string;

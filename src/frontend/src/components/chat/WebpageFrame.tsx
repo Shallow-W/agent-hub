@@ -49,6 +49,10 @@ export const WebpageFrame: React.FC<Props> = ({ url, srcDoc }) => {
     setErrored(true);
   };
 
+  const sandbox = srcDoc
+    ? 'allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation'
+    : 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation';
+
   return (
     <div className={styles.frameWrap}>
       {!errored && (
@@ -57,7 +61,7 @@ export const WebpageFrame: React.FC<Props> = ({ url, srcDoc }) => {
           title={url || '网页产物预览'}
           src={url}
           srcDoc={srcDoc}
-          sandbox="allow-scripts"
+          sandbox={sandbox}
           referrerPolicy="no-referrer"
           onLoad={handleLoad}
           onError={handleError}

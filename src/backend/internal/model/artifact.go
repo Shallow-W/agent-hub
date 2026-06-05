@@ -9,7 +9,7 @@ type Artifact struct {
 	ID        string    `json:"id" db:"id"`
 	MessageID string    `json:"message_id" db:"message_id"`
 	Version   int       `json:"version" db:"version"`
-	Type      string    `json:"type" db:"type"`               // code | webpage
+	Type      string    `json:"type" db:"type"`               // code | webpage | document | file
 	Language  string    `json:"language,omitempty" db:"language"` // code 产物的语言，如 go/ts/python
 	Filename  string    `json:"filename,omitempty" db:"filename"` // 可选文件名
 	Title     string    `json:"title,omitempty" db:"title"`       // 可选标题（webpage）

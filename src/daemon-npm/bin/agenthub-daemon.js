@@ -984,6 +984,7 @@ function parseOpenClawOutput(stdout) {
 function parseArtifacts(text) {
   if (typeof text !== 'string' || !text.trim()) return [];
   const artifacts = [];
+  const documentLanguages = new Set(['markdown', 'md', 'txt', 'text', 'json', 'csv']);
 
   // 1) 提取围栏代码块 ```lang\n...\n```
   // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
@@ -1008,6 +1009,14 @@ function parseArtifacts(text) {
     // language 为 html 时归类为 webpage（完整 HTML 文档），否则为 code
     if (language === 'html' && /<\s*(?:html|!doctype|body|head|div)\b/i.test(content)) {
       artifacts.push({ type: 'webpage', title: filename || 'HTML Preview', content });
+    } else if (documentLanguages.has(language)) {
+      artifacts.push({
+        type: 'document',
+        language: language || 'text',
+        filename,
+        title: filename || (language === 'json' ? 'JSON Document' : 'Document Preview'),
+        content,
+      });
     } else {
       artifacts.push({ type: 'code', language, filename, content });
     }

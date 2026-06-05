@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Modal, Tabs } from 'antd';
 import { CodeOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Artifact } from '@/types/message';
 import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
@@ -10,13 +12,57 @@ interface Props {
   artifact: Artifact | null;
   open: boolean;
   onClose: () => void;
-  /** 来源 Agent 名称（群聊多 Agent 时标识产物归属） */
+  /** 来源 Agent 名称，用于群聊多 Agent 时标识产物归属。 */
   agentName?: string | null;
 }
 
 function artifactTitle(artifact: Artifact): string {
-  return artifact.title || artifact.filename || (artifact.type === 'webpage' ? '网页产物' : '代码产物');
+  return artifact.title || artifact.filename || (artifact.type === 'document' ? '文档产物' : '代码产物');
 }
+
+function isMarkdownArtifact(artifact: Artifact): boolean {
+  const language = artifact.language?.toLowerCase();
+  const filename = artifact.filename?.toLowerCase();
+  return language === 'markdown' || language === 'md' || filename?.endsWith('.md') || filename?.endsWith('.markdown') || false;
+}
+
+const MarkdownPreview: React.FC<{ content: string }> = ({ content }) => {
+  const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
+  let checkboxIndex = 0;
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        input: (props) => {
+          if (props.type !== 'checkbox') {
+            return <input {...props} />;
+          }
+          const index = checkboxIndex;
+          checkboxIndex += 1;
+          const checked = checkedItems[index] ?? Boolean(props.checked);
+
+          return (
+            <input
+              {...props}
+              disabled={false}
+              checked={checked}
+              className={styles.taskCheckbox}
+              onChange={(event) => {
+                setCheckedItems((current) => ({
+                  ...current,
+                  [index]: event.target.checked,
+                }));
+              }}
+            />
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+};
 
 const PreviewView: React.FC<{ artifact: Artifact }> = ({ artifact }) => {
   if (artifact.type === 'webpage') {
@@ -35,6 +81,29 @@ const PreviewView: React.FC<{ artifact: Artifact }> = ({ artifact }) => {
       );
     }
   }
+
+  if (artifact.type === 'document' || artifact.type === 'file') {
+    if (!artifact.content) {
+      return (
+        <div className={styles.emptyHint}>
+          这个文件暂时没有可预览内容，后续可接入下载或文件服务。
+        </div>
+      );
+    }
+    if (isMarkdownArtifact(artifact)) {
+      return (
+        <div className={styles.documentArea}>
+          <MarkdownPreview content={artifact.content} />
+        </div>
+      );
+    }
+    return (
+      <pre className={styles.textDocument}>
+        {artifact.content}
+      </pre>
+    );
+  }
+
   return <div className={styles.emptyHint}>暂无可预览内容</div>;
 };
 
@@ -44,7 +113,7 @@ const CodeView: React.FC<{ artifact: Artifact }> = ({ artifact }) => {
   }
   return (
     <div className={styles.codeArea}>
-      <CodeBlock code={artifact.content} language={artifact.language} />
+      <CodeBlock code={artifact.content} language={artifact.language} expandable />
     </div>
   );
 };
@@ -81,20 +150,62 @@ const MetaView: React.FC<{ artifact: Artifact; agentName?: string | null }> = ({
   );
 };
 
-/**
- * 全屏产物工作区：点击内联卡片打开，提供 Preview / Code / Meta 三视图。
- * - code 产物默认 Code 视图；webpage 产物默认 Preview 视图。
- */
 export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName }) => {
-  const defaultTab = artifact?.type === 'webpage' ? 'preview' : 'code';
+  const defaultTab = artifact?.type === 'webpage' || artifact?.type === 'document' || artifact?.type === 'file'
+    ? 'preview'
+    : 'code';
   const [activeKey, setActiveKey] = useState(defaultTab);
 
-  // 切换产物时重置默认视图
   React.useEffect(() => {
-    setActiveKey(artifact?.type === 'webpage' ? 'preview' : 'code');
+    setActiveKey(
+      artifact?.type === 'webpage' || artifact?.type === 'document' || artifact?.type === 'file'
+        ? 'preview'
+        : 'code',
+    );
   }, [artifact?.id, artifact?.type]);
 
   if (!artifact) return null;
+
+  if (artifact.type === 'webpage') {
+    return (
+      <Modal
+        open={open}
+        onCancel={onClose}
+        footer={null}
+        width="94vw"
+        style={{ top: 16, maxWidth: 'none' }}
+        className={`${styles.workspaceModal} ${styles.webpageModal}`}
+        destroyOnClose
+      >
+        <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
+          <PreviewView artifact={artifact} />
+        </div>
+      </Modal>
+    );
+  }
+
+  const isDocument = artifact.type === 'document' || artifact.type === 'file';
+
+  if (isDocument) {
+    return (
+      <Modal
+        open={open}
+        onCancel={onClose}
+        footer={null}
+        width="94vw"
+        style={{ top: 16, maxWidth: 'none' }}
+        title={artifactTitle(artifact)}
+        className={`${styles.workspaceModal} ${styles.documentModal}`}
+        destroyOnClose
+      >
+        <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
+          <div className={styles.documentViewArea}>
+            <PreviewView artifact={artifact} />
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -104,6 +215,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
       width="80vw"
       style={{ top: 32, maxWidth: 1100 }}
       title={artifactTitle(artifact)}
+      className={styles.workspaceModal}
       destroyOnClose
     >
       <div className={styles.modalBody}>
