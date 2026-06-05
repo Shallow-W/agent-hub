@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/agent-hub/daemon/client"
+	"github.com/agent-hub/daemon/mcp"
 	"github.com/agent-hub/daemon/scanner"
 )
 
@@ -21,8 +25,58 @@ func main() {
 	serverURLFlag := flag.String("server-url", "", "AgentHub server url")
 	machineKeyFlag := flag.String("machine-key", "", "machine api key")
 	apiKeyFlag := flag.String("api-key", "", "machine api key")
+	mcpFlag := flag.Bool("mcp", false, "启动 MCP Server 模式（stdio）")
 	flag.Parse()
 
+	if *mcpFlag {
+		runMCP()
+		return
+	}
+
+	runDaemon(wsURLFlag, serverURLFlag, machineKeyFlag, apiKeyFlag)
+}
+
+// runMCP 启动 MCP Server，通过 stdio 对外提供 tool 能力
+func runMCP() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	serverURL := os.Getenv("AGENTHUB_SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:8080"
+	}
+	token := firstNonEmpty(
+		os.Getenv("AGENTHUB_DAEMON_TOKEN"),
+		os.Getenv("AGENTHUB_MACHINE_KEY"),
+	)
+	if token == "" {
+		logger.Error("缺少认证 token，设置 AGENTHUB_DAEMON_TOKEN 环境变量")
+		os.Exit(1)
+	}
+
+	api := mcp.NewAPIClient(serverURL, token)
+	handler := mcp.HandleTaskTool(api)
+
+	server := mcp.NewServer("agenthub", "0.1.0", mcp.TaskTools(), handler, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	logger.Info("MCP server starting", "server", serverURL)
+	if err := server.Serve(ctx); err != nil {
+		logger.Error("MCP server error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// runDaemon 正常模式：扫描 agent + 注册到后端
+func runDaemon(wsURLFlag, serverURLFlag, machineKeyFlag, apiKeyFlag *string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
