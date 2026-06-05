@@ -66,6 +66,9 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	// 启动写泵，用于向 daemon 发送消息
 	go client.WritePump(ctx)
 
+	// 启动服务端 ping 循环，检测死连接
+	go h.serverPingLoop(ctx, client, machine)
+
 	// 读取循环
 	h.readLoop(ctx, client, machine)
 
@@ -215,6 +218,29 @@ func (h *DaemonHandler) authenticateMachine(ctx context.Context, token string) (
 	return h.agentSvc.GetDaemonMachineByAPIKey(authCtx, token)
 }
 
+// serverPingLoop sends a {"type":"ping"} to the daemon every 30 seconds.
+// If the write fails (client closed), it logs and cancels the context to close the connection.
+func (h *DaemonHandler) serverPingLoop(ctx context.Context, client *ws.DaemonClient, machine *model.DaemonMachine) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := client.Send(ws.WSMessage{Type: "ping"}); err != nil {
+				machineLabel := "<unknown>"
+				if machine != nil {
+					machineLabel = machine.ID
+				}
+				h.logger.Debug("server ping failed, closing daemon connection", "machine_id", machineLabel, "error", err)
+				return
+			}
+		}
+	}
+}
+
 func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, machine *model.DaemonMachine) {
 	conn := client.Conn
 	for {
@@ -246,6 +272,11 @@ func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, m
 			if err := client.Send(ws.WSMessage{Type: "pong"}); err != nil {
 				h.logger.Warn("daemon pong failed", "error", err)
 				return
+			}
+		case "pong":
+			// Daemon responded to server ping — touch machine to confirm alive
+			if machine != nil {
+				h.agentSvc.TouchMachine(machine.ID)
 			}
 		default:
 			h.logger.Warn("unknown daemon message", "type", envelope.Type)

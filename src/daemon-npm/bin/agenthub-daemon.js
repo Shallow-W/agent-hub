@@ -12,6 +12,7 @@ const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
 const WS_PING_INTERVAL_MS = 30000;
+const INBOUND_WATCHDOG_MS = 70000;
 
 let WebSocket;
 try {
@@ -1232,10 +1233,20 @@ async function connectWS(serverURL, apiKey) {
     console.log(`AgentHub daemon connecting to ${protocol}//${url.host}/daemon/ws ...`);
     const ws = new WebSocket(wsURL);
     let pingTimer = null;
+    let watchdogTimer = null;
+
+    function resetWatchdog() {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(() => {
+        console.warn(`No message from server for ${INBOUND_WATCHDOG_MS / 1000}s, closing WS to reconnect.`);
+        try { ws.close(); } catch { /* ignore */ }
+      }, INBOUND_WATCHDOG_MS);
+    }
 
     ws.on('open', () => {
       reconnectAttempts = 0;
       console.log('AgentHub daemon WS connected.');
+      resetWatchdog();
       // Send register message over WS
       const agents = scanAgents();
       ws.send(JSON.stringify({
@@ -1251,6 +1262,7 @@ async function connectWS(serverURL, apiKey) {
     });
 
     ws.on('message', async (data) => {
+      resetWatchdog();
       let envelope;
       try {
         envelope = JSON.parse(data.toString());
@@ -1329,6 +1341,7 @@ async function connectWS(serverURL, apiKey) {
 
     ws.on('close', (code, reason) => {
       if (pingTimer) clearInterval(pingTimer);
+      if (watchdogTimer) clearTimeout(watchdogTimer);
       // Clean up all running agent entries on disconnect
       for (const [agentId] of runningAgents) {
         stopAgentProcess(agentId);

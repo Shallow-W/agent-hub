@@ -62,6 +62,9 @@ type OrchestratorService struct {
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
 	activeOrchs map[string]struct{} // convID →活跃编排
+
+	// 派发并发保护：同一 agent 同时只允许一个任务在飞
+	dispatching sync.Map // agentID → bool
 }
 
 // SetJWTSecret sets the JWT secret for generating management tool tokens.
@@ -211,6 +214,12 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	if agent.MachineID == nil || *agent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
+
+	// Dispatch guard: prevent double-dispatching to the same agent
+	if _, loaded := s.dispatching.LoadOrStore(agent.ID, true); loaded {
+		return nil, fmt.Errorf("agent %q busy (task already in flight)", agent.Name)
+	}
+	defer s.dispatching.Delete(agent.ID)
 
 	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
 	kbCtx := kbPreload
@@ -467,6 +476,12 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 	if agent.MachineID == nil || *agent.MachineID == "" {
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
+
+	// Dispatch guard: prevent double-dispatching to the same agent
+	if _, loaded := s.dispatching.LoadOrStore(agent.ID, true); loaded {
+		return nil, fmt.Errorf("agent %q busy (task already in flight)", agent.Name)
+	}
+	defer s.dispatching.Delete(agent.ID)
 
 	// 权限校验：与 dispatchSingleAgent 保持一致
 	if agent.UserID != nil && *agent.UserID != userID {
