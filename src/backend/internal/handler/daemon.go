@@ -51,6 +51,8 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "disconnect")
+	// Daemon registration can include hundreds of skills with full content (multi-MB).
+	conn.SetReadLimit(10 << 20) // 10MB
 
 	// 创建 DaemonClient 并注册到 DaemonHub
 	machineID := ""

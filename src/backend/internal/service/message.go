@@ -197,18 +197,23 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// @mention routing — 异步派发，不阻塞 HTTP 响应
-	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
-		// 优先使用调用方传入的 mentions 参数，仅在为空时从 content 中解析
-		parsedMentions := ParseMentions(content)
-		if len(mentions) > 0 || len(parsedMentions) > 0 {
-			go s.asyncMentionDispatch(convID, userID, content)
+	// Agent dispatch routing based on conversation type
+	switch conv.Type {
+	case "agent":
+		// Single/agent chat — direct dispatch via agentID
+		if strings.TrimSpace(agentID) != "" {
+			go s.asyncAgentReply(convID, userID, agentID, content)
 		}
-	}
-
-	// Agent 回复（显式 agentID 路径，异步派发）
-	if strings.TrimSpace(agentID) != "" {
-		go s.asyncAgentReply(convID, userID, agentID, content)
+	case "group":
+		// Group chat — mention routing via Orchestrator
+		if s.orchSvc != nil {
+			parsedMentions := ParseMentions(content)
+			if len(mentions) > 0 || len(parsedMentions) > 0 {
+				go s.asyncMentionDispatch(convID, userID, content)
+			}
+		}
+	default:
+		// "single" or other types — no agent dispatch
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）
@@ -599,6 +604,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 			"context_messages": contextMessages,
 			"agent_id":         agent.ID,
 			"conversation_id":  convID,
+			"user_id":          userID,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)

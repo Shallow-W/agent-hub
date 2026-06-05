@@ -33,18 +33,20 @@ func NewAgentRepo(db *sqlx.DB) *AgentRepo {
 	}
 }
 
-// ListAvailable 查询系统 Agent 和当前用户自建 Agent
+// ListAvailable 查询系统 Agent 和当前用户自建 Agent。userID 为空时返回所有 Agent。
 func (r *AgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
 	list := make([]model.Agent, 0)
-	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+	query := `SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
 		        last_seen_at, created_at, updated_at
-		 FROM agents
-		 WHERE user_id IS NULL OR user_id = $1
-		 ORDER BY type ASC, updated_at DESC`,
-		userID,
-	)
+		 FROM agents`
+	var args []interface{}
+	if userID != "" {
+		query += ` WHERE user_id IS NULL OR user_id = $1`
+		args = append(args, userID)
+	}
+	query += ` ORDER BY type ASC, updated_at DESC`
+	err := r.db.SelectContext(ctx, &list, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}

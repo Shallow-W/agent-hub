@@ -382,13 +382,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
             deleted_at: null,
           }
         : undefined;
+      // Group chats: don't pass agentId — routing handled by backend mention parsing.
+      // Agent/single chats: pass the resolved agentId for direct dispatch.
+      const targetAgentId = isGroup ? undefined : (mentionedAgentId ?? directAgentId);
       await send(
         trimmed,
         attachments.length ? attachments : undefined,
         replyTo?.id,
         replyPreview,
         mentions,
-        mentionedAgentId ?? directAgentId,
+        targetAgentId,
       );
       // Persist the @mentioned agent as sticky target for subsequent messages
       if (isGroup && mentionedAgentId) {

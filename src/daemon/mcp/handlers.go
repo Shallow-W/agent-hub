@@ -107,13 +107,13 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 		switch toolName {
 		// 会话
 		case "list_conversations":
-			return api.doGet("/api/conversations", nil)
+			return api.doGet("/mcp/conversations", nil)
 		case "list_conversation_agents":
 			id, _ := args["conversation_id"].(string)
 			if id == "" {
 				return nil, fmt.Errorf("conversation_id is required")
 			}
-			return api.doGet("/api/conversations/"+id+"/agents", nil)
+			return api.doGet("/mcp/conversations/"+id+"/agents", nil)
 		// 任务看板
 		case "list_tasks":
 			return handleListTasks(api, args)
@@ -127,25 +127,25 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 			return handleDeleteTask(api, args)
 		// 智能体
 		case "list_agents":
-			return api.doGet("/api/agents", nil)
+			return api.doGet("/mcp/agents", nil)
 		case "list_agent_candidates":
-			return api.doGet("/api/daemon/agent-candidates", nil)
+			return api.doGet("/mcp/daemon/agent-candidates", nil)
 		// 机器
 		case "list_machines":
-			return api.doGet("/api/daemon/machines", nil)
+			return api.doGet("/mcp/daemon/machines", nil)
 		// 群聊
 		case "get_group_info":
 			groupID, _ := args["group_id"].(string)
 			if groupID == "" {
 				return nil, fmt.Errorf("group_id is required")
 			}
-			return api.doGet("/api/groups/"+groupID, nil)
+			return api.doGet("/mcp/groups/"+groupID, nil)
 		case "list_group_members":
 			groupID, _ := args["group_id"].(string)
 			if groupID == "" {
 				return nil, fmt.Errorf("group_id is required")
 			}
-			return api.doGet("/api/groups/"+groupID+"/members", nil)
+			return api.doGet("/mcp/groups/"+groupID+"/members", nil)
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
@@ -160,7 +160,7 @@ func handleListTasks(api *APIClient, args map[string]interface{}) (interface{}, 
 	if v, ok := args["status"].(string); ok {
 		query["status"] = v
 	}
-	return api.doGet("/api/tasks", query)
+	return api.doGet("/mcp/tasks", query)
 }
 
 func handleCreateTask(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -177,7 +177,7 @@ func handleCreateTask(api *APIClient, args map[string]interface{}) (interface{},
 	optionalString(args, "conversation_id", body)
 	optionalString(args, "assignee_id", body)
 	optionalString(args, "agent_id", body)
-	return api.doPost("/api/tasks", body)
+	return api.doPost("/mcp/tasks", body)
 }
 
 func handleUpdateTask(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -191,7 +191,7 @@ func handleUpdateTask(api *APIClient, args map[string]interface{}) (interface{},
 	optionalString(args, "priority", body)
 	optionalString(args, "assignee_id", body)
 	optionalString(args, "agent_id", body)
-	return api.doPut("/api/tasks/"+id, body)
+	return api.doPut("/mcp/tasks/"+id, body)
 }
 
 func handleMoveTaskStatus(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -200,7 +200,7 @@ func handleMoveTaskStatus(api *APIClient, args map[string]interface{}) (interfac
 	if id == "" || status == "" {
 		return nil, fmt.Errorf("id and status are required")
 	}
-	return api.doPost("/api/tasks/"+id+"/status", map[string]interface{}{"status": status})
+	return api.doPost("/mcp/tasks/"+id+"/status", map[string]interface{}{"status": status})
 }
 
 func handleDeleteTask(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -208,7 +208,7 @@ func handleDeleteTask(api *APIClient, args map[string]interface{}) (interface{},
 	if id == "" {
 		return nil, fmt.Errorf("id is required")
 	}
-	return api.doDelete("/api/tasks/" + id)
+	return api.doDelete("/mcp/tasks/" + id)
 }
 
 // optionalString 如果 args 中存在非空字符串 key，则写入 body

@@ -63,8 +63,8 @@ type OrchestratorService struct {
 	mu          sync.Mutex
 	activeOrchs map[string]struct{} // convID →活跃编排
 
-	// 派发并发保护：同一 agent 同时只允许一个任务在飞
-	dispatching sync.Map // agentID → bool
+	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
+	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }
 
 // SetJWTSecret sets the JWT secret for generating management tool tokens.
@@ -215,11 +215,12 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	// Dispatch guard: prevent double-dispatching to the same agent
-	if _, loaded := s.dispatching.LoadOrStore(agent.ID, true); loaded {
-		return nil, fmt.Errorf("agent %q busy (task already in flight)", agent.Name)
-	}
-	defer s.dispatching.Delete(agent.ID)
+	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
+	newSem := make(chan struct{}, 1)
+	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
+	sem := actual.(chan struct{})
+	sem <- struct{}{} // blocks until slot available
+	defer func() { <-sem }()
 
 	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
 	kbCtx := kbPreload
@@ -249,6 +250,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 			"context_messages": agentCtx,
 			"agent_id":         agent.ID,
 			"conversation_id":  convID,
+			"user_id":          userID,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)
@@ -324,6 +326,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 			"context_messages": orchCtx,
 			"agent_id":         orchAgent.ID,
 			"conversation_id":  convID,
+			"user_id":          userID,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to orchestrator daemon: %w", err)
@@ -477,11 +480,12 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
 	}
 
-	// Dispatch guard: prevent double-dispatching to the same agent
-	if _, loaded := s.dispatching.LoadOrStore(agent.ID, true); loaded {
-		return nil, fmt.Errorf("agent %q busy (task already in flight)", agent.Name)
-	}
-	defer s.dispatching.Delete(agent.ID)
+	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
+	newSem := make(chan struct{}, 1)
+	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
+	sem := actual.(chan struct{})
+	sem <- struct{}{} // blocks until slot available
+	defer func() { <-sem }()
 
 	// 权限校验：与 dispatchSingleAgent 保持一致
 	if agent.UserID != nil && *agent.UserID != userID {
@@ -530,6 +534,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 			"context_messages": dispatchCtx,
 			"agent_id":         agent.ID,
 			"conversation_id":  convID,
+			"user_id":          userID,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to worker daemon: %w", err)
@@ -694,7 +699,7 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 }
 
 // InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
-// 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
+// 管理操作（agent/machine CRUD）通过 MCP daemon 工具提供，不在此注入 JWT/curl。
 // 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
 func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
@@ -704,25 +709,10 @@ func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString("\n\n")
 	}
 
-	hasTools := agent.ToolsConfig != ""
-	hasMgmt := agent.EnableManagementTools && s.jwtSecret != "" && s.serverURL != ""
-
-	if hasTools || hasMgmt {
+	if agent.ToolsConfig != "" {
 		sb.WriteString("[可用工具]\n")
-		if hasTools {
-			sb.WriteString(agent.ToolsConfig)
-			sb.WriteString("\n\n")
-		}
-		if hasMgmt {
-			token, _, err := s.generateMgmtToken(userID)
-			if err != nil {
-				slog.Warn("generate management token failed", "agent_id", agent.ID, "error", err)
-			} else {
-				sb.WriteString(GenerateManagementTools(s.serverURL, token))
-				sb.WriteString("\n")
-			}
-		}
-		sb.WriteString("\n")
+		sb.WriteString(agent.ToolsConfig)
+		sb.WriteString("\n\n")
 	}
 
 	sb.WriteString(contextStr)

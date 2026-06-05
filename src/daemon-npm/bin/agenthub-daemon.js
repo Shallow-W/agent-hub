@@ -70,15 +70,16 @@ const daemonConn = { serverURL: '', apiKey: '' };
 // buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
 // 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
 // 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
-function buildPlatformMcpArgs() {
+function buildPlatformMcpArgs(conversationId, userId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
+  const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
+  if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
+  if (userId) mcpServerArgs.push('--user-id', userId);
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
-        // 用 'node'（PATH 解析）而非 process.execPath，避免 "Program Files" 空格在
-        // 子进程参数转义中被拆断；daemon 始终在 node 下运行，PATH 必有 node。
         command: 'node',
-        args: [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'],
+        args: mcpServerArgs,
       },
     },
   });
@@ -580,19 +581,23 @@ function apiURL(serverURL, apiKey, pathname) {
   return url;
 }
 
-function requestJSON(method, url, body) {
+function requestJSON(method, url, body, bearerToken) {
   const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
   const transport = url.protocol === 'https:' ? https : http;
+
+  const headers = {};
+  if (data) {
+    headers['Content-Type'] = 'application/json';
+    headers['Content-Length'] = data.length;
+  }
+  if (bearerToken) {
+    headers['Authorization'] = `Bearer ${bearerToken}`;
+  }
 
   return new Promise((resolve, reject) => {
     const req = transport.request(url, {
       method,
-      headers: data
-        ? {
-          'Content-Type': 'application/json',
-          'Content-Length': data.length,
-        }
-        : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
     }, (res) => {
       let response = '';
       res.setEncoding('utf8');
@@ -1102,9 +1107,9 @@ function stopAgentProcess(agent_id) {
  * Returns { child, sessionId, sendPrompt }.
  * If resume=true, uses --resume <sessionId>; otherwise --session-id <sessionId>.
  */
-function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume) {
+function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs();
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -1210,16 +1215,21 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume) {
  * - Cross-conversation → kill + --resume restart
  * - No process → spawn fresh
  */
-async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemPrompt) {
+async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt, systemPrompt) {
   const sessionKey = `${agentId}:${conversationId}`;
   const savedSessionId = conversationSessions.get(sessionKey) || null;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const validSessionId = savedSessionId && UUID_RE.test(savedSessionId) ? savedSessionId : null;
   const slot = runningAgents.get(agentId);
 
-  // Fast path: same conversation, process running
-  if (slot?.sendPrompt && slot.currentConversationId === conversationId) {
-    console.log(`Agent ${agentId}: fast path (same conversation ${conversationId})`);
+  // Fast path: same conversation or unbound agent (null = accept any), process running
+  if (slot?.sendPrompt && (slot.currentConversationId === conversationId || slot.currentConversationId === null)) {
+    if (slot.currentConversationId === null) {
+      console.log(`Agent ${agentId}: fast path (unbound → binding to conversation ${conversationId})`);
+      slot.currentConversationId = conversationId;
+    } else {
+      console.log(`Agent ${agentId}: fast path (same conversation ${conversationId})`);
+    }
     const response = await slot.sendPrompt(prompt);
     if (response.error) throw new Error(response.error);
     return response.result;
@@ -1236,7 +1246,7 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemP
   let result;
   if (validSessionId) {
     try {
-      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true);
+      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId);
       // Wait briefly to detect immediate resume failure
       await sleep(2000);
       if (result.child.exitCode !== null) {
@@ -1245,10 +1255,10 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemP
     } catch {
       // Resume failed — spawn fresh with new session ID
       console.log(`Agent ${agentId}: --resume failed, spawning fresh`);
-      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false);
+      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
     }
   } else {
-    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false);
+    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
   }
 
   const { child, sessionId, sendPrompt } = result;
@@ -1445,6 +1455,7 @@ function handleAgentStart(ws, payload) {
       sessionId,
       cliTool: cli_tool,
       sendPrompt,
+      currentConversationId: null,
     });
     idleAgentConfigs.set(agent_id, { cliTool: cli_tool, sessionId, systemPrompt: system_prompt || '' });
     agentTurnStates.set(agent_id, 'idle');
@@ -1557,6 +1568,7 @@ async function connectWS(serverURL, apiKey) {
           context_messages: d.context_messages,
           agent_id: d.agent_id,
           conversation_id: d.conversation_id,
+          user_id: d.user_id,
         };
         if (!task.id) return;
 
@@ -1567,7 +1579,7 @@ async function connectWS(serverURL, apiKey) {
           let result;
           if (task.cli_tool === 'claude' && task.agent_id && task.conversation_id) {
             // Unified stream-json slot path with conversation isolation
-            result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, userPrompt, systemPrompt);
+            result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
           } else {
             // Non-claude or missing info — use legacy per-task spawn
             result = await executeTask(task);
@@ -1679,6 +1691,19 @@ async function callApi(serverURL, apiKey, method, pathname, options = {}) {
   throw lastError;
 }
 
+// callMcpApi 用 daemon token（非 JWT）调用 /mcp/... 端点，用于任务、群组等 MCP 专用接口。
+async function callMcpApi(serverURL, apiKey, method, pathname, options = {}, userId) {
+  const url = new URL(serverURL);
+  url.pathname = `${url.pathname.replace(/\/$/, '')}${pathname}`;
+  if (options.query) {
+    for (const [key, value] of Object.entries(options.query)) {
+      if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+    }
+  }
+  if (userId) url.searchParams.set('user_id', userId);
+  return requestJSON(method, url, options.body, apiKey);
+}
+
 const MCP_TOOLS = [
   {
     name: 'list_conversations',
@@ -1744,6 +1769,147 @@ const MCP_TOOLS = [
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+  },
+  // ── 任务管理（通过 /mcp/ 端点，daemon token 鉴权） ──
+  {
+    name: 'list_tasks',
+    description: '列出任务。默认列出当前会话的任务，可指定 conversation_id 和 status 过滤。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
+        status: { type: 'string', description: '按状态过滤（todo/in_progress/done/cancelled）' },
+      },
+      additionalProperties: false,
+    },
+    run: (args, ctx) => {
+      const query = {};
+      query.conversation_id = args.conversation_id || ctx.conversationId || '';
+      if (args.status) query.status = args.status;
+      return ctx.callMcpApi('GET', '/mcp/tasks', { query });
+    },
+  },
+  {
+    name: 'create_task',
+    description: '创建一个任务。默认关联到当前会话。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '任务标题' },
+        description: { type: 'string', description: '任务描述（可选）' },
+        conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
+        assignee_id: { type: 'string', description: '指派给用户的 ID（可选）' },
+        agent_id: { type: 'string', description: '关联的 Agent ID（可选）' },
+        priority: { type: 'string', description: '优先级（low/medium/high，默认 medium）' },
+      },
+      required: ['title'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => {
+      const body = { title: args.title };
+      body.conversation_id = args.conversation_id || ctx.conversationId || '';
+      if (args.description) body.description = args.description;
+      if (args.assignee_id) body.assignee_id = args.assignee_id;
+      if (args.agent_id) body.agent_id = args.agent_id;
+      if (args.priority) body.priority = args.priority;
+      return ctx.callMcpApi('POST', '/mcp/tasks', { body });
+    },
+  },
+  {
+    name: 'update_task',
+    description: '更新任务属性（标题、描述、优先级、指派人等）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '任务 ID' },
+        title: { type: 'string', description: '新标题' },
+        description: { type: 'string', description: '新描述' },
+        priority: { type: 'string', description: '优先级（low/medium/high）' },
+        assignee_id: { type: 'string', description: '指派人 ID' },
+        agent_id: { type: 'string', description: '关联 Agent ID' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => {
+      const body = {};
+      if (args.title) body.title = args.title;
+      if (args.description) body.description = args.description;
+      if (args.priority) body.priority = args.priority;
+      if (args.assignee_id) body.assignee_id = args.assignee_id;
+      if (args.agent_id) body.agent_id = args.agent_id;
+      return ctx.callMcpApi('PUT', `/mcp/tasks/${encodeURIComponent(args.id)}`, { body });
+    },
+  },
+  {
+    name: 'move_task_status',
+    description: '移动任务状态。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '任务 ID' },
+        status: { type: 'string', description: '目标状态（todo/in_progress/done/cancelled）' },
+      },
+      required: ['id', 'status'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi(
+      'POST',
+      `/mcp/tasks/${encodeURIComponent(args.id)}/status`,
+      { body: { status: args.status } },
+    ),
+  },
+  {
+    name: 'delete_task',
+    description: '删除一个任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '任务 ID' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('DELETE', `/mcp/tasks/${encodeURIComponent(args.id)}`),
+  },
+  // ── 群组信息 ──
+  {
+    name: 'get_group_info',
+    description: '获取群聊信息。默认获取当前会话对应的群组。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group_id: { type: 'string', description: '群组 ID（默认为当前会话 ID）' },
+      },
+      additionalProperties: false,
+    },
+    run: (args, ctx) => {
+      const gid = args.group_id || ctx.conversationId || '';
+      if (!gid) throw new Error('group_id is required (no conversation context)');
+      return ctx.callMcpApi('GET', `/mcp/groups/${encodeURIComponent(gid)}`);
+    },
+  },
+  {
+    name: 'list_group_members',
+    description: '列出群聊成员。默认列出当前会话对应群组的成员。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group_id: { type: 'string', description: '群组 ID（默认为当前会话 ID）' },
+      },
+      additionalProperties: false,
+    },
+    run: (args, ctx) => {
+      const gid = args.group_id || ctx.conversationId || '';
+      if (!gid) throw new Error('group_id is required (no conversation context)');
+      return ctx.callMcpApi('GET', `/mcp/groups/${encodeURIComponent(gid)}/members`);
+    },
+  },
+  {
+    name: 'list_machines',
+    description: '列出当前用户连接的电脑（daemon 机器）。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/machines'),
   },
 ];
 
@@ -1819,7 +1985,10 @@ async function handleMcpMessage(line, toolMap, ctx) {
 
 async function runMcpServer(serverURL, apiKey) {
   const ctx = {
+    conversationId: readArg('--conversation-id') || null,
+    userId: readArg('--user-id') || null,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
+    callMcpApi: (method, pathname, options) => callMcpApi(serverURL, apiKey, method, pathname, options, ctx.userId),
   };
   const toolMap = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
 

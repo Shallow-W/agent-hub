@@ -64,6 +64,30 @@ func (h *AgentHandler) List(c *gin.Context) {
 	middleware.SuccessResponse(c, list)
 }
 
+// MCPList 查询 Agent 列表（瘦身体，去掉 capabilities_json 等大字段）
+func (h *AgentHandler) MCPList(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	list, err := h.svc.ListAvailable(c.Request.Context(), userID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50030, "查询 Agent 列表失败")
+		return
+	}
+	slim := make([]gin.H, len(list))
+	for i, a := range list {
+		slim[i] = gin.H{
+			"id":            a.ID,
+			"name":          a.Name,
+			"type":          a.Type,
+			"status":        a.Status,
+			"machine_id":    a.MachineID,
+			"machine_name":  a.MachineName,
+			"version":       a.Version,
+			"cli_tool":      a.CLITool,
+		}
+	}
+	middleware.SuccessResponse(c, slim)
+}
+
 // ListDaemonMachines 查询当前用户创建的电脑连接位。
 func (h *AgentHandler) ListDaemonMachines(c *gin.Context) {
 	userID := middleware.GetUserID(c)
