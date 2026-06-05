@@ -1528,6 +1528,11 @@ async function connectWS(serverURL, apiKey) {
 
       if (envelope.type === 'pong') return;
 
+      if (envelope.type === 'ping') {
+        safeSend(ws, JSON.stringify({ type: 'pong' }));
+        return;
+      }
+
       if (envelope.type === 'agent.start') {
         enqueueAgentStart(ws, envelope.data);
         return;

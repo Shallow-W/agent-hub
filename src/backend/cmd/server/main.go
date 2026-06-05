@@ -161,6 +161,7 @@ func main() {
 	daemonHub := ws.NewDaemonHub(logger)
 	orchSvc.SetDaemonHub(daemonHub)
 	agentSvc.SetDaemonHub(daemonHub)
+	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
@@ -345,6 +346,30 @@ func main() {
 	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
 	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
 	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+
+	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
+	mcpGroup := router.Group("/mcp")
+	mcpGroup.Use(middleware.MCPAuth(cfg.Daemon.Token))
+	{
+		mcpGroup.GET("/conversations", convHandler.List)
+		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+
+		mcpTaskRoutes := mcpGroup.Group("/tasks")
+		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
+		{
+			mcpTaskRoutes.GET("", taskHandler.List)
+			mcpTaskRoutes.POST("", taskHandler.Create)
+			mcpTaskRoutes.PUT("/:id", taskHandler.Update)
+			mcpTaskRoutes.POST("/:id/status", taskHandler.MoveStatus)
+			mcpTaskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
+		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
+		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
+	}
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())

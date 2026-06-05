@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 const maxMessageLen = 10000 // 10KB
@@ -87,6 +88,7 @@ type MessageService struct {
 	notifier  MessageNotifier
 	cacher    MessageCacher
 	orchSvc   *OrchestratorService
+	daemonHub *ws.DaemonHub
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -113,6 +115,11 @@ func (s *MessageService) SetCacher(c MessageCacher) {
 // SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
 func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 	s.orchSvc = orchSvc
+}
+
+// SetDaemonHub 注入 DaemonHub（避免循环依赖，由 main.go 调用）
+func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
+	s.daemonHub = hub
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -577,12 +584,44 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
-	task, err = s.waitDaemonTask(ctx, task.ID)
-	if err != nil {
-		return nil, err
+
+	// Push via WS and wait for channel-based result
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
-	if task.Status == "failed" {
-		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
+	s.daemonHub.RegisterTaskPromise(task.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           userContent,
+			"context_messages": contextMessages,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to daemon: %w", err)
+	}
+
+	ch := s.daemonHub.AwaitTaskResult(task.ID)
+	if ch == nil {
+		return nil, fmt.Errorf("daemon not connected for task %s", task.ID)
+	}
+	defer s.daemonHub.RemoveTaskPromise(task.ID)
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	var result *ws.TaskResult
+	select {
+	case result = <-ch:
+	case <-ctx.Done():
+		return nil, ErrMsgAgentTimeout
+	}
+
+	if result.Error != "" {
+		return nil, fmt.Errorf("daemon task failed: %s", result.Error)
 	}
 
 	artifacts, err := json.Marshal(map[string]string{
@@ -594,35 +633,11 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
 	return msg, nil
-}
-
-func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(600 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get daemon task: %w", err)
-		}
-		if task != nil && (task.Status == "completed" || task.Status == "failed") {
-			return task, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ErrMsgAgentTimeout
-		case <-ticker.C:
-		}
-	}
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
