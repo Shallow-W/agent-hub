@@ -1213,6 +1213,8 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume) {
 async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemPrompt) {
   const sessionKey = `${agentId}:${conversationId}`;
   const savedSessionId = conversationSessions.get(sessionKey) || null;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const validSessionId = savedSessionId && UUID_RE.test(savedSessionId) ? savedSessionId : null;
   const slot = runningAgents.get(agentId);
 
   // Fast path: same conversation, process running
@@ -1232,18 +1234,18 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemP
 
   // Spawn with --resume if we have a saved session, otherwise fresh
   let result;
-  if (savedSessionId) {
+  if (validSessionId) {
     try {
-      result = spawnStreamJsonProcess(agentId, savedSessionId, systemPrompt, true);
+      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true);
       // Wait briefly to detect immediate resume failure
       await sleep(2000);
       if (result.child.exitCode !== null) {
         throw new Error('Resume failed');
       }
     } catch {
-      // Resume failed — spawn fresh with same session ID
-      console.log(`Agent ${agentId}: --resume failed, trying --session-id`);
-      result = spawnStreamJsonProcess(agentId, savedSessionId, systemPrompt, false);
+      // Resume failed — spawn fresh with new session ID
+      console.log(`Agent ${agentId}: --resume failed, spawning fresh`);
+      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false);
     }
   } else {
     result = spawnStreamJsonProcess(agentId, null, systemPrompt, false);
