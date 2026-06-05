@@ -277,6 +277,7 @@ func main() {
 		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
 		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
 		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
+		apiGroup.PUT("/conversations/:id/agents/:agentID/role", convHandler.SetAgentRole)
 		apiGroup.GET("/agents", agentHandler.List)
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)

@@ -354,3 +354,37 @@ func (h *ConversationHandler) RemoveAgent(c *gin.Context) {
 	}
 	middleware.SuccessResponse(c, nil)
 }
+
+// SetAgentRoleRequest 设置 Agent 角色请求体
+type SetAgentRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
+// SetAgentRole 设置会话中 Agent 的角色（Orchestrator/Worker）
+func (h *ConversationHandler) SetAgentRole(c *gin.Context) {
+	var req SetAgentRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40015, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.SetConversationAgentRole(c.Request.Context(), userID, c.Param("id"), c.Param("agentID"), req.Role)
+	if err != nil {
+		if errors.Is(err, service.ErrConvInvalidRole) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40016, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40415, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40315, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50017, "设置 Agent 角色失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}

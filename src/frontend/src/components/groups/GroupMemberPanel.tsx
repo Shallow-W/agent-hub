@@ -25,7 +25,7 @@ import {
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember, changeMemberRole } from '@/api/group';
-import { getConversationAgents, addConversationAgent, removeConversationAgent } from '@/api/conversation';
+import { getConversationAgents, addConversationAgent, removeConversationAgent, setConversationAgentRole } from '@/api/conversation';
 import type { GroupMember } from '@/types/group';
 import type { ConversationAgent } from '@/types/conversation';
 import { useFriendStore } from '@/store/friendStore';
@@ -362,32 +362,74 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                 actions={
                   canManage
                     ? [
-                        <Popconfirm
-                          key="remove-agent"
-                          title="确定移除该智能体？"
-                          onConfirm={async () => {
-                            setActionLoading(agent.agent_id);
-                            try {
-                              await removeConversationAgent(conversationId, agent.agent_id);
-                              message.success('已移除智能体');
-                              await fetchMembers();
-                            } catch {
-                              message.error('移除智能体失败');
-                            } finally {
-                              setActionLoading(null);
-                            }
+                        <Dropdown
+                          key="agent-actions"
+                          menu={{
+                            items: [
+                              ...(agent.role !== 'orchestrator'
+                                ? [{
+                                    key: 'set-orch',
+                                    icon: <TeamOutlined />,
+                                    label: '设为 Orchestrator',
+                                    onClick: async () => {
+                                      setActionLoading(agent.agent_id);
+                                      try {
+                                        await setConversationAgentRole(conversationId, agent.agent_id, 'orchestrator');
+                                        message.success('已设为 Orchestrator');
+                                        await fetchMembers();
+                                      } catch {
+                                        message.error('设置角色失败');
+                                      } finally {
+                                        setActionLoading(null);
+                                      }
+                                    },
+                                  }]
+                                : [{
+                                    key: 'cancel-orch',
+                                    icon: <UserOutlined />,
+                                    label: '取消 Orchestrator',
+                                    onClick: async () => {
+                                      setActionLoading(agent.agent_id);
+                                      try {
+                                        await setConversationAgentRole(conversationId, agent.agent_id, 'worker');
+                                        message.success('已取消 Orchestrator');
+                                        await fetchMembers();
+                                      } catch {
+                                        message.error('设置角色失败');
+                                      } finally {
+                                        setActionLoading(null);
+                                      }
+                                    },
+                                  }]),
+                              {
+                                key: 'remove',
+                                icon: <DeleteOutlined />,
+                                label: '移除智能体',
+                                danger: true,
+                                onClick: async () => {
+                                  setActionLoading(agent.agent_id);
+                                  try {
+                                    await removeConversationAgent(conversationId, agent.agent_id);
+                                    message.success('已移除智能体');
+                                    await fetchMembers();
+                                  } catch {
+                                    message.error('移除智能体失败');
+                                  } finally {
+                                    setActionLoading(null);
+                                  }
+                                },
+                              },
+                            ],
                           }}
-                          okText="确定"
-                          cancelText="取消"
+                          trigger={['click']}
                         >
                           <Button
                             type="text"
-                            danger
                             size="small"
-                            icon={<DeleteOutlined />}
+                            icon={<MoreOutlined />}
                             loading={actionLoading === agent.agent_id}
                           />
-                        </Popconfirm>,
+                        </Dropdown>,
                       ]
                     : []
                 }
@@ -400,6 +442,9 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                     <span>
                       {agent.name}
                       <Tag color="purple" style={{ fontSize: 10, marginLeft: 4 }}>智能体</Tag>
+                      {agent.role === 'orchestrator' && (
+                        <Tag color="orange" style={{ fontSize: 10, marginLeft: 2 }}>Orch</Tag>
+                      )}
                     </span>
                   }
                   description={agent.cli_tool}
