@@ -43,6 +43,26 @@ export const LANG_DISPLAY: Record<string, string> = {
   sh: 'Shell', shell: 'Shell', zsh: 'Shell', yml: 'YAML', md: 'Markdown',
 };
 
+// 常见 language → 文件扩展名，用于“下载”时推断文件名。
+const LANG_EXTENSION: Record<string, string> = {
+  javascript: 'js', js: 'js', jsx: 'jsx',
+  typescript: 'ts', ts: 'ts', tsx: 'tsx',
+  go: 'go', golang: 'go',
+  python: 'py', py: 'py',
+  rust: 'rs', rs: 'rs',
+  bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh',
+  json: 'json', yaml: 'yaml', yml: 'yaml',
+  markdown: 'md', md: 'md',
+  html: 'html', xml: 'xml', css: 'css', sql: 'sql',
+};
+
+/** 按 filename 优先、否则按 language 推断下载文件名；都缺省时退回 .txt。 */
+export function inferDownloadName(filename?: string, language?: string): string {
+  if (filename && filename.trim()) return filename.trim();
+  const ext = language ? LANG_EXTENSION[language.toLowerCase()] : undefined;
+  return `code.${ext || 'txt'}`;
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')

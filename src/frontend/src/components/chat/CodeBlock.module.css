@@ -76,26 +76,47 @@
 
 /* ── highlight.js github-dark-dimmed theme (inline, no external CSS) ── */
 .codeBlock :global(.hljs-comment),
-.codeBlock :global(.hljs-quote) { color: #8b949e; font-style: italic; }
+.codeBlock :global(.hljs-quote),
+.expandedCodeBlock :global(.hljs-comment),
+.expandedCodeBlock :global(.hljs-quote) { color: #8b949e; font-style: italic; }
 .codeBlock :global(.hljs-keyword),
 .codeBlock :global(.hljs-selector-tag),
-.codeBlock :global(.hljs-type) { color: #ff7b72; }
+.codeBlock :global(.hljs-type),
+.expandedCodeBlock :global(.hljs-keyword),
+.expandedCodeBlock :global(.hljs-selector-tag),
+.expandedCodeBlock :global(.hljs-type) { color: #ff7b72; }
 .codeBlock :global(.hljs-string),
-.codeBlock :global(.hljs-addition) { color: #a5d6ff; }
+.codeBlock :global(.hljs-addition),
+.expandedCodeBlock :global(.hljs-string),
+.expandedCodeBlock :global(.hljs-addition) { color: #a5d6ff; }
 .codeBlock :global(.hljs-number),
-.codeBlock :global(.hljs-literal) { color: #79c0ff; }
-.codeBlock :global(.hljs-built_in) { color: #ffa657; }
+.codeBlock :global(.hljs-literal),
+.expandedCodeBlock :global(.hljs-number),
+.expandedCodeBlock :global(.hljs-literal) { color: #79c0ff; }
+.codeBlock :global(.hljs-built_in),
+.expandedCodeBlock :global(.hljs-built_in) { color: #ffa657; }
 .codeBlock :global(.hljs-function),
-.codeBlock :global(.hljs-title) { color: #d2a8ff; }
+.codeBlock :global(.hljs-title),
+.expandedCodeBlock :global(.hljs-function),
+.expandedCodeBlock :global(.hljs-title) { color: #d2a8ff; }
 .codeBlock :global(.hljs-variable),
-.codeBlock :global(.hljs-attr) { color: #79c0ff; }
-.codeBlock :global(.hljs-selector-class) { color: #7ee787; }
-.codeBlock :global(.hljs-selector-id) { color: #ffa657; }
-.codeBlock :global(.hljs-meta) { color: #8b949e; }
-.codeBlock :global(.hljs-deletion) { color: #ffa198; background: rgba(255, 122, 122, 0.1); }
+.codeBlock :global(.hljs-attr),
+.expandedCodeBlock :global(.hljs-variable),
+.expandedCodeBlock :global(.hljs-attr) { color: #79c0ff; }
+.codeBlock :global(.hljs-selector-class),
+.expandedCodeBlock :global(.hljs-selector-class) { color: #7ee787; }
+.codeBlock :global(.hljs-selector-id),
+.expandedCodeBlock :global(.hljs-selector-id) { color: #ffa657; }
+.codeBlock :global(.hljs-meta),
+.expandedCodeBlock :global(.hljs-meta) { color: #8b949e; }
+.codeBlock :global(.hljs-deletion),
+.expandedCodeBlock :global(.hljs-deletion) { color: #ffa198; background: rgba(255, 122, 122, 0.1); }
 .codeBlock :global(.hljs-symbol),
-.codeBlock :global(.hljs-bullet) { color: #f2cc60; }
-.codeBlock :global(.hljs-link) { color: #a5d6ff; text-decoration: underline; }
+.codeBlock :global(.hljs-bullet),
+.expandedCodeBlock :global(.hljs-symbol),
+.expandedCodeBlock :global(.hljs-bullet) { color: #f2cc60; }
+.codeBlock :global(.hljs-link),
+.expandedCodeBlock :global(.hljs-link) { color: #a5d6ff; text-decoration: underline; }
 
 .expandedCodeModal :global(.ant-modal-content) {
   display: flex;
@@ -135,30 +156,40 @@
   font-size: 13px;
 }
 
+.expandedHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .expandedCopyBtn {
   opacity: 1;
 }
 
-.expandedCodeBlock,
-.expandedCodeEditor {
+.expandedCodeBlock {
   flex: 1;
   min-height: 0;
+  margin: 0;
   overflow: auto;
   padding: 18px 20px;
+  color: #e6edf3;
+  background: #1c2128;
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
   font-size: 15px;
   line-height: 1.7;
 }
 
-.expandedCodeEditor {
-  box-sizing: border-box;
-  width: 100%;
+.expandedEditorWrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editorLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
-  border: none;
-  outline: none;
-  resize: none;
-  color: #e6edf3;
-  background: #1c2128;
-  font-family: 'SF Mono', Menlo, Monaco, monospace;
-  white-space: pre;
-  tab-size: 2;
+  color: #8b949e;
+  font-size: 13px;
 }

@@ -10,6 +10,7 @@ import {
   UserAddOutlined,
   InfoCircleOutlined,
   DeleteOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -61,6 +62,65 @@ export const ChatWindow: React.FC = () => {
   const isStreaming = (streamingContent ?? '').length > 0;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
+
+  // 拖拽上传：drop 区覆盖整个聊天窗口（消息区 + 输入区），文件交给 ChatInput 的 processFiles 处理。
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+  const processFilesRef = useRef<((files: FileList | File[]) => void) | null>(null);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    // 仅在拖拽文件时高亮（排除文本/元素拖拽）
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    dragCounterRef.current += 1;
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      processFilesRef.current?.(files);
+    }
+  }, []);
+
+  const registerProcessFiles = useCallback(
+    (handler: ((files: FileList | File[]) => void) | null) => {
+      processFilesRef.current = handler;
+    },
+    [],
+  );
+
+  // 全局兜底：阻止整个 app 内拖放文件触发浏览器默认打开/下载/导航。
+  // 只 preventDefault，不吞掉业务逻辑；卸载时移除监听。
+  useEffect(() => {
+    const prevent = (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -277,7 +337,19 @@ export const ChatWindow: React.FC = () => {
   ];
 
   return (
-    <div className={styles.container}>
+    <div
+      className={styles.container}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className={styles.dropOverlay}>
+          <LinkOutlined className={styles.dropOverlayIcon} />
+          <span>松开以上传文件</span>
+        </div>
+      )}
       <div className={styles.header}>
         <Tooltip title={isGroup ? '查看群聊信息' : undefined} mouseEnterDelay={0.8}>
           <div
@@ -379,6 +451,7 @@ export const ChatWindow: React.FC = () => {
         conversationId={activeConv.id}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
+        onRegisterProcessFiles={registerProcessFiles}
       />
       {isGroup && activeId && (
         <GroupMemberPanel

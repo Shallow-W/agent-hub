@@ -1,0 +1,13 @@
+.editorHost {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editorHost :global(.cm-editor) {
+  height: 100%;
+}
+
+.editorHost :global(.cm-editor.cm-focused) {
+  outline: none;
+}

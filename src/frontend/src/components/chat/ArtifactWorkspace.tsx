@@ -113,7 +113,7 @@ const CodeView: React.FC<{ artifact: Artifact }> = ({ artifact }) => {
   }
   return (
     <div className={styles.codeArea}>
-      <CodeBlock code={artifact.content} language={artifact.language} expandable />
+      <CodeBlock code={artifact.content} language={artifact.language} filename={artifact.filename} expandable />
     </div>
   );
 };

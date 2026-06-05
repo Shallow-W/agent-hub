@@ -128,14 +128,27 @@
 | A3 | ✅ | P1 | 聊天内联卡片 | ArtifactCard：CodeBlock 抽共享组件复用（code）+ webpage 卡 |
 | A4 | ✅ | P1 | 全屏预览工作区 | ArtifactWorkspace：Preview / Code / Meta 三视图 |
 | A5 | ✅ | P1 | 网页 iframe 沙箱 | WebpageFrame：sandbox=allow-scripts + loading/error + 8s 超时 + CSP 兜底 |
-| A6 | 🅿️ | 后置 | 文档渲染 | markdown/text/pdf/docx 基础预览（MVP 后第一优先） |
-| A7 | 🅿️ | 后置 | 文件附件卡 | 文件名+图标+下载（需 daemon 传文件内容） |
-| A8 | 🅿️ | P2 | 代码编辑器 | Monaco/CodeMirror 编辑、下载、选区上下文 |
-| A9 | 🅿️ | P2 | Diff 与版本历史 | 版本列表、diff view、回滚（artifacts 表已预留 version） |
-| A10 | 🅿️ | P2 | 对话式局部修改 | 选中代码 → selection context → patch |
-| A11 | 🅿️ | P2 | PPT 浏览 | PPT/PPTX 转预览页/图片序列 |
+| A6 | ✅ | 后置 | 文档渲染 | document/file 卡片（content 文本预览，另一会话完成，v3.1）|
+| A7 | ✅ | 后置 | 文件附件卡 | document/file 卡片 + 下载（随 A6 完成）|
+| A8 | ✅ | P2-E | 代码编辑器 | CodeMirror 6 全屏「编辑/查看」+ 复制 + 下载（懒加载；编辑暂不落库）|
+| A9 | ⬜ | P2-C | Diff 与版本历史 | 版本列表、diff view、回滚（依赖版本模型 P2-A）|
+| A10 | ⬜ | P2-D | 对话式局部修改 | 🚩选中代码 → selection context → Agent patch → 新版本（依赖 P2-A）|
+| A11 | ✅ | P2-F | PPT 浏览 | 用户上传 .pptx/.ppt → pptx-preview 浏览器内渲染（全屏、真实比例、懒加载）|
 
 > 进度跟踪：本表 = 唯一真源。每完成一项更新「状态」列；实现期同步用会话内 todo。
+
+### P2 主轴规划（决策已定）
+
+- **起点**：先做独立小件 **P2-E 代码编辑器（✅）+ P2-F PPT（✅）**，编辑器库选 **CodeMirror 6**。PPT 范围定为「渲染用户上传的 pptx」（复用附件系统，纯前端），不做 Agent→PPT 二进制管道。
+- **剩余主轴（依赖版本模型）**：**P2-A 版本血缘数据模型**（artifacts 加 root_id/lineage + 版本递增，地基）→ **P2-B 版本历史 UI** → **P2-C Diff 视图** → **P2-D 🚩对话式局部修改**（旗舰：选中代码→描述→Agent patch→存为新版本）。
+- 配套：P2-A 落地后，P2-E 编辑器的「保存」可接「存为新版本」。
+
+### P2-E / P2-F 验证记录（2026-06-06，用户实测 + trellis-check）
+
+- ✅ P2-E：全屏编辑/查看切换、CodeMirror 编辑、复制（改后内容）、下载；懒加载 chunk 不进首屏。
+- ✅ P2-F：pptx 上传（按钮+拖拽）、内联卡片、全屏预览真实比例居中不裁切、大背景；window 级拖拽兜底不下载。
+- ✅ 上传管道：upload.go 白名单加 pptx/office/text（按扩展名 gate + zip/octet-stream 兜底）；txt/md/csv 的 charset 后缀 mime 二次校验已修。
+- ✅ trellis-check：资源清理（EditorView/previewer destroy、window 监听 removeEventListener）、懒加载、类型安全全部通过；前端 build + 后端 build/vet/test 绿。
 
 ### MVP 验证记录（2026-06-06，主会话独立验证）
 

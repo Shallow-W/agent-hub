@@ -28,7 +28,8 @@ import replyStyles from './ChatInput.module.css';
 
 const { TextArea } = Input;
 
-const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
+const ACCEPTED_TYPES =
+  '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 type MentionTarget =
@@ -50,9 +51,19 @@ interface ChatInputProps {
   conversationId: string;
   replyTo?: Message | null;
   onCancelReply?: () => void;
+  /**
+   * 把内部 processFiles 暴露给父级（ChatWindow），让整个聊天窗口的拖放都能复用同一套
+   * 校验 + 上传逻辑。传 null 表示注销（卸载时）。
+   */
+  onRegisterProcessFiles?: (handler: ((files: FileList | File[]) => void) | null) => void;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, onCancelReply }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({
+  conversationId,
+  replyTo,
+  onCancelReply,
+  onRegisterProcessFiles,
+}) => {
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
@@ -238,19 +249,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
     }
   }, [sendTypingStart, sendTypingStop, isGroup, mentionVisible, kbVisible, loadMentionTargets, loadKnowledgeBases]);
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // 文件入库通用逻辑：校验大小 → 入 pendingFiles → 逐个上传。
+  // input onChange 与拖拽 onDrop 共用，避免两份逻辑漂移。
+  const processFiles = useCallback((files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
 
     const newItems: PendingAttachment[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i]!;
+    list.forEach((f, i) => {
       if (f.size > MAX_FILE_SIZE) {
         message.error(`${f.name} 超过 50MB 限制`);
-        continue;
+        return;
       }
-      newItems.push({ uid: `${Date.now()}_${i}`, file: f, status: 'uploading' });
-    }
+      newItems.push({ uid: `${Date.now()}_${i}_${f.name}`, file: f, status: 'uploading' });
+    });
+    if (newItems.length === 0) return;
     setPendingFiles((prev) => [...prev, ...newItems]);
 
     // Upload each file
@@ -266,10 +279,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         );
       }
     });
+  }, []);
 
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    processFiles(files);
     // Reset input so same file can be re-selected
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+  }, [processFiles]);
+
+  // 把 processFiles 注册给父级（ChatWindow），让整个聊天窗口的拖放复用同一上传逻辑。
+  useEffect(() => {
+    onRegisterProcessFiles?.(processFiles);
+    return () => onRegisterProcessFiles?.(null);
+  }, [onRegisterProcessFiles, processFiles]);
 
   const handleRemoveFile = useCallback((uid: string) => {
     setPendingFiles((prev) => prev.filter((p) => p.uid !== uid));

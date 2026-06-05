@@ -1,0 +1,69 @@
+/* 始终可见的测量/定位容器：用它的 clientWidth 量真实可视宽度，并作为遮罩定位父级。 */
+.measure {
+  position: relative;
+  width: 100%;
+}
+
+/* host：大、深色、铺满的预览背景。
+   - 高度 ~80vh 且可滚动，使大 deck 也能完整浏览；
+   - flex 让 pptx-preview 注入的 wrapper（已被 JS 改成 height:auto/透明）水平居中；
+   - 多页时纵向堆叠由 list 模式的 slide margin 负责，整体在深色背景中居中浏览。 */
+.host {
+  width: 100%;
+  height: calc(100vh - 120px);
+  overflow: auto;
+  background-color: #1f1f1f;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  /* 顶端对齐：内容高于视口时从顶部开始滚动；内容矮时由内部 padding 给出居中留白感。 */
+  align-items: flex-start;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+/* pptx-preview 注入的 wrapper（库的全局类，用 :global 避免 CSS Modules 改名）：
+   JS 里已清掉它写死的 #000/固定高，这里再兜底确保居中、不抢背景。 */
+.host > :global(.pptx-preview-wrapper) {
+  margin: 0 auto !important;
+  background: transparent !important;
+  height: auto !important;
+}
+
+/* loading/error 遮罩：绝对定位盖在始终可见的 host 之上，避免切换 display 把 host 隐藏。 */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: 24px;
+  background-color: #1f1f1f;
+  border-radius: 8px;
+}
+
+.spinner {
+  font-size: 28px;
+  color: var(--color-primary, #1677ff);
+}
+
+.errorIcon {
+  font-size: 32px;
+  color: #cf1322;
+}
+
+.errorText {
+  font-size: 14px;
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+.downloadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
