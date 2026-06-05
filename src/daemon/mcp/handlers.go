@@ -133,6 +133,19 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 		// 机器
 		case "list_machines":
 			return api.doGet("/api/daemon/machines", nil)
+		// 群聊
+		case "get_group_info":
+			groupID, _ := args["group_id"].(string)
+			if groupID == "" {
+				return nil, fmt.Errorf("group_id is required")
+			}
+			return api.doGet("/api/groups/"+groupID, nil)
+		case "list_group_members":
+			groupID, _ := args["group_id"].(string)
+			if groupID == "" {
+				return nil, fmt.Errorf("group_id is required")
+			}
+			return api.doGet("/api/groups/"+groupID+"/members", nil)
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}

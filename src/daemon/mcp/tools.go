@@ -17,6 +17,7 @@ func AllTools() []Tool {
 	tools = append(tools, TaskTools()...)
 	tools = append(tools, AgentTools()...)
 	tools = append(tools, MachineTools()...)
+	tools = append(tools, GroupTools()...)
 	return tools
 }
 
@@ -211,6 +212,40 @@ func MachineTools() []Tool {
 			InputSchema: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
+			},
+		},
+	}
+}
+
+// GroupTools 群聊管理工具——查询群聊详情和成员信息
+func GroupTools() []Tool {
+	return []Tool{
+		{
+			Name:        "get_group_info",
+			Description: "查询群聊详情，包含群名称、成员数量、创建时间等。需要传入群聊ID（group_id）",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"group_id": map[string]interface{}{
+						"type":        "string",
+						"description": "群聊ID（必填）",
+					},
+				},
+				"required": []string{"group_id"},
+			},
+		},
+		{
+			Name:        "list_group_members",
+			Description: "查询群聊成员列表，包含每个成员的用户名、角色（owner/admin/member）、加入时间等信息",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"group_id": map[string]interface{}{
+						"type":        "string",
+						"description": "群聊ID（必填）",
+					},
+				},
+				"required": []string{"group_id"},
 			},
 		},
 	}
