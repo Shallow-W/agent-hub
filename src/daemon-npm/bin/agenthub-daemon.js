@@ -65,7 +65,7 @@ let lastAgentStartAt = 0;
 const agentStartQueue = [];
 
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
-const daemonConn = { serverURL: '', apiKey: '' };
+const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 
 // buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
 // 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
@@ -73,6 +73,7 @@ const daemonConn = { serverURL: '', apiKey: '' };
 function buildPlatformMcpArgs(conversationId, userId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
+  if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
   const mcpConfig = JSON.stringify({
@@ -1691,8 +1692,9 @@ async function callApi(serverURL, apiKey, method, pathname, options = {}) {
   throw lastError;
 }
 
-// callMcpApi 用 daemon token（非 JWT）调用 /mcp/... 端点，用于任务、群组等 MCP 专用接口。
-async function callMcpApi(serverURL, apiKey, method, pathname, options = {}, userId) {
+// callMcpApi 用 daemon token（非 JWT、非 machine API key）调用 /mcp/... 端点。
+// daemon token 从 CLI --daemon-token 或环境变量获取，与后端 config daemon.token 一致。
+async function callMcpApi(serverURL, daemonToken, method, pathname, options = {}, userId) {
   const url = new URL(serverURL);
   url.pathname = `${url.pathname.replace(/\/$/, '')}${pathname}`;
   if (options.query) {
@@ -1701,7 +1703,7 @@ async function callMcpApi(serverURL, apiKey, method, pathname, options = {}, use
     }
   }
   if (userId) url.searchParams.set('user_id', userId);
-  return requestJSON(method, url, options.body, apiKey);
+  return requestJSON(method, url, options.body, daemonToken);
 }
 
 const MCP_TOOLS = [
@@ -1984,11 +1986,12 @@ async function handleMcpMessage(line, toolMap, ctx) {
 }
 
 async function runMcpServer(serverURL, apiKey) {
+  const daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   const ctx = {
     conversationId: readArg('--conversation-id') || null,
     userId: readArg('--user-id') || null,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
-    callMcpApi: (method, pathname, options) => callMcpApi(serverURL, apiKey, method, pathname, options, ctx.userId),
+    callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };
   const toolMap = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
 
@@ -2023,6 +2026,7 @@ async function main() {
 
   daemonConn.serverURL = serverURL;
   daemonConn.apiKey = apiKey;
+  daemonConn.daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   loadSessionMap();
   await register(serverURL, apiKey);
   ensureGlobalMcpConfigs(serverURL, apiKey);
