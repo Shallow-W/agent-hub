@@ -37,6 +37,29 @@ const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, s
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
 const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
 
+// Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
+const conversationSessions = new Map();
+const SESSIONS_FILE = path.join(os.homedir(), '.agenthub', 'sessions.json');
+
+function loadSessionMap() {
+  try {
+    const data = fs.readFileSync(SESSIONS_FILE, 'utf8');
+    for (const [key, value] of Object.entries(JSON.parse(data))) {
+      conversationSessions.set(key, value);
+    }
+  } catch { /* file not found or invalid — start fresh */ }
+}
+
+function saveSessionMap() {
+  try {
+    const obj = Object.fromEntries(conversationSessions);
+    fs.mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true });
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error(`Failed to save session map: ${err.message}`);
+  }
+}
+
 const START_QUEUE_INTERVAL_MS = 3000;
 let lastAgentStartAt = 0;
 const agentStartQueue = [];
@@ -1074,6 +1097,194 @@ function stopAgentProcess(agent_id) {
   runningAgents.delete(agent_id);
 }
 
+/**
+ * Spawn a Claude Code process with stream-json transport.
+ * Returns { child, sessionId, sendPrompt }.
+ * If resume=true, uses --resume <sessionId>; otherwise --session-id <sessionId>.
+ */
+function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume) {
+  const command = resolveCommand('claude');
+  const mcpArgs = buildPlatformMcpArgs();
+  const effectiveSessionId = sessionId || `agenthub-${crypto.randomUUID()}`;
+
+  const args = [
+    '--dangerously-skip-permissions',
+    '--output-format', 'stream-json',
+    '--input-format', 'stream-json',
+    '--verbose',
+    ...mcpArgs,
+    resume ? '--resume' : '--session-id',
+    effectiveSessionId,
+  ];
+  if (systemPrompt) {
+    args.push('--system-prompt', systemPrompt);
+  }
+
+  const spec = processSpec(command, args);
+  const child = spawn(spec.command, spec.args, {
+    detached: process.platform !== 'win32',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+
+  let stdoutBuf = '';
+  let resultResolver = null;
+
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    stdoutBuf += chunk;
+    const lines = stdoutBuf.split('\n');
+    stdoutBuf = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'assistant') {
+          agentTurnStates.set(agentId, 'active');
+        }
+        if (event.type === 'result') {
+          agentTurnStates.set(agentId, 'idle');
+          const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
+          if (resultResolver) {
+            const r = resultResolver;
+            resultResolver = null;
+            if (event.is_error || event.subtype === 'error_during_execution') {
+              r({ error: text || 'Agent execution failed' });
+            } else {
+              r({ result: text || '' });
+            }
+          }
+        }
+      } catch { /* ignore non-JSON lines */ }
+    }
+  });
+
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    console.error(`[agent:${agentId}:err] ${chunk.trim()}`);
+  });
+
+  // Reject any pending resultResolver if process exits mid-turn
+  child.on('close', (code) => {
+    if (resultResolver) {
+      const r = resultResolver;
+      resultResolver = null;
+      r({ error: `Agent process exited (code=${code})` });
+    }
+    agentTurnStates.delete(agentId);
+  });
+
+  let queueTail = Promise.resolve();
+  const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
+    if (child.exitCode !== null) {
+      reject(new Error('Agent process not running'));
+      return;
+    }
+    resultResolver = resolve;
+    const msg = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: prompt }] },
+    });
+    child.stdin.write(msg + '\n');
+    const timer = setTimeout(() => {
+      if (resultResolver === resolve) {
+        resultResolver = null;
+        reject(new Error('Agent task timed out (120s)'));
+      }
+    }, EXEC_TIMEOUT_MS);
+    timer.unref(); // Don't keep event loop alive for timeout timer
+  });
+
+  const sendPrompt = (prompt) => {
+    const run = () => sendPromptRaw(prompt);
+    queueTail = queueTail.then(run, run);
+    return queueTail;
+  };
+
+  return { child, sessionId: effectiveSessionId, sendPrompt };
+}
+
+/**
+ * Unified claude dispatch: per-agent process slot with conversation isolation.
+ * - Same conversation → stdin inject (fast path)
+ * - Cross-conversation → kill + --resume restart
+ * - No process → spawn fresh
+ */
+async function dispatchToClaudeSlot(ws, agentId, conversationId, prompt, systemPrompt) {
+  const sessionKey = `${agentId}:${conversationId}`;
+  const savedSessionId = conversationSessions.get(sessionKey) || null;
+  const slot = runningAgents.get(agentId);
+
+  // Fast path: same conversation, process running
+  if (slot?.sendPrompt && slot.currentConversationId === conversationId) {
+    console.log(`Agent ${agentId}: fast path (same conversation ${conversationId})`);
+    const response = await slot.sendPrompt(prompt);
+    if (response.error) throw new Error(response.error);
+    return response.result;
+  }
+
+  // Kill existing process if serving a different conversation
+  if (slot?.process) {
+    console.log(`Agent ${agentId}: switching conversation ${slot.currentConversationId} → ${conversationId}`);
+    stopAgentProcess(agentId);
+    await sleep(500);
+  }
+
+  // Spawn with --resume if we have a saved session, otherwise fresh
+  let result;
+  if (savedSessionId) {
+    try {
+      result = spawnStreamJsonProcess(agentId, savedSessionId, systemPrompt, true);
+      // Wait briefly to detect immediate resume failure
+      await sleep(2000);
+      if (result.child.exitCode !== null) {
+        throw new Error('Resume failed');
+      }
+    } catch {
+      // Resume failed — spawn fresh with same session ID
+      console.log(`Agent ${agentId}: --resume failed, trying --session-id`);
+      result = spawnStreamJsonProcess(agentId, savedSessionId, systemPrompt, false);
+    }
+  } else {
+    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false);
+  }
+
+  const { child, sessionId, sendPrompt } = result;
+
+  // Handle process exit
+  child.on('close', (code) => {
+    const entry = runningAgents.get(agentId);
+    if (entry?.process === child) {
+      runningAgents.delete(agentId);
+    }
+    agentTurnStates.delete(agentId);
+    console.log(`Agent ${agentId} process exited (code=${code})`);
+    safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
+  });
+
+  // Register in runningAgents with conversation tracking
+  runningAgents.set(agentId, {
+    process: child,
+    sessionId,
+    currentConversationId: conversationId,
+    cliTool: 'claude',
+    sendPrompt,
+  });
+  idleAgentConfigs.set(agentId, { cliTool: 'claude', sessionId, systemPrompt: systemPrompt || '' });
+  agentTurnStates.set(agentId, 'idle');
+
+  // Persist session mapping
+  conversationSessions.set(sessionKey, sessionId);
+  saveSessionMap();
+
+  console.log(`Agent ${agentId} spawned for conversation ${conversationId} (session=${sessionId}, pid=${child.pid})`);
+
+  // Send the prompt
+  const response = await sendPrompt(prompt);
+  if (response.error) throw new Error(response.error);
+  return response.result;
+}
+
 function enqueueAgentStart(ws, payload) {
   agentStartQueue.push({ ws, payload });
   processStartQueue();
@@ -1109,7 +1320,7 @@ function handleAgentStart(ws, payload) {
     return;
   }
 
-  const sessionId = `agenthub-${agent_id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const sessionId = crypto.randomUUID();
   const command = resolveCommand(cli_tool);
   const mcpArgs = buildPlatformMcpArgs();
 
@@ -1117,6 +1328,7 @@ function handleAgentStart(ws, payload) {
     '--dangerously-skip-permissions',
     '--output-format', 'stream-json',
     '--input-format', 'stream-json',
+    '--verbose',
     ...mcpArgs,
     '--session-id', sessionId,
   ];
@@ -1341,57 +1553,24 @@ async function connectWS(serverURL, apiKey) {
         };
         if (!task.id) return;
 
-        const runningAgent = runningAgents.get(task.agent_id);
         const { systemPrompt, userPrompt } = buildPromptParts(task);
 
         console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
-        const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
         try {
           let result;
-          if (runningAgent?.sendPrompt) {
-            // Persistent process: send prompt via stdin, wait for result
-            const response = await runningAgent.sendPrompt(userPrompt);
-            if (response.error) {
-              throw new Error(response.error);
-            }
-            result = response.result;
+          if (task.cli_tool === 'claude' && task.agent_id && task.conversation_id) {
+            // Unified stream-json slot path with conversation isolation
+            result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, userPrompt, systemPrompt);
           } else {
-            // Check if we can auto-restart an idle agent
-            const idleConfig = idleAgentConfigs.get(task.agent_id);
-            if (idleConfig && task.cli_tool === 'claude') {
-              console.log(`Agent ${task.agent_id} auto-restarting (idle process)`);
-              const startPayload = {
-                agent_id: task.agent_id,
-                cli_tool: idleConfig.cliTool,
-                system_prompt: idleConfig.systemPrompt,
-              };
-              handleAgentStart(ws, startPayload);
-              // Wait for the process to initialize
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              const restartedAgent = runningAgents.get(task.agent_id);
-              if (restartedAgent?.sendPrompt) {
-                const response = await restartedAgent.sendPrompt(userPrompt);
-                if (response.error) throw new Error(response.error);
-                result = response.result;
-              } else {
-                // Auto-restart failed, fall back to executeTask
-                task._sessionId = idleConfig.sessionId || null;
-                result = await executeTask(task);
-              }
-            } else {
-              // No idle config or not claude — spawn per task
-              task._sessionId = runningAgent?.sessionId || null;
-              result = await executeTask(task);
-            }
+            // Non-claude or missing info — use legacy per-task spawn
+            result = await executeTask(task);
           }
-          stopHeartbeat();
           safeSend(ws, JSON.stringify({
             type: 'task.complete',
             data: { task_id: task.id, result },
           }));
           console.log(`AgentHub daemon task ${task.id} completed.`);
         } catch (error) {
-          stopHeartbeat();
           safeSend(ws, JSON.stringify({
             type: 'task.complete',
             data: {
@@ -1668,6 +1847,7 @@ async function main() {
 
   daemonConn.serverURL = serverURL;
   daemonConn.apiKey = apiKey;
+  loadSessionMap();
   await register(serverURL, apiKey);
   ensureGlobalMcpConfigs(serverURL, apiKey);
   await connectWS(serverURL, apiKey);
