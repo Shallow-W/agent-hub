@@ -59,7 +59,7 @@ type OrchestratorService struct {
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
-	activeOrchs map[string]struct{} // convID →活跃编排
+	activeOrchs map[string]time.Time // convID → 锁获取时间
 }
 
 // SetJWTSecret sets the JWT secret for generating management tool tokens.
@@ -83,7 +83,7 @@ func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgR
 		convRepo:    convRepo,
 		agentRepo:   agentRepo,
 		msgRepo:     msgRepo,
-		activeOrchs: make(map[string]struct{}),
+		activeOrchs: make(map[string]time.Time),
 	}
 }
 
@@ -133,10 +133,11 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			continue
 		}
 
+		// 并发保护：同一对话同时只允许一个编排（超时自动释放）
 		if agent.Type == "orchestrator" {
-			// 并发保护：同一对话同时只允许一个编排
 			s.mu.Lock()
-			if _, active := s.activeOrchs[convID]; active {
+			acquiredAt, active := s.activeOrchs[convID]
+			if active && time.Since(acquiredAt) < orchLockTimeout {
 				s.mu.Unlock()
 				slog.Warn("orchestration already active for conversation", "conv_id", convID)
 				// 返回提示消息给用户（直接构造，避免并发调用 msgRepo.Create）
@@ -148,7 +149,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				})
 				continue
 			}
-			s.activeOrchs[convID] = struct{}{}
+			s.activeOrchs[convID] = time.Now()
 			s.mu.Unlock()
 
 			// 确保 panic 时也能清理 activeOrchs，避免对话永久被锁
@@ -219,7 +220,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
-	task, err = s.waitDaemonTask(ctx, task.ID)
+	task, err = waitDaemonTask(ctx, s.agentRepo, task.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +276,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
 
-	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
+	orchTask, err = waitDaemonTask(ctx, s.agentRepo, orchTask.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +457,7 @@ func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID
 		return nil, fmt.Errorf("create worker daemon task: %w", err)
 	}
 
-	daemonTask, err = s.waitDaemonTask(ctx, daemonTask.ID)
+	daemonTask, err = waitDaemonTask(ctx, s.agentRepo, daemonTask.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -580,30 +581,11 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 	return sb.String(), agentNames, nil
 }
 
-// waitDaemonTask polls for daemon task completion (600ms interval, 120s timeout).
-func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
+// orchLockTimeout 编排锁最大持有时间，超时自动释放防止死锁
+const orchLockTimeout = 3 * time.Minute
 
-	ticker := time.NewTicker(600 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get daemon task: %w", err)
-		}
-		if task != nil && (task.Status == "completed" || task.Status == "failed") {
-			return task, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ErrMsgAgentTimeout
-		case <-ticker.C:
-		}
-	}
-}
+// orchCleanupInterval 编排锁定期清理间隔
+const orchCleanupInterval = 30 * time.Second
 
 // InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
 // 如果 agent.EnableManagementTools 为 true，还会生成管理工具并追加到工具配置中。
@@ -762,11 +744,26 @@ func (s *OrchestratorService) generateMgmtToken(userID string) (string, time.Tim
 	return tokenStr, expiresAt, nil
 }
 
-// truncateString truncates s to maxRunes runes, appending "..." if truncated.
-func truncateString(s string, maxRunes int) string {
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes]) + "..."
+// startOrchCleanup 启动编排锁定期清理 goroutine（由 NewOrchestratorService 调用）
+func (s *OrchestratorService) startOrchCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(orchCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				now := time.Now()
+				for id, acquiredAt := range s.activeOrchs {
+					if now.Sub(acquiredAt) > orchLockTimeout {
+						delete(s.activeOrchs, id)
+						slog.Warn("orch lock timed out, force-released", "conv_id", id)
+					}
+				}
+				s.mu.Unlock()
+			}
+		}
+	}()
 }

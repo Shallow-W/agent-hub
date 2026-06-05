@@ -575,7 +575,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
-	task, err = s.waitDaemonTask(ctx, task.ID)
+	task, err = waitDaemonTask(ctx, s.agentRepo, task.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -597,30 +597,6 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
 	return msg, nil
-}
-
-func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(600 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get daemon task: %w", err)
-		}
-		if task != nil && (task.Status == "completed" || task.Status == "failed") {
-			return task, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ErrMsgAgentTimeout
-		case <-ticker.C:
-		}
-	}
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态

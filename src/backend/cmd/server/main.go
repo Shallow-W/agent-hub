@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -20,69 +19,9 @@ import (
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmoiron/sqlx"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/v2"
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// Config 应用配置结构
-type Config struct {
-	Server struct {
-		Port int `koanf:"port"`
-	} `koanf:"server"`
-	Database struct {
-		Host     string `koanf:"host"`
-		Port     int    `koanf:"port"`
-		User     string `koanf:"user"`
-		Password string `koanf:"password"`
-		DBName   string `koanf:"dbname"`
-		SSLMode  string `koanf:"sslmode"`
-	} `koanf:"database"`
-	JWT struct {
-		Secret      string `koanf:"secret"`
-		ExpiryHours int    `koanf:"expiry_hours"`
-	} `koanf:"jwt"`
-	Daemon struct {
-		Token string `koanf:"token"`
-	} `koanf:"daemon"`
-	CORS struct {
-		AllowedOrigins []string `koanf:"allowed_origins"`
-	} `koanf:"cors"`
-	Redis struct {
-		Host     string `koanf:"host"`
-		Port     int    `koanf:"port"`
-		Password string `koanf:"password"`
-		DB       int    `koanf:"db"`
-	} `koanf:"redis"`
-	Upload struct {
-		Dir        string `koanf:"dir"`
-		MaxImageMB int    `koanf:"max_image_mb"`
-		MaxPDFMB   int    `koanf:"max_pdf_mb"`
-	} `koanf:"upload"`
-	Log struct {
-		Level string `koanf:"level"`
-	} `koanf:"log"`
-	RateLimit struct {
-		RPS   float64 `koanf:"rps"`
-		Burst int     `koanf:"burst"`
-	} `koanf:"rate_limit"`
-}
-
-func parseLogLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}
 
 func main() {
 	// 加载配置
@@ -183,6 +122,37 @@ func main() {
 	// 健康检查（无需鉴权、不受限流）
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
+	})
+	router.GET("/health/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		healthy := true
+		details := make(map[string]string)
+
+		if err := db.PingContext(ctx); err != nil {
+			healthy = false
+			details["database"] = "unreachable: " + err.Error()
+		} else {
+			details["database"] = "ok"
+		}
+
+		if rdb != nil {
+			if err := rdb.Ping(ctx).Err(); err != nil {
+				healthy = false
+				details["redis"] = "unreachable: " + err.Error()
+			} else {
+				details["redis"] = "ok"
+			}
+		} else {
+			details["redis"] = "not_configured"
+		}
+
+		status := http.StatusOK
+		if !healthy {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"code": 0, "message": "ready", "data": details})
 	})
 
 	// WebSocket 路由（通过 query 参数鉴权，不受限流）
@@ -386,141 +356,4 @@ func main() {
 	}
 
 	logger.Info("server stopped")
-}
-
-// initDatabase 连接数据库，若不存在则自动创建并运行迁移
-func initDatabase(cfg *Config, logger *slog.Logger) (*sqlx.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
-	)
-
-	db, err := sqlx.Connect("pgx", dsn)
-	if err != nil {
-		// 数据库不存在时自动创建
-		if strings.Contains(err.Error(), "does not exist") {
-			logger.Info("database not found, creating...", "dbname", cfg.Database.DBName)
-			if err := createDatabase(cfg); err != nil {
-				return nil, fmt.Errorf("create database: %w", err)
-			}
-			logger.Info("database created", "dbname", cfg.Database.DBName)
-			db, err = sqlx.Connect("pgx", dsn)
-			if err != nil {
-				return nil, fmt.Errorf("connect after create: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("connect database: %w", err)
-		}
-	}
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(2 * time.Minute)
-
-	// 自动运行迁移
-	if err := runMigrations(db, logger); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-
-	logger.Info("database connected and migrated")
-	return db, nil
-}
-
-// createDatabase 连接到默认 postgres 库并创建目标数据库
-func createDatabase(cfg *Config) error {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=postgres sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.SSLMode,
-	)
-	db, err := sqlx.Connect("pgx", dsn)
-	if err != nil {
-		return fmt.Errorf("connect to postgres: %w", err)
-	}
-	defer db.Close()
-
-	// Quote identifier to prevent injection; name comes from config, not user input
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE \"%s\"", strings.ReplaceAll(cfg.Database.DBName, "\"", "")))
-	return err
-}
-
-// runMigrations 从 migrations/ 目录读取 SQL 文件并执行（幂等）
-func runMigrations(db *sqlx.DB, logger *slog.Logger) error {
-	// 创建迁移追踪表
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version VARCHAR PRIMARY KEY,
-		applied_at TIMESTAMPTZ DEFAULT NOW()
-	)`); err != nil {
-		return fmt.Errorf("create schema_migrations table: %w", err)
-	}
-
-	files, err := filepath.Glob("migrations/*.sql")
-	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
-	}
-	sort.Strings(files)
-
-	for _, path := range files {
-		name := filepath.Base(path)
-
-		// 检查是否已执行
-		var exists bool
-		err := db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", name)
-		if err != nil || exists {
-			continue
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
-		}
-
-		// 只执行 ---- DOWN 之前的部分（UP migration）
-		sql := string(content)
-		if idx := strings.Index(sql, "---- DOWN"); idx != -1 {
-			sql = sql[:idx]
-		}
-
-		if _, err := db.Exec(sql); err != nil {
-			return fmt.Errorf("exec migration %s: %w", name, err)
-		}
-
-		_, _ = db.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", name)
-		logger.Info("migration applied", "file", name)
-	}
-
-	return nil
-}
-
-// loadConfig 从 YAML 文件加载配置
-func loadConfig(path string) (*Config, error) {
-	k := koanf.New(".")
-	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
-		return nil, fmt.Errorf("load config file: %w", err)
-	}
-
-	var cfg Config
-	if err := k.Unmarshal("", &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal config: %w", err)
-	}
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
-	}
-	return &cfg, nil
-}
-
-func (c *Config) validate() error {
-	if c.JWT.Secret == "" {
-		return fmt.Errorf("jwt.secret is required")
-	}
-	if c.Server.Port <= 0 {
-		return fmt.Errorf("server.port must be positive")
-	}
-	if c.Database.Host == "" {
-		return fmt.Errorf("database.host is required")
-	}
-	if c.Database.DBName == "" {
-		return fmt.Errorf("database.dbname is required")
-	}
-	return nil
 }

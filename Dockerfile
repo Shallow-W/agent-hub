@@ -17,8 +17,9 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=backend-builder /agenthub-server /app/server
 COPY --from=frontend-builder /app/dist /app/dist
-COPY src/backend/config/config.example.yaml /app/config/config.yaml
 COPY src/backend/migrations /app/migrations
+# Config must be provided via volume mount or environment variables.
+# Example: docker run -v ./config.yaml:/app/config/config.yaml ...
 
 ENV GIN_MODE=release
 EXPOSE 8080
