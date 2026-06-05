@@ -275,6 +275,20 @@ func TestFindMentionedAgentIDBasic(t *testing.T) {
 	}
 }
 
+func TestFindMentionedAgentIDMatchesNoSpaceAlias(t *testing.T) {
+	mentions := []MentionResult{
+		{AgentName: "ClaudeCode", Task: "review"},
+	}
+	agents := []model.ConversationAgent{
+		{AgentID: "agent-1", Name: "Claude Code"},
+	}
+
+	result := FindMentionedAgentID(mentions, agents)
+	if result["ClaudeCode"] != "agent-1" {
+		t.Fatalf("expected ClaudeCode alias to match Claude Code, got %#v", result)
+	}
+}
+
 func TestFindMentionedAgentIDSkipUnknown(t *testing.T) {
 	mentions := []MentionResult{
 		{AgentName: "Alice", Task: "分析"},

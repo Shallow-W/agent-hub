@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 type fakeMsgRepo struct {
@@ -140,13 +142,30 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	userID := "user-1"
 	msgRepo := &fakeMsgRepo{}
 	convRepo := &fakeConvRepoForMsg{
-		conv: &model.Conversation{ID: "conv-1", UserID: userID},
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
 	}
 	agentRepo := &fakeAgentRepoForMsg{
 		agent:          &model.Agent{ID: "agent-1", UserID: &userID, Name: "Codex Agent", CLITool: "codex", MachineID: stringPtr("machine-1")},
 		inConversation: true,
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
+	daemonHub := ws.NewDaemonHub(slog.Default())
+	daemonHub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(daemonHub)
+
+	go func() {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if agentRepo.task != nil && daemonHub.AwaitTaskResult(agentRepo.task.ID) != nil {
+				daemonHub.ResolveTask(agentRepo.task.ID, &ws.TaskResult{
+					TaskID: agentRepo.task.ID,
+					Result: "daemon task result",
+				})
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 
 	result, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
 	if err != nil {
@@ -174,7 +193,7 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	if agentMessage == nil {
 		t.Fatalf("expected async assistant reply, got messages %#v", msgRepo.messages)
 	}
-	if agentMessage.Content != "鐪熷疄 CLI 鍥炲" {
+	if agentMessage.Content != "daemon task result" {
 		t.Fatalf("expected daemon task result, got %s", agentMessage.Content)
 	}
 	if agentMessage.ArtifactsJSON == "" {

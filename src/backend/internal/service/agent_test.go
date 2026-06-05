@@ -22,6 +22,7 @@ type fakeAgentRepo struct {
 	machineAgent []string
 	candidates   []string
 	addedPrompt  string
+	addedCLITool string
 }
 
 func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
@@ -113,8 +114,9 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error) {
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
 	r.addedPrompt = systemPrompt
+	r.addedCLITool = expectedCLITool
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
@@ -382,12 +384,15 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
-	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "persona")
+	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "codex", "persona")
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
 	}
 	if repo.addedPrompt != "persona" {
 		t.Fatalf("expected system prompt stored, got %q", repo.addedPrompt)
+	}
+	if repo.addedCLITool != "codex" {
+		t.Fatalf("expected cli tool checked, got %q", repo.addedCLITool)
 	}
 }
 

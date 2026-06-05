@@ -32,8 +32,12 @@ const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 type MentionTarget =
-  | { id: string; label: string; kind: 'user'; user: GroupMember }
-  | { id: string; label: string; kind: 'agent'; agent: ConversationAgent };
+  | { id: string; label: string; mentionLabel: string; kind: 'user'; user: GroupMember }
+  | { id: string; label: string; mentionLabel: string; kind: 'agent'; agent: ConversationAgent };
+
+function toMentionLabel(label: string): string {
+  return label.replace(/\s+/g, '');
+}
 
 interface KBTarget {
   username: string;
@@ -274,20 +278,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
   const mentionTargets: MentionTarget[] = [
     ...members
       .filter((m) => !!m.username)
-      .map((m) => ({ id: m.user_id, label: m.username ?? 'unknown', kind: 'user' as const, user: m })),
-    ...agentMembers.map((agent) => ({ id: agent.agent_id, label: agent.name, kind: 'agent' as const, agent })),
+      .map((m) => {
+        const label = m.username ?? 'unknown';
+        return { id: m.user_id, label, mentionLabel: toMentionLabel(label), kind: 'user' as const, user: m };
+      }),
+    ...agentMembers.map((agent) => ({
+      id: agent.agent_id,
+      label: agent.name,
+      mentionLabel: toMentionLabel(agent.name),
+      kind: 'agent' as const,
+      agent,
+    })),
   ];
 
   const filteredTargets = mentionTargets.filter(
-    (target) => target.label.toLowerCase().includes(mentionQuery.toLowerCase()),
+    (target) => (
+      target.label.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+      target.mentionLabel.toLowerCase().includes(mentionQuery.toLowerCase())
+    ),
   );
 
   const insertMention = useCallback((target: MentionTarget) => {
     const before = value.slice(0, mentionStart);
     const after = value.slice(mentionStart + mentionQuery.length + 1); // +1 for @
     // Append " #" to auto-trigger KB selection after choosing an agent
-    const hashPos = mentionStart + target.label.length + 2; // position of the new #
-    const newValue = `${before}@${target.label} #${after}`;
+    const hashPos = mentionStart + target.mentionLabel.length + 2; // position of the new #
+    const newValue = `${before}@${target.mentionLabel} #${after}`;
     setValue(newValue);
     setMentionVisible(false);
 
@@ -357,10 +373,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
         ? await fetchMentionTargets()
         : { members, agentMembers };
       const userMentions = targetLists.members
-        .filter((member) => member.username && hasMention(trimmed, member.username))
+        .filter((member) => member.username && hasMention(trimmed, toMentionLabel(member.username)))
         .map((member) => member.user_id);
       mentions = userMentions.length > 0 ? userMentions : undefined;
-      mentionedAgentId = targetLists.agentMembers.find((agent) => hasMention(trimmed, agent.name))?.agent_id;
+      mentionedAgentId = targetLists.agentMembers.find((agent) => hasMention(trimmed, toMentionLabel(agent.name)))?.agent_id;
     }
 
     setSending(true);
@@ -582,7 +598,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ conversationId, replyTo, o
                 insertMention(target);
               }}
             >
-              @{target.label}
+              @{target.mentionLabel}
               {target.kind === 'agent' ? ' · Agent' : ''}
             </button>
           ))}

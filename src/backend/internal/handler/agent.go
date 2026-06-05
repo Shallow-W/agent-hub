@@ -50,6 +50,7 @@ type CreateDaemonMachineResponse struct {
 // AddCandidateAgentRequest 添加候选 Agent 请求体
 type AddCandidateAgentRequest struct {
 	Name         string `json:"name" binding:"required,max=100"`
+	CLITool      string `json:"cli_tool" binding:"required,max=50"`
 	SystemPrompt string `json:"system_prompt"`
 }
 
@@ -75,14 +76,14 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":            a.ID,
-			"name":          a.Name,
-			"type":          a.Type,
-			"status":        a.Status,
-			"machine_id":    a.MachineID,
-			"machine_name":  a.MachineName,
-			"version":       a.Version,
-			"cli_tool":      a.CLITool,
+			"id":           a.ID,
+			"name":         a.Name,
+			"type":         a.Type,
+			"status":       a.Status,
+			"machine_id":   a.MachineID,
+			"machine_name": a.MachineName,
+			"version":      a.Version,
+			"cli_tool":     a.CLITool,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -119,7 +120,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.SystemPrompt)
+	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentInvalidInput) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40038, err.Error())

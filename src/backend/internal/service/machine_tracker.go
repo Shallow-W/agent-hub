@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	machineOfflineThreshold = 15 * time.Second
+	machineOfflineThreshold = 75 * time.Second
 	machineSweepInterval    = 30 * time.Second
 )
 

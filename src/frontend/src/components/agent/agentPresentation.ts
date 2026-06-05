@@ -48,6 +48,12 @@ export function parseSkills(value?: string): Skill[] {
   return [];
 }
 
+export function getDefaultAgentName(name: string, cliTool: string): string {
+  const normalizedName = name.replace(/\s+/g, '');
+  if (normalizedName) return normalizedName;
+  return cliTool.replace(/\s+/g, '');
+}
+
 export function autoGenerateSkills(agent: Agent): Skill[] {
   const tool = agent.cli_tool.toLowerCase();
   const prompt = (agent.system_prompt || '').toLowerCase();

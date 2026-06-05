@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Input, Modal, Select, message } from 'antd';
 import type { AgentCandidate } from '@/types/agent';
+import { getDefaultAgentName } from './agentPresentation';
 import styles from './AgentCreateModal.module.css';
 
 interface AgentCreateModalProps {
@@ -35,15 +36,15 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     if (!open) return;
     const first = candidates[0];
     setCandidateId(first?.id ?? '');
-    setName(first?.name ?? '');
+    setName(first ? getDefaultAgentName(first.name, first.cli_tool) : '');
     setSystemPrompt('');
   }, [open, candidates]);
 
   const handleCandidateChange = (value: string) => {
     setCandidateId(value);
     const selected = candidates.find((candidate) => candidate.id === value);
-    if (selected && name.trim() === '') {
-      setName(selected.name);
+    if (selected) {
+      setName(getDefaultAgentName(selected.name, selected.cli_tool));
     }
   };
 
