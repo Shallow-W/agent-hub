@@ -52,9 +52,9 @@ func runMCP() {
 	}
 
 	api := mcp.NewAPIClient(serverURL, token)
-	handler := mcp.HandleTaskTool(api)
+	handler := mcp.HandleAllTools(api)
 
-	server := mcp.NewServer("agenthub", "0.1.0", mcp.TaskTools(), handler, logger)
+	server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 
 	ctx := context.Background()
 

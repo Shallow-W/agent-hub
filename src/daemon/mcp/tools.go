@@ -10,18 +10,56 @@ type Tool struct {
 // ToolHandlerFunc 处理 tool 调用
 type ToolHandlerFunc func(toolName string, arguments map[string]interface{}) (interface{}, error)
 
-// TaskTools 返回任务面板相关的 MCP tool 定义
-func TaskTools() []Tool {
+// AllTools 返回所有 MCP tool 定义
+func AllTools() []Tool {
+	var tools []Tool
+	tools = append(tools, ConversationTools()...)
+	tools = append(tools, TaskTools()...)
+	tools = append(tools, AgentTools()...)
+	tools = append(tools, MachineTools()...)
+	return tools
+}
+
+// ConversationTools 会话相关工具
+func ConversationTools() []Tool {
 	return []Tool{
 		{
-			Name:        "list_tasks",
-			Description: "查询任务看板列表。可按会话ID、状态筛选。状态可选值：todo、in_progress、blocked、done",
+			Name:        "list_conversations",
+			Description: "查询当前用户的会话列表（单聊/群聊）。任务看板以会话为基本单位，通常需要先获取会话列表再操作对应任务",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "list_conversation_agents",
+			Description: "查询指定会话中参与的 Agent 列表，用于了解群聊中有哪些 Agent 可用",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"conversation_id": map[string]interface{}{
 						"type":        "string",
-						"description": "按会话ID筛选",
+						"description": "会话ID（必填）",
+					},
+				},
+				"required": []string{"conversation_id"},
+			},
+		},
+	}
+}
+
+// TaskTools 任务看板工具——任务以会话（群聊）为基本单位
+func TaskTools() []Tool {
+	return []Tool{
+		{
+			Name:        "list_tasks",
+			Description: "查询任务看板列表。任务以会话为单位组织，建议传入 conversation_id 查看特定会话的任务。不传则返回当前用户所有任务",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"conversation_id": map[string]interface{}{
+						"type":        "string",
+						"description": "按会话ID筛选（推荐，任务以会话为单位组织）",
 					},
 					"status": map[string]interface{}{
 						"type":        "string",
@@ -33,10 +71,14 @@ func TaskTools() []Tool {
 		},
 		{
 			Name:        "create_task",
-			Description: "创建新任务。状态可选值：todo（默认）、in_progress、blocked、done。优先级可选值：low、medium（默认）、high",
+			Description: "在指定会话中创建新任务。任务归属到某个会话（群聊），建议必传 conversation_id",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
+					"conversation_id": map[string]interface{}{
+						"type":        "string",
+						"description": "所属会话ID（推荐必传，任务以会话为单位）",
+					},
 					"title": map[string]interface{}{
 						"type":        "string",
 						"description": "任务标题（必填，1-120字符）",
@@ -55,17 +97,13 @@ func TaskTools() []Tool {
 						"enum":        []string{"low", "medium", "high"},
 						"description": "优先级，默认 medium",
 					},
-					"conversation_id": map[string]interface{}{
-						"type":        "string",
-						"description": "关联的会话ID",
-					},
 					"assignee_id": map[string]interface{}{
 						"type":        "string",
-						"description": "负责人ID",
+						"description": "负责人ID（用户ID）",
 					},
 					"agent_id": map[string]interface{}{
 						"type":        "string",
-						"description": "分配的 Agent ID",
+						"description": "分配的 Agent ID（可用 list_agents 查询）",
 					},
 				},
 				"required": []string{"title"},
@@ -137,6 +175,42 @@ func TaskTools() []Tool {
 					},
 				},
 				"required": []string{"id"},
+			},
+		},
+	}
+}
+
+// AgentTools 智能体相关工具——查询当前用户可用的 Agent
+func AgentTools() []Tool {
+	return []Tool{
+		{
+			Name:        "list_agents",
+			Description: "查询当前用户可用的 Agent 列表（包括系统 Agent 和自建 Agent），返回名称、类型、状态、能力等信息",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "list_agent_candidates",
+			Description: "查询本机已发现的 Agent 候选列表（来自 daemon 扫描），包含 CLI 路径、版本、能力（skills）等信息。尚未添加到平台的 Agent 会出现在这里",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+	}
+}
+
+// MachineTools 机器/设备管理工具——查询当前用户连接的电脑
+func MachineTools() []Tool {
+	return []Tool{
+		{
+			Name:        "list_machines",
+			Description: "查询当前用户已连接的电脑（daemon 机器）列表，包含机器名称、在线状态、最后心跳时间等信息",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
 			},
 		},
 	}

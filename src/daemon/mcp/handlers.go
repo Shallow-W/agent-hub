@@ -101,10 +101,20 @@ func (c *APIClient) doRequest(method, reqURL string, body interface{}) (interfac
 	return wrapper.Data, nil
 }
 
-// HandleTaskTool 处理任务面板相关的 tool 调用
-func HandleTaskTool(api *APIClient) ToolHandlerFunc {
+// HandleAllTools 处理所有 tool 调用
+func HandleAllTools(api *APIClient) ToolHandlerFunc {
 	return func(toolName string, args map[string]interface{}) (interface{}, error) {
 		switch toolName {
+		// 会话
+		case "list_conversations":
+			return api.doGet("/api/conversations", nil)
+		case "list_conversation_agents":
+			id, _ := args["conversation_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("conversation_id is required")
+			}
+			return api.doGet("/api/conversations/"+id+"/agents", nil)
+		// 任务看板
 		case "list_tasks":
 			return handleListTasks(api, args)
 		case "create_task":
@@ -115,6 +125,14 @@ func HandleTaskTool(api *APIClient) ToolHandlerFunc {
 			return handleMoveTaskStatus(api, args)
 		case "delete_task":
 			return handleDeleteTask(api, args)
+		// 智能体
+		case "list_agents":
+			return api.doGet("/api/agents", nil)
+		case "list_agent_candidates":
+			return api.doGet("/api/daemon/agent-candidates", nil)
+		// 机器
+		case "list_machines":
+			return api.doGet("/api/daemon/machines", nil)
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
