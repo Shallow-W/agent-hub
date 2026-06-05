@@ -34,6 +34,12 @@ function safeSend(ws, data) {
 
 const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
+const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
+const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
+
+const START_QUEUE_INTERVAL_MS = 3000;
+let lastAgentStartAt = 0;
+const agentStartQueue = [];
 
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '' };
@@ -1068,6 +1074,29 @@ function stopAgentProcess(agent_id) {
   runningAgents.delete(agent_id);
 }
 
+function enqueueAgentStart(ws, payload) {
+  agentStartQueue.push({ ws, payload });
+  processStartQueue();
+}
+
+function processStartQueue() {
+  if (agentStartQueue.length === 0) return;
+  const now = Date.now();
+  const elapsed = now - lastAgentStartAt;
+  if (elapsed < START_QUEUE_INTERVAL_MS) {
+    setTimeout(processStartQueue, START_QUEUE_INTERVAL_MS - elapsed);
+    return;
+  }
+  const item = agentStartQueue.shift();
+  if (item) {
+    lastAgentStartAt = Date.now();
+    handleAgentStart(item.ws, item.payload);
+    if (agentStartQueue.length > 0) {
+      setTimeout(processStartQueue, START_QUEUE_INTERVAL_MS);
+    }
+  }
+}
+
 function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
@@ -1116,7 +1145,11 @@ function handleAgentStart(ws, payload) {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          if (event.type === 'assistant') {
+            agentTurnStates.set(agent_id, 'active');
+          }
           if (event.type === 'result') {
+            agentTurnStates.set(agent_id, 'idle');
             // Turn complete — resolve pending promise
             const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
             if (event.is_error || event.subtype === 'error_during_execution') {
@@ -1143,7 +1176,11 @@ function handleAgentStart(ws, payload) {
     });
 
     child.on('close', (code) => {
-      console.log(`Agent ${agent_id} process exited with code ${code}`);
+      if (code === 0) {
+        console.log(`Agent ${agent_id} process exited normally (code=0), keeping idle config`);
+      } else {
+        console.log(`Agent ${agent_id} process exited with code ${code}, keeping idle config for auto-restart`);
+      }
       // Reject any pending result promise
       if (resultResolver) {
         const r = resultResolver;
@@ -1153,11 +1190,14 @@ function handleAgentStart(ws, payload) {
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
+      agentTurnStates.delete(agent_id);
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
 
     // sendPrompt: write user message to stdin, return promise that resolves on result event
     const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
+      const state = agentTurnStates.get(agent_id) || 'unknown';
+      console.log(`Agent ${agent_id} sending prompt (current state: ${state})`);
       if (child.exitCode !== null) {
         reject(new Error('Agent process not running'));
         return;
@@ -1192,6 +1232,8 @@ function handleAgentStart(ws, payload) {
       cliTool: cli_tool,
       sendPrompt,
     });
+    idleAgentConfigs.set(agent_id, { cliTool: cli_tool, sessionId, systemPrompt: system_prompt || '' });
+    agentTurnStates.set(agent_id, 'idle');
 
     console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id } }));
@@ -1206,6 +1248,8 @@ function handleAgentStop(ws, payload) {
   if (!agent_id) return;
   stopAgentProcess(agent_id);
   runningAgents.delete(agent_id);
+  idleAgentConfigs.delete(agent_id);
+  agentTurnStates.delete(agent_id);
   console.log(`Agent ${agent_id} stopped`);
   safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
 }
@@ -1273,7 +1317,7 @@ async function connectWS(serverURL, apiKey) {
       if (envelope.type === 'pong') return;
 
       if (envelope.type === 'agent.start') {
-        handleAgentStart(ws, envelope.data);
+        enqueueAgentStart(ws, envelope.data);
         return;
       }
       if (envelope.type === 'agent.stop') {
@@ -1312,9 +1356,33 @@ async function connectWS(serverURL, apiKey) {
             }
             result = response.result;
           } else {
-            // No persistent process: spawn per task
-            task._sessionId = runningAgent?.sessionId || null;
-            result = await executeTask(task);
+            // Check if we can auto-restart an idle agent
+            const idleConfig = idleAgentConfigs.get(task.agent_id);
+            if (idleConfig && task.cli_tool === 'claude') {
+              console.log(`Agent ${task.agent_id} auto-restarting (idle process)`);
+              const startPayload = {
+                agent_id: task.agent_id,
+                cli_tool: idleConfig.cliTool,
+                system_prompt: idleConfig.systemPrompt,
+              };
+              handleAgentStart(ws, startPayload);
+              // Wait for the process to initialize
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              const restartedAgent = runningAgents.get(task.agent_id);
+              if (restartedAgent?.sendPrompt) {
+                const response = await restartedAgent.sendPrompt(userPrompt);
+                if (response.error) throw new Error(response.error);
+                result = response.result;
+              } else {
+                // Auto-restart failed, fall back to executeTask
+                task._sessionId = idleConfig.sessionId || null;
+                result = await executeTask(task);
+              }
+            } else {
+              // No idle config or not claude — spawn per task
+              task._sessionId = runningAgent?.sessionId || null;
+              result = await executeTask(task);
+            }
           }
           stopHeartbeat();
           safeSend(ws, JSON.stringify({
@@ -1347,6 +1415,8 @@ async function connectWS(serverURL, apiKey) {
         stopAgentProcess(agentId);
       }
       runningAgents.clear();
+      idleAgentConfigs.clear();
+      agentTurnStates.clear();
       console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
