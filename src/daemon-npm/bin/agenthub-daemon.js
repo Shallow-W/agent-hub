@@ -1105,7 +1105,7 @@ function stopAgentProcess(agent_id) {
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume) {
   const command = resolveCommand('claude');
   const mcpArgs = buildPlatformMcpArgs();
-  const effectiveSessionId = sessionId || `agenthub-${crypto.randomUUID()}`;
+  const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
     '--dangerously-skip-permissions',
