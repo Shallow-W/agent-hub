@@ -168,6 +168,7 @@ func main() {
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
+	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
@@ -335,11 +336,9 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
+	router.GET("/daemon/connect", daemonHandler.Handle)
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
 	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
-	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())

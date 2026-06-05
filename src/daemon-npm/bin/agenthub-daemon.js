@@ -7,13 +7,15 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
-const POLL_INTERVAL_MS = 1500;
 const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
+const INBOUND_WATCHDOG_MS = 70000;
 
 const activeSessions = new Map();
+const wsTaskQueue = [];
+let wsTaskRunning = false;
 
-// 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
+// 常驻 daemon 的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '' };
 
 // buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
@@ -36,7 +38,7 @@ function buildPlatformMcpArgs() {
 
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
-// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   registerOpenClawMcp(mcpArgs);
@@ -529,6 +531,142 @@ function apiURL(serverURL, apiKey, pathname) {
   return url;
 }
 
+function daemonWSURL(serverURL, apiKey) {
+  const url = new URL(serverURL);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/daemon/connect`;
+  url.searchParams.set('key', apiKey);
+  url.hash = '';
+  return url;
+}
+
+function encodeWSFrame(opcode, payload) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload || ''), 'utf8');
+  const len = body.length;
+  let headerLen = 2;
+  if (len >= 126 && len <= 0xffff) headerLen = 4;
+  if (len > 0xffff) headerLen = 10;
+  const frame = Buffer.alloc(headerLen + 4 + len);
+  frame[0] = 0x80 | opcode;
+  if (len < 126) {
+    frame[1] = 0x80 | len;
+  } else if (len <= 0xffff) {
+    frame[1] = 0x80 | 126;
+    frame.writeUInt16BE(len, 2);
+  } else {
+    frame[1] = 0x80 | 127;
+    frame.writeBigUInt64BE(BigInt(len), 2);
+  }
+  const maskOffset = headerLen;
+  crypto.randomFillSync(frame, maskOffset, 4);
+  for (let i = 0; i < len; i += 1) {
+    frame[maskOffset + 4 + i] = body[i] ^ frame[maskOffset + (i % 4)];
+  }
+  return frame;
+}
+
+function connectWS(targetURL) {
+  const transport = targetURL.protocol === 'wss:' ? https : http;
+  const requestURL = new URL(targetURL);
+  requestURL.protocol = targetURL.protocol === 'wss:' ? 'https:' : 'http:';
+  const key = crypto.randomBytes(16).toString('base64');
+  return new Promise((resolve, reject) => {
+    const req = transport.request(requestURL, {
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Key': key,
+        'Sec-WebSocket-Version': '13',
+      },
+    });
+    req.on('upgrade', (res, socket, head) => {
+      if (res.statusCode !== 101) {
+        socket.destroy();
+        reject(new Error(`websocket upgrade failed: HTTP ${res.statusCode}`));
+        return;
+      }
+      socket.setNoDelay(true);
+      resolve(createWSConnection(socket, head));
+    });
+    req.on('response', (res) => {
+      reject(new Error(`websocket upgrade failed: HTTP ${res.statusCode}`));
+      res.resume();
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function createWSConnection(socket, initial) {
+  let buffer = initial && initial.length ? Buffer.from(initial) : Buffer.alloc(0);
+  const handlers = { message: null, close: null };
+  let closed = false;
+  const sendFrame = (opcode, payload) => {
+    if (!closed) socket.write(encodeWSFrame(opcode, payload));
+  };
+  const parse = () => {
+    for (;;) {
+      if (buffer.length < 2) return;
+      const opcode = buffer[0] & 0x0f;
+      let len = buffer[1] & 0x7f;
+      let offset = 2;
+      if (len === 126) {
+        if (buffer.length < 4) return;
+        len = buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (len === 127) {
+        if (buffer.length < 10) return;
+        len = Number(buffer.readBigUInt64BE(2));
+        offset = 10;
+      }
+      const masked = (buffer[1] & 0x80) !== 0;
+      const maskOffset = offset;
+      if (masked) offset += 4;
+      if (buffer.length < offset + len) return;
+      let payload = buffer.subarray(offset, offset + len);
+      if (masked) {
+        payload = Buffer.from(payload);
+        const mask = buffer.subarray(maskOffset, maskOffset + 4);
+        for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+      }
+      buffer = buffer.subarray(offset + len);
+      if (opcode === 0x1 && handlers.message) handlers.message(payload.toString('utf8'));
+      if (opcode === 0x8) {
+        closed = true;
+        socket.end();
+        if (handlers.close) handlers.close();
+        return;
+      }
+      if (opcode === 0x9) sendFrame(0xA, payload);
+    }
+  };
+  socket.on('data', (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    parse();
+  });
+  socket.on('close', () => {
+    closed = true;
+    if (handlers.close) handlers.close();
+  });
+  socket.on('error', () => {
+    closed = true;
+  });
+  parse();
+  return {
+    send: (message) => sendFrame(0x1, message),
+    close: () => {
+      try {
+        sendFrame(0x8, Buffer.alloc(0));
+      } finally {
+        closed = true;
+        socket.end();
+      }
+    },
+    onMessage: (handler) => { handlers.message = handler; },
+    onClose: (handler) => { handlers.close = handler; },
+  };
+}
+
 function requestJSON(method, url, body) {
   const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
   const transport = url.protocol === 'https:' ? https : http;
@@ -735,7 +873,7 @@ async function executeTask(task) {
           spec.sessionId,
         ));
       } catch (_err2) {
-        const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        const freshId = crypto.randomUUID();
         ({ stdout, stderr } = await runProcess(
           spec.command,
           ['--session-id', freshId, ...spec.args],
@@ -965,7 +1103,7 @@ function runProcess(command, args, stdin, sessionId) {
   });
 }
 
-async function register(serverURL, apiKey) {
+function registerOnWS(ws) {
   const agents = scanAgents();
   console.log(`AgentHub daemon 发现 ${agents.length} 个 Agent：`);
   for (const agent of agents) {
@@ -973,54 +1111,117 @@ async function register(serverURL, apiKey) {
     const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
     console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
   }
-  await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
-    machine_id: os.hostname(),
-    agents,
-  });
-  console.log('详细能力已上报，请在 AgentHub 网页端查看。');
-  console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
+  ws.send(JSON.stringify({
+    type: 'daemon.register',
+    data: {
+      machine_id: os.hostname(),
+      agents,
+    },
+  }));
+  console.log('AgentHub daemon 已建立 WebSocket 连接，等待后端主动派发任务。');
 }
 
 // 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
-function startHeartbeat(serverURL, apiKey, taskId) {
-  const timer = setInterval(async () => {
-    try {
-      await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${taskId}/heartbeat`), {});
-    } catch (error) {
-      console.error(`AgentHub daemon task ${taskId} heartbeat failed: ${error.message}`);
-    }
+function startWSHeartbeat(ws, taskId) {
+  const timer = setInterval(() => {
+    ws.send(JSON.stringify({ type: 'task.heartbeat', data: { task_id: taskId } }));
   }, HEARTBEAT_INTERVAL_MS);
   return () => clearInterval(timer);
 }
 
-async function pollTasks(serverURL, apiKey) {
+function enqueueWSTask(ws, task) {
+  if (!task || !task.id) return;
+  wsTaskQueue.push({ ws, task });
+  void runNextWSTask();
+}
+
+async function runNextWSTask() {
+  if (wsTaskRunning) return;
+  const next = wsTaskQueue.shift();
+  if (!next) return;
+  wsTaskRunning = true;
+  try {
+    await handleWSTask(next.ws, next.task);
+  } finally {
+    wsTaskRunning = false;
+    void runNextWSTask();
+  }
+}
+
+async function handleWSTask(ws, task) {
+  if (!task || !task.id) return;
+  console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool}`);
+  const stopHeartbeat = startWSHeartbeat(ws, task.id);
+  try {
+    const result = await executeTask(task);
+    stopHeartbeat();
+    ws.send(JSON.stringify({
+      type: 'task.done',
+      data: { task_id: task.id, result },
+    }));
+    console.log(`AgentHub daemon task ${task.id} completed.`);
+  } catch (error) {
+    stopHeartbeat();
+    ws.send(JSON.stringify({
+      type: 'task.error',
+      data: {
+        task_id: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }));
+    console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
+  }
+}
+
+async function runDaemonWS(serverURL, apiKey) {
+  let retry = 1000;
   for (;;) {
     try {
-      const response = await requestJSON('GET', apiURL(serverURL, apiKey, '/daemon/tasks'));
-      const task = response ? response.data : null;
-      if (!task) {
-        await sleep(POLL_INTERVAL_MS);
-        continue;
-      }
-
-      console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool}`);
-      const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
-      try {
-        const result = await executeTask(task);
-        stopHeartbeat();
-        await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
-        console.log(`AgentHub daemon task ${task.id} completed.`);
-      } catch (error) {
-        stopHeartbeat();
-        await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), {
-          error: error instanceof Error ? error.message : String(error),
+      const ws = await connectWS(daemonWSURL(serverURL, apiKey));
+      retry = 1000;
+      await new Promise((resolve) => {
+        let watchdog = null;
+        const resetWatchdog = () => {
+          if (watchdog) clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            console.error(`AgentHub daemon ${INBOUND_WATCHDOG_MS / 1000}s 未收到服务端消息，正在重连...`);
+            ws.close();
+          }, INBOUND_WATCHDOG_MS);
+        };
+        resetWatchdog();
+        ws.onMessage((line) => {
+          resetWatchdog();
+          let msg = null;
+          try {
+            msg = JSON.parse(line);
+          } catch {
+            return;
+          }
+          if (msg.type === 'ping') {
+            console.log('AgentHub daemon received ping.');
+            ws.send(JSON.stringify({ type: 'pong' }));
+          }
+          if (msg.type === 'task.execute') {
+            enqueueWSTask(ws, msg.data);
+          }
+          if (msg.type === 'task.nack') {
+            const taskId = msg.data && msg.data.task_id ? msg.data.task_id : 'unknown';
+            const detail = msg.data && msg.data.message ? `: ${msg.data.message}` : '';
+            console.error(`AgentHub daemon task ${taskId} result rejected${detail}`);
+          }
         });
-        console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
-      }
+        ws.onClose(() => {
+          if (watchdog) clearTimeout(watchdog);
+          resolve();
+        });
+        registerOnWS(ws);
+      });
+      console.error('AgentHub daemon WebSocket disconnected, reconnecting...');
     } catch (error) {
-      console.error(`AgentHub daemon poll failed: ${error.message}`);
-      await sleep(POLL_INTERVAL_MS * 2);
+      console.error(`AgentHub daemon WebSocket failed: ${error.message}`);
     }
+    await sleep(retry);
+    retry = Math.min(retry * 2, 30000);
   }
 }
 
@@ -1259,9 +1460,8 @@ async function main() {
 
   daemonConn.serverURL = serverURL;
   daemonConn.apiKey = apiKey;
-  await register(serverURL, apiKey);
   ensureGlobalMcpConfigs(serverURL, apiKey);
-  await pollTasks(serverURL, apiKey);
+  await runDaemonWS(serverURL, apiKey);
 }
 
 main().catch((error) => {
