@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
-import { CheckOutlined, CopyOutlined, DiffOutlined, DownloadOutlined, EditOutlined, ExpandOutlined, EyeOutlined, SaveOutlined } from '@ant-design/icons';
+import { CheckOutlined, CopyOutlined, DiffOutlined, DownloadOutlined, EditOutlined, ExpandOutlined, EyeOutlined, RollbackOutlined, SaveOutlined } from '@ant-design/icons';
 import { Modal, Select, message as antMessage } from 'antd';
 import type { Artifact } from '@/types/message';
 import { listArtifactVersions, createArtifactVersion } from '@/api/artifact';
@@ -123,29 +123,52 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     setMode('view');
   };
 
+  // 共享：以指定内容创建新版本，成功后刷新列表并选中新版本，返回新版本号。
+  const createNewVersionFromContent = async (content: string): Promise<number> => {
+    if (!artifactRootId) throw new Error('no artifactRootId');
+    const created = await createArtifactVersion(artifactRootId, {
+      content,
+      type: 'code',
+      ...(lang ? { language: lang } : {}),
+      ...(selectedArtifact?.filename ? { filename: selectedArtifact.filename } : filename ? { filename } : {}),
+    });
+    const list = await listArtifactVersions(artifactRootId);
+    setVersions(list);
+    setSelectedVersion(created.version);
+    setEditedCode(created.content ?? content);
+    // 同步刷新 Diff 默认对比版本（旧=次新、新=最新）。
+    if (list.length >= 2) {
+      setDiffOldVersion(list[list.length - 2]!.version);
+      setDiffNewVersion(list[list.length - 1]!.version);
+    }
+    return created.version;
+  };
+
   // 保存为新版本：POST 当前编辑内容，成功后刷新列表并选中新版本。
   const handleSaveAsNewVersion = async () => {
     if (!artifactRootId || saving) return;
     setSaving(true);
     try {
-      const created = await createArtifactVersion(artifactRootId, {
-        content: editedCode,
-        type: 'code',
-        ...(lang ? { language: lang } : {}),
-        ...(selectedArtifact?.filename ? { filename: selectedArtifact.filename } : filename ? { filename } : {}),
-      });
-      const list = await listArtifactVersions(artifactRootId);
-      setVersions(list);
-      setSelectedVersion(created.version);
-      setEditedCode(created.content ?? editedCode);
-      // 同步刷新 Diff 默认对比版本（旧=次新、新=最新）。
-      if (list.length >= 2) {
-        setDiffOldVersion(list[list.length - 2]!.version);
-        setDiffNewVersion(list[list.length - 1]!.version);
-      }
-      antMessage.success(`已保存为 v${created.version}`);
+      const newVer = await createNewVersionFromContent(editedCode);
+      antMessage.success(`已保存为 v${newVer}`);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : '保存新版本失败';
+      antMessage.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 回滚：用当前选中的旧版本内容创建新版本，使旧内容成为最新版。
+  const handleRollback = async () => {
+    if (!artifactRootId || saving || !selectedArtifact) return;
+    const rollbackContent = selectedArtifact.content ?? '';
+    setSaving(true);
+    try {
+      const newVer = await createNewVersionFromContent(rollbackContent);
+      antMessage.success(`已回滚，生成 v${newVer}`);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : '回滚失败';
       antMessage.error(msg);
     } finally {
       setSaving(false);
@@ -305,6 +328,21 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
                           <DiffOutlined />
                         </span>
                         <span className={styles.codeCopyText}>Diff</span>
+                      </button>
+                    )}
+                    {/* 回滚入口：仅在查看模式且选中版本不是最新版时显示。 */}
+                    {mode === 'view' && artifactRootId && selectedVersion !== null && selectedVersion !== latestVersion && (
+                      <button
+                        className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
+                        type="button"
+                        title="用此版本内容创建新版本（回滚）"
+                        disabled={saving}
+                        onClick={handleRollback}
+                      >
+                        <span className={styles.codeCopyIcon}>
+                          <RollbackOutlined />
+                        </span>
+                        <span className={styles.codeCopyText}>{saving ? '回滚中…' : '回滚到此版本'}</span>
                       </button>
                     )}
                     <button
