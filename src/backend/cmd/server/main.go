@@ -172,6 +172,7 @@ func main() {
 	groupHandler := handler.NewGroupHandler(groupSvc)
 	userHandler := handler.NewUserHandler(friendSvc, userSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
+	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
@@ -243,6 +244,7 @@ func main() {
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
+		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
 
 		// 知识库路由（需要鉴权）
 		kbRoutes := apiGroup.Group("/knowledge-bases")

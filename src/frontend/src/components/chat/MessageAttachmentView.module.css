@@ -59,6 +59,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
 }
 
 .pdfName {
@@ -91,7 +93,7 @@
   background-color: var(--color-bg-white);
   border: 1px solid var(--color-border);
   color: inherit;
-  max-width: 320px;
+  width: min(420px, 100%);
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }

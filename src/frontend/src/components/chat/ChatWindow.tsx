@@ -32,7 +32,8 @@ import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import styles from './ChatWindow.module.css';
 
-const ACCEPTED_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.pdf';
+const ACCEPTED_TYPES =
+  '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 

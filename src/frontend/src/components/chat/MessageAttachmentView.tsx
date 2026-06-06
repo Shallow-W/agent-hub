@@ -27,6 +27,18 @@ function authUrl(path: string): string {
   return token ? `${path}${sep}token=${encodeURIComponent(token)}` : path;
 }
 
+function attachmentName(attachment: Pick<MessageAttachment, 'file_name' | 'file_path'>): string {
+  const name = attachment.file_name?.trim();
+  if (name) return name;
+  const normalized = attachment.file_path.replace(/\\/g, '/');
+  return decodeURIComponent(normalized.split('/').pop() || '未命名文件');
+}
+
+function pptPreviewUrl(attachment: MessageAttachment): string {
+  const relativePath = toUrlPath(attachment.file_path).replace(/^\/?uploads\//, '');
+  return authUrl(`/api/ppt-preview/${relativePath}`);
+}
+
 interface Props {
   attachments: MessageAttachment[];
 }
@@ -53,6 +65,7 @@ export const MessageAttachmentView: React.FC<Props> = ({ attachments }) => {
 
 const ImageAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
   const filePath = `/api${toUrlPath(attachment.file_path)}`;
+  const fileName = attachmentName(attachment);
   const thumbSrc = attachment.thumbnail_path
     ? `/api${toUrlPath(attachment.thumbnail_path)}`
     : filePath;
@@ -62,12 +75,12 @@ const ImageAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachme
       href={authUrl(filePath)}
       target="_blank"
       rel="noopener noreferrer"
-      download={attachment.file_name}
+      download={fileName}
       className={styles.imageLink}
     >
       <img
         src={authUrl(thumbSrc)}
-        alt={attachment.file_name}
+        alt={fileName}
         className={styles.imageThumb}
         loading="lazy"
       />
@@ -80,12 +93,14 @@ const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment
     href={authUrl(`/api${toUrlPath(attachment.file_path)}`)}
     target="_blank"
     rel="noopener noreferrer"
-    download={attachment.file_name}
+    download={attachmentName(attachment)}
     className={styles.pdfCard}
   >
     <FilePdfOutlined className={styles.pdfIcon} />
     <div className={styles.pdfInfo}>
-      <span className={styles.pdfName}>{attachment.file_name}</span>
+      <span className={styles.pdfName} title={attachmentName(attachment)}>
+        {attachmentName(attachment)}
+      </span>
       <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
     </div>
   </a>
@@ -94,13 +109,15 @@ const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment
 const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
   const [open, setOpen] = useState(false);
   const fileUrl = authUrl(`/api${toUrlPath(attachment.file_path)}`);
+  const fileName = attachmentName(attachment);
+  const previewUrl = pptPreviewUrl(attachment);
 
   return (
     <>
       <div className={styles.pptCard}>
         <FilePptOutlined className={styles.pptIcon} />
         <div className={styles.pdfInfo}>
-          <span className={styles.pdfName}>{attachment.file_name}</span>
+          <span className={styles.pdfName} title={fileName}>{fileName}</span>
           <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
         </div>
         <div className={styles.pptActions}>
@@ -115,7 +132,7 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
           </button>
           <a
             href={fileUrl}
-            download={attachment.file_name}
+            download={fileName}
             className={styles.pptDownload}
             title="下载文件"
           >
@@ -132,14 +149,14 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
         title={
           <span className={styles.modalTitle}>
             <FilePptOutlined className={styles.pptIcon} />
-            <span className={styles.modalTitleName}>{attachment.file_name}</span>
+            <span className={styles.modalTitleName}>{fileName}</span>
           </span>
         }
         destroyOnClose
       >
         {open && (
           <Suspense fallback={<div className={styles.pptModalLoading}>加载预览组件…</div>}>
-            <PptxPreview fileUrl={fileUrl} fileName={attachment.file_name} />
+            <PptxPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
           </Suspense>
         )}
       </Modal>
@@ -150,12 +167,14 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
 const GenericFileAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => (
   <a
     href={authUrl(`/api${toUrlPath(attachment.file_path)}`)}
-    download={attachment.file_name}
+    download={attachmentName(attachment)}
     className={styles.pdfCard}
   >
     <FileOutlined className={styles.pdfIcon} />
     <div className={styles.pdfInfo}>
-      <span className={styles.pdfName}>{attachment.file_name}</span>
+      <span className={styles.pdfName} title={attachmentName(attachment)}>
+        {attachmentName(attachment)}
+      </span>
       <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
     </div>
     <DownloadOutlined className={styles.downloadIcon} />

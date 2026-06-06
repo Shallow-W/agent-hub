@@ -22,6 +22,15 @@
   box-sizing: border-box;
 }
 
+.pdfFrame {
+  width: 100%;
+  height: calc(100vh - 120px);
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  display: block;
+}
+
 /* pptx-preview 注入的 wrapper（库的全局类，用 :global 避免 CSS Modules 改名）：
    JS 里已清掉它写死的 #000/固定高，这里再兜底确保居中、不抢背景。 */
 .host > :global(.pptx-preview-wrapper) {
