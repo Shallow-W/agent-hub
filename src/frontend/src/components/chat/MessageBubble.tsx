@@ -15,10 +15,10 @@ import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
-import type { Message, OptimisticStatus } from '@/types/message';
+import type { Message, OptimisticStatus, Artifact } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
-import { CodeBlock } from './CodeBlock';
+import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { escapeHtml } from './highlight';
 import styles from './MessageBubble.module.css';
@@ -74,22 +74,52 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   return children;
 }
 
-const markdownComponents: Components = {
-  code({ className, children, node, ...rest }) {
-    const isBlock = className?.startsWith('language-');
-    if (isBlock) {
-      return <CodeBlock className={className} expandable>{children}</CodeBlock>;
-    }
-    return (
-      <code className={styles.inlineCode} {...rest}>
-        {children}
-      </code>
-    );
-  },
-  pre({ children }) {
-    // Let the code component handle the wrapper; strip the extra <pre>
-    return <>{children}</>;
-  },
+/**
+ * 从 code 产物列表构建「内容 → root_id」纯查找表。
+ * 尾部换行符剥离后作为 key，重复内容首个产物胜出（极少见，可接受）。
+ * 纯函数，零渲染副作用，React StrictMode 双调用安全。
+ */
+function buildContentRootMap(codeArtifacts: Artifact[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const art of codeArtifacts) {
+    if (!art.root_id || art.content == null) continue;
+    const key = art.content.replace(/\n$/, '');
+    if (!map.has(key)) map.set(key, art.root_id); // 重复内容首个胜出
+  }
+  return map;
+}
+
+/** 基于本条消息的 code 产物构建 markdown 组件，使围栏代码块能接通版本能力。 */
+function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
+  // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
+  const contentRootMap = buildContentRootMap(codeArtifacts);
+  return {
+    code({ className, children, node, ...rest }) {
+      const isBlock = className?.startsWith('language-');
+      if (isBlock) {
+        const ct = extractText(children);
+        const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
+        return (
+          <CodeBlock className={className} expandable artifactRootId={rootId}>
+            {children}
+          </CodeBlock>
+        );
+      }
+      return (
+        <code className={styles.inlineCode} {...rest}>
+          {children}
+        </code>
+      );
+    },
+    pre({ children }) {
+      // Let the code component handle the wrapper; strip the extra <pre>
+      return <>{children}</>;
+    },
+    ...sharedMarkdownComponents,
+  };
+}
+
+const sharedMarkdownComponents: Components = {
   a({ href, children, node, ...rest }) {
     const safeHref =
       href && (/^https?:\/\//i.test(href) || /^mailto:/i.test(href))
@@ -113,9 +143,14 @@ const markdownComponents: Components = {
 };
 
 /** Renders markdown content with full GFM support. */
-const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
+  content,
+  codeArtifacts,
+}) => {
+  // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
+  const components = buildMarkdownComponents(codeArtifacts);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {content}
     </ReactMarkdown>
   );
@@ -181,6 +216,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const displayContent = message.content ?? '';
   const cardArtifacts = useMemo(
     () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
+    [message.artifacts],
+  );
+  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）。
+  const codeArtifacts = useMemo(
+    () => message.artifacts?.filter((a) => a.type === 'code') ?? [],
     [message.artifacts],
   );
   const contentLength = displayContent.length;
@@ -360,7 +400,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             )}
             {displayContent && (
               <div className={styles.markdownBody}>
-                <MarkdownRenderer content={displayContent} />
+                <MarkdownRenderer content={displayContent} codeArtifacts={codeArtifacts} />
               </div>
             )}
             {cardArtifacts.length > 0 && (

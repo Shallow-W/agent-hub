@@ -160,6 +160,17 @@
 - ✅ 跨层字段契约 5 层贯通（daemon→WS handler→service→广播→前端 msg.data.artifacts）；artifacts_json 零回归
 - ⏳ **唯一待人工**：真·UI 点击流（前端+后端+daemon+已连电脑跑真实 Claude Code → 发消息 → 看卡片渲染），需活体 agent 硬件/凭据，无法 headless 自动驱动。
 
+### P2-A 后端验证记录（2026-06-06）
+
+- ✅ 迁移 025：`root_id` 列 + 回填（自身 id）+ NOT NULL + `idx_artifacts_root(root_id,version)`；真实 PG 跑过且幂等（二次运行 UPDATE 0、IF NOT EXISTS 跳过），31 行回填 root_id=id、0 空值。
+- ✅ `model.Artifact` 加 `RootID`（`db/json:"root_id"`）。
+- ✅ repo：`CreateArtifacts` Go 侧生成 uuid 且 root_id=id（v1 自成血缘根）；新增 `CreateVersion`（事务 + 根行 FOR UPDATE 锁，max(version)+1 串行化并发；FOR UPDATE 与聚合分两步查询）、`ListVersions`、`GetLatestByRoot`、`GetConversationIDByRoot`；`ListByMessageIDs` 改 `DISTINCT ON(root_id)` 取每血缘最新版后按 message_id/sort_order 排。
+- ✅ service `ArtifactService`：rootId→对话成员鉴权（复用 GetMember + 创建者兜底），ListVersions/CreateVersion。
+- ✅ handler + 路由：`GET/POST /api/artifacts/:rootId/versions`（authMiddleware + ValidateUUIDParam("rootId")，service 层鉴权）。
+- ✅ 前端 `types/message.ts` 的 `Artifact` 加 `root_id?`（仅类型，UI 后续批次）。
+- ✅ 真实 PG 往返：CreateVersion 造 v2 → 血缘 {1,2} → DISTINCT ON 取 v2 → root→conversation 解析 → 删 v2 回 {1}。
+- ✅ 后端 `go build ./... && go vet ./... && go test ./...` 绿（TestCreateAgentReplyPersistsArtifacts 偶发超时为既有 async-reply 计时 flaky，单跑 -count=3 稳过）；前端 `npm run build` 类型零报错。
+
 ## Technical Notes
 
 - 影响文件（初判）：

@@ -8,6 +8,7 @@ import "time"
 type Artifact struct {
 	ID        string    `json:"id" db:"id"`
 	MessageID string    `json:"message_id" db:"message_id"`
+	RootID    string    `json:"root_id" db:"root_id"` // 版本血缘根（v1 的 id），同一逻辑产物各版本共享
 	Version   int       `json:"version" db:"version"`
 	Type      string    `json:"type" db:"type"`               // code | webpage | document | file
 	Language  string    `json:"language,omitempty" db:"language"` // code 产物的语言，如 go/ts/python

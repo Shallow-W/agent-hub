@@ -21,6 +21,8 @@ export type ArtifactType = 'code' | 'webpage' | 'document' | 'file';
 export interface Artifact {
   id?: string;
   message_id?: string;
+  /** 版本血缘根（v1 的 id），同一逻辑产物各版本共享；用于版本历史/Diff */
+  root_id?: string;
   version: number;
   type: ArtifactType;
   language?: string;

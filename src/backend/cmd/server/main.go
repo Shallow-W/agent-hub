@@ -123,6 +123,7 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
+	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -174,6 +175,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
@@ -303,6 +305,14 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
+		artifactRoutes := apiGroup.Group("/artifacts")
+		artifactRoutes.Use(middleware.ValidateUUIDParam("rootId"))
+		{
+			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
+			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
 		}
 	}
 

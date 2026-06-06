@@ -48,6 +48,11 @@
   color: #e6edf3;
 }
 
+.codeActionBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .codeCopyBtnCopied {
   color: #3fb950 !important;
   opacity: 1 !important;
@@ -154,6 +159,16 @@
   background: rgba(0, 0, 0, 0.15);
   color: #8b949e;
   font-size: 13px;
+}
+
+.expandedHeaderLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.versionSelect {
+  min-width: 120px;
 }
 
 .expandedHeaderActions {
