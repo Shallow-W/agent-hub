@@ -16,11 +16,15 @@ import type { Artifact } from '@/types/message';
 import { aiEditArtifact, createArtifactVersion, listArtifactVersions } from '@/api/artifact';
 import { ApiError } from '@/api/client';
 import { LANG_DISPLAY, highlightCode, inferDownloadName } from './highlight';
+import type { CodeSelectViewHandle } from './CodeSelectView';
 import styles from './CodeBlock.module.css';
 
 const CodeEditor = lazy(() => import('./CodeEditor'));
+const CodeSelectView = lazy(() => import('./CodeSelectView'));
 const DiffView = lazy(() => import('./DiffView'));
 const { TextArea } = Input;
+
+const SELECTION_PREVIEW_LIMIT = 240;
 
 export function extractText(node: ReactNode): string {
   if (typeof node === 'string') return node;
@@ -66,6 +70,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   const [aiEditing, setAiEditing] = useState(false);
   const inlineCodeRef = useRef<HTMLPreElement>(null);
   const expandedCodeRef = useRef<HTMLPreElement>(null);
+  const selectViewRef = useRef<CodeSelectViewHandle>(null);
 
   const [versions, setVersions] = useState<Artifact[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -223,6 +228,15 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     }
   };
 
+  const handleSelectAll = () => {
+    // 优先走 CodeSelectView：既在视图里视觉全选高亮，也回写完整文本。
+    if (selectViewRef.current) {
+      selectViewRef.current.selectAll();
+    } else {
+      setSelectedCode(editedCode);
+    }
+  };
+
   const handleCopy = (value = codeStr) => {
     navigator.clipboard.writeText(value).then(() => {
       setCopied(true);
@@ -244,6 +258,10 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     URL.revokeObjectURL(objectUrl);
   };
 
+  const selectionPreview = selectedCode.length > SELECTION_PREVIEW_LIMIT
+    ? `${selectedCode.slice(0, SELECTION_PREVIEW_LIMIT)}…`
+    : selectedCode;
+
   const renderAIEditPanel = (compact = false) => (
     <div className={`${styles.aiEditPanel} ${compact ? styles.aiEditPanelCompact : ''}`}>
       <div className={styles.aiEditMeta}>
@@ -251,10 +269,23 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
           <RobotOutlined />
           AI 局部修改
         </span>
-        <span className={styles.aiEditSelection}>
-          {selectedCode.trim() ? `已选中 ${selectedCode.length} 个字符` : '未选中代码，将按整份代码修改'}
+        <span className={styles.aiEditMetaRight}>
+          <span className={styles.aiEditSelection}>
+            {selectedCode.trim() ? `已选中 ${selectedCode.length} 个字符` : '未选中代码，将按整份代码修改'}
+          </span>
+          <button
+            className={styles.aiEditSelectAll}
+            type="button"
+            disabled={aiEditing}
+            onClick={handleSelectAll}
+          >
+            全选
+          </button>
         </span>
       </div>
+      {selectedCode.trim() && (
+        <pre className={styles.aiEditPreview} title="当前选中内容">{selectionPreview}</pre>
+      )}
       <div className={styles.aiEditControls}>
         <TextArea
           className={styles.aiEditInput}
@@ -425,15 +456,28 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
 
             {mode === 'view' && (
               <>
-                {artifactRootId && selectedCode.trim() && renderAIEditPanel()}
-                <pre
-                  ref={expandedCodeRef}
-                  className={styles.expandedCodeBlock}
-                  onMouseUp={() => captureSelectionFrom(expandedCodeRef.current)}
-                  onKeyUp={() => captureSelectionFrom(expandedCodeRef.current)}
-                >
-                <code dangerouslySetInnerHTML={{ __html: editedHighlighted }} />
-                </pre>
+                {artifactRootId && renderAIEditPanel()}
+                {artifactRootId ? (
+                  <div className={styles.expandedEditorWrapper}>
+                    <Suspense fallback={<div className={styles.editorLoading}>加载代码视图...</div>}>
+                      <CodeSelectView
+                        ref={selectViewRef}
+                        value={editedCode}
+                        language={lang || undefined}
+                        onSelectionChange={setSelectedCode}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <pre
+                    ref={expandedCodeRef}
+                    className={styles.expandedCodeBlock}
+                    onMouseUp={() => captureSelectionFrom(expandedCodeRef.current)}
+                    onKeyUp={() => captureSelectionFrom(expandedCodeRef.current)}
+                  >
+                    <code dangerouslySetInnerHTML={{ __html: editedHighlighted }} />
+                  </pre>
+                )}
               </>
             )}
 

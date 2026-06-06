@@ -244,10 +244,56 @@
   font-weight: 600;
 }
 
+.aiEditMetaRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .aiEditSelection {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.aiEditSelectAll {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: 1px solid rgba(88, 166, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.aiEditSelectAll:hover {
+  background: rgba(88, 166, 255, 0.22);
+  color: #79c0ff;
+}
+
+.aiEditSelectAll:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.aiEditPreview {
+  max-height: 96px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  border-radius: 4px;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .aiEditControls {
