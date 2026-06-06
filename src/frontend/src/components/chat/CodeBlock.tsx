@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
-import { CheckOutlined, CopyOutlined, DownloadOutlined, EditOutlined, ExpandOutlined, EyeOutlined, SaveOutlined } from '@ant-design/icons';
+import { CheckOutlined, CopyOutlined, DiffOutlined, DownloadOutlined, EditOutlined, ExpandOutlined, EyeOutlined, SaveOutlined } from '@ant-design/icons';
 import { Modal, Select, message as antMessage } from 'antd';
 import type { Artifact } from '@/types/message';
 import { listArtifactVersions, createArtifactVersion } from '@/api/artifact';
@@ -9,6 +9,8 @@ import styles from './CodeBlock.module.css';
 
 // CodeMirror 较重，仅在用户切到“编辑”模式时才动态加载，保证首屏与“查看”模式不引入它。
 const CodeEditor = lazy(() => import('./CodeEditor'));
+// Diff 视图依赖 @codemirror/merge，同样仅在用户切到“Diff”模式时才动态加载，与首屏 bundle 隔离。
+const DiffView = lazy(() => import('./DiffView'));
 
 /** 从 react-markdown 的 ReactNode 中递归提取纯文本。 */
 export function extractText(node: ReactNode): string {
@@ -47,7 +49,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   const codeStr = (code ?? extractText(children)).replace(/\n$/, '');
   const [copied, setCopied] = useState(false);
   const [expandedOpen, setExpandedOpen] = useState(false);
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [mode, setMode] = useState<'view' | 'edit' | 'diff'>('view');
   const [editedCode, setEditedCode] = useState(codeStr);
 
   // ── 版本能力（仅 artifactRootId 存在时启用） ──
@@ -55,6 +57,13 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // ── Diff 模式：左旧右新两个版本选择 ──
+  const [diffOldVersion, setDiffOldVersion] = useState<number | null>(null);
+  const [diffNewVersion, setDiffNewVersion] = useState<number | null>(null);
+
+  // 是否可进入 Diff：需有血缘根且至少两个版本可对比。
+  const canDiff = !!artifactRootId && versions.length >= 2;
 
   const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
   const highlighted = highlightCode(codeStr, lang || undefined);
@@ -87,6 +96,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
         setVersions(list);
         const latest = list.length ? list[list.length - 1]!.version : null;
         setSelectedVersion(latest);
+        // Diff 默认对比：旧=次新版（倒数第二），新=最新版。
+        if (list.length >= 2) {
+          setDiffOldVersion(list[list.length - 2]!.version);
+          setDiffNewVersion(list[list.length - 1]!.version);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -124,6 +138,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       setVersions(list);
       setSelectedVersion(created.version);
       setEditedCode(created.content ?? editedCode);
+      // 同步刷新 Diff 默认对比版本（旧=次新、新=最新）。
+      if (list.length >= 2) {
+        setDiffOldVersion(list[list.length - 2]!.version);
+        setDiffNewVersion(list[list.length - 1]!.version);
+      }
       antMessage.success(`已保存为 v${created.version}`);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : '保存新版本失败';
@@ -154,6 +173,16 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   };
 
   const editedHighlighted = highlightCode(editedCode, lang || undefined);
+
+  // Diff 两栏内容：按选中版本号取 content，缺省回退空串。
+  const diffOldDoc = versions.find((v) => v.version === diffOldVersion)?.content ?? '';
+  const diffNewDoc = versions.find((v) => v.version === diffNewVersion)?.content ?? '';
+
+  // Diff/普通版本下拉的选项：标注 vN / 最新。
+  const versionOptions = versions.map((v) => ({
+    value: v.version,
+    label: v.version === latestVersion ? `v${v.version}（最新）` : `v${v.version}`,
+  }));
 
   return (
     <div className={styles.codeBlockWrapper}>
@@ -204,56 +233,104 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
             <div className={styles.expandedCodeHeader}>
               <div className={styles.expandedHeaderLeft}>
                 <span>{displayLang}</span>
-                {artifactRootId && versions.length > 0 && (
-                  <Select<number>
-                    size="small"
-                    className={styles.versionSelect}
-                    value={selectedVersion ?? undefined}
-                    loading={versionsLoading}
-                    onChange={handleSelectVersion}
-                    options={versions.map((v) => ({
-                      value: v.version,
-                      label: v.version === latestVersion
-                        ? `v${v.version}（最新）`
-                        : `v${v.version}`,
-                    }))}
-                  />
+                {/* Diff 模式：左旧右新两个版本选择器；其余模式：单个版本选择器（与 diff 的双选择器互斥，避免混淆）。 */}
+                {mode === 'diff' ? (
+                  <>
+                    <span className={styles.diffLabel}>旧</span>
+                    <Select<number>
+                      size="small"
+                      className={styles.versionSelect}
+                      value={diffOldVersion ?? undefined}
+                      onChange={setDiffOldVersion}
+                      options={versionOptions}
+                    />
+                    <span className={styles.diffLabel}>新</span>
+                    <Select<number>
+                      size="small"
+                      className={styles.versionSelect}
+                      value={diffNewVersion ?? undefined}
+                      onChange={setDiffNewVersion}
+                      options={versionOptions}
+                    />
+                  </>
+                ) : (
+                  artifactRootId && versions.length > 0 && (
+                    <Select<number>
+                      size="small"
+                      className={styles.versionSelect}
+                      value={selectedVersion ?? undefined}
+                      loading={versionsLoading}
+                      onChange={handleSelectVersion}
+                      options={versionOptions}
+                    />
+                  )
                 )}
               </div>
               <div className={styles.expandedHeaderActions}>
-                <button
-                  className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                  type="button"
-                  title={mode === 'view' ? '切换到编辑' : '切换到查看'}
-                  onClick={() => setMode(mode === 'view' ? 'edit' : 'view')}
-                >
-                  <span className={styles.codeCopyIcon}>
-                    {mode === 'view' ? <EditOutlined /> : <EyeOutlined />}
-                  </span>
-                  <span className={styles.codeCopyText}>{mode === 'view' ? '编辑' : '查看'}</span>
-                </button>
-                <button
-                  className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
-                  type="button"
-                  title="复制代码"
-                  onClick={() => handleCopy(editedCode)}
-                >
-                  <span className={styles.codeCopyIcon}>
-                    {copied ? <CheckOutlined /> : <CopyOutlined />}
-                  </span>
-                  <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
-                </button>
-                <button
-                  className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                  type="button"
-                  title="下载为文件"
-                  onClick={handleDownload}
-                >
-                  <span className={styles.codeCopyIcon}>
-                    <DownloadOutlined />
-                  </span>
-                  <span className={styles.codeCopyText}>下载</span>
-                </button>
+                {/* Diff 是只读对比模式：进入后隐藏编辑/查看切换与复制/下载/保存，避免与对比语义混淆。 */}
+                {mode === 'diff' ? (
+                  <button
+                    className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
+                    type="button"
+                    title="退出对比，回到查看"
+                    onClick={() => setMode('view')}
+                  >
+                    <span className={styles.codeCopyIcon}>
+                      <EyeOutlined />
+                    </span>
+                    <span className={styles.codeCopyText}>查看</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
+                      type="button"
+                      title={mode === 'view' ? '切换到编辑' : '切换到查看'}
+                      onClick={() => setMode(mode === 'view' ? 'edit' : 'view')}
+                    >
+                      <span className={styles.codeCopyIcon}>
+                        {mode === 'view' ? <EditOutlined /> : <EyeOutlined />}
+                      </span>
+                      <span className={styles.codeCopyText}>{mode === 'view' ? '编辑' : '查看'}</span>
+                    </button>
+                    {/* Diff 入口：仅当存在血缘根且至少两个版本可对比时显示。 */}
+                    {canDiff && (
+                      <button
+                        className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
+                        type="button"
+                        title="对比两个版本的差异"
+                        onClick={() => setMode('diff')}
+                      >
+                        <span className={styles.codeCopyIcon}>
+                          <DiffOutlined />
+                        </span>
+                        <span className={styles.codeCopyText}>Diff</span>
+                      </button>
+                    )}
+                    <button
+                      className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
+                      type="button"
+                      title="复制代码"
+                      onClick={() => handleCopy(editedCode)}
+                    >
+                      <span className={styles.codeCopyIcon}>
+                        {copied ? <CheckOutlined /> : <CopyOutlined />}
+                      </span>
+                      <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
+                    </button>
+                    <button
+                      className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
+                      type="button"
+                      title="下载为文件"
+                      onClick={handleDownload}
+                    >
+                      <span className={styles.codeCopyIcon}>
+                        <DownloadOutlined />
+                      </span>
+                      <span className={styles.codeCopyText}>下载</span>
+                    </button>
+                  </>
+                )}
                 {mode === 'edit' && (
                   <button
                     className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
@@ -280,14 +357,22 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
                 )}
               </div>
             </div>
-            {mode === 'view' ? (
+            {mode === 'view' && (
               <pre className={styles.expandedCodeBlock}>
                 <code dangerouslySetInnerHTML={{ __html: editedHighlighted }} />
               </pre>
-            ) : (
+            )}
+            {mode === 'edit' && (
               <div className={styles.expandedEditorWrapper}>
                 <Suspense fallback={<div className={styles.editorLoading}>加载编辑器…</div>}>
                   <CodeEditor value={editedCode} language={lang || undefined} onChange={setEditedCode} />
+                </Suspense>
+              </div>
+            )}
+            {mode === 'diff' && (
+              <div className={styles.expandedEditorWrapper}>
+                <Suspense fallback={<div className={styles.editorLoading}>加载对比视图…</div>}>
+                  <DiffView oldDoc={diffOldDoc} newDoc={diffNewDoc} language={lang || undefined} />
                 </Suspense>
               </div>
             )}

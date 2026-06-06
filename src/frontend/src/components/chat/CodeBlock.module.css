@@ -171,6 +171,11 @@
   min-width: 120px;
 }
 
+.diffLabel {
+  color: #8b949e;
+  font-size: 12px;
+}
+
 .expandedHeaderActions {
   display: inline-flex;
   align-items: center;
