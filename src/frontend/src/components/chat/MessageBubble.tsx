@@ -186,6 +186,15 @@ function formatTimestamp(dateStr: string): string {
   return `${month}-${day} ${hh}:${mm}`;
 }
 
+function fallbackAttachmentName(value: unknown, filePath: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof filePath === 'string' && filePath.trim()) {
+    const normalized = filePath.replace(/\\/g, '/');
+    return decodeURIComponent(normalized.split('/').pop() || '未命名文件');
+  }
+  return '未命名文件';
+}
+
 const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
@@ -290,7 +299,10 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     return pending.map((p, i) => ({
       id: `pending_${i}`,
       message_id: '',
-      file_name: (p as Record<string, unknown>).file_name as string,
+      file_name: fallbackAttachmentName(
+        (p as Record<string, unknown>).file_name,
+        (p as Record<string, unknown>).file_path,
+      ),
       mime_type: (p as Record<string, unknown>).mime_type as string,
       file_size: (p as Record<string, unknown>).file_size as number,
       file_path: (p as Record<string, unknown>).file_path as string,

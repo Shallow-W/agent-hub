@@ -16,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const pptPreviewTimeout = 45 * time.Second
+const pptPreviewTimeout = 120 * time.Second
 
 var errPptPreviewToolMissing = errors.New("ppt preview tool missing")
 
@@ -84,7 +84,11 @@ func (h *PptPreviewHandler) safeUploadPath(filePath string) (string, error) {
 }
 
 func (h *PptPreviewHandler) ensurePDFPreview(ctx context.Context, sourcePath string) (string, error) {
-	outDir := filepath.Join(h.uploadDir, "previews", "ppt")
+	absUploadDir, err := filepath.Abs(h.uploadDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve upload dir: %w", err)
+	}
+	outDir := filepath.Join(absUploadDir, "previews", "ppt")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("create preview dir: %w", err)
 	}

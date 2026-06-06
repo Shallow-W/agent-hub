@@ -20,5 +20,9 @@ export async function uploadFile(file: File): Promise<AttachmentPayload> {
   if (!res.ok || json.code !== 0) {
     throw new ApiError(res.status, json.code ?? 0, json.message || '上传失败');
   }
-  return json.data!;
+  const data = json.data!;
+  return {
+    ...data,
+    file_name: data.file_name?.trim() || file.name,
+  };
 }
