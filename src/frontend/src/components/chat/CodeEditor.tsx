@@ -11,18 +11,21 @@ interface CodeEditorProps {
   value: string;
   language?: string;
   onChange: (value: string) => void;
+  onSelectionChange?: (selection: string) => void;
 }
 
 /**
  * 基于 CodeMirror 6 的可编辑代码视图。仅在全屏 Modal 的“编辑”模式下使用，
  * 通过 React.lazy 动态加载，避免把 CodeMirror 打进首屏 bundle。
  */
-const CodeEditor: React.FC<CodeEditorProps> = ({ value, language, onChange }) => {
+const CodeEditor: React.FC<CodeEditorProps> = ({ value, language, onChange, onSelectionChange }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   // 用 ref 持有最新 onChange，避免它进入重建依赖导致编辑器频繁销毁重建。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   // language 变化时重建编辑器（语言 extension 无法热切换）。
   useEffect(() => {
@@ -43,6 +46,13 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ value, language, onChange }) =>
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           onChangeRef.current(update.state.doc.toString());
+        }
+        if (update.selectionSet || update.docChanged) {
+          const selection = update.state.selection.ranges
+            .map((range) => update.state.doc.sliceString(range.from, range.to))
+            .filter(Boolean)
+            .join('\n');
+          onSelectionChangeRef.current?.(selection);
         }
       }),
     ];

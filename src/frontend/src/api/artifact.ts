@@ -11,6 +11,11 @@ export interface CreateArtifactVersionPayload {
   url?: string;
 }
 
+export interface AIEditArtifactPayload {
+  instruction: string;
+  selection?: string;
+}
+
 /** 列出某血缘根的全部版本（按 version 升序）。 */
 export async function listArtifactVersions(rootId: string): Promise<Artifact[]> {
   return get<Artifact[]>(`/api/artifacts/${rootId}/versions`);
@@ -22,4 +27,11 @@ export async function createArtifactVersion(
   payload: CreateArtifactVersionPayload,
 ): Promise<Artifact> {
   return post<Artifact>(`/api/artifacts/${rootId}/versions`, payload);
+}
+
+export async function aiEditArtifact(
+  rootId: string,
+  payload: AIEditArtifactPayload,
+): Promise<Artifact> {
+  return post<Artifact>(`/api/artifacts/${rootId}/ai-edit`, payload);
 }

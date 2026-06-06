@@ -200,9 +200,76 @@
 }
 
 .expandedEditorWrapper {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.aiEditPanel {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: #161b22;
+}
+
+.aiEditMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.aiEditTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+.aiEditSelection {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.aiEditControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.aiEditInput {
+  flex: 1;
+}
+
+.aiEditInput :global(textarea) {
+  resize: none !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  background: #0d1117 !important;
+  color: #e6edf3 !important;
+}
+
+.aiEditInput :global(textarea::placeholder) {
+  color: #8b949e !important;
+}
+
+.aiEditButton {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(46, 160, 67, 0.5);
+  background: rgba(46, 160, 67, 0.16);
+  color: #7ee787;
+}
+
+.aiEditButton:hover {
+  background: rgba(46, 160, 67, 0.24);
+  color: #aff5b4;
 }
 
 .editorLoading {

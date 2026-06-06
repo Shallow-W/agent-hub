@@ -156,6 +156,7 @@ func main() {
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
+	orchSvc.SetArtifactRepo(artifactRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
@@ -176,6 +177,7 @@ func main() {
 	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
+	artifactHandler.SetOrchestratorService(orchSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
@@ -288,7 +290,7 @@ func main() {
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
-			apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
+		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
@@ -313,6 +315,7 @@ func main() {
 		{
 			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
 			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
+			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
 		}
 	}
 

@@ -9,7 +9,7 @@ import (
 	"github.com/agent-hub/backend/internal/repository"
 )
 
-// fakeArtifactRepo 实现 ArtifactRepoForSvc，用于隔离 service 鉴权与版本逻辑。
+// fakeArtifactRepo 实现 ArtifactRepoForSvc + OrchArtifactRepo，用于隔离 service 鉴权与版本逻辑。
 type fakeArtifactRepo struct {
 	convIDByRoot   map[string]string
 	rootNotFound   bool
@@ -17,7 +17,10 @@ type fakeArtifactRepo struct {
 	created        *model.Artifact
 	createVersIn   model.Artifact
 	createVersRoot string
+	createCalls    int
 	versions       []model.Artifact
+	latest         *model.Artifact
+	latestErr      error
 }
 
 func (f *fakeArtifactRepo) ListVersions(_ context.Context, rootID string) ([]model.Artifact, error) {
@@ -25,12 +28,24 @@ func (f *fakeArtifactRepo) ListVersions(_ context.Context, rootID string) ([]mod
 }
 
 func (f *fakeArtifactRepo) CreateVersion(_ context.Context, rootID string, in model.Artifact) (*model.Artifact, error) {
+	f.createCalls++
 	f.createVersRoot = rootID
 	f.createVersIn = in
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
-	return f.created, nil
+	if f.created != nil {
+		return f.created, nil
+	}
+	out := in
+	out.RootID = rootID
+	out.Version = 2
+	return &out, nil
+}
+
+// GetLatestByRoot 实现 OrchArtifactRepo（AI 编辑取最新版本）。
+func (f *fakeArtifactRepo) GetLatestByRoot(_ context.Context, _ string) (*model.Artifact, error) {
+	return f.latest, f.latestErr
 }
 
 func (f *fakeArtifactRepo) GetConversationIDByRoot(_ context.Context, rootID string) (string, error) {

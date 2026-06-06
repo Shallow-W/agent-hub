@@ -18,6 +18,7 @@ import (
 type OrchConvRepo interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
+	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 }
 
 // OrchAgentRepo queries agent details and creates daemon tasks.
@@ -47,6 +48,13 @@ type OrchKBResolver interface {
 	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
 }
 
+// OrchArtifactRepo 产物访问能力，用于 AI 编辑产物（取最新版本、回溯对话、创建新版本）。
+type OrchArtifactRepo interface {
+	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
+	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
+	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
+}
+
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
 	convRepo  OrchConvRepo
@@ -56,8 +64,9 @@ type OrchestratorService struct {
 	jwtSecret string
 	serverURL string
 
-	kbResolver OrchKBResolver
-	daemonHub  *ws.DaemonHub
+	kbResolver   OrchKBResolver
+	daemonHub    *ws.DaemonHub
+	artifactRepo OrchArtifactRepo
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
@@ -85,6 +94,11 @@ func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 // SetDaemonHub sets the daemon WebSocket hub for task dispatch.
 func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
+}
+
+// SetArtifactRepo sets the artifact repository used for AI editing artifacts.
+func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
+	s.artifactRepo = repo
 }
 
 // NewOrchestratorService creates a new orchestrator service.

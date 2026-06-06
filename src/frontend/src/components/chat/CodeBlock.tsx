@@ -1,24 +1,33 @@
-import React, { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
-import { CheckOutlined, CopyOutlined, DiffOutlined, DownloadOutlined, EditOutlined, ExpandOutlined, EyeOutlined, RollbackOutlined, SaveOutlined } from '@ant-design/icons';
-import { Modal, Select, message as antMessage } from 'antd';
+import React, { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  CheckOutlined,
+  CopyOutlined,
+  DiffOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  ExpandOutlined,
+  EyeOutlined,
+  RobotOutlined,
+  RollbackOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
+import { Input, Modal, Select, message as antMessage } from 'antd';
 import type { Artifact } from '@/types/message';
-import { listArtifactVersions, createArtifactVersion } from '@/api/artifact';
+import { aiEditArtifact, createArtifactVersion, listArtifactVersions } from '@/api/artifact';
 import { ApiError } from '@/api/client';
 import { LANG_DISPLAY, highlightCode, inferDownloadName } from './highlight';
 import styles from './CodeBlock.module.css';
 
-// CodeMirror 较重，仅在用户切到“编辑”模式时才动态加载，保证首屏与“查看”模式不引入它。
 const CodeEditor = lazy(() => import('./CodeEditor'));
-// Diff 视图依赖 @codemirror/merge，同样仅在用户切到“Diff”模式时才动态加载，与首屏 bundle 隔离。
 const DiffView = lazy(() => import('./DiffView'));
+const { TextArea } = Input;
 
-/** 从 react-markdown 的 ReactNode 中递归提取纯文本。 */
 export function extractText(node: ReactNode): string {
   if (typeof node === 'string') return node;
   if (typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(extractText).join('');
-  if (node && typeof node === 'object' && 'props' in node) {
-    return extractText((node as React.ReactElement).props.children);
+  if (React.isValidElement(node)) {
+    return extractText((node.props as { children?: ReactNode }).children);
   }
   return '';
 }
@@ -28,13 +37,12 @@ interface CodeBlockProps {
   children?: ReactNode;
   code?: string;
   language?: string;
-  /** 产物文件名，用于全屏“下载”时推断文件名。 */
   filename?: string;
-  /** 正文代码块是否显示“展开”入口。 */
   expandable?: boolean;
-  /** 对应 code 产物的版本血缘根 id；有值才在全屏开放版本切换与“保存为新版本”。 */
   artifactRootId?: string;
 }
+
+type CodeMode = 'view' | 'edit' | 'diff';
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({
   className,
@@ -47,45 +55,67 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
 }) => {
   const lang = language ?? (className?.replace('language-', '') || '');
   const codeStr = (code ?? extractText(children)).replace(/\n$/, '');
+  const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
+
   const [copied, setCopied] = useState(false);
   const [expandedOpen, setExpandedOpen] = useState(false);
-  const [mode, setMode] = useState<'view' | 'edit' | 'diff'>('view');
+  const [mode, setMode] = useState<CodeMode>('view');
   const [editedCode, setEditedCode] = useState(codeStr);
+  const [selectedCode, setSelectedCode] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiEditing, setAiEditing] = useState(false);
 
-  // ── 版本能力（仅 artifactRootId 存在时启用） ──
   const [versions, setVersions] = useState<Artifact[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // ── Diff 模式：左旧右新两个版本选择 ──
   const [diffOldVersion, setDiffOldVersion] = useState<number | null>(null);
   const [diffNewVersion, setDiffNewVersion] = useState<number | null>(null);
 
-  // 是否可进入 Diff：需有血缘根且至少两个版本可对比。
-  const canDiff = !!artifactRootId && versions.length >= 2;
-
-  const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
-  const highlighted = highlightCode(codeStr, lang || undefined);
-
-  // 当前选中版本的产物（用于沿用 language/filename 等元信息）。
   const selectedArtifact = versions.find((v) => v.version === selectedVersion) ?? null;
-  // 最新版本号（列表按 version 升序，末位为最新）。
   const latestVersion = versions.length ? versions[versions.length - 1]!.version : null;
-  // 选中版本的基准内容：选到具体版本时用其 content，否则回退到原始代码。
   const baseCode = selectedArtifact?.content ?? codeStr;
+  const canDiff = Boolean(artifactRootId && versions.length >= 2);
 
-  // 每次打开全屏都从基准内容起步，并默认“查看”模式。
-  useEffect(() => {
-    if (expandedOpen) {
-      setEditedCode(baseCode);
-      setMode('view');
+  const highlighted = useMemo(() => highlightCode(codeStr, lang || undefined), [codeStr, lang]);
+  const editedHighlighted = useMemo(() => highlightCode(editedCode, lang || undefined), [editedCode, lang]);
+  const diffOldDoc = versions.find((v) => v.version === diffOldVersion)?.content ?? '';
+  const diffNewDoc = versions.find((v) => v.version === diffNewVersion)?.content ?? '';
+  const versionOptions = versions.map((v) => ({
+    value: v.version,
+    label: v.version === latestVersion ? `v${v.version}（最新）` : `v${v.version}`,
+  }));
+
+  const syncDiffDefaults = (list: Artifact[]) => {
+    if (list.length >= 2) {
+      setDiffOldVersion(list[list.length - 2]!.version);
+      setDiffNewVersion(list[list.length - 1]!.version);
     }
-    // 仅在打开/关闭与基准内容变化时重置，避免编辑过程被覆盖。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  };
+
+  const refreshVersions = async (created?: Artifact, fallbackContent = codeStr) => {
+    if (!artifactRootId) return;
+    const list = await listArtifactVersions(artifactRootId);
+    setVersions(list);
+    syncDiffDefaults(list);
+    if (created) {
+      setSelectedVersion(created.version);
+      setEditedCode(created.content ?? fallbackContent);
+      return;
+    }
+    const latest = list.length ? list[list.length - 1]!.version : null;
+    setSelectedVersion(latest);
+  };
+
+  useEffect(() => {
+    if (!expandedOpen) return;
+    setEditedCode(baseCode);
+    setSelectedCode('');
+    setAiInstruction('');
+    setMode('view');
   }, [baseCode, expandedOpen]);
 
-  // 懒拉版本列表：仅在打开全屏且有血缘根时拉取一次，默认选最新版。
   useEffect(() => {
     if (!expandedOpen || !artifactRootId) return;
     let cancelled = false;
@@ -94,18 +124,12 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       .then((list) => {
         if (cancelled) return;
         setVersions(list);
-        const latest = list.length ? list[list.length - 1]!.version : null;
-        setSelectedVersion(latest);
-        // Diff 默认对比：旧=次新版（倒数第二），新=最新版。
-        if (list.length >= 2) {
-          setDiffOldVersion(list[list.length - 2]!.version);
-          setDiffNewVersion(list[list.length - 1]!.version);
-        }
+        setSelectedVersion(list.length ? list[list.length - 1]!.version : null);
+        syncDiffDefaults(list);
       })
       .catch((err) => {
         if (cancelled) return;
-        const msg = err instanceof ApiError ? err.message : '加载版本列表失败';
-        antMessage.error(msg);
+        antMessage.error(err instanceof ApiError ? err.message : '加载版本列表失败');
       })
       .finally(() => {
         if (!cancelled) setVersionsLoading(false);
@@ -115,15 +139,14 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     };
   }, [expandedOpen, artifactRootId]);
 
-  // 切换版本：把查看/编辑区切到该版本内容，回到查看模式。
   const handleSelectVersion = (version: number) => {
     setSelectedVersion(version);
     const target = versions.find((v) => v.version === version);
     setEditedCode(target?.content ?? codeStr);
+    setSelectedCode('');
     setMode('view');
   };
 
-  // 共享：以指定内容创建新版本，成功后刷新列表并选中新版本，返回新版本号。
   const createNewVersionFromContent = async (content: string): Promise<number> => {
     if (!artifactRootId) throw new Error('no artifactRootId');
     const created = await createArtifactVersion(artifactRootId, {
@@ -132,19 +155,10 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       ...(lang ? { language: lang } : {}),
       ...(selectedArtifact?.filename ? { filename: selectedArtifact.filename } : filename ? { filename } : {}),
     });
-    const list = await listArtifactVersions(artifactRootId);
-    setVersions(list);
-    setSelectedVersion(created.version);
-    setEditedCode(created.content ?? content);
-    // 同步刷新 Diff 默认对比版本（旧=次新、新=最新）。
-    if (list.length >= 2) {
-      setDiffOldVersion(list[list.length - 2]!.version);
-      setDiffNewVersion(list[list.length - 1]!.version);
-    }
+    await refreshVersions(created, content);
     return created.version;
   };
 
-  // 保存为新版本：POST 当前编辑内容，成功后刷新列表并选中新版本。
   const handleSaveAsNewVersion = async () => {
     if (!artifactRootId || saving) return;
     setSaving(true);
@@ -152,26 +166,48 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       const newVer = await createNewVersionFromContent(editedCode);
       antMessage.success(`已保存为 v${newVer}`);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : '保存新版本失败';
-      antMessage.error(msg);
+      antMessage.error(err instanceof ApiError ? err.message : '保存新版本失败');
     } finally {
       setSaving(false);
     }
   };
 
-  // 回滚：用当前选中的旧版本内容创建新版本，使旧内容成为最新版。
   const handleRollback = async () => {
     if (!artifactRootId || saving || !selectedArtifact) return;
-    const rollbackContent = selectedArtifact.content ?? '';
     setSaving(true);
     try {
-      const newVer = await createNewVersionFromContent(rollbackContent);
+      const newVer = await createNewVersionFromContent(selectedArtifact.content ?? '');
       antMessage.success(`已回滚，生成 v${newVer}`);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : '回滚失败';
-      antMessage.error(msg);
+      antMessage.error(err instanceof ApiError ? err.message : '回滚失败');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAIEdit = async () => {
+    if (!artifactRootId || aiEditing) return;
+    const instruction = aiInstruction.trim();
+    if (!instruction) {
+      antMessage.warning('先写一下你希望 AI 怎么改');
+      return;
+    }
+
+    setAiEditing(true);
+    try {
+      const created = await aiEditArtifact(artifactRootId, {
+        instruction,
+        ...(selectedCode.trim() ? { selection: selectedCode } : {}),
+      });
+      await refreshVersions(created, created.content ?? editedCode);
+      setAiInstruction('');
+      setSelectedCode('');
+      setMode('view');
+      antMessage.success(`AI 已生成 v${created.version}`);
+    } catch (err) {
+      antMessage.error(err instanceof ApiError ? err.message : 'AI 修改失败');
+    } finally {
+      setAiEditing(false);
     }
   };
 
@@ -179,10 +215,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     navigator.clipboard.writeText(value).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable */ });
+    }).catch(() => {
+      antMessage.error('复制失败');
+    });
   };
 
-  // 基于编辑后的最新内容下载为文件。
   const handleDownload = () => {
     const blob = new Blob([editedCode], { type: 'text/plain;charset=utf-8' });
     const objectUrl = URL.createObjectURL(blob);
@@ -195,33 +232,14 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     URL.revokeObjectURL(objectUrl);
   };
 
-  const editedHighlighted = highlightCode(editedCode, lang || undefined);
-
-  // Diff 两栏内容：按选中版本号取 content，缺省回退空串。
-  const diffOldDoc = versions.find((v) => v.version === diffOldVersion)?.content ?? '';
-  const diffNewDoc = versions.find((v) => v.version === diffNewVersion)?.content ?? '';
-
-  // Diff/普通版本下拉的选项：标注 vN / 最新。
-  const versionOptions = versions.map((v) => ({
-    value: v.version,
-    label: v.version === latestVersion ? `v${v.version}（最新）` : `v${v.version}`,
-  }));
-
   return (
     <div className={styles.codeBlockWrapper}>
       <div className={styles.codeHeader}>
         <span>{displayLang}</span>
         <div className={styles.codeActions}>
           {expandable && (
-            <button
-              className={styles.codeActionBtn}
-              type="button"
-              title="全屏查看代码"
-              onClick={() => setExpandedOpen(true)}
-            >
-              <span className={styles.codeCopyIcon}>
-                <ExpandOutlined />
-              </span>
+            <button className={styles.codeActionBtn} type="button" title="展开代码" onClick={() => setExpandedOpen(true)}>
+              <span className={styles.codeCopyIcon}><ExpandOutlined /></span>
               <span className={styles.codeCopyText}>展开</span>
             </button>
           )}
@@ -231,9 +249,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
             title="复制代码"
             onClick={() => handleCopy()}
           >
-            <span className={styles.codeCopyIcon}>
-              {copied ? <CheckOutlined /> : <CopyOutlined />}
-            </span>
+            <span className={styles.codeCopyIcon}>{copied ? <CheckOutlined /> : <CopyOutlined />}</span>
             <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
           </button>
         </div>
@@ -241,6 +257,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       <pre className={styles.codeBlock}>
         <code dangerouslySetInnerHTML={{ __html: highlighted }} />
       </pre>
+
       {expandable && (
         <Modal
           open={expandedOpen}
@@ -256,7 +273,6 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
             <div className={styles.expandedCodeHeader}>
               <div className={styles.expandedHeaderLeft}>
                 <span>{displayLang}</span>
-                {/* Diff 模式：左旧右新两个版本选择器；其余模式：单个版本选择器（与 diff 的双选择器互斥，避免混淆）。 */}
                 {mode === 'diff' ? (
                   <>
                     <span className={styles.diffLabel}>旧</span>
@@ -289,18 +305,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
                   )
                 )}
               </div>
+
               <div className={styles.expandedHeaderActions}>
-                {/* Diff 是只读对比模式：进入后隐藏编辑/查看切换与复制/下载/保存，避免与对比语义混淆。 */}
                 {mode === 'diff' ? (
-                  <button
-                    className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                    type="button"
-                    title="退出对比，回到查看"
-                    onClick={() => setMode('view')}
-                  >
-                    <span className={styles.codeCopyIcon}>
-                      <EyeOutlined />
-                    </span>
+                  <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={() => setMode('view')}>
+                    <span className={styles.codeCopyIcon}><EyeOutlined /></span>
                     <span className={styles.codeCopyText}>查看</span>
                   </button>
                 ) : (
@@ -308,74 +317,44 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
                     <button
                       className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
                       type="button"
-                      title={mode === 'view' ? '切换到编辑' : '切换到查看'}
                       onClick={() => setMode(mode === 'view' ? 'edit' : 'view')}
                     >
-                      <span className={styles.codeCopyIcon}>
-                        {mode === 'view' ? <EditOutlined /> : <EyeOutlined />}
-                      </span>
+                      <span className={styles.codeCopyIcon}>{mode === 'view' ? <EditOutlined /> : <EyeOutlined />}</span>
                       <span className={styles.codeCopyText}>{mode === 'view' ? '编辑' : '查看'}</span>
                     </button>
-                    {/* Diff 入口：仅当存在血缘根且至少两个版本可对比时显示。 */}
                     {canDiff && (
-                      <button
-                        className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                        type="button"
-                        title="对比两个版本的差异"
-                        onClick={() => setMode('diff')}
-                      >
-                        <span className={styles.codeCopyIcon}>
-                          <DiffOutlined />
-                        </span>
+                      <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={() => setMode('diff')}>
+                        <span className={styles.codeCopyIcon}><DiffOutlined /></span>
                         <span className={styles.codeCopyText}>Diff</span>
                       </button>
                     )}
-                    {/* 回滚入口：仅在查看模式且选中版本不是最新版时显示。 */}
                     {mode === 'view' && artifactRootId && selectedVersion !== null && selectedVersion !== latestVersion && (
                       <button
                         className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
                         type="button"
-                        title="用此版本内容创建新版本（回滚）"
                         disabled={saving}
                         onClick={handleRollback}
                       >
-                        <span className={styles.codeCopyIcon}>
-                          <RollbackOutlined />
-                        </span>
-                        <span className={styles.codeCopyText}>{saving ? '回滚中…' : '回滚到此版本'}</span>
+                        <span className={styles.codeCopyIcon}><RollbackOutlined /></span>
+                        <span className={styles.codeCopyText}>{saving ? '回滚中...' : '回滚到此版本'}</span>
                       </button>
                     )}
                     <button
                       className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
                       type="button"
-                      title="复制代码"
                       onClick={() => handleCopy(editedCode)}
                     >
-                      <span className={styles.codeCopyIcon}>
-                        {copied ? <CheckOutlined /> : <CopyOutlined />}
-                      </span>
+                      <span className={styles.codeCopyIcon}>{copied ? <CheckOutlined /> : <CopyOutlined />}</span>
                       <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
                     </button>
-                    <button
-                      className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                      type="button"
-                      title="下载为文件"
-                      onClick={handleDownload}
-                    >
-                      <span className={styles.codeCopyIcon}>
-                        <DownloadOutlined />
-                      </span>
+                    <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={handleDownload}>
+                      <span className={styles.codeCopyIcon}><DownloadOutlined /></span>
                       <span className={styles.codeCopyText}>下载</span>
                     </button>
                   </>
                 )}
                 {mode === 'edit' && (
-                  <button
-                    className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
-                    type="button"
-                    title="恢复当前版本内容"
-                    onClick={() => setEditedCode(baseCode)}
-                  >
+                  <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={() => setEditedCode(baseCode)}>
                     <span className={styles.codeCopyText}>重置</span>
                   </button>
                 )}
@@ -383,33 +362,70 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
                   <button
                     className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`}
                     type="button"
-                    title="将当前编辑内容保存为新版本"
                     disabled={saving}
                     onClick={handleSaveAsNewVersion}
                   >
-                    <span className={styles.codeCopyIcon}>
-                      <SaveOutlined />
-                    </span>
-                    <span className={styles.codeCopyText}>{saving ? '保存中…' : '保存为新版本'}</span>
+                    <span className={styles.codeCopyIcon}><SaveOutlined /></span>
+                    <span className={styles.codeCopyText}>{saving ? '保存中...' : '保存为新版本'}</span>
                   </button>
                 )}
               </div>
             </div>
+
             {mode === 'view' && (
               <pre className={styles.expandedCodeBlock}>
                 <code dangerouslySetInnerHTML={{ __html: editedHighlighted }} />
               </pre>
             )}
+
             {mode === 'edit' && (
               <div className={styles.expandedEditorWrapper}>
-                <Suspense fallback={<div className={styles.editorLoading}>加载编辑器…</div>}>
-                  <CodeEditor value={editedCode} language={lang || undefined} onChange={setEditedCode} />
+                {artifactRootId && (
+                  <div className={styles.aiEditPanel}>
+                    <div className={styles.aiEditMeta}>
+                      <span className={styles.aiEditTitle}>
+                        <RobotOutlined />
+                        AI 局部修改
+                      </span>
+                      <span className={styles.aiEditSelection}>
+                        {selectedCode.trim() ? `已选中 ${selectedCode.length} 个字符` : '未选中代码，将按整份代码修改'}
+                      </span>
+                    </div>
+                    <div className={styles.aiEditControls}>
+                      <TextArea
+                        className={styles.aiEditInput}
+                        value={aiInstruction}
+                        onChange={(event) => setAiInstruction(event.target.value)}
+                        placeholder="描述你想怎么改选中的代码"
+                        autoSize={{ minRows: 1, maxRows: 3 }}
+                        disabled={aiEditing}
+                      />
+                      <button
+                        className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${styles.aiEditButton}`}
+                        type="button"
+                        disabled={aiEditing}
+                        onClick={handleAIEdit}
+                      >
+                        <span className={styles.codeCopyIcon}><RobotOutlined /></span>
+                        <span className={styles.codeCopyText}>{aiEditing ? '修改中...' : '让 AI 改'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <Suspense fallback={<div className={styles.editorLoading}>加载编辑器...</div>}>
+                  <CodeEditor
+                    value={editedCode}
+                    language={lang || undefined}
+                    onChange={setEditedCode}
+                    onSelectionChange={setSelectedCode}
+                  />
                 </Suspense>
               </div>
             )}
+
             {mode === 'diff' && (
               <div className={styles.expandedEditorWrapper}>
-                <Suspense fallback={<div className={styles.editorLoading}>加载对比视图…</div>}>
+                <Suspense fallback={<div className={styles.editorLoading}>加载对比视图...</div>}>
                   <DiffView oldDoc={diffOldDoc} newDoc={diffNewDoc} language={lang || undefined} />
                 </Suspense>
               </div>
