@@ -38,6 +38,7 @@ type AgentRepo interface {
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
+	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
@@ -356,6 +357,21 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateAvatar 仅更新 Agent 头像，校验归属权后写入。
+func (s *AgentService) UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error) {
+	if id == "" || userID == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateAvatar(ctx, id, userID, avatar)
+	if err != nil {
+		return nil, fmt.Errorf("update agent avatar: %w", err)
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound

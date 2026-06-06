@@ -13,7 +13,8 @@ import {
 import { useAgentStore } from '@/store/agentStore';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
-import { formatDateTime, parseCapabilities } from './agentPresentation';
+import { AvatarPickerModal } from './AvatarPickerModal';
+import { formatDateTime, parseCapabilities, resolveAgentAvatar } from './agentPresentation';
 import styles from './ComputerProfile.module.css';
 
 interface ComputerProfileProps {
@@ -78,6 +79,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   const stopAgent = useAgentStore((s) => s.stopAgent);
   const restartAgent = useAgentStore((s) => s.restartAgent);
   const [createOpen, setCreateOpen] = useState(false);
+  const [avatarPickerAgent, setAvatarPickerAgent] = useState<Agent | null>(null);
   const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [lifecycleLoading, setLifecycleLoading] = useState<Record<string, boolean>>({});
@@ -357,7 +359,16 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   }}
                 >
                   <div className={styles.agentMain}>
-                    <Avatar size={32} icon={<RobotOutlined />} />
+                    <Avatar
+                      size={32}
+                      src={resolveAgentAvatar(agent)}
+                      icon={<RobotOutlined />}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(event) => {
+                        event?.stopPropagation();
+                        setAvatarPickerAgent(agent);
+                      }}
+                    />
                     <div className={styles.agentInfo}>
                       <div className={styles.agentName}>
                         {agent.name}
@@ -440,6 +451,11 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         candidates={machineCandidates}
         onClose={() => setCreateOpen(false)}
         onCreate={handleCreateAgent}
+      />
+      <AvatarPickerModal
+        agent={avatarPickerAgent}
+        open={avatarPickerAgent !== null}
+        onClose={() => setAvatarPickerAgent(null)}
       />
     </div>
   );

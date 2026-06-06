@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
@@ -11,7 +11,11 @@ import {
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import { useAuthStore } from '@/store/authStore';
+import { resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { UserAvatarPickerModal } from './UserAvatarPickerModal';
 import styles from './SettingsPanel.module.css';
 
 type WsStatus = 'connected' | 'connecting' | 'disconnected';
@@ -57,6 +61,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   collapsed,
 }) => {
   const initial = username ? username.charAt(0).toUpperCase() : '?';
+  const user = useAuthStore((s) => s.user);
+  const avatarSrc = user ? resolveUserAvatar(user) : undefined;
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   const handleNavClick = (key: string) => {
     onNavChange(key);
@@ -113,8 +120,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </Tooltip>
           <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>
         </div>
-        <Tooltip title={username || '个人头像'} placement="right">
-          <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
+        <Tooltip title="更换头像" placement="right">
+          <button
+            type="button"
+            className={styles.footerAvatarBtn}
+            onClick={() => setAvatarPickerOpen(true)}
+            aria-label="更换头像"
+          >
+            <Avatar
+              className={styles.footerAvatar}
+              size={24}
+              src={avatarSrc}
+              icon={<UserOutlined />}
+            >
+              {initial}
+            </Avatar>
+          </button>
         </Tooltip>
         <Tooltip title="调色板" placement="right">
           <button className={styles.footerIconBtn} type="button" aria-label="调色板">
@@ -136,6 +157,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
         </Tooltip>
       </div>
+
+      <UserAvatarPickerModal
+        open={avatarPickerOpen}
+        onClose={() => setAvatarPickerOpen(false)}
+      />
     </div>
   );
 };

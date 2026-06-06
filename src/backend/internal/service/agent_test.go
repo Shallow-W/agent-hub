@@ -141,6 +141,10 @@ func (r *fakeAgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*m
 	return nil, nil
 }
 
+func (r *fakeAgentRepo) UpdateAvatar(_ context.Context, _, _, _ string) (*model.Agent, error) {
+	return nil, nil
+}
+
 func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
 	return nil
 }

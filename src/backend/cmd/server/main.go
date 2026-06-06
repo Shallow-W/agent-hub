@@ -289,6 +289,7 @@ func main() {
 		apiGroup.GET("/agents", agentHandler.List)
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
+		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)

@@ -249,6 +249,37 @@ func (h *AgentHandler) Update(c *gin.Context) {
 	middleware.SuccessResponse(c, agent)
 }
 
+// UpdateAvatarRequest 换头像请求体（仅 avatar 字段，无 required 约束）
+type UpdateAvatarRequest struct {
+	Avatar string `json:"avatar"`
+}
+
+// UpdateAvatar 仅更新 Agent 头像
+func (h *AgentHandler) UpdateAvatar(c *gin.Context) {
+	agentID := c.Param("id")
+	var req UpdateAvatarRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40044, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	agent, err := h.svc.UpdateAvatar(c.Request.Context(), agentID, userID, req.Avatar)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40045, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40434, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50045, "更新头像失败")
+		return
+	}
+	middleware.SuccessResponse(c, agent)
+}
+
 // Delete 删除自建 Agent
 func (h *AgentHandler) Delete(c *gin.Context) {
 	agentID := c.Param("id")

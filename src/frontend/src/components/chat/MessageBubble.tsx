@@ -15,12 +15,14 @@ import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
+import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { escapeHtml } from './highlight';
+import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
 
 const { Text } = Typography;
@@ -212,11 +214,43 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
-  const agentName = (() => {
-    if (message.role !== 'assistant' || !message.artifacts_json) return null;
-    try { return (JSON.parse(message.artifacts_json) as { agent_name?: string }).agent_name ?? null; } catch { return null; }
-  })();
+
+  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool}）。
+  const agentMeta = useMemo((): { agent_id?: string; agent_name?: string } => {
+    if (message.role !== 'assistant' || !message.artifacts_json) return {};
+    try { return JSON.parse(message.artifacts_json) as { agent_id?: string; agent_name?: string }; } catch { return {}; }
+  }, [message.role, message.artifacts_json]);
+  const agentName = agentMeta.agent_name ?? null;
+
+  // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
+  // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
+  const agents = useAgentStore((s) => s.agents);
+  const storeAgent = useMemo(
+    () => (agentMeta.agent_id ? agents.find((a) => a.id === agentMeta.agent_id) : undefined),
+    [agents, agentMeta.agent_id],
+  );
+
   const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+
+  // 头像来源优先级：
+  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)（honors agent.avatar）
+  //   2. assistant + 未找到（历史消息/列表未加载）→ resolveAgentAvatar({id: agent_id, name: agent_name}) 哈希兜底
+  //   3. 自己（当前登录用户，含 avatar）
+  //   4. 其他用户（按 sender_id/username 稳定哈希默认）
+  const avatarSrc = useMemo((): string | undefined => {
+    if (message.role === 'assistant' && agentName) {
+      if (storeAgent) return resolveAgentAvatar(storeAgent);
+      return resolveAgentAvatar({ id: agentMeta.agent_id ?? agentName, name: agentName });
+    }
+    if (message.role === 'assistant') return undefined;
+    if (isOwn) {
+      const me = useAuthStore.getState().user;
+      return me ? resolveUserAvatar(me) : undefined;
+    }
+    return resolveUserAvatar({ id: message.sender_id, username: message.username });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.role, message.sender_id, message.username, agentName, agentMeta.agent_id, storeAgent, isOwn]);
+
   const avatarLetter = agentName
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
@@ -331,8 +365,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       >
         {showAvatar && (
           <Avatar
-            size={24}
+            size={36}
             className={styles.chatAvatar}
+            src={avatarSrc}
           >
             {avatarLetter}
           </Avatar>
