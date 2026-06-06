@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   CheckOutlined,
   CopyOutlined,
@@ -64,6 +64,8 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   const [selectedCode, setSelectedCode] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
+  const inlineCodeRef = useRef<HTMLPreElement>(null);
+  const expandedCodeRef = useRef<HTMLPreElement>(null);
 
   const [versions, setVersions] = useState<Artifact[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -159,6 +161,15 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     return created.version;
   };
 
+  const captureSelectionFrom = (container: HTMLElement | null) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !container) return;
+    const range = selection.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return;
+    const text = selection.toString();
+    setSelectedCode(text.trim() ? text : '');
+  };
+
   const handleSaveAsNewVersion = async () => {
     if (!artifactRootId || saving) return;
     setSaving(true);
@@ -203,6 +214,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       setAiInstruction('');
       setSelectedCode('');
       setMode('view');
+      setExpandedOpen(true);
       antMessage.success(`AI 已生成 v${created.version}`);
     } catch (err) {
       antMessage.error(err instanceof ApiError ? err.message : 'AI 修改失败');
@@ -232,6 +244,39 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     URL.revokeObjectURL(objectUrl);
   };
 
+  const renderAIEditPanel = (compact = false) => (
+    <div className={`${styles.aiEditPanel} ${compact ? styles.aiEditPanelCompact : ''}`}>
+      <div className={styles.aiEditMeta}>
+        <span className={styles.aiEditTitle}>
+          <RobotOutlined />
+          AI 局部修改
+        </span>
+        <span className={styles.aiEditSelection}>
+          {selectedCode.trim() ? `已选中 ${selectedCode.length} 个字符` : '未选中代码，将按整份代码修改'}
+        </span>
+      </div>
+      <div className={styles.aiEditControls}>
+        <TextArea
+          className={styles.aiEditInput}
+          value={aiInstruction}
+          onChange={(event) => setAiInstruction(event.target.value)}
+          placeholder="描述你想怎么改选中的代码"
+          autoSize={{ minRows: 1, maxRows: 3 }}
+          disabled={aiEditing}
+        />
+        <button
+          className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${styles.aiEditButton}`}
+          type="button"
+          disabled={aiEditing}
+          onClick={handleAIEdit}
+        >
+          <span className={styles.codeCopyIcon}><RobotOutlined /></span>
+          <span className={styles.codeCopyText}>{aiEditing ? '修改中...' : '让 AI 改'}</span>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className={styles.codeBlockWrapper}>
       <div className={styles.codeHeader}>
@@ -254,9 +299,15 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
           </button>
         </div>
       </div>
-      <pre className={styles.codeBlock}>
+      <pre
+        ref={inlineCodeRef}
+        className={styles.codeBlock}
+        onMouseUp={() => captureSelectionFrom(inlineCodeRef.current)}
+        onKeyUp={() => captureSelectionFrom(inlineCodeRef.current)}
+      >
         <code dangerouslySetInnerHTML={{ __html: highlighted }} />
       </pre>
+      {artifactRootId && selectedCode.trim() && !expandedOpen && renderAIEditPanel(true)}
 
       {expandable && (
         <Modal
@@ -373,45 +424,22 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
             </div>
 
             {mode === 'view' && (
-              <pre className={styles.expandedCodeBlock}>
+              <>
+                {artifactRootId && selectedCode.trim() && renderAIEditPanel()}
+                <pre
+                  ref={expandedCodeRef}
+                  className={styles.expandedCodeBlock}
+                  onMouseUp={() => captureSelectionFrom(expandedCodeRef.current)}
+                  onKeyUp={() => captureSelectionFrom(expandedCodeRef.current)}
+                >
                 <code dangerouslySetInnerHTML={{ __html: editedHighlighted }} />
-              </pre>
+                </pre>
+              </>
             )}
 
             {mode === 'edit' && (
               <div className={styles.expandedEditorWrapper}>
-                {artifactRootId && (
-                  <div className={styles.aiEditPanel}>
-                    <div className={styles.aiEditMeta}>
-                      <span className={styles.aiEditTitle}>
-                        <RobotOutlined />
-                        AI 局部修改
-                      </span>
-                      <span className={styles.aiEditSelection}>
-                        {selectedCode.trim() ? `已选中 ${selectedCode.length} 个字符` : '未选中代码，将按整份代码修改'}
-                      </span>
-                    </div>
-                    <div className={styles.aiEditControls}>
-                      <TextArea
-                        className={styles.aiEditInput}
-                        value={aiInstruction}
-                        onChange={(event) => setAiInstruction(event.target.value)}
-                        placeholder="描述你想怎么改选中的代码"
-                        autoSize={{ minRows: 1, maxRows: 3 }}
-                        disabled={aiEditing}
-                      />
-                      <button
-                        className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${styles.aiEditButton}`}
-                        type="button"
-                        disabled={aiEditing}
-                        onClick={handleAIEdit}
-                      >
-                        <span className={styles.codeCopyIcon}><RobotOutlined /></span>
-                        <span className={styles.codeCopyText}>{aiEditing ? '修改中...' : '让 AI 改'}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {artifactRootId && renderAIEditPanel()}
                 <Suspense fallback={<div className={styles.editorLoading}>加载编辑器...</div>}>
                   <CodeEditor
                     value={editedCode}

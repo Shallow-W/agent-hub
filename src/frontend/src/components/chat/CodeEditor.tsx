@@ -41,7 +41,18 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ value, language, onChange, onSe
       oneDark,
       EditorView.theme({
         '&': { height: '100%', fontSize: '15px' },
-        '.cm-scroller': { fontFamily: "'SF Mono', Menlo, Monaco, monospace", lineHeight: '1.7' },
+        '.cm-scroller': {
+          fontFamily: "'SF Mono', Menlo, Monaco, monospace",
+          lineHeight: '1.7',
+          userSelect: 'text',
+        },
+        '.cm-content': {
+          cursor: 'text',
+          userSelect: 'text',
+        },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+          backgroundColor: 'rgba(88, 166, 255, 0.45) !important',
+        },
       }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
