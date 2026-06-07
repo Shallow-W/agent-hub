@@ -46,7 +46,7 @@ func (h *DaemonHandler) WithMachine(fn func(*gin.Context, *model.DaemonMachine))
 	return func(c *gin.Context) {
 		token := c.Query("token")
 		machine, err := h.authenticateMachine(c.Request.Context(), token)
-		if err != nil {
+		if err != nil || machine == nil {
 			middleware.ErrorResponse(c, http.StatusUnauthorized, 40100, "认证失败")
 			return
 		}

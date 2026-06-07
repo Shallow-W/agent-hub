@@ -156,7 +156,11 @@ func (s *TaskService) MoveStatus(ctx context.Context, userID, id, status string)
 	if !isTaskStatus(status) {
 		return nil, ErrTaskInvalid
 	}
-	// Fetch current task to validate state transition
+	// Fetch current task to validate state transition.
+	// Although the handler layer may have already fetched the task for permission
+	// checks, this read is intentionally kept here because the repo-level
+	// MoveStatus performs a direct SQL UPDATE without knowing the current status,
+	// so the service layer must read it to enforce the state machine.
 	current, err := s.repo.GetByID(ctx, userID, id)
 	if err != nil {
 		return nil, fmt.Errorf("get task for status check: %w", err)

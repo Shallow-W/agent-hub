@@ -30,6 +30,8 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { CreateTaskPayload, OrchTaskCard, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
 import type { ConversationAgent } from '@/types/conversation';
 import styles from './TaskBoardView.module.css';
@@ -137,12 +139,16 @@ const TaskDetailModal: React.FC<{
     >
       <div className={styles.detailSection}>
         <h4 className={styles.detailTitle}>任务要求</h4>
-        <p className={styles.detailContent}>{description}</p>
+        <div className={styles.detailContent}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
+        </div>
       </div>
       {result && (
         <div className={styles.detailSection}>
           <h4 className={styles.detailTitle}>执行结果</h4>
-          <p className={styles.detailContent}>{result}</p>
+          <div className={styles.detailContent}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
+          </div>
         </div>
       )}
     </Modal>

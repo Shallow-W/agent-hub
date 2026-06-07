@@ -42,14 +42,24 @@ var serviceErrorMappings = []serviceErrorEntry{
 
 // HandleServiceError maps a service-layer error to an HTTP error response using the
 // central mapping table. If no mapping matches, it falls back to 500 with the
-// provided fallbackMsg. Returns true if an error was handled (caller should return).
-func HandleServiceError(c *gin.Context, err error, fallbackMsg string) bool {
+// provided fallbackMsg.
+// When a mapping is found, err.Error() is appended to the mapped message so that
+// service-layer details (e.g. "名称过长") are not silently discarded.
+// An optional overrideCodes int may be provided to override the mapped error code.
+func HandleServiceError(c *gin.Context, err error, fallbackMsg string, overrideCodes ...int) {
 	for _, m := range serviceErrorMappings {
 		if errors.Is(err, m.Err) {
-			ErrorResponse(c, m.Mapping.HTTPStatus, m.Mapping.Code, m.Mapping.Message)
-			return true
+			code := m.Mapping.Code
+			if len(overrideCodes) > 0 {
+				code = overrideCodes[0]
+			}
+			msg := m.Mapping.Message
+			if err.Error() != "" && err.Error() != m.Mapping.Message {
+				msg = m.Mapping.Message + ": " + err.Error()
+			}
+			ErrorResponse(c, m.Mapping.HTTPStatus, code, msg)
+			return
 		}
 	}
 	ErrorResponse(c, http.StatusInternalServerError, 50000, fallbackMsg)
-	return true
 }

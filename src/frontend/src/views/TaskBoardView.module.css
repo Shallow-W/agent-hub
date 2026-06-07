@@ -379,10 +379,19 @@
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.65;
-  white-space: pre-wrap;
+  white-space: normal;
+  word-break: break-word;
   max-height: 320px;
   overflow-y: auto;
 }
+
+.detailContent p { margin: 0 0 8px; }
+.detailContent p:last-child { margin-bottom: 0; }
+.detailContent ul, .detailContent ol { padding-left: 20px; margin: 4px 0; }
+.detailContent table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.detailContent th, .detailContent td { border: 1px solid var(--color-border); padding: 4px 8px; }
+.detailContent pre { background: var(--color-bg-secondary); padding: 8px; border-radius: 4px; overflow-x: auto; }
+.detailContent code { font-size: 12px; }
 
 /* ── Form ── */
 

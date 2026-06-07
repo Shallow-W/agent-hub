@@ -217,5 +217,5 @@ func (h *TaskHandler) ListOrchCards(c *gin.Context) {
 }
 
 func writeTaskError(c *gin.Context, err error, badRequestCode int, fallback string) {
-	middleware.HandleServiceError(c, err, fallback)
+	middleware.HandleServiceError(c, err, fallback, badRequestCode)
 }
