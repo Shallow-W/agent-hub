@@ -278,6 +278,7 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
+		s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -398,6 +399,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
+			s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
@@ -413,6 +415,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
+				s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
 			messages = append(messages, dispatchMsg)
 		}
 	}

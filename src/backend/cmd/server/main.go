@@ -146,8 +146,6 @@ func main() {
 		logger.Warn("redis init failed, running without cache", "error", err)
 	} else {
 		logger.Info("redis connected")
-		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
