@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,6 +22,7 @@ type GroupRepo interface {
 	IsMember(ctx context.Context, conversationID, userID string) (bool, error)
 	GetConversationByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetUserByID(ctx context.Context, id string) (*model.User, error)
+	UpdateGroupInfo(ctx context.Context, conversationID, title, avatar, description, announcement, tags string) (*model.Conversation, error)
 }
 
 var (
@@ -252,6 +254,59 @@ func (s *GroupService) ChangeMemberRole(ctx context.Context, convID, operatorID,
 	}
 
 	return s.repo.UpdateMemberRole(ctx, convID, targetUserID, newRole)
+}
+
+// UpdateGroupInfo 更新群聊基本信息（标题、头像、简介）
+func (s *GroupService) UpdateGroupInfo(ctx context.Context, conversationID, userID, title, avatar, description, announcement, tags string) (*model.Conversation, error) {
+	// 权限校验：owner 或 admin 才能编辑
+	member, err := s.repo.GetMember(ctx, conversationID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check member: %w", err)
+	}
+	if member == nil {
+		return nil, ErrNotMember
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		return nil, ErrNotAdmin
+	}
+
+	// 校验 title 非空且 <= 50 字符
+	trimmedTitle := strings.TrimSpace(title)
+	if trimmedTitle == "" {
+		return nil, errors.New("群名不能为空")
+	}
+	if len([]rune(trimmedTitle)) > 50 {
+		return nil, errors.New("群名不能超过 50 个字符")
+	}
+	// 校验 description <= 200 字符
+	if len([]rune(description)) > 200 {
+		return nil, errors.New("群简介不能超过 200 个字符")
+	}
+	// 校验 announcement <= 500 字符
+	if len([]rune(announcement)) > 500 {
+		return nil, errors.New("群公告不能超过 500 个字符")
+	}
+	// tags 校验：JSON 数组格式，最多 10 个标签，每个 <= 20 字符
+	if tags != "" && tags != "[]" {
+		var tagList []string
+		if err := json.Unmarshal([]byte(tags), &tagList); err != nil {
+			return nil, errors.New("标签格式错误")
+		}
+		if len(tagList) > 10 {
+			return nil, errors.New("标签数量不能超过 10 个")
+		}
+		for _, t := range tagList {
+			if len([]rune(t)) > 20 {
+				return nil, errors.New("单个标签不能超过 20 个字符")
+			}
+		}
+	}
+
+	conv, err := s.repo.UpdateGroupInfo(ctx, conversationID, trimmedTitle, avatar, description, announcement, tags)
+	if err != nil {
+		return nil, fmt.Errorf("update group info: %w", err)
+	}
+	return conv, nil
 }
 
 // dedupMembers 去重并排除 ownerID

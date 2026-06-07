@@ -354,6 +354,7 @@ func main() {
 	{
 		groupRoutes.POST("", groupHandler.CreateGroup)
 		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)
+		groupRoutes.PUT("/:id", groupHandler.UpdateGroupInfo)
 		groupRoutes.POST("/:id/members", groupHandler.AddMember)
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)

@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
-import { Avatar, Button } from 'antd';
-import { PlusOutlined, ReloadOutlined, RobotOutlined, UploadOutlined } from '@ant-design/icons';
+import React, { useEffect, useState } from 'react';
+import { Avatar, Button, Input } from 'antd';
+import { PlusOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
+import { TaskGroupList } from '@/components/sidebar/TaskGroupList';
 import ContactsPanel from '@/components/contacts/ContactsPanel';
 import { AgentList } from '@/components/agent/AgentList';
 import KnowledgePanel from '@/components/knowledge/KnowledgePanel';
@@ -12,6 +13,7 @@ import type { Conversation } from '@/types/conversation';
 import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
 import skillStyles from './SkillsAgentList.module.css';
+import listStyles from '@/components/sidebar/ConversationList.module.css';
 
 interface MiddlePanelProps {
   activeNav: string;
@@ -94,6 +96,20 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
     );
   }
 
+  if (activeNav === 'workspace') {
+    return (
+      <>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>群聊</span>
+          <div className={styles.convPanelTools}>
+            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={onRefresh} />
+          </div>
+        </div>
+        <TaskGroupList />
+      </>
+    );
+  }
+
   if (activeNav === 'contacts') {
     return (
       <>
@@ -133,39 +149,57 @@ interface SkillsAgentListProps {
 const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSelectAgent }) => {
   const agents = useAgentStore((s) => s.agents);
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     fetchAgents().catch(() => {});
   }, [fetchAgents]);
+
+  const normalized = query.trim().toLowerCase();
+  const filtered = normalized
+    ? agents.filter((a) => a.name.toLowerCase().includes(normalized))
+    : agents;
 
   return (
     <>
       <div className={styles.convPanelHeader}>
         <span className={styles.convPanelTitle}>技能</span>
       </div>
-      <div className={styles.middleScroll}>
-        <div className={skillStyles.grid}>
-          {agents.length === 0 && (
-            <div className={skillStyles.empty}>暂无 Agent</div>
-          )}
-          {agents.map((agent) => {
-            const skillCount = parseSkills(agent.capabilities_json).length;
-            const isSelected = agent.id === selectedAgentId;
-            return (
-              <button
-                key={agent.id}
-                className={`${skillStyles.card} ${isSelected ? skillStyles.cardActive : ''}`}
-                type="button"
-                onClick={() => onSelectAgent(agent)}
-              >
-                <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
-                <div className={skillStyles.info}>
-                  <span className={skillStyles.name}>{agent.name}</span>
-                  <span className={skillStyles.meta}>{skillCount} skills</span>
-                </div>
-              </button>
-            );
-          })}
+      <div className={listStyles.list}>
+        <div className={listStyles.searchWrap}>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索技能..."
+            allowClear
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className={listStyles.searchInput}
+          />
+        </div>
+        <div className={listStyles.items}>
+          <div className={skillStyles.grid}>
+            {filtered.length === 0 && (
+              <div className={skillStyles.empty}>{normalized ? '无匹配结果' : '暂无 Agent'}</div>
+            )}
+            {filtered.map((agent) => {
+              const skillCount = parseSkills(agent.capabilities_json).length;
+              const isSelected = agent.id === selectedAgentId;
+              return (
+                <button
+                  key={agent.id}
+                  className={`${skillStyles.card} ${isSelected ? skillStyles.cardActive : ''}`}
+                  type="button"
+                  onClick={() => onSelectAgent(agent)}
+                >
+                  <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
+                  <div className={skillStyles.info}>
+                    <span className={skillStyles.name}>{agent.name}</span>
+                    <span className={skillStyles.meta}>{skillCount} skills</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </>

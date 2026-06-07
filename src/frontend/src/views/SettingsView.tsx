@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Avatar, Button, Descriptions, Segmented, Switch, Tag } from 'antd';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Descriptions, Segmented, Switch, Tag, Button } from 'antd';
 import {
   LogoutOutlined,
   SunOutlined,
@@ -12,6 +12,8 @@ import {
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { useNavigate } from 'react-router-dom';
+import { resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { EditableProfileCard } from '@/components/common/EditableProfileCard';
 import styles from './SettingsView.module.css';
 
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -42,6 +44,8 @@ function getInitialBool(key: string, fallback: boolean): boolean {
 const SettingsView: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const updateUsername = useAuthStore((s) => s.updateUsername);
+  const updateAvatar = useAuthStore((s) => s.updateAvatar);
   const navigate = useNavigate();
 
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
@@ -94,6 +98,7 @@ const SettingsView: React.FC = () => {
   }
 
   const initial = user.username.charAt(0).toUpperCase();
+  const avatarSrc = resolveUserAvatar(user);
   const memberSince = new Date(user.created_at).toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: 'long',
@@ -116,17 +121,19 @@ const SettingsView: React.FC = () => {
           </nav>
           <div className={styles.settingsContent}>
             <div className={styles.profileCard}>
-              <div className={styles.profileGlow}>
-                <Avatar size={52} className={styles.avatar} icon={<UserOutlined />}>
-                  {initial}
-                </Avatar>
-              </div>
-              <div className={styles.profileInfo}>
-                <span className={styles.profileEyebrow}>账号状态</span>
-                <span className={styles.username}>{user.username}</span>
-                <span className={styles.userId}>ID: {user.id}</span>
-              </div>
-              <Tag color="success" className={styles.statusTag}>在线</Tag>
+              <EditableProfileCard
+                avatarSrc={avatarSrc}
+                avatarFallback={initial}
+                avatarEditable={true}
+                onAvatarChange={async (key) => { await updateAvatar(key); }}
+                fields={[
+                  { key: 'username', label: '用户名', value: user.username, maxLength: 32 },
+                ]}
+                onFieldSave={async (key, value) => {
+                  if (key === 'username') await updateUsername(value);
+                }}
+                canEdit={true}
+              />
             </div>
             <section id="account" className={styles.section}>
               <div className={styles.sectionHeader}>

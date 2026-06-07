@@ -163,7 +163,7 @@ func (r *GroupRepo) IsMember(ctx context.Context, conversationID, userID string)
 func (r *GroupRepo) GetConversationByID(ctx context.Context, id string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, user_id, type, title, pinned, archived_at, created_at, updated_at
+		`SELECT id, user_id, type, title, avatar, description, announcement, tags, pinned, archived_at, created_at, updated_at
 		 FROM conversations WHERE id = $1`,
 		id,
 	).StructScan(&c)
@@ -211,6 +211,21 @@ func (r *GroupRepo) GetUserByID(ctx context.Context, id string) (*model.User, er
 		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 	return &u, nil
+}
+
+// UpdateGroupInfo 更新群聊基本信息（标题、头像、简介、公告、标签）
+func (r *GroupRepo) UpdateGroupInfo(ctx context.Context, conversationID, title, avatar, description, announcement, tags string) (*model.Conversation, error) {
+	var c model.Conversation
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE conversations SET title = $1, avatar = $2, description = $3, announcement = $4, tags = $5, updated_at = NOW()
+		 WHERE id = $6 AND type = 'group'
+		 RETURNING id, user_id, type, title, avatar, description, announcement, tags, pinned, archived_at, created_at, updated_at`,
+		title, avatar, description, announcement, tags, conversationID,
+	).StructScan(&c)
+	if err != nil {
+		return nil, fmt.Errorf("update group info: %w", err)
+	}
+	return &c, nil
 }
 
 // SearchUsers 按用户名前缀搜索用户

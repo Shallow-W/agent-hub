@@ -164,7 +164,8 @@ const TaskBoardView: React.FC = () => {
   const [detailTask, setDetailTask] = useState<WorkspaceTask | OrchTaskCard | null>(null);
   const [form] = Form.useForm<TaskFormValues>();
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
-  const conversations = useConversationStore((s) => s.conversations);
+  const allConversations = useConversationStore((s) => s.conversations);
+  const conversations = useMemo(() => allConversations.filter((c) => c.type === 'group'), [allConversations]);
   const setActiveConversation = useConversationStore((s) => s.setActive);
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
   const currentUser = useAuthStore((s) => s.user);

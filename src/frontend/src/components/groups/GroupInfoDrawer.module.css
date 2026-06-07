@@ -1,10 +1,29 @@
+.card {
+  background: var(--color-bg-secondary, #f5f5f5);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
 .sectionTitle {
-  margin-top: 20px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.tagsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tagInput {
+  width: 100px;
+  height: 24px;
+  font-size: 12px;
 }

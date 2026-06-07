@@ -493,6 +493,7 @@ export const ChatWindow: React.FC = () => {
           open={groupInfoOpen}
           onClose={() => setGroupInfoOpen(false)}
           conversationId={activeId}
+          currentUserId={user?.id ?? ''}
         />
       )}
       <ForwardModal

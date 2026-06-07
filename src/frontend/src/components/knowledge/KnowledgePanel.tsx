@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Button,
+  Input,
   Switch,
   Spin,
   Popconfirm,
@@ -17,10 +18,12 @@ import {
   GlobalOutlined,
   CloseOutlined,
   InboxOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useKnowledgeStore } from '@/store/knowledgeStore';
 import type { KnowledgeFile } from '@/types/knowledge';
 import { formatFileSize } from '@/types/attachment';
+import listStyles from '@/components/sidebar/ConversationList.module.css';
 import styles from './KnowledgePanel.module.css';
 
 /** 格式化文件大小 */
@@ -53,6 +56,15 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
   useEffect(() => {
     fetchKnowledgeBases().catch(() => {});
   }, [fetchKnowledgeBases]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const normalized = searchQuery.trim().toLowerCase();
+  const filteredBases = useMemo(
+    () => normalized
+      ? knowledgeBases.filter((kb) => kb.name.toLowerCase().includes(normalized))
+      : knowledgeBases,
+    [knowledgeBases, normalized],
+  );
 
   // 创建知识库弹窗状态
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -155,6 +167,14 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
             <Button type="text" icon={<PlusOutlined />} aria-label="新建" onClick={openCreateModal} />
           </div>
         </div>
+        <div className={listStyles.searchWrap}>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索知识库..."
+            className={listStyles.searchInput}
+            disabled
+          />
+        </div>
         <div className={styles.loadingWrap}>
           <Spin />
         </div>
@@ -172,8 +192,19 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
         </div>
       </div>
 
+      <div className={listStyles.searchWrap}>
+        <Input
+          prefix={<SearchOutlined />}
+          placeholder="搜索知识库..."
+          allowClear
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className={listStyles.searchInput}
+        />
+      </div>
+
       <div className={styles.scrollArea}>
-        {knowledgeBases.length === 0 ? (
+        {filteredBases.length === 0 ? (
           <div className={styles.emptyState}>
             <InboxOutlined className={styles.emptyIcon} />
             <div className={styles.emptyTitle}>暂无知识库</div>
@@ -192,7 +223,7 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
           </div>
         ) : (
           <div className={styles.cardGrid}>
-            {knowledgeBases.map((kb) => (
+            {filteredBases.map((kb) => (
               <div className={styles.kbCard} key={kb.id}>
                 {/* 卡片头部：名称 + 删除 */}
                 <div className={styles.cardHeader}>
