@@ -13,11 +13,13 @@ import {
   TeamOutlined,
   TagsOutlined,
   PlusOutlined,
+  CameraOutlined,
 } from '@ant-design/icons';
 import { getGroupInfo, updateGroupInfo } from '@/api/group';
 import type { GroupInfo } from '@/api/group';
 import { resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { EditableProfileCard } from '@/components/common/EditableProfileCard';
+import { GroupAvatarPicker } from '@/components/groups/GroupAvatarPicker';
 import styles from './GroupInfoDrawer.module.css';
 
 interface GroupInfoDrawerProps {
@@ -67,6 +69,9 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
   const [tagInputVisible, setTagInputVisible] = useState(false);
   const [tagInputValue, setTagInputValue] = useState('');
 
+  // Group avatar picker state
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+
   const fetchInfo = useCallback(async () => {
     setLoading(true);
     try {
@@ -96,6 +101,7 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
 
   const handleAvatarChange = useCallback(async (avatarKey: string) => {
     await updateGroupInfo(conversationId, { avatar: avatarKey });
+    message.success('群头像已更新');
     await fetchInfo();
   }, [conversationId, fetchInfo]);
 
@@ -146,6 +152,14 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
       })()
     : undefined;
 
+  /** Extract the group avatar key (e.g. "group-3") from the raw avatar value, or undefined. */
+  const currentGroupAvatarKey = (() => {
+    const raw = info?.conversation?.avatar?.trim();
+    if (!raw) return undefined;
+    if (/^group-\d+$/.test(raw)) return raw;
+    return undefined;
+  })();
+
   const tags = parseTags(info?.conversation?.tags);
 
   return (
@@ -160,11 +174,33 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
           <>
             {/* 群资料卡片 */}
             <div className={styles.card}>
+              {/* Group avatar — dedicated picker */}
+              <div
+                className={`${styles.groupAvatarWrapper} ${canEdit ? styles.groupAvatarEditable : ''}`}
+                onClick={() => canEdit && setAvatarPickerOpen(true)}
+                role={canEdit ? 'button' : undefined}
+                tabIndex={canEdit ? 0 : undefined}
+                aria-label="更换群头像"
+              >
+                <Avatar
+                  size={64}
+                  src={groupAvatarSrc}
+                  icon={<TeamOutlined />}
+                  className={styles.groupAvatar}
+                >
+                  {info.conversation?.title?.charAt(0) || 'G'}
+                </Avatar>
+                {canEdit && (
+                  <div className={styles.groupAvatarOverlay}>
+                    <CameraOutlined />
+                  </div>
+                )}
+              </div>
+
               <EditableProfileCard
-                avatarSrc={groupAvatarSrc}
-                avatarFallback={info.conversation?.title?.charAt(0) || 'G'}
-                avatarEditable={true}
-                onAvatarChange={handleAvatarChange}
+                avatarSrc={undefined}
+                avatarFallback={undefined}
+                avatarEditable={false}
                 fields={[
                   { key: 'title', label: '群名', value: info.conversation?.title || '', maxLength: 50, placeholder: '输入群名称' },
                   { key: 'description', label: '简介', value: info.conversation?.description || '', type: 'textarea', maxLength: 200, placeholder: '添加群简介...' },
@@ -174,6 +210,13 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
                 canEdit={canEdit}
               />
             </div>
+
+            <GroupAvatarPicker
+              open={avatarPickerOpen}
+              onClose={() => setAvatarPickerOpen(false)}
+              currentKey={currentGroupAvatarKey}
+              onSelect={handleAvatarChange}
+            />
 
             {/* 群标签卡片 */}
             <div className={styles.card}>
