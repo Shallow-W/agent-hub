@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/agent-hub/backend/internal/middleware"
@@ -85,11 +84,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 		Status:         c.Query("status"),
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskInvalid) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40400, "任务筛选参数错误")
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50400, "查询任务失败")
+		middleware.HandleServiceError(c, err, "查询任务失败")
 		return
 	}
 	middleware.SuccessResponse(c, tasks)
@@ -118,11 +113,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		Priority:       req.Priority,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskInvalid) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40401, "任务参数错误")
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50401, "创建任务失败")
+		middleware.HandleServiceError(c, err, "创建任务失败")
 		return
 	}
 	middleware.CreatedResponse(c, task)
@@ -226,13 +217,5 @@ func (h *TaskHandler) ListOrchCards(c *gin.Context) {
 }
 
 func writeTaskError(c *gin.Context, err error, badRequestCode int, fallback string) {
-	if errors.Is(err, service.ErrTaskInvalid) {
-		middleware.ErrorResponse(c, http.StatusBadRequest, badRequestCode, "任务参数错误")
-		return
-	}
-	if errors.Is(err, service.ErrTaskNotFound) {
-		middleware.ErrorResponse(c, http.StatusNotFound, 40410, "任务不存在")
-		return
-	}
-	middleware.ErrorResponse(c, http.StatusInternalServerError, 50410, fallback)
+	middleware.HandleServiceError(c, err, fallback)
 }

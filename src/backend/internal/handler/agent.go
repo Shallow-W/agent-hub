@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -122,15 +121,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40038, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40432, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50037, "添加候选 Agent 失败")
+		middleware.HandleServiceError(c, err, "添加候选 Agent 失败")
 		return
 	}
 	middleware.CreatedResponse(c, agent)
@@ -147,11 +138,7 @@ func (h *AgentHandler) CreateDaemonMachine(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	machine, apiKey, err := h.svc.CreateDaemonMachine(c.Request.Context(), userID, req.Name)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40036, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50035, "创建电脑连接失败")
+		middleware.HandleServiceError(c, err, "创建电脑连接失败")
 		return
 	}
 	middleware.CreatedResponse(c, CreateDaemonMachineResponse{
@@ -167,15 +154,7 @@ func (h *AgentHandler) DeleteDaemonMachine(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	err := h.svc.DeleteDaemonMachine(c.Request.Context(), c.Param("id"), userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40039, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40433, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50038, "删除电脑连接失败")
+		middleware.HandleServiceError(c, err, "删除电脑连接失败")
 		return
 	}
 	middleware.SuccessResponse(c, nil)
@@ -202,11 +181,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		req.EnableManagementTools,
 	)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40031, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50031, "创建 Agent 失败")
+		middleware.HandleServiceError(c, err, "创建 Agent 失败")
 		return
 	}
 	middleware.CreatedResponse(c, agent)
@@ -235,15 +210,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		req.EnableManagementTools,
 	)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40033, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40430, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50032, "更新 Agent 失败")
+		middleware.HandleServiceError(c, err, "更新 Agent 失败")
 		return
 	}
 	middleware.SuccessResponse(c, agent)
@@ -266,15 +233,7 @@ func (h *AgentHandler) UpdateAvatar(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	agent, err := h.svc.UpdateAvatar(c.Request.Context(), agentID, userID, req.Avatar)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40045, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40434, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50045, "更新头像失败")
+		middleware.HandleServiceError(c, err, "更新头像失败")
 		return
 	}
 	middleware.SuccessResponse(c, agent)
@@ -287,15 +246,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 
 	err := h.svc.DeleteOwned(c.Request.Context(), agentID, userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40034, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40431, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50033, "删除 Agent 失败")
+		middleware.HandleServiceError(c, err, "删除 Agent 失败")
 		return
 	}
 	middleware.SuccessResponse(c, nil)
@@ -312,7 +263,7 @@ func (h *AgentHandler) GenerateAgentToken(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	token, expiresAt, err := h.svc.GenerateAgentToken(c.Request.Context(), userID)
 	if err != nil {
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50040, "生成 Agent Token 失败")
+		middleware.HandleServiceError(c, err, "生成 Agent Token 失败")
 		return
 	}
 	middleware.SuccessResponse(c, AgentTokenResponse{
@@ -327,15 +278,7 @@ func (h *AgentHandler) StartAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	err := h.svc.StartAgent(c.Request.Context(), agentID, userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40443, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentOffline) {
-			middleware.ErrorResponse(c, http.StatusConflict, 40941, "Agent 所在电脑不在线，无法启动")
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50044, "启动 Agent 失败")
+		middleware.HandleServiceError(c, err, "启动 Agent 失败")
 		return
 	}
 	middleware.SuccessResponse(c, map[string]string{"message": "agent started"})
@@ -347,19 +290,7 @@ func (h *AgentHandler) RestartAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	err := h.svc.RestartAgent(c.Request.Context(), agentID, userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40440, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40041, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentOffline) {
-			middleware.ErrorResponse(c, http.StatusConflict, 40940, "Agent 不在线，无法重启")
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50041, "重启 Agent 失败")
+		middleware.HandleServiceError(c, err, "重启 Agent 失败")
 		return
 	}
 	middleware.SuccessResponse(c, map[string]string{"message": "restart task created"})
@@ -371,15 +302,7 @@ func (h *AgentHandler) StopAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	err := h.svc.StopAgent(c.Request.Context(), agentID, userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40441, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40042, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50042, "停止 Agent 失败")
+		middleware.HandleServiceError(c, err, "停止 Agent 失败")
 		return
 	}
 	middleware.SuccessResponse(c, map[string]string{"message": "agent stopped"})
@@ -391,15 +314,7 @@ func (h *AgentHandler) GetMachineConnect(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	command, machine, apiKey, err := h.svc.GetMachineConnectCommand(c.Request.Context(), machineID, userID)
 	if err != nil {
-		if errors.Is(err, service.ErrAgentNotFound) {
-			middleware.ErrorResponse(c, http.StatusNotFound, 40442, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrAgentInvalidInput) {
-			middleware.ErrorResponse(c, http.StatusBadRequest, 40043, err.Error())
-			return
-		}
-		middleware.ErrorResponse(c, http.StatusInternalServerError, 50043, "获取连接命令失败")
+		middleware.HandleServiceError(c, err, "获取连接命令失败")
 		return
 	}
 	middleware.SuccessResponse(c, map[string]interface{}{

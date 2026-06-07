@@ -150,7 +150,7 @@ func newTestDaemonHandler(t *testing.T) (*DaemonHandler, *ws.DaemonHub, *fakeDae
 
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil) // nil tracker: not needed for these tests
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -361,7 +361,7 @@ func TestDaemonWS_TaskDispatch_DaemonReceivesAndResolves(t *testing.T) {
 func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -473,7 +473,7 @@ func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -507,7 +507,7 @@ func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -588,7 +588,7 @@ func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -660,7 +660,7 @@ func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 func TestDaemonWS_Ping_RespondsPong(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())

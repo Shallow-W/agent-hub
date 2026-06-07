@@ -15,7 +15,6 @@ import (
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // AgentRepo Agent 服务所需仓库接口
@@ -84,11 +83,11 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo      AgentRepo
-	tracker   *MachineTracker
-	jwtSecret string
-	serverURL string
-	daemonHub *ws.DaemonHub
+	repo        AgentRepo
+	tracker     *MachineTracker
+	tokenIssuer *TokenIssuer
+	serverURL   string
+	daemonHub   *ws.DaemonHub
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -109,9 +108,9 @@ func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
 }
 
-// SetJWTSecret 设置 JWT 密钥（用于生成 Agent Token）
-func (s *AgentService) SetJWTSecret(secret string) {
-	s.jwtSecret = secret
+// SetTokenIssuer 注入 TokenIssuer（用于生成 Agent Token）
+func (s *AgentService) SetTokenIssuer(ti *TokenIssuer) {
+	s.tokenIssuer = ti
 }
 
 // SetServerURL 设置服务端 URL（用于生成 daemon 连接命令）
@@ -403,20 +402,10 @@ func (s *AgentService) GenerateAgentToken(ctx context.Context, userID string) (s
 	if userID == "" {
 		return "", time.Time{}, ErrAgentInvalidInput
 	}
-	now := time.Now()
-	expiresAt := now.Add(5 * time.Minute)
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"scope":   "agent_management",
-		"iat":     now.Unix(),
-		"exp":     expiresAt.Unix(),
+	if s.tokenIssuer == nil {
+		return "", time.Time{}, fmt.Errorf("token issuer not configured")
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString([]byte(s.jwtSecret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign agent token: %w", err)
-	}
-	return tokenStr, expiresAt, nil
+	return s.tokenIssuer.IssueAgentToken(userID)
 }
 
 // StartAgent 启动 Agent 进程：通过 WS 通知远端 daemon 启动对应 CLI 进程。

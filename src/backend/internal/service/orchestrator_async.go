@@ -177,10 +177,7 @@ func (s *OrchestratorService) pushTaskChanged(ctx context.Context, convID, userI
 	if s.notifier == nil {
 		return
 	}
-	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
-	if err != nil || len(memberIDs) == 0 {
-		memberIDs = []string{userID}
-	}
+	memberIDs := s.resolveMemberIDs(ctx, convID, userID)
 	s.notifier.PushCustomEvent(convID, memberIDs, "task.changed", map[string]any{
 		"conversation_id": convID,
 	})
@@ -365,10 +362,7 @@ func (s *OrchestratorService) postPersistAsync(convID, userID string, msg *model
 		return
 	}
 
-	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
-	if err != nil || len(memberIDs) == 0 {
-		memberIDs = []string{userID}
-	}
+	memberIDs := s.resolveMemberIDs(ctx, convID, userID)
 
 	s.notifier.PushToConversation(convID, memberIDs, msg)
 }

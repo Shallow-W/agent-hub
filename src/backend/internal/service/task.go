@@ -141,9 +141,34 @@ func (s *TaskService) Update(ctx context.Context, userID, id string, input model
 	return task, nil
 }
 
+// validTaskTransitions defines legal state transitions for workspace tasks.
+// Each key is a source status; the value maps target statuses that are allowed.
+var validTaskTransitions = map[string]map[string]bool{
+	"todo":        {"in_progress": true, "cancelled": true},
+	"in_progress": {"done": true, "blocked": true, "cancelled": true},
+	"blocked":     {"in_progress": true, "cancelled": true},
+	"done":        {},
+	"cancelled":   {},
+}
+
 // MoveStatus 流转任务状态。
 func (s *TaskService) MoveStatus(ctx context.Context, userID, id, status string) (*model.WorkspaceTask, error) {
 	if !isTaskStatus(status) {
+		return nil, ErrTaskInvalid
+	}
+	// Fetch current task to validate state transition
+	current, err := s.repo.GetByID(ctx, userID, id)
+	if err != nil {
+		return nil, fmt.Errorf("get task for status check: %w", err)
+	}
+	if current == nil {
+		return nil, ErrTaskNotFound
+	}
+	allowed, exists := validTaskTransitions[current.Status]
+	if !exists {
+		return nil, ErrTaskInvalid
+	}
+	if !allowed[status] {
 		return nil, ErrTaskInvalid
 	}
 	task, err := s.repo.MoveStatus(ctx, userID, id, status)

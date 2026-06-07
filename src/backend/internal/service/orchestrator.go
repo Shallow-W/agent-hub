@@ -11,7 +11,6 @@ import (
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // OrchConvRepo queries conversation agents for @mention resolution.
@@ -81,8 +80,8 @@ type OrchestratorService struct {
 	msgRepo     MsgRepo
 	orchTaskRepo OrchTaskStore
 
-	jwtSecret string
-	serverURL string
+	tokenIssuer *TokenIssuer
+	serverURL   string
 
 	kbResolver   OrchKBResolver
 	daemonHub    *ws.DaemonHub
@@ -95,9 +94,9 @@ type OrchestratorService struct {
 	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }
 
-// SetJWTSecret sets the JWT secret for generating management tool tokens.
-func (s *OrchestratorService) SetJWTSecret(secret string) {
-	s.jwtSecret = secret
+// SetTokenIssuer sets the token issuer for generating management tool tokens.
+func (s *OrchestratorService) SetTokenIssuer(ti *TokenIssuer) {
+	s.tokenIssuer = ti
 }
 
 // SetServerURL sets the server base URL for management tool API calls.
@@ -272,12 +271,8 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 
-	artifacts, _ := json.Marshal(map[string]string{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-		"cli_tool":   agent.CLITool,
-	})
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
+	artifacts := agentMetadata(agent)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
@@ -394,12 +389,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 
 	// Orchestrator responded directly without dispatching
 	if dispatch == nil || len(dispatch.Tasks) == 0 {
-		artifacts, _ := json.Marshal(map[string]string{
-			"agent_id":   orchAgent.ID,
-			"agent_name": orchAgent.Name,
-			"cli_tool":   orchAgent.CLITool,
-		})
-		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, string(artifacts), nil, nil, nil, nil)
+		artifacts := agentMetadata(orchAgent)
+		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
@@ -410,12 +401,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// Post orchestrator's full dispatch message (including @mentions) to group chat
 	var messages []*model.Message
 	{
-		artifacts, _ := json.Marshal(map[string]string{
-			"agent_id":   orchAgent.ID,
-			"agent_name": orchAgent.Name,
-			"cli_tool":   orchAgent.CLITool,
-		})
-		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, string(artifacts), nil, nil, nil, nil)
+		artifacts := agentMetadata(orchAgent)
+		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
@@ -488,15 +475,8 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	for _, m := range msgs {
 		role := m.Role
 		if m.Role == "assistant" {
-			// Extract agent name from artifacts if available
-			var a struct {
-				AgentName string `json:"agent_name"`
-			}
-			if m.ArtifactsJSON != "" {
-				_ = json.Unmarshal([]byte(m.ArtifactsJSON), &a)
-			}
-			if a.AgentName != "" {
-				role = a.AgentName
+			if name := extractAgentName(m.ArtifactsJSON); name != "" {
+				role = name
 			}
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
@@ -553,14 +533,8 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 	for _, m := range msgs {
 		role := m.Role
 		if m.Role == "assistant" {
-			var a struct {
-				AgentName string `json:"agent_name"`
-			}
-			if m.ArtifactsJSON != "" {
-				_ = json.Unmarshal([]byte(m.ArtifactsJSON), &a)
-			}
-			if a.AgentName != "" {
-				role = a.AgentName
+			if name := extractAgentName(m.ArtifactsJSON); name != "" {
+				role = name
 			}
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
@@ -692,8 +666,8 @@ func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content stri
 	sb.WriteString(kbSection.String())
 
 	// 如果有需要工具读取的文件，注入知识库读取工具
-	if needTool && s.jwtSecret != "" && s.serverURL != "" {
-		token, _, err := s.generateMgmtToken(userID)
+	if needTool && s.tokenIssuer != nil && s.serverURL != "" {
+		token, _, err := s.tokenIssuer.IssueAgentToken(userID)
 		if err != nil {
 			slog.Warn("generate kb tool token failed", "error", err)
 		} else {
@@ -730,26 +704,6 @@ func formatFileSize(size int64) string {
 	}
 }
 
-// generateMgmtToken generates a scoped JWT token for management tool usage.
-// Token has a short 5-minute lifetime and "agent_management" scope to distinguish
-// from regular user tokens.
-func (s *OrchestratorService) generateMgmtToken(userID string) (string, time.Time, error) {
-	now := time.Now()
-	expiresAt := now.Add(5 * time.Minute)
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"scope":   "agent_management",
-		"iat":     now.Unix(),
-		"exp":     expiresAt.Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString([]byte(s.jwtSecret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign management token: %w", err)
-	}
-	return tokenStr, expiresAt, nil
-}
-
 // truncateString truncates s to maxRunes runes, appending "..." if truncated.
 func truncateString(s string, maxRunes int) string {
 	runes := []rune(s)
@@ -757,4 +711,35 @@ func truncateString(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+// agentMetadata serializes the agent identity fields into a JSON string
+// for storing in the ArtifactsJSON column of a message.
+func agentMetadata(agent *model.Agent) string {
+	b, _ := json.Marshal(map[string]string{
+		"agent_id":   agent.ID,
+		"agent_name": agent.Name,
+		"cli_tool":   agent.CLITool,
+	})
+	return string(b)
+}
+
+// resolveMemberIDs returns the member IDs for a conversation, falling back to
+// a single-element slice containing fallbackUserID if the query fails or returns empty.
+func (s *OrchestratorService) resolveMemberIDs(ctx context.Context, convID, fallbackUserID string) []string {
+	ids, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(ids) == 0 {
+		return []string{fallbackUserID}
+	}
+	return ids
+}
+
+// extractAgentName parses the agent_name field from an ArtifactsJSON string.
+// Returns empty string on parse failure or missing field.
+func extractAgentName(artifactsJSON string) string {
+	var m map[string]string
+	if err := json.Unmarshal([]byte(artifactsJSON), &m); err == nil {
+		return m["agent_name"]
+	}
+	return ""
 }

@@ -150,11 +150,12 @@ func main() {
 		logger.Info("redis connected")
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
+	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
-	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
-	orchSvc.SetJWTSecret(cfg.JWT.Secret)
+	orchSvc.SetTokenIssuer(tokenIssuer)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
@@ -370,11 +371,11 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
-	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
-	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
-	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+	router.POST("/daemon/register", daemonHandler.WithMachine(daemonHandler.RegisterHTTP))
+	router.GET("/daemon/agent-token", daemonHandler.WithMachine(daemonHandler.IssueAgentToken))
+	router.GET("/daemon/tasks", daemonHandler.WithMachine(daemonHandler.ClaimTask))
+	router.POST("/daemon/tasks/:id/complete", daemonHandler.WithMachine(daemonHandler.CompleteTask))
+	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.WithMachine(daemonHandler.Heartbeat))
 
 	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
 	mcpGroup := router.Group("/mcp")
