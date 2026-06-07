@@ -40,7 +40,7 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 
 	// 创建 WorkspaceTask 卡片 + 推送 WS 信号
 	if s.taskSvc != nil && orchTaskID != "" {
-		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, userID, agentID, truncateString(task.Task, 80), task.Task, orchTaskID, task.AgentName); err != nil {
+		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, "", agentID, truncateString(task.Task, 80), task.Task, orchTaskID, task.AgentName); err != nil {
 			slog.Warn("create orch worker task board card failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
 		} else {
 			s.pushTaskChanged(ctx, convID, userID)

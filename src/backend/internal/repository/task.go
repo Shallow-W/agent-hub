@@ -74,7 +74,7 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING id, user_id, conversation_id, assignee_id, agent_id, title, description,
 		 status, priority, created_at, updated_at, '' AS assignee_name, '' AS agent_name,
-		 orch_task_id, worker_name, task_hash`,
+		 orch_task_id, worker_name, task_hash, worker_result, completed_at`,
 		nilIfEmpty(userID), input.ConversationID, input.AssigneeID, input.AgentID, input.Title,
 		input.Description, input.Status, input.Priority, input.OrchTaskID, input.WorkerName, input.TaskHash,
 	).StructScan(&task)

@@ -15,7 +15,6 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
-  ExclamationCircleOutlined,
   FolderOutlined,
   MoreOutlined,
   PlusOutlined,
@@ -25,12 +24,14 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { createTask, deleteTask, getTasks, moveTaskStatus, updateTask } from '@/api/task';
+import { getConversationAgents } from '@/api/conversation';
 import { onTaskChanged } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import type { CreateTaskPayload, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
+import type { ConversationAgent } from '@/types/conversation';
 import styles from './TaskBoardView.module.css';
 
 interface TaskFormValues {
@@ -49,7 +50,6 @@ interface TaskColumn {
 const columns: TaskColumn[] = [
   { key: 'todo', title: '已派发', icon: <ClockCircleOutlined /> },
   { key: 'in_progress', title: '正在执行', icon: <ThunderboltOutlined /> },
-  { key: 'blocked', title: '待处理', icon: <ExclamationCircleOutlined /> },
   { key: 'cancelled', title: '已取消', icon: <StopOutlined /> },
   { key: 'done', title: '完成/已验收', icon: <CheckCircleOutlined /> },
 ];
@@ -63,7 +63,7 @@ const priorityLabels: Record<TaskPriority, string> = {
 const nextStatus: Record<TaskStatus, TaskStatus | null> = {
   todo: 'in_progress',
   in_progress: 'done',
-  blocked: 'in_progress',
+  blocked: null,
   done: null,
   cancelled: null,
 };
@@ -159,6 +159,24 @@ const TaskBoardView: React.FC = () => {
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
   const currentUser = useAuthStore((s) => s.user);
   const agents = useAgentStore((s) => s.agents);
+  const [orchAgent, setOrchAgent] = useState<ConversationAgent | null>(null);
+
+  // Resolve the orchestrator agent for the active conversation (used for card creator display)
+  useEffect(() => {
+    if (!activeConversationId) {
+      setOrchAgent(null);
+      return;
+    }
+    let cancelled = false;
+    getConversationAgents(activeConversationId)
+      .then((list) => {
+        if (cancelled) return;
+        const orch = (list ?? []).find((a) => a.role === 'orchestrator');
+        setOrchAgent(orch ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeConversationId]);
 
   const grouped = useMemo(() => {
     const map = new Map<TaskStatus, WorkspaceTask[]>();
@@ -289,16 +307,23 @@ const TaskBoardView: React.FC = () => {
   };
 
   const resolveCreatorAvatar = (task: WorkspaceTask): string => {
+    if (task.orch_task_id) {
+      if (orchAgent) return resolveAgentAvatar({ id: orchAgent.agent_id, name: orchAgent.name, avatar: orchAgent.avatar });
+      return resolveAgentAvatar({ id: 'orch', name: 'Orch' });
+    }
     if (task.user_id && currentUser && task.user_id === currentUser.id) {
       return resolveUserAvatar({ id: currentUser.id, username: currentUser.username, avatar: currentUser.avatar });
     }
     if (task.user_id) {
       return resolveUserAvatar({ id: task.user_id });
     }
-    return resolveUserAvatar({ id: 'orch', username: 'Orch' });
+    return resolveAgentAvatar({ id: 'orch', name: 'Orch' });
   };
 
   const resolveCreatorName = (task: WorkspaceTask): string => {
+    if (task.orch_task_id) {
+      return orchAgent?.name || 'Orch';
+    }
     if (task.user_id && currentUser && task.user_id === currentUser.id) {
       return currentUser.username || '我';
     }
@@ -392,12 +417,10 @@ const TaskBoardView: React.FC = () => {
               menu={{
                 items: [
                   { key: 'edit', label: '编辑任务' },
-                  { key: 'blocked', label: '标记待处理', disabled: task.status === 'blocked' },
                   { key: 'delete', label: '删除任务', danger: true },
                 ],
                 onClick: ({ key }) => {
                   if (key === 'edit') openEdit(task);
-                  if (key === 'blocked') handleMove(task, 'blocked');
                   if (key === 'delete') handleDelete(task);
                 },
               }}
@@ -501,7 +524,7 @@ const TaskBoardView: React.FC = () => {
                 options={[
                   { value: 'todo', label: '已派发' },
                   { value: 'in_progress', label: '正在执行' },
-                  { value: 'blocked', label: '待处理' },
+
                   { value: 'done', label: '完成/已验收' },
                   { value: 'cancelled', label: '已取消' },
                 ]}
