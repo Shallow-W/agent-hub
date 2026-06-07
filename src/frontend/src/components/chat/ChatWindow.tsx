@@ -4,6 +4,7 @@ import {
   FolderOpenOutlined,
   LogoutOutlined,
   MoreOutlined,
+  RobotOutlined,
   SearchOutlined,
   SettingOutlined,
   StopOutlined,
@@ -30,6 +31,7 @@ import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
+import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
@@ -250,6 +252,7 @@ export const ChatWindow: React.FC = () => {
   if (!activeConv) return null;
 
   const isGroup = activeConv.type === 'group';
+  const isAgent = activeConv.type === 'agent';
   const displayName = isGroup
     ? activeConv.title
     : (activeConv.peer_name || activeConv.title);
@@ -366,9 +369,26 @@ export const ChatWindow: React.FC = () => {
               }
             }}
           >
-            <Avatar className={styles.conversationAvatar} size={26}>
-              {avatarText}
-            </Avatar>
+            {isAgent ? (
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                src={resolveAgentAvatar({ id: activeConv.peer_id || '', name: displayName })}
+                icon={<RobotOutlined />}
+              />
+            ) : isGroup ? (
+              <Avatar className={styles.conversationAvatar} size={26}>
+                {avatarText}
+              </Avatar>
+            ) : (
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                src={resolveUserAvatar({ id: activeConv.peer_id, username: displayName })}
+              >
+                {avatarText}
+              </Avatar>
+            )}
             <h1 className={styles.title}>
               {displayName}
             </h1>
