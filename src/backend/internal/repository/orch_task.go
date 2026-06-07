@@ -28,10 +28,11 @@ func (r *OrchTaskRepo) Create(ctx context.Context, task *model.OrchTask) error {
 	task.CreatedAt = now
 	task.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO orch_tasks (id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		`INSERT INTO orch_tasks (id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		task.ID, task.ConversationID, task.UserID, task.OrchAgentID, task.Status,
 		task.DispatchPlan, task.WorkerStatus, task.WorkerResults, task.Summary, task.OriginalMessage, task.KBPreload,
+		task.Round, task.RoundHistory,
 		task.CreatedAt, task.UpdatedAt,
 	)
 	if err != nil {
@@ -43,7 +44,7 @@ func (r *OrchTaskRepo) Create(ctx context.Context, task *model.OrchTask) error {
 func (r *OrchTaskRepo) GetByID(ctx context.Context, id string) (*model.OrchTask, error) {
 	var t model.OrchTask
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, created_at, updated_at
+		`SELECT id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at
 		 FROM orch_tasks WHERE id = $1`, id,
 	).StructScan(&t)
 	if err == sql.ErrNoRows {
@@ -128,15 +129,64 @@ func (r *OrchTaskRepo) UpdateWorkerResult(ctx context.Context, id, workerName, s
 	return allDone, nil
 }
 
-func (r *OrchTaskRepo) SetSummary(ctx context.Context, id, summary string) error {
+// SetSummaryAndEvaluate saves the summary and transitions status to evaluating (instead of completed).
+func (r *OrchTaskRepo) SetSummaryAndEvaluate(ctx context.Context, id, summary string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE orch_tasks SET summary = $2, status = $3, updated_at = NOW() WHERE id = $1`,
-		id, summary, model.OrchTaskCompleted,
+		id, summary, model.OrchTaskEvaluating,
 	)
 	if err != nil {
-		return fmt.Errorf("set orch summary: %w", err)
+		return fmt.Errorf("set orch summary evaluate: %w", err)
 	}
 	return nil
+}
+
+// IncrementRound archives current round results into round_history, resets worker state,
+// increments round counter, and transitions status back to workers_running.
+func (r *OrchTaskRepo) IncrementRound(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var currentRound int
+	var currentStatus string
+	var historyJSON, wsJSON, wrJSON string
+	err = tx.QueryRowxContext(ctx,
+		`SELECT round, status, COALESCE(round_history::text, '[]'), COALESCE(worker_status::text, '{}'), COALESCE(worker_results::text, '{}') FROM orch_tasks WHERE id = $1 FOR UPDATE`, id,
+	).Scan(&currentRound, &currentStatus, &historyJSON, &wsJSON, &wrJSON)
+	if err != nil {
+		return fmt.Errorf("lock orch task for round increment: %w", err)
+	}
+
+	// Verify we are transitioning from a valid state (completed by evaluateOrchResponse CAS)
+	if currentStatus != model.OrchTaskCompleted && currentStatus != model.OrchTaskEvaluating {
+		return fmt.Errorf("increment round: unexpected status %q for orch task %s", currentStatus, id)
+	}
+
+	var history []json.RawMessage
+	_ = json.Unmarshal([]byte(historyJSON), &history)
+
+	entry := map[string]interface{}{
+		"round":          currentRound,
+		"worker_status":  json.RawMessage(wsJSON),
+		"worker_results": json.RawMessage(wrJSON),
+	}
+	entryBytes, _ := json.Marshal(entry)
+	history = append(history, entryBytes)
+	newHistory, _ := json.Marshal(history)
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE orch_tasks SET round = round + 1, worker_status = '{}', worker_results = '{}',
+		 round_history = $2, status = $3, summary = '', updated_at = NOW() WHERE id = $1`,
+		id, string(newHistory), model.OrchTaskWorkersRunning,
+	)
+	if err != nil {
+		return fmt.Errorf("increment round: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // UpdateStatusCAS atomically transitions status only if current status matches fromStatus.

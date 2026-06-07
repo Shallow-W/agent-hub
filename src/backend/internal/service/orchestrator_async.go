@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -137,29 +135,8 @@ func (s *OrchestratorService) startOrchSummary(orchTaskID string) {
 		return
 	}
 
-	// 构建汇总 prompt
-	var sb strings.Builder
-	sb.WriteString(OrchestratorSystemPrompt)
-	sb.WriteString("\n\n---\n\n")
-	sb.WriteString("[汇总任务]\n")
-	sb.WriteString("所有 Agent 已完成你分配的任务，以下是它们的执行结果。\n")
-	sb.WriteString("请汇总各 Agent 的成果，给出最终结论。\n\n")
-	sb.WriteString("[原始用户请求]\n")
-	sb.WriteString(truncateString(orchTask.OriginalMessage, 1000))
-	sb.WriteString("\n\n[Agent 执行结果]\n")
-
-	// 解析 worker_results
-	var workerResults map[string]string
-	if orchTask.WorkerResults != "" {
-		_ = json.Unmarshal([]byte(orchTask.WorkerResults), &workerResults)
-	}
-	for name, result := range workerResults {
-		fmt.Fprintf(&sb, "### %s\n%s\n\n", name, truncateString(result, 2000))
-	}
-	sb.WriteString("请发布最终汇总。")
-
-	// 使用统一路径 dispatchAndWait 进行汇总
-	summaryPrompt := sb.String()
+	// 构建汇总+决策 prompt（支持多轮上下文）
+	summaryPrompt := BuildSummaryPrompt(orchTask)
 	summaryCtx := s.InjectAgentConfig(orchAgent, "", orchTask.UserID)
 
 	msg, err := s.dispatchAndWait(ctx, orchTask.ConversationID, orchTask.UserID, orchAgent, summaryPrompt, summaryCtx)
@@ -169,13 +146,91 @@ func (s *OrchestratorService) startOrchSummary(orchTaskID string) {
 		return
 	}
 
-	// 更新 OrchTask
-	_ = s.orchTaskRepo.SetSummary(ctx, orchTaskID, msg.Content)
+	// 保存 summary 并过渡到 evaluating 状态（决策点）
+	_ = s.orchTaskRepo.SetSummaryAndEvaluate(ctx, orchTaskID, msg.Content)
 
-	// 推送汇总消息
+	// 推送汇总/决策消息
 	if msg != nil {
 		s.postPersistAsync(orchTask.ConversationID, orchTask.UserID, msg)
 	}
+
+	// 评估 Orch 回复，决定继续派发还是完成
+	s.evaluateOrchResponse(orchTaskID, orchTask, orchAgent.Name, msg.Content)
+}
+
+// evaluateOrchResponse parses the orchestrator's summary response for @mention dispatches.
+// If @mentions are found and max rounds not reached, archives current round and dispatches new workers.
+// Otherwise marks the task as completed.
+func (s *OrchestratorService) evaluateOrchResponse(orchTaskID string, orchTask *model.OrchTask, orchestratorName, orchResponse string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	dispatch := ParseOrchestratorOutput(orchResponse)
+
+	// CAS guard: only proceed if status is still "evaluating"
+	if s.orchTaskRepo != nil {
+		ok, err := s.orchTaskRepo.UpdateStatusCAS(ctx, orchTaskID, model.OrchTaskEvaluating, model.OrchTaskCompleted)
+		if err != nil {
+			slog.Warn("evaluate orch response: CAS check failed", "id", orchTaskID, "error", err)
+			return
+		}
+		if !ok {
+			slog.Debug("evaluate orch response: status no longer evaluating", "id", orchTaskID)
+			return
+		}
+	}
+
+	// No @mentions -> orchestrator is done (already set to completed by CAS above)
+	if dispatch == nil || len(dispatch.Tasks) == 0 {
+		slog.Info("orch task completed (no further dispatch)", "orch_task", orchTaskID, "round", orchTask.Round)
+		return
+	}
+
+	// Max rounds reached -> already completed by CAS, stay completed
+	if orchTask.Round >= model.MaxOrchRounds-1 {
+		slog.Info("orch task completed (max rounds reached)", "orch_task", orchTaskID, "round", orchTask.Round)
+		return
+	}
+
+	// Transition evaluating -> workers_running via IncrementRound (archives current round, resets workers)
+	if err := s.orchTaskRepo.IncrementRound(ctx, orchTaskID); err != nil {
+		slog.Error("increment round failed", "orch_task", orchTaskID, "error", err)
+		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+		return
+	}
+
+	// Resolve @mentions to agent IDs
+	convAgents, err := s.convRepo.ListAgents(ctx, orchTask.ConversationID, orchTask.UserID)
+	if err != nil {
+		slog.Error("list agents for re-dispatch failed", "orch_task", orchTaskID, "error", err)
+		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+		return
+	}
+	agentNameToID := make(map[string]string)
+	for _, ca := range convAgents {
+		agentNameToID[ca.Name] = ca.AgentID
+	}
+
+	// Dispatch new workers (same pattern as initial dispatch)
+	dispatched := 0
+	for _, t := range dispatch.Tasks {
+		agentID, ok := agentNameToID[t.AgentName]
+		if !ok {
+			slog.Warn("re-dispatch: agent not found", "agent", t.AgentName, "orch_task", orchTaskID)
+			continue
+		}
+		dispatched++
+		go s.dispatchOrchWorker(orchTask.ConversationID, orchTask.UserID, t, agentID, orchestratorName, orchTask.KBPreload, orchTaskID)
+	}
+
+	// Zero valid workers -> force complete to avoid empty loop
+	if dispatched == 0 {
+		slog.Warn("re-dispatch: no valid agents found, completing", "orch_task", orchTaskID)
+		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskCompleted)
+		return
+	}
+
+	slog.Info("orch re-dispatching workers", "orch_task", orchTaskID, "round", orchTask.Round+1, "workers", dispatched)
 }
 
 // postPersistAsync 推送消息到用户 WS 并缓存到 Redis（异步安全版）。

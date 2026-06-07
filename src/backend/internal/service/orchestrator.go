@@ -39,7 +39,8 @@ type OrchTaskStore interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
 	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
-	SetSummary(ctx context.Context, id, summary string) error
+	SetSummaryAndEvaluate(ctx context.Context, id, summary string) error
+	IncrementRound(ctx context.Context, id string) error
 }
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
@@ -437,6 +438,9 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		DispatchPlan:    orchTask.Result,
 		OriginalMessage: content,
 		KBPreload:       kbPreload,
+		WorkerStatus:    "{}",
+		WorkerResults:   "{}",
+		RoundHistory:    "[]",
 	}
 	if s.orchTaskRepo != nil {
 		if err := s.orchTaskRepo.Create(ctx, orchTaskRecord); err != nil {

@@ -1,6 +1,12 @@
 package service
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/agent-hub/backend/internal/model"
+)
 
 // OrchestratorSystemPrompt is the base system prompt for the orchestrator agent.
 // It instructs the agent how to decompose tasks, dispatch to workers, and aggregate results.
@@ -62,6 +68,69 @@ func BuildOrchestratorPrompt(conversationTitle string, agentList []string, recen
 	sb.WriteString("请分析用户需求，决定是否需要拆解任务并分派给相应的 Agent。\n")
 	sb.WriteString("如果只需要单个 Agent 处理，直接 @该Agent。\n")
 	sb.WriteString("如果需要多 Agent 协作，按照分派格式拆解任务。")
+
+	return sb.String()
+}
+
+// roundHistoryEntry is used to deserialize round_history JSONB.
+type roundHistoryEntry struct {
+	Round         int               `json:"round"`
+	WorkerStatus  map[string]string `json:"worker_status"`
+	WorkerResults map[string]string `json:"worker_results"`
+}
+
+// BuildSummaryPrompt builds the prompt for the summary+decision phase.
+// After all workers complete (or after all rounds), the orchestrator receives
+// this prompt and must either conclude or dispatch more work via @mention.
+func BuildSummaryPrompt(orchTask *model.OrchTask) string {
+	var sb strings.Builder
+	sb.WriteString(OrchestratorSystemPrompt)
+	sb.WriteString("\n\n---\n\n")
+
+	sb.WriteString("[汇总与决策任务]\n")
+	if orchTask.Round == 0 {
+		sb.WriteString("所有 Agent 已完成你分配的任务，以下是它们的执行结果。\n")
+	} else {
+		fmt.Fprintf(&sb, "这是第 %d 轮任务执行结果。以下是历史轮次和本轮 Agent 的执行结果。\n", orchTask.Round+1)
+	}
+
+	sb.WriteString("\n[原始用户请求]\n")
+	sb.WriteString(truncateString(orchTask.OriginalMessage, 1000))
+	sb.WriteString("\n\n")
+
+	// Include previous rounds context from round_history
+	if orchTask.RoundHistory != "" {
+		var history []roundHistoryEntry
+		if json.Unmarshal([]byte(orchTask.RoundHistory), &history) == nil {
+			for _, entry := range history {
+				fmt.Fprintf(&sb, "[第 %d 轮结果]\n", entry.Round+1)
+				for name, result := range entry.WorkerResults {
+					fmt.Fprintf(&sb, "- %s: %s\n", name, truncateString(result, 1000))
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	// Current round results
+	sb.WriteString("[本轮 Agent 执行结果]\n")
+	var workerResults map[string]string
+	if orchTask.WorkerResults != "" {
+		_ = json.Unmarshal([]byte(orchTask.WorkerResults), &workerResults)
+	}
+	for name, result := range workerResults {
+		fmt.Fprintf(&sb, "### %s\n%s\n\n", name, truncateString(result, 2000))
+	}
+
+	// Decision guidance
+	sb.WriteString("[决策指引]\n")
+	sb.WriteString("请先汇总各 Agent 的成果。\n")
+	sb.WriteString("如果你认为任务已全部完成，直接给出最终结论即可（不要包含任何 @mention）。\n")
+	sb.WriteString("如果需要进一步工作，请使用 @mention 格式分派新的任务（可以使用与之前相同的 Agent）。\n")
+
+	if orchTask.Round >= model.MaxOrchRounds-1 {
+		sb.WriteString("\n注意：已达到最大轮次限制，这是最后一轮，请直接给出最终结论。\n")
+	}
 
 	return sb.String()
 }
