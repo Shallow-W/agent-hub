@@ -91,10 +91,6 @@ type OrchestratorService struct {
 	cacher       OrchMessageCacher
 	taskSvc      TaskBoardSync
 
-	// 编排并发保护：同一对话同时只允许一个编排流程
-	mu          sync.Mutex
-	activeOrchs map[string]struct{} // convID →活跃编排
-
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
 	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }

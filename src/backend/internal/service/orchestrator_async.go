@@ -36,10 +36,11 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 
 	// 创建 WorkspaceTask 卡片 + 推送 WS 信号
 	if s.taskSvc != nil && orchTaskID != "" {
-		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, userID, agentID, task.Task, task.Task, orchTaskID, task.AgentName); err != nil {
+		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, userID, agentID, truncateString(task.Task, 80), task.Task, orchTaskID, task.AgentName); err != nil {
 			slog.Warn("create orch worker task board card failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
+		} else {
+			s.pushTaskChanged(ctx, convID, userID)
 		}
-		s.pushTaskChanged(ctx, convID, userID)
 	}
 
 	// 构建 dispatch 上下文
@@ -76,8 +77,9 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		if s.taskSvc != nil {
 			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, orchTaskID, task.AgentName, "done"); err != nil {
 				slog.Warn("update orch worker task board status failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
+			} else {
+				s.pushTaskChanged(ctx, convID, userID)
 			}
-			s.pushTaskChanged(ctx, convID, userID)
 		}
 
 		if allDone {
@@ -104,11 +106,12 @@ func (s *OrchestratorService) markWorkerFailed(orchTaskID, workerName, reason st
 	if s.taskSvc != nil {
 		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, orchTaskID, workerName, "blocked"); err != nil {
 			slog.Warn("update orch worker task board status (failed) error", "orch_task", orchTaskID, "worker", workerName, "error", err)
-		}
-		// 获取 convID 用于推送 WS 信号
-		orchTask, _ := s.orchTaskRepo.GetByID(ctx, orchTaskID)
-		if orchTask != nil {
-			s.pushTaskChanged(ctx, orchTask.ConversationID, orchTask.UserID)
+		} else {
+			// 获取 convID 用于推送 WS 信号（仅在更新成功时推送）
+			orchTask, _ := s.orchTaskRepo.GetByID(ctx, orchTaskID)
+			if orchTask != nil {
+				s.pushTaskChanged(ctx, orchTask.ConversationID, orchTask.UserID)
+			}
 		}
 	}
 
@@ -141,6 +144,12 @@ func (s *OrchestratorService) goStartOrchSummary(orchTaskID string) {
 				defer cancel()
 				if s.orchTaskRepo != nil {
 					_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+				}
+				// 将关联的 WorkspaceTask 标记为 blocked
+				if s.taskSvc != nil {
+					if err := s.taskSvc.FailAllTasksForOrchTask(ctx, orchTaskID); err != nil {
+						slog.Warn("fail all workspace tasks after panic", "orch_task", orchTaskID, "error", err)
+					}
 				}
 			}
 		}()

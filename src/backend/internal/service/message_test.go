@@ -158,23 +158,6 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		inConversation: true,
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
-	daemonHub := ws.NewDaemonHub(slog.Default())
-	daemonHub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(daemonHub)
-
-	go func() {
-		deadline := time.Now().Add(time.Second)
-		for time.Now().Before(deadline) {
-			if agentRepo.task != nil && daemonHub.AwaitTaskResult(agentRepo.task.ID) != nil {
-				daemonHub.ResolveTask(agentRepo.task.ID, &ws.TaskResult{
-					TaskID: agentRepo.task.ID,
-					Result: "daemon task result",
-				})
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
 
 	// Wire up DaemonHub for WS-based dispatch
 	hub := ws.NewDaemonHub(slog.Default())
@@ -189,7 +172,7 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		hub.ResolveTask("task-1", &ws.TaskResult{
 			TaskID: "task-1",
-			Result: "鐪熷疄 CLI 鍥炲",
+			Result: "daemon task result",
 		})
 	}()
 

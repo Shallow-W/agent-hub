@@ -198,6 +198,19 @@ func (r *TaskRepo) Delete(ctx context.Context, userID, id string) (bool, error) 
 	return rows > 0, nil
 }
 
+// FailAllByOrchTask 将指定 orch_task_id 下所有非终态的 WorkspaceTask 状态设为 blocked。
+func (r *TaskRepo) FailAllByOrchTask(ctx context.Context, orchTaskID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_tasks SET status = 'blocked', updated_at = NOW()
+		 WHERE orch_task_id = $1 AND status NOT IN ('done', 'blocked', 'cancelled')`,
+		orchTaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("fail all tasks by orch task: %w", err)
+	}
+	return nil
+}
+
 // nilIfEmpty 空字符串转为 nil *string（用于 NULLable 列）。
 func nilIfEmpty(s string) *string {
 	if s == "" {

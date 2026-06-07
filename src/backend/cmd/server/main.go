@@ -185,7 +185,7 @@ func main() {
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))

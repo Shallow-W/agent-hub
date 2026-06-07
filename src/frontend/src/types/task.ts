@@ -1,10 +1,10 @@
-export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
 
 export type TaskPriority = 'low' | 'medium' | 'high';
 
 export interface WorkspaceTask {
   id: string;
-  user_id: string;
+  user_id?: string | null;
   conversation_id?: string;
   assignee_id?: string;
   agent_id?: string;

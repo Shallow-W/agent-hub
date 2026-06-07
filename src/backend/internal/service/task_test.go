@@ -60,6 +60,10 @@ func (r *fakeTaskRepo) GetByOrchTaskAndWorker(context.Context, string, string) (
 	return r.task, nil
 }
 
+func (r *fakeTaskRepo) FailAllByOrchTask(context.Context, string) error {
+	return nil
+}
+
 func TestTaskServiceCreateDefaults(t *testing.T) {
 	svc := NewTaskService(&fakeTaskRepo{})
 	task, err := svc.Create(context.Background(), "user-1", model.TaskCreateInput{Title: "  设计任务看板  "})

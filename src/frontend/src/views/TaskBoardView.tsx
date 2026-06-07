@@ -21,6 +21,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
+  StopOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -47,6 +48,7 @@ const columns: TaskColumn[] = [
   { key: 'todo', title: '已派发', icon: <ClockCircleOutlined /> },
   { key: 'in_progress', title: '正在执行', icon: <ThunderboltOutlined /> },
   { key: 'blocked', title: '待处理', icon: <ExclamationCircleOutlined /> },
+  { key: 'cancelled', title: '已取消', icon: <StopOutlined /> },
   { key: 'done', title: '完成/已验收', icon: <CheckCircleOutlined /> },
 ];
 
@@ -61,6 +63,7 @@ const nextStatus: Record<TaskStatus, TaskStatus | null> = {
   in_progress: 'done',
   blocked: 'in_progress',
   done: null,
+  cancelled: null,
 };
 
 const TaskBoardView: React.FC = () => {
@@ -339,6 +342,7 @@ const TaskBoardView: React.FC = () => {
                   { value: 'in_progress', label: '正在执行' },
                   { value: 'blocked', label: '待处理' },
                   { value: 'done', label: '完成/已验收' },
+                  { value: 'cancelled', label: '已取消' },
                 ]}
               />
             </Form.Item>
