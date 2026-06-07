@@ -102,6 +102,11 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40401, "任务参数错误: "+err.Error())
 		return
 	}
+	if req.ConversationID != nil && *req.ConversationID != "" {
+		if !h.requireMember(c, *req.ConversationID) {
+			return
+		}
+	}
 	userID := middleware.GetUserID(c)
 	task, err := h.svc.Create(c.Request.Context(), userID, model.TaskCreateInput{
 		ConversationID: req.ConversationID,

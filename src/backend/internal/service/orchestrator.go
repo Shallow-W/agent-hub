@@ -354,7 +354,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// agent.Type 可能是 "system" 或 "custom"。
 	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
 	orchCtx += kbPreload
-	orchCtx += s.InjectAgentConfig(orchAgent, orchCtx, userID)
+	agentConfig := s.InjectAgentConfig(orchAgent, "", userID)
+	orchCtx = agentConfig + orchCtx
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
