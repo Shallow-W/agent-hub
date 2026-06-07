@@ -3,6 +3,7 @@ package service
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -205,14 +206,24 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 func FindMentionedAgentID(mentions []MentionResult, conversationAgents []model.ConversationAgent) map[string]string {
 	result := make(map[string]string)
 	for _, m := range mentions {
+		mentionName := normalizeMentionName(m.AgentName)
 		for _, ca := range conversationAgents {
-			if ca.Name == m.AgentName {
+			if ca.Name == m.AgentName || normalizeMentionName(ca.Name) == mentionName {
 				result[m.AgentName] = ca.AgentID
 				break
 			}
 		}
 	}
 	return result
+}
+
+func normalizeMentionName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, name)
 }
 
 // KnowledgeRef 表示消息中的一个知识库引用

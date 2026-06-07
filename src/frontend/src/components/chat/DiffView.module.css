@@ -1,0 +1,18 @@
+.diffHost {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diffHost :global(.cm-mergeView),
+.diffHost :global(.cm-mergeViewEditors) {
+  height: 100%;
+}
+
+.diffHost :global(.cm-editor) {
+  height: 100%;
+}
+
+.diffHost :global(.cm-editor.cm-focused) {
+  outline: none;
+}

@@ -2,10 +2,35 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
   background-color: var(--color-bg-chat);
   background-image:
     radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.75), transparent 40%),
     radial-gradient(circle at 100% 80%, rgba(255, 255, 255, 0.65), transparent 35%);
+}
+
+/* 拖拽上传遮罩：覆盖整个聊天窗口（消息区 + 输入区），高亮提示用户在任意位置松手即可上传。 */
+.dropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(47, 143, 107, 0.1);
+  border: 2px dashed var(--color-primary);
+  border-radius: 8px;
+  color: var(--color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
+.dropOverlayIcon {
+  font-size: 28px;
 }
 
 .header {

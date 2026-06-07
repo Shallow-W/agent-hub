@@ -107,7 +107,8 @@ func main() {
 	userRepo := repository.NewUserRepo(db)
 	convRepo := repository.NewConversationRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
-	msgRepo := repository.NewMessageRepo(db, attachmentRepo)
+	artifactRepo := repository.NewArtifactRepo(db)
+	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
@@ -123,6 +124,7 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
+	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -144,8 +146,6 @@ func main() {
 		logger.Warn("redis init failed, running without cache", "error", err)
 	} else {
 		logger.Info("redis connected")
-		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
@@ -155,6 +155,7 @@ func main() {
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
+	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
 
@@ -179,10 +180,13 @@ func main() {
 	groupHandler := handler.NewGroupHandler(groupSvc)
 	userHandler := handler.NewUserHandler(friendSvc, userSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
+	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
+	artifactHandler := handler.NewArtifactHandler(artifactSvc)
+	artifactHandler.SetOrchestratorService(orchSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
@@ -248,6 +252,7 @@ func main() {
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
+		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
 
 		// 知识库路由（需要鉴权）
 		kbRoutes := apiGroup.Group("/knowledge-bases")
@@ -292,10 +297,11 @@ func main() {
 		apiGroup.GET("/agents", agentHandler.List)
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
+		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
-			apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
+		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
@@ -312,6 +318,15 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
+		artifactRoutes := apiGroup.Group("/artifacts")
+		artifactRoutes.Use(middleware.ValidateUUIDParam("rootId"))
+		{
+			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
+			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
+			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
 		}
 	}
 

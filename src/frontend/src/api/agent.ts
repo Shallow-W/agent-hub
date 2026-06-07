@@ -23,6 +23,10 @@ export async function updateAgent(id: string, body: AgentRequest): Promise<Agent
   return put<Agent>(`/api/agents/${id}`, body);
 }
 
+export async function updateAgentAvatar(id: string, avatar: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/avatar`, { avatar });
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   return del<void>(`/api/agents/${id}`);
 }

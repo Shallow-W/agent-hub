@@ -21,9 +21,10 @@ interface AgentState {
   deleteDaemonMachine: (id: string) => Promise<void>;
   fetchAgentCandidates: () => Promise<void>;
   createDaemonMachine: (name: string) => Promise<CreateDaemonMachineResponse>;
-  addAgentCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
+  addAgentCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
+  updateAgentAvatar: (id: string, avatar: string) => Promise<Agent>;
   openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
   startAgent: (id: string) => Promise<void>;
@@ -105,8 +106,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   },
 
-  addAgentCandidate: async (id, name, systemPrompt) => {
-    const payload = systemPrompt ? { name, system_prompt: systemPrompt } : { name };
+  addAgentCandidate: async (id, name, cliTool, systemPrompt) => {
+    const payload = systemPrompt ? { name, cli_tool: cliTool, system_prompt: systemPrompt } : { name, cli_tool: cliTool };
     const agent = await agentApi.addAgentCandidate(id, payload);
     set((state) => ({
       agents: sortAgents([...state.agents.filter((item) => item.id !== agent.id), agent]),
@@ -122,6 +123,16 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   updateAgent: async (id, body) => {
     const agent = await agentApi.updateAgent(id, body);
+    set((state) => ({
+      agents: sortAgents(state.agents.map((item) => (
+        item.id === id ? agent : item
+      ))),
+    }));
+    return agent;
+  },
+
+  updateAgentAvatar: async (id, avatar) => {
+    const agent = await agentApi.updateAgentAvatar(id, avatar);
     set((state) => ({
       agents: sortAgents(state.agents.map((item) => (
         item.id === id ? agent : item

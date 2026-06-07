@@ -18,6 +18,7 @@ import (
 type OrchConvRepo interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
+	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
 }
 
@@ -60,6 +61,13 @@ type OrchKBResolver interface {
 	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
 }
 
+// OrchArtifactRepo 产物访问能力，用于 AI 编辑产物（取最新版本、回溯对话、创建新版本）。
+type OrchArtifactRepo interface {
+	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
+	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
+	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
+}
+
 // OrchMessageCacher 缓存异步消息到 Redis，避免刷新后丢失。
 type OrchMessageCacher interface {
 	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
@@ -75,10 +83,15 @@ type OrchestratorService struct {
 	jwtSecret string
 	serverURL string
 
-	kbResolver OrchKBResolver
-	daemonHub  *ws.DaemonHub
-	notifier   MessageNotifier
-	cacher     OrchMessageCacher
+	kbResolver   OrchKBResolver
+	daemonHub    *ws.DaemonHub
+	artifactRepo OrchArtifactRepo
+	notifier     MessageNotifier
+	cacher       OrchMessageCacher
+
+	// 编排并发保护：同一对话同时只允许一个编排流程
+	mu          sync.Mutex
+	activeOrchs map[string]struct{} // convID →活跃编排
 
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
 	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
@@ -102,6 +115,11 @@ func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 // SetDaemonHub sets the daemon WebSocket hub for task dispatch.
 func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
+}
+
+// SetArtifactRepo sets the artifact repository used for AI editing artifacts.
+func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
+	s.artifactRepo = repo
 }
 
 // SetOrchTaskRepo sets the orchestration task store.
@@ -260,6 +278,7 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
+		s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -295,7 +314,11 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	// 注入 Agent 系统提示词和工具配置到 context
 	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
 
-	return s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
+	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
 }
 
 // handleOrchestratedDispatch runs the full orchestrator flow: dispatch to orchestrator, parse output, fan out to workers.
@@ -376,6 +399,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
+			s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
@@ -391,6 +415,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
+				s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
 			messages = append(messages, dispatchMsg)
 		}
 	}
@@ -432,6 +457,17 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	}
 
 	return messages, nil
+}
+
+func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
+	if msg == nil || len(artifacts) == 0 {
+		return
+	}
+	if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, artifacts); err != nil {
+		slog.Warn("save orchestrator artifacts failed", "message_id", msg.ID, "error", err)
+		return
+	}
+	msg.Artifacts = artifacts
 }
 
 // buildDispatchContext builds Layer 2 context for a worker agent dispatch.
@@ -557,9 +593,10 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	select {
 	case result := <-ch:
 		task := &model.DaemonTask{
-			ID:     result.TaskID,
-			Status: "completed",
-			Result: result.Result,
+			ID:        result.TaskID,
+			Status:    "completed",
+			Result:    result.Result,
+			Artifacts: artifactsFromTaskResult(result.Artifacts),
 		}
 		if result.Error != "" {
 			task.Status = "failed"

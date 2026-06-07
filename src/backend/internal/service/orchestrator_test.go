@@ -34,6 +34,8 @@ type fakeOrchConvRepo struct {
 	convAgents []model.ConversationAgent
 	convErr    error
 	agentsErr  error
+	member     *model.ConversationMember
+	memberErr  error
 }
 
 func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversation, error) {
@@ -42,6 +44,10 @@ func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversa
 
 func (f *fakeOrchConvRepo) ListAgents(_ context.Context, _, _ string) ([]model.ConversationAgent, error) {
 	return f.convAgents, f.agentsErr
+}
+
+func (f *fakeOrchConvRepo) GetMember(_ context.Context, _, _ string) (*model.ConversationMember, error) {
+	return f.member, f.memberErr
 }
 
 func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string, error) {

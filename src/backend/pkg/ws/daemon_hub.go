@@ -16,9 +16,21 @@ const daemonSendBuf = 64
 
 // TaskResult daemon 任务执行结果
 type TaskResult struct {
-	TaskID string `json:"task_id"`
-	Result string `json:"result"`
-	Error  string `json:"error"`
+	TaskID    string           `json:"task_id"`
+	Result    string           `json:"result"`
+	Error     string           `json:"error"`
+	Artifacts []ArtifactResult `json:"artifacts,omitempty"`
+}
+
+// ArtifactResult daemon 解析出的结构化产物（随 task.complete 上行）。
+// 字段名必须与 backend model.Artifact 的 json tag 及前端 TS 类型对齐。
+type ArtifactResult struct {
+	Type     string `json:"type"` // code | webpage
+	Language string `json:"language,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Title    string `json:"title,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Content  string `json:"content,omitempty"`
 }
 
 // DaemonClient 封装单个 daemon WebSocket 连接

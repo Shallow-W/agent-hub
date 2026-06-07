@@ -170,8 +170,20 @@
 .connecting { background: #faad14; }
 .disconnected { background: #ff4d4f; }
 
+.footerAvatarBtn {
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .footerAvatar {
-  background: var(--gradient-avatar-group) !important;
+  background: var(--gradient-avatar-group);
   flex-shrink: 0;
 }
 

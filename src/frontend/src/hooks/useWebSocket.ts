@@ -88,6 +88,7 @@ export function useWebSocket() {
               artifacts_json: msg.data.artifacts_json ?? null,
               created_at: msg.data.created_at ?? new Date().toISOString(),
               attachments: msg.data.attachments,
+              artifacts: msg.data.artifacts,
               sender_id: msg.data.sender_id,
               username: msg.data.username,
               reply_to: msg.data.reply_to ?? null,

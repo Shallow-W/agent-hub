@@ -289,6 +289,27 @@ func (r *AgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) er
 	return nil
 }
 
+// UpdateAvatar 仅更新 Agent 头像字段（归属校验由调用方完成）
+func (r *AgentRepo) UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error) {
+	var a model.Agent
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE agents
+		 SET avatar = $3, updated_at = NOW()
+		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		id, userID, avatar,
+	).StructScan(&a)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update agent avatar: %w", err)
+	}
+	return &a, nil
+}
+
 // ClearAgentMachine 清除 Agent 的 machine_id 并设为离线
 func (r *AgentRepo) ClearAgentMachine(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,

@@ -50,6 +50,7 @@ type CreateDaemonMachineResponse struct {
 // AddCandidateAgentRequest 添加候选 Agent 请求体
 type AddCandidateAgentRequest struct {
 	Name         string `json:"name" binding:"required,max=100"`
+	CLITool      string `json:"cli_tool" binding:"required,max=50"`
 	SystemPrompt string `json:"system_prompt"`
 }
 
@@ -75,14 +76,14 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":            a.ID,
-			"name":          a.Name,
-			"type":          a.Type,
-			"status":        a.Status,
-			"machine_id":    a.MachineID,
-			"machine_name":  a.MachineName,
-			"version":       a.Version,
-			"cli_tool":      a.CLITool,
+			"id":           a.ID,
+			"name":         a.Name,
+			"type":         a.Type,
+			"status":       a.Status,
+			"machine_id":   a.MachineID,
+			"machine_name": a.MachineName,
+			"version":      a.Version,
+			"cli_tool":     a.CLITool,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -119,7 +120,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.SystemPrompt)
+	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentInvalidInput) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40038, err.Error())
@@ -243,6 +244,37 @@ func (h *AgentHandler) Update(c *gin.Context) {
 			return
 		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50032, "更新 Agent 失败")
+		return
+	}
+	middleware.SuccessResponse(c, agent)
+}
+
+// UpdateAvatarRequest 换头像请求体（仅 avatar 字段，无 required 约束）
+type UpdateAvatarRequest struct {
+	Avatar string `json:"avatar"`
+}
+
+// UpdateAvatar 仅更新 Agent 头像
+func (h *AgentHandler) UpdateAvatar(c *gin.Context) {
+	agentID := c.Param("id")
+	var req UpdateAvatarRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40044, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	agent, err := h.svc.UpdateAvatar(c.Request.Context(), agentID, userID, req.Avatar)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentInvalidInput) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40045, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40434, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50045, "更新头像失败")
 		return
 	}
 	middleware.SuccessResponse(c, agent)

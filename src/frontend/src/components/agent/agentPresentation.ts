@@ -48,6 +48,84 @@ export function parseSkills(value?: string): Skill[] {
   return [];
 }
 
+/** 命名头像 key（与 public/avatars 下的文件名对应）。 */
+export const NAMED_AVATAR_KEYS = ['Chatgpt', 'Claudecode', 'OpenClaw'] as const;
+/** 通用「其它」头像 key（Agent1 ~ Agent14）。 */
+export const GENERIC_AVATAR_KEYS = Array.from(
+  { length: 14 },
+  (_, i): string => `Agent${i + 1}`,
+);
+/** 头像选择器候选列表（命名头像在前，通用头像在后）。 */
+export const ALL_AVATAR_KEYS: string[] = [...NAMED_AVATAR_KEYS, ...GENERIC_AVATAR_KEYS];
+
+/** 用户头像 key（与 public/avatars/user1.png ~ user20.png 对应）。 */
+export const USER_AVATAR_KEYS: string[] = Array.from(
+  { length: 20 },
+  (_, i): string => `user${i + 1}`,
+);
+
+/** 根据 key 返回静态头像 URL。 */
+export function avatarUrl(key: string): string {
+  return `/avatars/${key}.png`;
+}
+
+/** 稳定哈希（djb2），用于把 agent 稳定映射到某个通用头像。 */
+function stableHash(seed: string): number {
+  let hash = 5381;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = ((hash << 5) + hash + seed.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * 解析 Agent 头像 URL。
+ * - 若 agent.avatar 已设置（手动选定的 key 或 URL）→ 直接使用。
+ * - 否则按 name 归一化匹配命名头像；其它名字稳定映射到某个通用头像。
+ */
+export function resolveAgentAvatar(agent: Pick<Agent, 'id' | 'name' | 'avatar'>): string {
+  const manual = agent.avatar?.trim();
+  if (manual) {
+    if (/^(https?:|data:|\/)/i.test(manual)) return manual;
+    return avatarUrl(manual);
+  }
+  const normalized = agent.name.toLowerCase().replace(/\s+/g, '');
+  if (normalized.includes('chatgpt') || normalized.includes('codex')) {
+    return avatarUrl('Chatgpt');
+  }
+  if (normalized.includes('openclaw')) {
+    return avatarUrl('OpenClaw');
+  }
+  if (normalized.includes('claudecode') || normalized.includes('claude')) {
+    return avatarUrl('Claudecode');
+  }
+  const seed = agent.id || agent.name;
+  const key = GENERIC_AVATAR_KEYS[stableHash(seed) % GENERIC_AVATAR_KEYS.length]!;
+  return avatarUrl(key);
+}
+
+/**
+ * 解析用户头像 URL。
+ * - 若 user.avatar 已设置（手动选定的 key 或 URL）→ 直接使用。
+ * - 否则按 id（兜底 username）djb2 哈希稳定映射到 user1~user20。
+ */
+export function resolveUserAvatar(user: { id?: string; username?: string; avatar?: string }): string {
+  const manual = user.avatar?.trim();
+  if (manual) {
+    if (/^(https?:|data:|\/)/i.test(manual)) return manual;
+    return avatarUrl(manual);
+  }
+  const seed = user.id || user.username || '';
+  const key = USER_AVATAR_KEYS[stableHash(seed) % USER_AVATAR_KEYS.length]!;
+  return avatarUrl(key);
+}
+
+export function getDefaultAgentName(name: string, cliTool: string): string {
+  const normalizedName = name.replace(/\s+/g, '');
+  if (normalizedName) return normalizedName;
+  return cliTool.replace(/\s+/g, '');
+}
+
 export function autoGenerateSkills(agent: Agent): Skill[] {
   const tool = agent.cli_tool.toLowerCase();
   const prompt = (agent.system_prompt || '').toLowerCase();

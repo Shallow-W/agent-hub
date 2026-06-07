@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
+import { AvatarPickerModal } from './AvatarPickerModal';
 import {
   formatDateTime,
   getAgentDescription,
@@ -26,6 +27,7 @@ import {
   parseCapabilities,
   parseSkills,
   autoGenerateSkills,
+  resolveAgentAvatar,
 } from './agentPresentation';
 import type { Skill } from './agentPresentation';
 import styles from './AgentProfile.module.css';
@@ -66,6 +68,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [saving, setSaving] = useState(false);
   const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!agent) return;
@@ -247,7 +250,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.identity}>
-          <Avatar size={40} src={avatar || undefined} icon={<RobotOutlined />} />
+          <Avatar
+            size={40}
+            src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
+            icon={<RobotOutlined />}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setAvatarPickerOpen(true)}
+          />
           <div className={styles.titleBlock}>
             <span className={styles.title}>{agent.name}</span>
             <span className={styles.subtitle}>{description}</span>
@@ -276,7 +285,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'profile' && (
           <>
             <div className={styles.profileTop}>
-              <Avatar size={74} src={avatar || undefined} icon={<RobotOutlined />} />
+              <Avatar
+                size={74}
+                src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
+                icon={<RobotOutlined />}
+                style={{ cursor: 'pointer' }}
+                onClick={() => setAvatarPickerOpen(true)}
+              />
               <div className={styles.profileSummary}>
                 <div className={styles.profileName}>
                   {agent.name}
@@ -510,6 +525,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           </section>
         )}
       </div>
+      <AvatarPickerModal
+        agent={agent}
+        open={avatarPickerOpen}
+        onClose={() => setAvatarPickerOpen(false)}
+      />
     </div>
   );
 };

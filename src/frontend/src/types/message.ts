@@ -11,6 +11,28 @@ export interface ReplyToPreview {
   deleted_at?: string | null;
 }
 
+/**
+ * 结构化产物：从 Agent 回复中提取的代码 / 网页等一等对象。
+ * 字段名严格对齐后端 model.Artifact 与 daemon 上行 JSON（三层对齐真源）。
+ * `artifacts_json` 字段不动（只放 agent meta），产物经独立 artifacts 表随消息下发。
+ */
+export type ArtifactType = 'code' | 'webpage' | 'document' | 'file';
+
+export interface Artifact {
+  id?: string;
+  message_id?: string;
+  /** 版本血缘根（v1 的 id），同一逻辑产物各版本共享；用于版本历史/Diff */
+  root_id?: string;
+  version: number;
+  type: ArtifactType;
+  language?: string;
+  filename?: string;
+  title?: string;
+  url?: string;
+  content?: string;
+  created_at?: string;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -21,6 +43,7 @@ export interface Message {
   sender_id?: string;
   username?: string;
   attachments?: MessageAttachment[];
+  artifacts?: Artifact[];
   reply_to?: string | null;
   reply_to_message?: ReplyToPreview | null;
   mentions?: string[];
@@ -70,6 +93,7 @@ export interface StreamMessage {
     message?: string;
     userId?: string;
     attachments?: MessageAttachment[];
+    artifacts?: Artifact[];
     reply_to?: string | null;
     reply_to_message?: ReplyToPreview | null;
     agent_id?: string;
