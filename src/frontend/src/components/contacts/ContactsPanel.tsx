@@ -139,26 +139,28 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.searchBar}>
-        <Input.Search
+        <Input
           prefix={<SearchOutlined />}
           placeholder="搜索好友或群聊..."
           allowClear
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          className={styles.searchInput}
         />
       </div>
 
-      <div className={styles.section}>
-        <div className={styles.managerCard}>
-          <div className={styles.managerCopy}>
-            <span className={styles.managerTitle}>好友申请</span>
-            <span className={styles.managerHint}>{friends.length} 位好友 · {groupConvs.length} 个群聊</span>
+      <div className={styles.scrollContent}>
+        <div className={styles.section}>
+          <div className={styles.managerCard}>
+            <div className={styles.managerCopy}>
+              <span className={styles.managerTitle}>好友申请</span>
+              <span className={styles.managerHint}>{friends.length} 位好友 · {groupConvs.length} 个群聊</span>
+            </div>
+            <FriendRequest />
           </div>
-          <FriendRequest />
         </div>
-      </div>
 
-      <Tabs
+        <Tabs
         className={styles.tabs}
         size="small"
         items={[
@@ -249,6 +251,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
           },
         ]}
       />
+      </div>
     </div>
   );
 };

@@ -33,6 +33,8 @@ type ConvRepo interface {
 	UpdateTitle(ctx context.Context, id, title string) error
 	Archive(ctx context.Context, id string) error
 	Unarchive(ctx context.Context, id string) error
+	ArchiveForMember(ctx context.Context, conversationID, userID string) error
+	UnarchiveForMember(ctx context.Context, conversationID, userID string) error
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 	DeleteMember(ctx context.Context, conversationID, userID string) error
 	AddMember(ctx context.Context, conversationID, userID, role string) error
@@ -253,10 +255,17 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	// 私聊会话：任何成员都可归档
+	// agent 类型对话：只有创建者可归档，使用全局归档
+	if conv.Type == "agent" {
+		if conv.UserID != userID {
+			return ErrConvNoPerm
+		}
+		return s.repo.Archive(ctx, conversationID)
+	}
+	// 私聊会话：任何成员都可归档（按用户）
 	if conv.Type == "single" {
 		if conv.UserID == userID {
-			return s.repo.Archive(ctx, conversationID)
+			return s.repo.ArchiveForMember(ctx, conversationID, userID)
 		}
 		member, err := s.repo.GetMember(ctx, conversationID, userID)
 		if err != nil {
@@ -265,9 +274,9 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 		if member == nil {
 			return ErrConvNotMember
 		}
-		return s.repo.Archive(ctx, conversationID)
+		return s.repo.ArchiveForMember(ctx, conversationID, userID)
 	}
-	// 群聊需要 owner/admin 权限
+	// 群聊需要 owner/admin 权限，按用户归档
 	member, err := s.repo.GetMember(ctx, conversationID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
@@ -275,7 +284,7 @@ func (s *ConversationService) ArchiveConversation(ctx context.Context, userID, c
 	if member == nil || (member.Role != "owner" && member.Role != "admin") {
 		return ErrConvNotMember
 	}
-	return s.repo.Archive(ctx, conversationID)
+	return s.repo.ArchiveForMember(ctx, conversationID, userID)
 }
 
 // ListArchivedConversations 查询用户已归档的对话列表
@@ -308,10 +317,17 @@ func (s *ConversationService) UnarchiveConversation(ctx context.Context, userID,
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	// 私聊会话：任何成员都可取消归档
+	// agent 类型对话：只有创建者可取消归档，使用全局取消归档
+	if conv.Type == "agent" {
+		if conv.UserID != userID {
+			return ErrConvNoPerm
+		}
+		return s.repo.Unarchive(ctx, conversationID)
+	}
+	// 私聊会话：任何成员都可取消归档（按用户）
 	if conv.Type == "single" {
 		if conv.UserID == userID {
-			return s.repo.Unarchive(ctx, conversationID)
+			return s.repo.UnarchiveForMember(ctx, conversationID, userID)
 		}
 		member, err := s.repo.GetMember(ctx, conversationID, userID)
 		if err != nil {
@@ -320,9 +336,9 @@ func (s *ConversationService) UnarchiveConversation(ctx context.Context, userID,
 		if member == nil {
 			return ErrConvNotMember
 		}
-		return s.repo.Unarchive(ctx, conversationID)
+		return s.repo.UnarchiveForMember(ctx, conversationID, userID)
 	}
-	// 群聊需要 owner/admin 权限
+	// 群聊需要 owner/admin 权限，按用户取消归档
 	member, err := s.repo.GetMember(ctx, conversationID, userID)
 	if err != nil {
 		return fmt.Errorf("check member: %w", err)
@@ -330,7 +346,7 @@ func (s *ConversationService) UnarchiveConversation(ctx context.Context, userID,
 	if member == nil || (member.Role != "owner" && member.Role != "admin") {
 		return ErrConvNotMember
 	}
-	return s.repo.Unarchive(ctx, conversationID)
+	return s.repo.UnarchiveForMember(ctx, conversationID, userID)
 }
 
 // ListConversationAgents 查询当前对话里已加入的 Robot。

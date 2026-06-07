@@ -106,14 +106,12 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
             <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={onRefreshContacts} />
           </div>
         </div>
-        <div className={styles.middleScroll}>
-          <ContactsPanel
-            conversations={conversations}
-            onStartChat={onStartChat}
-            onStartAgentChat={onStartAgentChat}
-            onSwitchChat={onSwitchChat}
-          />
-        </div>
+        <ContactsPanel
+          conversations={conversations}
+          onStartChat={onStartChat}
+          onStartAgentChat={onStartAgentChat}
+          onSwitchChat={onSwitchChat}
+        />
       </>
     );
   }
