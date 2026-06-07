@@ -19,6 +19,8 @@ export interface WorkspaceTask {
   orch_task_id?: string;
   worker_name?: string;
   task_hash?: string;
+  worker_result?: string;
+  completed_at?: string;
 }
 
 export interface TaskQuery {

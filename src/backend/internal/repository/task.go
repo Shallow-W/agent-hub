@@ -26,7 +26,8 @@ func selectTaskSQL(from string) string {
 		t.title, t.description, t.status, t.priority, t.created_at, t.updated_at,
 		COALESCE(u.username, '') AS assignee_name,
 		COALESCE(a.name, '') AS agent_name,
-		t.orch_task_id, t.worker_name, t.task_hash
+		t.orch_task_id, t.worker_name, t.task_hash,
+		t.worker_result, t.completed_at
 		FROM ` + from + `
 		LEFT JOIN users u ON u.id = t.assignee_id
 		LEFT JOIN agents a ON a.id = t.agent_id`
@@ -194,6 +195,18 @@ func (r *TaskRepo) MoveStatus(ctx context.Context, userID, id, status string) (*
 		return nil, fmt.Errorf("move task status: %w", err)
 	}
 	return r.GetByID(ctx, "", updatedID)
+}
+
+// UpdateWorkerResult 更新 worker_result 并设置 completed_at = NOW()。
+func (r *TaskRepo) UpdateWorkerResult(ctx context.Context, id, result string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_tasks SET worker_result = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2`,
+		result, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update worker result: %w", err)
+	}
+	return nil
 }
 
 // Delete 删除任务。userID 为空时仅按 ID 匹配。

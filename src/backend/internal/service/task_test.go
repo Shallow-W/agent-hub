@@ -84,6 +84,14 @@ func (r *fakeTaskRepo) FailAllByOrchTask(context.Context, string) error {
 	return nil
 }
 
+func (r *fakeTaskRepo) UpdateWorkerResult(_ context.Context, _, result string) error {
+	if r.task == nil {
+		return nil
+	}
+	r.task.WorkerResult = &result
+	return nil
+}
+
 func TestTaskServiceCreateDefaults(t *testing.T) {
 	svc := NewTaskService(newFakeTaskRepo())
 	task, err := svc.Create(context.Background(), "user-1", model.TaskCreateInput{Title: "  设计任务看板  "})

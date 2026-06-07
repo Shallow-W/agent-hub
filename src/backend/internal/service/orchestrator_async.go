@@ -49,7 +49,7 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 
 	// 标记为执行中
 	if s.taskSvc != nil && orchTaskID != "" {
-		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "in_progress"); err != nil {
+		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "in_progress", ""); err != nil {
 			slog.Warn("update orch worker task to in_progress failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
 		} else {
 			s.pushTaskChanged(ctx, convID, userID)
@@ -88,7 +88,7 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 
 		// 同步 WorkspaceTask 状态为 done
 		if s.taskSvc != nil {
-			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "done"); err != nil {
+			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "done", truncateString(msg.Content, 4000)); err != nil {
 				slog.Warn("update orch worker task board status failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
 			} else {
 				s.pushTaskChanged(ctx, convID, userID)
@@ -114,7 +114,7 @@ func (s *OrchestratorService) markWorkerFailed(orchTaskID, workerName, taskDesc,
 	// 同步 WorkspaceTask 状态为 blocked
 	if s.taskSvc != nil {
 		taskHash := computeTaskHash(orchTaskID, workerName, truncateString(taskDesc, 80))
-		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "blocked"); err != nil {
+		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "blocked", reason); err != nil {
 			slog.Warn("update orch worker task board status (failed) error", "orch_task", orchTaskID, "worker", workerName, "error", err)
 		} else {
 			// 获取 convID 用于推送 WS 信号（仅在更新成功时推送）

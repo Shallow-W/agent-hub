@@ -23,12 +23,13 @@ type TaskRepo interface {
 	MoveStatus(ctx context.Context, userID, id, status string) (*model.WorkspaceTask, error)
 	Delete(ctx context.Context, userID, id string) (bool, error)
 	FailAllByOrchTask(ctx context.Context, orchTaskID string) error
+	UpdateWorkerResult(ctx context.Context, id, result string) error
 }
 
 // TaskBoardSync 定义 Orchestrator 到 TaskBoard 的同步接口。
 type TaskBoardSync interface {
 	CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error)
-	UpdateOrchWorkerStatus(ctx context.Context, taskHash, status string) error
+	UpdateOrchWorkerStatus(ctx context.Context, taskHash, status, result string) error
 	FailAllTasksForOrchTask(ctx context.Context, orchTaskID string) error
 }
 
@@ -191,7 +192,8 @@ func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, 
 }
 
 // UpdateOrchWorkerStatus Worker 状态变化时更新，通过 taskHash 精确定位。
-func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, taskHash, status string) error {
+// 当 status 为 done 或 blocked 时，result 参数存储到 worker_result 字段，并设 completed_at。
+func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, taskHash, status, result string) error {
 	task, err := s.repo.GetByTaskHash(ctx, taskHash)
 	if err != nil {
 		return fmt.Errorf("lookup task by hash: %w", err)
@@ -203,6 +205,12 @@ func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, taskHash, stat
 	_, err = s.repo.MoveStatus(ctx, "", task.ID, status)
 	if err != nil {
 		return fmt.Errorf("update orch worker status: %w", err)
+	}
+	// Store worker_result when reaching a terminal state
+	if (status == "done" || status == "blocked") && result != "" {
+		if err := s.repo.UpdateWorkerResult(ctx, task.ID, result); err != nil {
+			slog.Warn("store worker_result failed", "task_id", task.ID, "error", err)
+		}
 	}
 	return nil
 }
