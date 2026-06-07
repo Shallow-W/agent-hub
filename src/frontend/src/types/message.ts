@@ -1,5 +1,6 @@
 import type { MessageAttachment } from './attachment';
 import type { AttachmentPayload } from './attachment';
+import type { Deployment } from './deployment';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -70,6 +71,8 @@ export interface MessageArtifacts {
   agent_id?: string;
   agent_name?: string;
   cli_tool?: string;
+  /** 聊天「部署」指令回执：存在时前端在该消息内联渲染部署状态卡片 */
+  deployment?: Deployment;
 }
 
 export interface StreamMessage {

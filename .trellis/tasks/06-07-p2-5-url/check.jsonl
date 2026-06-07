@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端代码质量校验基线（命名、错误处理、测试）"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "校验 deploy 接口错误码与统一响应是否对齐既有范式"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端 DeployStatusCard 与 api 模块质量基线"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Deployment 类型三层对齐（Go/TS）校验"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "部署涉及 daemon? 否；但 model→api→组件三层契约需逐层核对"}

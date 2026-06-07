@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import type { Artifact } from '@/types/message';
 import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
+import { DeployButton } from './DeployButton';
 import styles from './ArtifactWorkspace.module.css';
 
 interface Props {
@@ -228,6 +229,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
               </>
             )}
           </span>
+          <DeployButton artifact={artifact} />
         </div>
         <Tabs
           activeKey={activeKey}

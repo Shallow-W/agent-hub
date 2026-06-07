@@ -108,6 +108,7 @@ func main() {
 	convRepo := repository.NewConversationRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	artifactRepo := repository.NewArtifactRepo(db)
+	deploymentRepo := repository.NewDeploymentRepo(db)
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
@@ -124,6 +125,8 @@ func main() {
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
+	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
+	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -158,6 +161,7 @@ func main() {
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
+	msgSvc.SetDeploymentService(deploymentSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -179,6 +183,7 @@ func main() {
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
+	deploymentHandler := handler.NewDeploymentHandler(deploymentSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
@@ -319,8 +324,18 @@ func main() {
 			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
 			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
 			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
+			artifactRoutes.POST("/:rootId/deploy", deploymentHandler.Deploy)
 		}
+
+		// 部署状态查询（需要鉴权）
+		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
 	}
+
+	// 部署产物的公开访问（凭 deployment id 作能力令牌，无需鉴权，便于二维码/分享/直链下载）
+	router.GET("/api/sites/:id/*filepath", middleware.ValidateUUIDParam("id"), deploymentHandler.ServeSite)
+	router.GET("/api/deployments/:id/download", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
+	// 带文件名末段的下载（:name 仅用于让浏览器存成正确的 .zip 名，handler 忽略其值）
+	router.GET("/api/deployments/:id/download/:name", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
 
 	// 好友路由（需要鉴权）
 	friendGroup := router.Group("/api/friends")

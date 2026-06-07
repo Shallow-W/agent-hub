@@ -90,6 +90,10 @@ uploads/
 src/backend/uploads/originals/
 src/backend/uploads/thumbnails/
 
+# === 部署发布产物（运行时落盘的站点目录） ===
+data/sites/
+src/backend/data/
+
 # === 测试时从 src/backend 复制到根目录的文件（防止误提交） ===
 /config/
 /migrations/
