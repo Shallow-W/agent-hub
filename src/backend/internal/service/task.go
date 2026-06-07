@@ -28,7 +28,7 @@ type TaskRepo interface {
 // TaskBoardSync 定义 Orchestrator 到 TaskBoard 的同步接口。
 type TaskBoardSync interface {
 	CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error)
-	UpdateOrchWorkerStatus(ctx context.Context, orchTaskID, workerName, status string) error
+	UpdateOrchWorkerStatus(ctx context.Context, taskHash, status string) error
 	FailAllTasksForOrchTask(ctx context.Context, orchTaskID string) error
 }
 
@@ -151,6 +151,8 @@ func (s *TaskService) Delete(ctx context.Context, userID, id string) error {
 }
 
 // computeTaskHash 生成任务内容的短 hash，用于跨轮次去重。
+// 输出 16 hex chars（64 bits），在单次 OrchTask 内 worker 数量（通常 < 100）下碰撞概率极低，
+// 远低于生日攻击阈值（~2^32 条才会 50% 碰撞概率），对本场景完全安全。
 func computeTaskHash(orchTaskID, workerName, title string) string {
 	h := sha256.Sum256([]byte(orchTaskID + ":" + workerName + ":" + title))
 	return hex.EncodeToString(h[:])[:16]
@@ -162,7 +164,10 @@ func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, 
 	taskHash := computeTaskHash(orchTaskID, workerName, title)
 
 	// 用 hash 查重：相同任务描述 → 幂等返回
-	existing, _ := s.repo.GetByTaskHash(ctx, taskHash)
+	existing, err := s.repo.GetByTaskHash(ctx, taskHash)
+	if err != nil {
+		return nil, fmt.Errorf("check task hash: %w", err)
+	}
 	if existing != nil {
 		return existing, nil // 幂等，不覆盖
 	}
@@ -185,14 +190,14 @@ func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, 
 	return task, nil
 }
 
-// UpdateOrchWorkerStatus Worker 状态变化时更新。
-func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, orchTaskID, workerName, status string) error {
-	task, err := s.repo.GetByOrchTaskAndWorker(ctx, orchTaskID, workerName)
+// UpdateOrchWorkerStatus Worker 状态变化时更新，通过 taskHash 精确定位。
+func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, taskHash, status string) error {
+	task, err := s.repo.GetByTaskHash(ctx, taskHash)
 	if err != nil {
-		return fmt.Errorf("find orch worker task: %w", err)
+		return fmt.Errorf("lookup task by hash: %w", err)
 	}
 	if task == nil {
-		slog.Debug("UpdateOrchWorkerStatus: task not found", "orch_task_id", orchTaskID, "worker", workerName)
+		slog.Debug("UpdateOrchWorkerStatus: task not found", "task_hash", taskHash)
 		return nil
 	}
 	_, err = s.repo.MoveStatus(ctx, "", task.ID, status)
