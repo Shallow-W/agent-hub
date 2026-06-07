@@ -326,9 +326,7 @@ const TaskBoardView: React.FC = () => {
 
   const resolveCreatorAvatar = (task: WorkspaceTask | OrchTaskCard): string => {
     if ('sender_id' in task) {
-      // OrchTaskCard - use embedded sender_avatar directly
-      if (task.sender_avatar) return task.sender_avatar;
-      return resolveAgentAvatar({ id: task.sender_id, name: task.sender_name });
+      return resolveAgentAvatar({ id: task.sender_id, name: task.sender_name, avatar: task.sender_avatar });
     }
     if (task.orch_task_id) {
       if (orchAgent) return resolveAgentAvatar({ id: orchAgent.agent_id, name: orchAgent.name, avatar: orchAgent.avatar });
@@ -357,10 +355,8 @@ const TaskBoardView: React.FC = () => {
   };
 
   const resolveWorkerAvatar = (task: WorkspaceTask | OrchTaskCard): string => {
-    if ('worker_avatar' in task) {
-      // OrchTaskCard - use embedded worker_avatar directly
-      if (task.worker_avatar) return task.worker_avatar;
-      return resolveAgentAvatar({ id: task.worker_id, name: task.worker_name });
+    if ('worker_id' in task) {
+      return resolveAgentAvatar({ id: task.worker_id, name: task.worker_name, avatar: task.worker_avatar });
     }
     if (task.agent_id) {
       const storeAgent = agents.find((a) => a.id === task.agent_id);

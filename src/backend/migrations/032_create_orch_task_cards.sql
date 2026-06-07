@@ -41,5 +41,4 @@ CREATE TABLE IF NOT EXISTS orch_task_cards (
 CREATE INDEX IF NOT EXISTS idx_orch_task_cards_conv ON orch_task_cards (conversation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orch_task_cards_hash ON orch_task_cards (task_hash);
 
----- DOWN
-DROP TABLE IF EXISTS orch_task_cards;
+-- DOWN: DROP TABLE IF EXISTS orch_task_cards;
