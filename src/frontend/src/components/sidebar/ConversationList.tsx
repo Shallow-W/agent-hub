@@ -72,6 +72,46 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
     ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
     : conversations;
 
+  const pinnedConvs = filtered.filter((c) => c.pinned);
+  const unpinnedConvs = filtered.filter((c) => !c.pinned);
+  const agentConvs = unpinnedConvs.filter((c) => c.type === 'agent');
+  const groupConvs = unpinnedConvs.filter((c) => c.type === 'group');
+  const singleConvs = unpinnedConvs.filter((c) => c.type === 'single');
+
+  const renderGroup = (convs: typeof filtered, header: string) =>
+    convs.length > 0 && (
+      <>
+        <div className={styles.sectionHeader}>{header}</div>
+        {convs.map((conv) => (
+          <ConversationItemWrapper
+            key={conv.id}
+            conversation={conv}
+            active={conv.id === activeId}
+            onSelect={() => setActive(conv.id)}
+            onDelete={() => remove(conv.id)}
+            onTogglePin={() => togglePin(conv.id)}
+            onRename={conv.type === 'group' ? (newTitle: string) => rename(conv.id, newTitle) : undefined}
+            onArchive={async () => {
+              try {
+                await convApi.archiveConversation(conv.id);
+                archiveConversationLocal(conv.id);
+              } catch {
+                antMessage.error('归档失败');
+              }
+            }}
+            onInviteMembers={
+              conv.type === 'group'
+                ? () => {
+                    setActive(conv.id);
+                    setMemberPanelOpen(true);
+                  }
+                : undefined
+            }
+          />
+        ))}
+      </>
+    );
+
   return (
     <div className={styles.list}>
       <div className={styles.searchWrap} data-conv-search>
@@ -85,34 +125,10 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
         />
       </div>
       <div className={styles.items}>
-        {filtered.map((conv) => (
-          <ConversationItemWrapper
-              key={conv.id}
-              conversation={conv}
-              active={conv.id === activeId}
-              onSelect={() => setActive(conv.id)}
-              onDelete={() => remove(conv.id)}
-              onTogglePin={() => togglePin(conv.id)}
-              onRename={conv.type === 'group' ? (newTitle: string) => rename(conv.id, newTitle) : undefined}
-              onArchive={async () => {
-                try {
-                  await convApi.archiveConversation(conv.id);
-                  archiveConversationLocal(conv.id);
-                } catch {
-                  antMessage.error('归档失败');
-                }
-              }}
-              onInviteMembers={
-                conv.type === 'group'
-                  ? () => {
-                      setActive(conv.id);
-                      setMemberPanelOpen(true);
-                    }
-                  : undefined
-              }
-            />
-          ))
-        }
+        {renderGroup(pinnedConvs, '置顶')}
+        {renderGroup(agentConvs, '智能体')}
+        {renderGroup(groupConvs, '群聊')}
+        {renderGroup(singleConvs, '单聊')}
       </div>
     </div>
   );

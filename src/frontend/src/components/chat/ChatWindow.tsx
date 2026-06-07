@@ -32,6 +32,7 @@ import { searchMessages } from '@/api/search';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { useAgentStore } from '@/store/agentStore';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
@@ -42,6 +43,7 @@ const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
   const user = useAuthStore((s) => s.user);
+  const agents = useAgentStore((s) => s.agents);
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const activeConv = conversations.find((c) => c.id === activeId);
   const memberPanelOpen = useConversationStore((s) => s.memberPanelOpen);
@@ -373,7 +375,10 @@ export const ChatWindow: React.FC = () => {
               <Avatar
                 className={styles.conversationAvatar}
                 size={26}
-                src={resolveAgentAvatar({ id: activeConv.peer_id || '', name: displayName })}
+                src={resolveAgentAvatar(
+                  agents.find((a) => a.id === activeConv.peer_id)
+                    || { id: activeConv.peer_id || '', name: displayName },
+                )}
                 icon={<RobotOutlined />}
               />
             ) : isGroup ? (
