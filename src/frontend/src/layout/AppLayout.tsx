@@ -29,7 +29,9 @@ import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
 import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
+import KnowledgeFilePreview from '@/components/knowledge/KnowledgeFilePreview';
 import type { Agent } from '@/types/agent';
+import type { KnowledgeFile } from '@/types/knowledge';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
@@ -56,10 +58,17 @@ const AppLayout: React.FC = () => {
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
+  const [selectedKnowledgeFile, setSelectedKnowledgeFile] = useState<KnowledgeFile | null>(null);
+  const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
   const creatingAgentChatRef = useRef<string | null>(null);
 
   const handleNavChange = useCallback((key: string) => {
     setActiveNav(key);
+    // 切换面板时清除知识库文件选中
+    if (key !== 'knowledge') {
+      setSelectedKnowledgeFile(null);
+      setSelectedKbId(null);
+    }
     if (key === 'settings') {
       navigate('/settings');
       return;
@@ -239,6 +248,11 @@ const AppLayout: React.FC = () => {
     setSelectedAgentId(null);
   }, []);
 
+  const handleKnowledgeFileSelect = useCallback((file: KnowledgeFile, kbId: string) => {
+    setSelectedKnowledgeFile(file);
+    setSelectedKbId(kbId);
+  }, []);
+
   return (
     <div className={styles.container}>
       {showDisconnectAlert && (
@@ -293,17 +307,24 @@ const AppLayout: React.FC = () => {
           selectedMachineId={selectedMachineId}
           onSelectAgent={handleSelectAgent}
           onSelectMachine={handleSelectMachine}
+          onKnowledgeFileSelect={handleKnowledgeFileSelect}
+          selectedFileId={selectedKnowledgeFile?.id ?? null}
+          selectedKbId={selectedKbId}
         />
       </div>
 
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
         {activeNav === 'knowledge' ? (
-          <div className={styles.emptyRightPanel}>
-            <div className={styles.emptyRightIcon}>📚</div>
-            <div className={styles.emptyRightTitle}>知识库管理</div>
-            <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
-          </div>
+          selectedKnowledgeFile && selectedKbId ? (
+            <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
+          ) : (
+            <div className={styles.emptyRightPanel}>
+              <div className={styles.emptyRightIcon}>📚</div>
+              <div className={styles.emptyRightTitle}>知识库管理</div>
+              <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+            </div>
+          )
         ) : activeNav === 'skills' ? (
           selectedAgent ? (
             <AgentSkillsPanel agent={selectedAgent} />

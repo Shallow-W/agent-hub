@@ -71,3 +71,11 @@ export async function removeConversationAgent(
 ): Promise<void> {
   return del<void>(`/api/conversations/${id}/agents/${agentId}`);
 }
+
+export async function setConversationAgentRole(
+  id: string,
+  agentId: string,
+  role: 'orchestrator' | 'worker',
+): Promise<void> {
+  return put<void>(`/api/conversations/${id}/agents/${agentId}/role`, { role });
+}

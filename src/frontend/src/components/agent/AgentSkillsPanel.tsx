@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   SaveOutlined,
   EditOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -18,11 +19,13 @@ interface AgentSkillsPanelProps {
 
 export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
+  const openSkillLocation = useAgentStore((s) => s.openSkillLocation);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
   const [editingSkillName, setEditingSkillName] = useState('');
   const [selectedSkillIdx, setSelectedSkillIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openingPath, setOpeningPath] = useState(false);
 
   useEffect(() => {
     const nextSkills = parseSkills(agent.capabilities_json);
@@ -30,7 +33,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setEditingSkillIdx(null);
     setEditingSkillName('');
     setSelectedSkillIdx(nextSkills.length > 0 ? 0 : null);
-  }, [agent.id]);
+  }, [agent.id, agent.capabilities_json]);
 
   const selectedSkill = selectedSkillIdx === null ? null : skills[selectedSkillIdx] ?? null;
 
@@ -88,6 +91,22 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setSkills((prev) =>
       prev.map((skill, idx) => (idx === selectedSkillIdx ? { ...skill, ...patch } : skill))
     );
+  };
+
+  const handleOpenLocation = async () => {
+    if (!selectedSkill?.source_path) return;
+    setOpeningPath(true);
+    try {
+      await openSkillLocation(agent.id, selectedSkill.source_path);
+      message.success('已打开所在文件夹');
+    } catch (err) {
+      const errorMessage = err instanceof Error && err.message
+        ? err.message
+        : '打开所在文件夹失败，请确认电脑 daemon 在线';
+      message.error(errorMessage);
+    } finally {
+      setOpeningPath(false);
+    }
   };
 
   return (
@@ -175,6 +194,22 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                   <span className={styles.detailTitle}>{selectedSkill.name}</span>
                   {selectedSkill.auto && <span className={styles.autoBadge}>auto</span>}
                 </div>
+                {selectedSkill.source_path && (
+                  <div className={styles.sourcePath}>
+                    <div className={styles.sourcePathText}>
+                      <span className={styles.fieldLabel}>真实路径</span>
+                      <span title={selectedSkill.source_path}>{selectedSkill.source_path}</span>
+                    </div>
+                    <Button
+                      size="small"
+                      icon={<FolderOpenOutlined />}
+                      loading={openingPath}
+                      onClick={handleOpenLocation}
+                    >
+                      打开所在文件夹
+                    </Button>
+                  </div>
+                )}
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>描述</span>
                   <Input.TextArea

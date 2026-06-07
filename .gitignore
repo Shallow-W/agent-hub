@@ -10,6 +10,9 @@ build/
 # === Go 构建产物 ===
 src/backend/bin/
 src/backend/server
+src/backend/agenthub-server
+src/backend/main
+src/backend/tmp/
 src/daemon/bin/
 bin/
 !src/daemon-npm/bin/
@@ -78,15 +81,18 @@ src/frontend/screenshot.mjs
 .claude/sessions/
 .claude/state/
 .claude/state.backup/
-src/backend/uploads/originals/
-src/backend/uploads/thumbnails/
 
 # === Playwright MCP 测试产物 ===
 .playwright-mcp/
 
 # === 本地上传文件（运行时生成） ===
 uploads/
+src/backend/uploads/originals/
+src/backend/uploads/thumbnails/
 
 # === 测试时从 src/backend 复制到根目录的文件（防止误提交） ===
 /config/
 /migrations/
+
+# === 本地临时运行文件 ===
+.tmp/

@@ -6,6 +6,9 @@ export interface KnowledgeFile {
   id: string;
   filename: string;
   size: number;
+  mime_type: string;
+  preview_type: 'text' | 'image' | 'binary' | 'too_large';
+  preview_text?: string;
   uploaded_at: string;
 }
 
@@ -21,7 +24,17 @@ export interface KnowledgeBase {
   updated_at: string;
 }
 
-/** 创建知识库请求 */
+/** 群组中可用的知识库（含 owner 信息） */
+export interface GroupKnowledgeBase {
+  id: string;
+  name: string;
+  description?: string;
+  visibility: KnowledgeVisibility;
+  username: string;
+  file_count: number;
+  created_at: string;
+  updated_at: string;
+}
 export interface CreateKnowledgeBaseRequest {
   name: string;
   description?: string;

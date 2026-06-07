@@ -23,13 +23,12 @@
   background: var(--gradient-agent) !important;
   font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 0 0 2px var(--color-bg-white), 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
 .bubbleUser .chatAvatar { margin: 20px 0 0 10px; }
 .bubbleAssistant .chatAvatar { margin: 20px 10px 0 0; }
 
-.avatarSpacer { width: 35px; flex-shrink: 0; }
+.avatarSpacer { width: 46px; flex-shrink: 0; }
 
 .content {
   display: flex;
@@ -163,6 +162,67 @@
   text-align: left;
 }
 
+/* ── Markdown element styles (rendered by react-markdown) ── */
+
+/* Headings */
+.markdownBody :global(h1), .markdownBody :global(h2), .markdownBody :global(h3),
+.markdownBody :global(h4), .markdownBody :global(h5), .markdownBody :global(h6) {
+  margin: 12px 0 6px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.markdownBody :global(h1) { font-size: 18px; }
+.markdownBody :global(h2) { font-size: 16px; }
+.markdownBody :global(h3) { font-size: 14.5px; }
+.markdownBody :global(h4), .markdownBody :global(h5), .markdownBody :global(h6) { font-size: 13.5px; }
+
+/* Lists */
+.markdownBody :global(ul), .markdownBody :global(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.markdownBody :global(li) { margin: 2px 0; }
+
+/* Blockquotes */
+.markdownBody :global(blockquote) {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--color-primary);
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+}
+
+/* Horizontal rule */
+.markdownBody :global(hr) {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Paragraphs */
+.markdownBody :global(p) {
+  margin: 4px 0;
+}
+
+/* Task list checkboxes */
+.markdownBody :global(input[type="checkbox"]) {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Images inside markdown */
+.markdownBody :global(img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+/* Strikethrough */
+.markdownBody :global(del) {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
 .systemMessage {
   display: flex;
   justify-content: center;
@@ -177,98 +237,7 @@
   border-radius: 10px;
 }
 
-.codeBlockWrapper {
-  margin: 8px 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  background-color: #1c2128;
-}
-
-.codeHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: #8b949e;
-  font-size: 11px;
-  background: rgba(0, 0, 0, 0.15);
-}
-
-.codeCopyBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #8b949e;
-  cursor: pointer;
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
-}
-
-.codeBlockWrapper:hover .codeCopyBtn {
-  opacity: 1;
-}
-
-.codeCopyBtn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #e6edf3;
-}
-
-.codeCopyBtnCopied {
-  color: #3fb950 !important;
-  opacity: 1 !important;
-}
-
-.codeCopyIcon {
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-}
-
-.codeCopyText {
-  font-family: var(--font-family);
-}
-
-.codeBlock {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  color: #e6edf3;
-  font-family: 'SF Mono', Menlo, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  background: #1c2128;
-}
-
-/* ── highlight.js github-dark-dimmed theme (inline, no external CSS) ── */
-.codeBlock :global(.hljs-comment),
-.codeBlock :global(.hljs-quote) { color: #8b949e; font-style: italic; }
-.codeBlock :global(.hljs-keyword),
-.codeBlock :global(.hljs-selector-tag),
-.codeBlock :global(.hljs-type) { color: #ff7b72; }
-.codeBlock :global(.hljs-string),
-.codeBlock :global(.hljs-addition) { color: #a5d6ff; }
-.codeBlock :global(.hljs-number),
-.codeBlock :global(.hljs-literal) { color: #79c0ff; }
-.codeBlock :global(.hljs-built_in) { color: #ffa657; }
-.codeBlock :global(.hljs-function),
-.codeBlock :global(.hljs-title) { color: #d2a8ff; }
-.codeBlock :global(.hljs-variable),
-.codeBlock :global(.hljs-attr) { color: #79c0ff; }
-.codeBlock :global(.hljs-selector-class) { color: #7ee787; }
-.codeBlock :global(.hljs-selector-id) { color: #ffa657; }
-.codeBlock :global(.hljs-meta) { color: #8b949e; }
-.codeBlock :global(.hljs-deletion) { color: #ffa198; background: rgba(255, 122, 122, 0.1); }
-.codeBlock :global(.hljs-symbol),
-.codeBlock :global(.hljs-bullet) { color: #f2cc60; }
-.codeBlock :global(.hljs-link) { color: #a5d6ff; text-decoration: underline; }
+/* 围栏代码块样式已抽到 CodeBlock.module.css，供 markdown / 产物卡片复用 */
 
 .inlineCode {
   padding: 1px 4px;
@@ -454,4 +423,23 @@
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   border-radius: 8px;
   line-height: 1.5;
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .innerAssistant {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .innerAssistant .mention {
+  color: #8ab4f8;
+  background: rgba(138, 180, 248, 0.15);
+}
+
+:global(html.dark) .markdownBody :global(blockquote) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
+.innerUser .mention {
+  color: rgba(255, 255, 255, 0.92);
 }

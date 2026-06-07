@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -17,17 +18,18 @@ import (
 )
 
 var (
-	ErrKBNotFound    = errors.New("知识库不存在")
+	ErrKBNotFound     = errors.New("知识库不存在")
 	ErrKBNoPermission = errors.New("无权访问该知识库")
-	ErrKBNameEmpty   = errors.New("知识库名称不能为空")
-	ErrKBNotPublic   = errors.New("该知识库不是公开的")
-	ErrKBFileEmpty   = errors.New("上传文件不能为空")
+	ErrKBNameEmpty    = errors.New("知识库名称不能为空")
+	ErrKBNotPublic    = errors.New("该知识库不是公开的")
+	ErrKBFileEmpty    = errors.New("上传文件不能为空")
+	ErrKBFileNotFound = errors.New("文件不存在")
 )
 
 // KnowledgeService 知识库业务逻辑
 type KnowledgeService struct {
-	kbRepo   *repository.KnowledgeRepo
-	userRepo *repository.UserRepo
+	kbRepo    *repository.KnowledgeRepo
+	userRepo  *repository.UserRepo
 	uploadDir string
 }
 
@@ -161,13 +163,59 @@ func (s *KnowledgeService) UploadFile(ctx context.Context, userID, kbID string, 
 	}
 
 	// 数据库路径使用正斜杠
-	dbPath := "uploads/knowledge/" + kbID + "/" + storedName
+	dbPath := path.Join("knowledge", kbID, storedName)
 
 	// 检测MIME
 	mimeType := detectFileMIME(fileHeader.Filename, fileContent)
 
-	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex)
+	// 上传时预处理：提取文本内容或标记文件类型
+	previewText, previewType := extractPreview(fileHeader.Filename, mimeType, fileContent)
+
+	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex, previewText, previewType)
 	return err
+}
+
+// GetUploadDir 返回上传目录路径
+func (s *KnowledgeService) GetUploadDir() string {
+	return s.uploadDir
+}
+
+// GetFile 获取知识库中的单个文件（含权限验证）
+func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID string) (*model.KnowledgeFile, error) {
+	kb, err := s.kbRepo.GetByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if kb == nil {
+		return nil, ErrKBNotFound
+	}
+	if kb.UserID != userID && kb.Visibility != "public" {
+		return nil, ErrKBNoPermission
+	}
+
+	f, err := s.kbRepo.GetFileByID(ctx, kbID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, ErrKBFileNotFound
+	}
+	return f, nil
+}
+
+// ListFiles 获取知识库中的文件列表（含权限验证）
+func (s *KnowledgeService) ListFiles(ctx context.Context, userID, kbID string) ([]model.KnowledgeFile, error) {
+	kb, err := s.kbRepo.GetByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if kb == nil {
+		return nil, ErrKBNotFound
+	}
+	if kb.UserID != userID && kb.Visibility != "public" {
+		return nil, ErrKBNoPermission
+	}
+	return s.kbRepo.ListFiles(ctx, kbID)
 }
 
 // DeleteFile 删除知识库文件
@@ -187,9 +235,52 @@ func (s *KnowledgeService) DeleteFile(ctx context.Context, userID, kbID, fileID 
 	if err != nil {
 		return err
 	}
+	if filePath == "" {
+		return ErrKBFileNotFound
+	}
 	// 删除物理文件
 	_ = os.Remove(filepath.Join(s.uploadDir, filepath.Clean(filePath)))
 	return nil
+}
+
+// ListGroupKnowledgeBases 返回群组中当前用户可用的知识库列表：
+// 自己的全部 KB（含私有和公开） + 其他群成员的公开 KB。
+func (s *KnowledgeService) ListGroupKnowledgeBases(ctx context.Context, currentUserID string, memberUserIDs []string) ([]model.KnowledgeBase, error) {
+	// 1. 获取自己的全部 KB
+	ownKBs, err := s.List(ctx, currentUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list own knowledge bases: %w", err)
+	}
+	// 填充 username
+	user, err := s.userRepo.GetUserByID(ctx, currentUserID)
+	if err != nil || user == nil {
+		return nil, fmt.Errorf("get current user: %w", err)
+	}
+	for i := range ownKBs {
+		ownKBs[i].Username = user.Username
+		ownKBs[i].Files = nil // 列表场景不需要文件内容
+	}
+
+	// 2. 获取其他成员的公开 KB
+	otherIDs := make([]string, 0, len(memberUserIDs))
+	for _, id := range memberUserIDs {
+		if id != currentUserID {
+			otherIDs = append(otherIDs, id)
+		}
+	}
+	if len(otherIDs) == 0 {
+		return ownKBs, nil
+	}
+
+	publicKBs, err := s.kbRepo.ListPublicByUsers(ctx, otherIDs, currentUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list public knowledge bases: %w", err)
+	}
+
+	result := make([]model.KnowledgeBase, 0, len(ownKBs)+len(publicKBs))
+	result = append(result, ownKBs...)
+	result = append(result, publicKBs...)
+	return result, nil
 }
 
 // ResolveKnowledgeRef 解析群聊中的知识库引用 "用户名/知识库名"
@@ -266,4 +357,56 @@ func detectFileMIME(filename string, content []byte) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// previewTextMaxSize 预览文本的最大字节数（200KB）
+const previewTextMaxSize = 200 * 1024
+
+// previewableTextExts 可以提取文本内容的文件扩展名
+var previewableTextExts = map[string]bool{
+	".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true,
+	".html": true, ".htm": true, ".xml": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".log": true,
+	".sh": true, ".bat": true, ".ps1": true, ".py": true, ".js": true,
+	".ts": true, ".tsx": true, ".jsx": true, ".go": true, ".java": true,
+	".c": true, ".cpp": true, ".h": true, ".hpp": true, ".cs": true,
+	".rs": true, ".rb": true, ".php": true, ".sql": true, ".env": true,
+	".dockerfile": true, ".makefile": true, ".properties": true, ".gradle": true,
+	".swift": true, ".kt": true, ".scala": true, ".r": true, ".lua": true,
+}
+
+// imageExts 图片文件扩展名
+var imageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+	".bmp": true, ".svg": true, ".ico": true,
+}
+
+// extractPreview 上传时预处理文件内容，返回 (previewText, previewType)。
+// - 文本文件（<200KB）: previewType="text", previewText=文件内容
+// - 超大文本文件: previewType="too_large", previewText=""
+// - 图片文件: previewType="image", previewText=文件名+尺寸描述
+// - 其他二进制: previewType="binary", previewText=""
+func extractPreview(filename string, mimeType string, content []byte) (string, string) {
+	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
+
+	// 1. 文本文件
+	if previewableTextExts[ext] || strings.HasPrefix(mimeType, "text/") {
+		if len(content) > previewTextMaxSize {
+			return "", "too_large"
+		}
+		return string(content), "text"
+	}
+
+	// 2. 图片文件：生成描述信息供 Agent 理解图片用途
+	if imageExts[ext] || strings.HasPrefix(mimeType, "image/") {
+		// SVG 是文本格式，直接提取内容
+		if ext == ".svg" && len(content) <= previewTextMaxSize {
+			return string(content), "text"
+		}
+		desc := fmt.Sprintf("[图片: %s, %s, %s]", filename, formatFileSize(int64(len(content))), mimeType)
+		return desc, "image"
+	}
+
+	// 3. PDF 等文档：标记为 binary（未来可扩展文本提取）
+	return "", "binary"
 }

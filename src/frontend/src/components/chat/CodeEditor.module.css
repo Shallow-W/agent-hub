@@ -1,0 +1,21 @@
+.editorHost {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  user-select: text;
+}
+
+.editorHost :global(.cm-editor) {
+  height: 100%;
+}
+
+.editorHost :global(.cm-scroller),
+.editorHost :global(.cm-content),
+.editorHost :global(.cm-line) {
+  user-select: text;
+}
+
+.editorHost :global(.cm-editor.cm-focused) {
+  outline: none;
+}

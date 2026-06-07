@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 const maxMessageLen = 10000 // 10KB
@@ -44,6 +45,30 @@ type MsgRepo interface {
 	GetMessageSender(ctx context.Context, messageID string) (string, error)
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
+	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+}
+
+// artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
+func artifactsFromTaskResult(results []ws.ArtifactResult) []model.Artifact {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]model.Artifact, 0, len(results))
+	for _, r := range results {
+		if r.Type == "" {
+			continue
+		}
+		out = append(out, model.Artifact{
+			Version:  1,
+			Type:     r.Type,
+			Language: r.Language,
+			Filename: r.Filename,
+			Title:    r.Title,
+			URL:      r.URL,
+			Content:  r.Content,
+		})
+	}
+	return out
 }
 
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
@@ -87,6 +112,7 @@ type MessageService struct {
 	notifier  MessageNotifier
 	cacher    MessageCacher
 	orchSvc   *OrchestratorService
+	daemonHub *ws.DaemonHub
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -113,6 +139,11 @@ func (s *MessageService) SetCacher(c MessageCacher) {
 // SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
 func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 	s.orchSvc = orchSvc
+}
+
+// SetDaemonHub 注入 DaemonHub（避免循环依赖，由 main.go 调用）
+func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
+	s.daemonHub = hub
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -162,9 +193,8 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 		return nil, err
 	}
 
-	if role == "" {
-		role = "user"
-	}
+	// 强制角色约束：客户端只允许发送 user 角色消息，防止伪造 assistant 消息
+	role = "user"
 
 	// 校验 reply_to 引用的消息
 	if replyTo != nil {
@@ -191,26 +221,27 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
-	// @mention routing — 异步派发，不阻塞 HTTP 响应
-	if s.orchSvc != nil && strings.TrimSpace(agentID) == "" {
-		mentions := ParseMentions(content)
-		if len(mentions) > 0 {
-			go s.asyncMentionDispatch(convID, userID, content)
+	// Agent dispatch routing based on conversation type
+	switch conv.Type {
+	case "agent":
+		// Single/agent chat — direct dispatch via agentID
+		if strings.TrimSpace(agentID) != "" {
+			go s.asyncAgentReply(convID, userID, agentID, content)
 		}
-	}
-
-	// Agent 回复（显式 agentID 路径，异步派发）
-	if strings.TrimSpace(agentID) != "" {
-		go s.asyncAgentReply(convID, userID, agentID, content)
+	case "group":
+		// Group chat — mention routing via Orchestrator
+		if s.orchSvc != nil {
+			parsedMentions := ParseMentions(content)
+			if len(mentions) > 0 || len(parsedMentions) > 0 {
+				go s.asyncMentionDispatch(convID, userID, content)
+			}
+		}
+	default:
+		// "single" or other types — no agent dispatch
 	}
 
 	// 异步推送和缓存（失败不影响消息持久化）
 	go s.postPersist(convID, userID, msg)
-
-	// 刷新对话的 updated_at
-	if err := s.convRepo.UpdateTimestamp(ctx, convID); err != nil {
-		return nil, fmt.Errorf("update conversation timestamp: %w", err)
-	}
 
 	return result, nil
 }
@@ -283,6 +314,8 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 
 	if s.cacher != nil {
 		_ = s.cacher.ClearUnread(ctx, userID, convID)
+		// 同时清空离线消息队列，防止 GetUnreadMessages 再次返回已读消息
+		_, _ = s.cacher.DequeueOfflineAfter(ctx, userID, convID, "+inf")
 	}
 
 	return nil
@@ -304,8 +337,8 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if limit <= 0 {
 		limit = 50
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 200 {
+		limit = 200
 	}
 
 	// 仅在无游标时使用缓存（缓存是最新N条，不含历史分页）
@@ -580,12 +613,45 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
-	task, err = s.waitDaemonTask(ctx, task.ID)
-	if err != nil {
-		return nil, err
+
+	// Push via WS and wait for channel-based result
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
-	if task.Status == "failed" {
-		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
+	s.daemonHub.RegisterTaskPromise(task.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           userContent,
+			"context_messages": contextMessages,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+			"user_id":          userID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to daemon: %w", err)
+	}
+
+	ch := s.daemonHub.AwaitTaskResult(task.ID)
+	if ch == nil {
+		return nil, fmt.Errorf("daemon not connected for task %s", task.ID)
+	}
+	defer s.daemonHub.RemoveTaskPromise(task.ID)
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	var result *ws.TaskResult
+	select {
+	case result = <-ch:
+	case <-ctx.Done():
+		return nil, ErrMsgAgentTimeout
+	}
+
+	if result.Error != "" {
+		return nil, fmt.Errorf("daemon task failed: %s", result.Error)
 	}
 
 	artifacts, err := json.Marshal(map[string]string{
@@ -597,35 +663,20 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
-	return msg, nil
-}
 
-func (s *MessageService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(600 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		task, err := s.agentRepo.GetDaemonTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("get daemon task: %w", err)
-		}
-		if task != nil && (task.Status == "completed" || task.Status == "failed") {
-			return task, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ErrMsgAgentTimeout
-		case <-ticker.C:
+	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
+	if arts := artifactsFromTaskResult(result.Artifacts); len(arts) > 0 {
+		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
+			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
+		} else {
+			msg.Artifacts = arts
 		}
 	}
+	return msg, nil
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
@@ -672,7 +723,23 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	defer cancel()
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
-	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+
+		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
+		if s.orchSvc != nil {
+			agent, err := s.agentRepo.GetByID(ctx, agentID)
+			if err == nil && agent != nil {
+				// KB 优先从消息内容中预解析
+				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
+				if kbCtx != "" {
+					contextMessages = kbCtx + contextMessages
+				}
+				// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
+				// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
+				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+			}
+		}
+
+		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
 		return

@@ -11,7 +11,8 @@ import {
 import { useAgents } from '@/hooks/useAgents';
 import type { Agent, AgentStatus, DaemonMachine } from '@/types/agent';
 import { ConnectComputerModal } from './ConnectComputerModal';
-import { formatDateTime, parseCapabilities } from './agentPresentation';
+import { AvatarPickerModal } from './AvatarPickerModal';
+import { formatDateTime, parseCapabilities, resolveAgentAvatar } from './agentPresentation';
 import styles from './AgentList.module.css';
 
 interface AgentListProps {
@@ -26,6 +27,7 @@ const statusColor: Record<AgentStatus, string> = {
   offline: 'default',
   busy: 'processing',
   error: 'red',
+  stopped: 'default',
 };
 
 const machineStatusLabel: Record<DaemonMachine['status'], string> = {
@@ -47,6 +49,7 @@ export const AgentList: React.FC<AgentListProps> = ({
   onSelectMachine,
 }) => {
   const [connectOpen, setConnectOpen] = useState(false);
+  const [avatarPickerAgent, setAvatarPickerAgent] = useState<Agent | null>(null);
   const [expandedMachines, setExpandedMachines] = useState<Record<string, boolean>>({});
   const {
     agents,
@@ -232,7 +235,16 @@ export const AgentList: React.FC<AgentListProps> = ({
                           >
                             <div className={styles.agentHeader}>
                               <Badge color={statusColor[agent.status]} dot>
-                                <Avatar size={28} icon={<RobotOutlined />} />
+                                <Avatar
+                                  size={28}
+                                  src={resolveAgentAvatar(agent)}
+                                  icon={<RobotOutlined />}
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={(event) => {
+                                    event?.stopPropagation();
+                                    setAvatarPickerAgent(agent);
+                                  }}
+                                />
                               </Badge>
                               <div className={styles.agentMeta}>
                                 <span className={styles.agentName}>{agent.name}</span>
@@ -285,9 +297,13 @@ export const AgentList: React.FC<AgentListProps> = ({
         onCreate={createDaemonMachine}
         onDeleteMachine={deleteDaemonMachine}
         onRefresh={async () => {
-          await refreshMachines();
-          await refreshCandidates();
+          await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
         }}
+      />
+      <AvatarPickerModal
+        agent={avatarPickerAgent}
+        open={avatarPickerAgent !== null}
+        onClose={() => setAvatarPickerAgent(null)}
       />
     </div>
   );

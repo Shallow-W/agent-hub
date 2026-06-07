@@ -1,0 +1,212 @@
+/* 全屏产物工作区：Preview / Code / Meta 三视图 */
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  height: 72vh;
+}
+
+.workspaceModal :global(.ant-modal-content) {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspaceModal :global(.ant-modal-body) {
+  flex: 1;
+  min-height: 0;
+}
+
+.webpageModal :global(.ant-modal-content) {
+  height: calc(100vh - 32px);
+}
+
+.webpageModal :global(.ant-modal-body) {
+  padding: 16px;
+}
+
+.webpageModalBody {
+  height: calc(100vh - 64px);
+  min-height: 0;
+}
+
+.documentModalBody {
+  height: calc(100vh - 96px);
+}
+
+.documentModal :global(.ant-modal-content) {
+  min-height: calc(100vh - 32px);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sourceAgent {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.viewArea {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.documentViewArea {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+/* Preview：iframe 占满 */
+.previewArea {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* Code 视图：CodeBlock 撑满高度 */
+.codeArea {
+  height: 100%;
+  overflow: auto;
+  padding: 0 2px;
+}
+
+.documentArea {
+  min-height: 100%;
+  padding: 32px 40px 56px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.documentArea :global(h1),
+.documentArea :global(h2),
+.documentArea :global(h3) {
+  margin: 0 0 12px;
+  color: var(--color-text);
+}
+
+.documentArea :global(p),
+.documentArea :global(ul),
+.documentArea :global(ol),
+.documentArea :global(blockquote),
+.documentArea :global(pre) {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.documentArea :global(code) {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--color-surface-muted);
+}
+
+.documentArea :global(.contains-task-list) {
+  padding-left: 0;
+  list-style: none;
+}
+
+.documentArea :global(.task-list-item) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.taskCheckbox {
+  width: 16px;
+  height: 16px;
+  margin: 5px 2px 0 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.documentArea :global(pre) {
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1c2128;
+  color: #e6edf3;
+}
+
+.textDocument {
+  box-sizing: border-box;
+  min-height: 100%;
+  margin: 0;
+  padding: 24px 28px;
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+/* Meta 视图 */
+.metaTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.metaTable th,
+.metaTable td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.metaTable th {
+  width: 120px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.metaLink {
+  color: var(--color-primary);
+  word-break: break-all;
+}
+
+.emptyHint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}

@@ -2,12 +2,17 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
+
+const minDescriptionChars = 6
 
 // SkillInfo 描述本机 Agent 暴露的真实 skill 文件
 type SkillInfo struct {
@@ -60,6 +65,12 @@ func DefaultCandidates() []Candidate {
 			Name:         "OpenCode",
 			CLITool:      "opencode",
 			Command:      "opencode",
+			Capabilities: defaultSkills("coding"),
+		},
+		{
+			Name:         "OpenClaw",
+			CLITool:      "openclaw",
+			Command:      "openclaw",
 			Capabilities: defaultSkills("coding"),
 		},
 	}
@@ -117,7 +128,16 @@ func (s *Scanner) readSkills(candidate Candidate) []SkillInfo {
 	seen := make(map[string]bool)
 	for _, root := range roots {
 		filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil || entry.IsDir() || entry.Name() != "SKILL.md" {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() {
+				if entry.Name() == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.Name() != "SKILL.md" {
 				return nil
 			}
 			content, err := os.ReadFile(path)
@@ -141,21 +161,94 @@ func skillRoots(cliTool string) []string {
 	wd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	roots := make([]string, 0, 4)
+	includeProjectRoots := !isAgentHubWorkspace(wd)
 	switch cliTool {
 	case "claude":
-		roots = append(roots, filepath.Join(wd, ".claude", "skills"))
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".claude", "skills"))
+		}
 		if home != "" {
-			roots = append(roots, filepath.Join(home, ".claude", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "plugins", "marketplaces"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".claude", "plugins", "cache"))
 		}
 	case "codex":
-		roots = append(roots, filepath.Join(wd, ".agents", "skills"))
-		if home != "" {
-			roots = append(roots, filepath.Join(home, ".codex", "skills"))
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".agents", "skills"))
 		}
-	case "opencode":
-		roots = append(roots, filepath.Join(wd, ".opencode", "skills"))
 		if home != "" {
-			roots = append(roots, filepath.Join(home, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".codex", "skills"))
+		}
+	case "opencode", "openclaw":
+		if includeProjectRoots {
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(wd, ".openclaw", "skills"))
+		}
+		if home != "" {
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".opencode", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".openclaw", "skills"))
+			roots = appendUniqueRoot(roots, filepath.Join(home, ".openclaw", "plugin-skills"))
+			roots = append(roots, openClawInstallSkillRoots(home)...)
+		}
+	}
+	return roots
+}
+
+func isAgentHubWorkspace(root string) bool {
+	if root == "" {
+		return false
+	}
+	daemonPackage := filepath.Join(root, "src", "daemon-npm", "package.json")
+	frontendPackage := filepath.Join(root, "src", "frontend", "package.json")
+	if _, err := os.Stat(frontendPackage); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(daemonPackage)
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	return pkg.Name == "@agenthub/daemon"
+}
+
+func appendUniqueRoot(roots []string, root string) []string {
+	if root == "" {
+		return roots
+	}
+	for _, existing := range roots {
+		if existing == root {
+			return roots
+		}
+	}
+	return append(roots, root)
+}
+
+func openClawInstallSkillRoots(home string) []string {
+	data, err := os.ReadFile(filepath.Join(home, ".openclaw", "plugins", "installs.json"))
+	if err != nil {
+		return nil
+	}
+	var installs struct {
+		InstallRecords map[string]struct {
+			InstallPath string `json:"installPath"`
+			SourcePath  string `json:"sourcePath"`
+		} `json:"installRecords"`
+	}
+	if err := json.Unmarshal(data, &installs); err != nil {
+		return nil
+	}
+	roots := make([]string, 0, len(installs.InstallRecords))
+	for _, record := range installs.InstallRecords {
+		if record.InstallPath != "" {
+			roots = appendUniqueRoot(roots, filepath.Join(record.InstallPath, "skills"))
+		}
+		if record.SourcePath != "" {
+			roots = appendUniqueRoot(roots, filepath.Join(record.SourcePath, "skills"))
 		}
 	}
 	return roots
@@ -165,10 +258,11 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 	skill := SkillInfo{Name: fallbackName, Detail: content, SourcePath: path, Auto: true}
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
+		skill.Description = normalizeSkillDescription(skill.Name, skill.Description, content)
 		return skill
 	}
-	for _, line := range lines[1:] {
-		trimmed := strings.TrimSpace(line)
+	for i := 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "---" {
 			break
 		}
@@ -176,7 +270,7 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 		if !ok {
 			continue
 		}
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		value, i = readFrontmatterValue(lines, i, strings.TrimSpace(value))
 		switch strings.TrimSpace(key) {
 		case "name":
 			if value != "" {
@@ -186,13 +280,172 @@ func parseSkillFile(fallbackName, path, content string) SkillInfo {
 			skill.Description = value
 		}
 	}
+	skill.Description = normalizeSkillDescription(skill.Name, skill.Description, content)
 	return skill
+}
+
+func normalizeSkillDescription(name, description, content string) string {
+	current := strings.TrimSpace(description)
+	if isUsefulDescription(current) {
+		return current
+	}
+	return inferSkillDescription(name, content)
+}
+
+func isUsefulDescription(description string) bool {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return false
+	}
+	switch strings.ToLower(description) {
+	case "ok", "todo", "tbd", "none", "n/a", "na", "null", "undefined", "test", "demo", "sample", "example":
+		return false
+	}
+	count := 0
+	for _, r := range description {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		count++
+	}
+	return count >= minDescriptionChars
+}
+
+func inferSkillDescription(name, content string) string {
+	body := stripFrontmatter(content)
+	lines := strings.Split(body, "\n")
+	chunks := make([]string, 0, 3)
+	inFence := false
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || line == "" {
+			continue
+		}
+		line = cleanMarkdownLine(line)
+		if line == "" || strings.EqualFold(line, name) {
+			continue
+		}
+		chunks = append(chunks, line)
+		if len(strings.Join(chunks, " ")) >= 120 {
+			break
+		}
+	}
+	summary := truncateDescription(strings.Join(chunks, " "))
+	if summary != "" {
+		return summary
+	}
+	if name == "" {
+		name = "selected"
+	}
+	return "Provides the " + name + " skill for local Agent workflows."
+}
+
+func stripFrontmatter(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return content
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return content
+}
+
+func cleanMarkdownLine(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "#")
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "-*+>")
+	line = strings.TrimSpace(line)
+	line = trimOrderedListPrefix(line)
+	line = regexp.MustCompile(`!\[[^\]]*]\([^)]*\)`).ReplaceAllString(line, "")
+	line = regexp.MustCompile(`\[([^\]]+)]\([^)]*\)`).ReplaceAllString(line, "$1")
+	replacer := strings.NewReplacer("`", "", "**", "", "__", "", "*", "", "_", "")
+	return strings.TrimSpace(replacer.Replace(line))
+}
+
+func trimOrderedListPrefix(line string) string {
+	index := 0
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if index == 0 || index >= len(line) || (line[index] != '.' && line[index] != ')') {
+		return line
+	}
+	index++
+	for index < len(line) && (line[index] == ' ' || line[index] == '\t') {
+		index++
+	}
+	return line[index:]
+}
+
+func truncateDescription(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len([]rune(text)) <= 180 {
+		return text
+	}
+	runes := []rune(text)
+	return strings.TrimSpace(string(runes[:177])) + "..."
 }
 
 func defaultSkills(names ...string) []SkillInfo {
 	skills := make([]SkillInfo, 0, len(names))
 	for _, name := range names {
-		skills = append(skills, SkillInfo{Name: name, Auto: true})
+		skills = append(skills, SkillInfo{Name: name, Description: defaultSkillDescription(name), Auto: true})
 	}
 	return skills
+}
+
+func defaultSkillDescription(name string) string {
+	switch name {
+	case "coding":
+		return "Handle local coding tasks such as implementation, refactoring, and project edits."
+	case "review":
+		return "Review code changes, identify risks, and suggest focused improvements."
+	case "orchestration":
+		return "Coordinate multi-step work and route tasks across local Agent workflows."
+	default:
+		return "Provides the " + name + " skill for local Agent workflows."
+	}
+}
+
+func readFrontmatterValue(lines []string, index int, rawValue string) (string, int) {
+	value := strings.Trim(strings.TrimSpace(rawValue), `"'`)
+	if rawValue != ">" && rawValue != "|" {
+		return value, index
+	}
+	folded := rawValue == ">"
+	parts := make([]string, 0)
+	nextIndex := index
+	for i := index + 1; i < len(lines); i++ {
+		current := lines[i]
+		trimmed := strings.TrimSpace(current)
+		if trimmed == "---" || isFrontmatterKeyLine(current) {
+			nextIndex = i - 1
+			break
+		}
+		parts = append(parts, trimmed)
+		nextIndex = i
+	}
+	if folded {
+		return strings.TrimSpace(strings.Join(parts, " ")), nextIndex
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), nextIndex
+}
+
+func isFrontmatterKeyLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	first := rune(line[0])
+	if unicode.IsSpace(first) {
+		return false
+	}
+	return regexp.MustCompile(`^[A-Za-z0-9_-]+\s*:`).MatchString(strings.TrimSpace(line))
 }

@@ -43,6 +43,9 @@ func (s *TaskService) List(ctx context.Context, userID string, filter model.Task
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
+	if tasks == nil {
+		tasks = []*model.WorkspaceTask{}
+	}
 	return tasks, nil
 }
 
@@ -124,7 +127,7 @@ func (s *TaskService) Delete(ctx context.Context, userID, id string) error {
 
 func isTaskStatus(status string) bool {
 	switch status {
-	case "todo", "in_progress", "blocked", "done":
+	case "todo", "in_progress", "blocked", "done", "cancelled":
 		return true
 	default:
 		return false

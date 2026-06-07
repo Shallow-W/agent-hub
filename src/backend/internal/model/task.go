@@ -5,7 +5,7 @@ import "time"
 // WorkspaceTask 表示任务看板中的一张任务卡片。
 type WorkspaceTask struct {
 	ID             string    `json:"id" db:"id"`
-	UserID         string    `json:"user_id" db:"user_id"`
+	UserID         *string   `json:"user_id,omitempty" db:"user_id"`
 	ConversationID *string   `json:"conversation_id,omitempty" db:"conversation_id"`
 	AssigneeID     *string   `json:"assignee_id,omitempty" db:"assignee_id"`
 	AgentID        *string   `json:"agent_id,omitempty" db:"agent_id"`

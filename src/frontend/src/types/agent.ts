@@ -1,5 +1,5 @@
 export type AgentType = 'system' | 'custom';
-export type AgentStatus = 'online' | 'offline' | 'busy' | 'error';
+export type AgentStatus = 'online' | 'offline' | 'busy' | 'error' | 'stopped';
 
 export interface Agent {
   id: string;
@@ -69,5 +69,10 @@ export interface CreateDaemonMachineResponse {
 
 export interface AddCandidateAgentRequest {
   name: string;
+  cli_tool: string;
   system_prompt?: string;
+}
+
+export interface OpenSkillLocationRequest {
+  source_path: string;
 }

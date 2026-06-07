@@ -2,18 +2,40 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 // --- Orchestrator-specific fakes (fakeMsgRepo is in message_test.go) ---
+
+// newTestDaemonHub creates a DaemonHub with a fake connected client for the
+// given machineID. The hub can be used with SetDaemonHub to make dispatch
+// methods work. Tests must manually call hub.RegisterTaskPromise + hub.ResolveTask
+// or use autoResolveTask after creating a daemon task.
+func newTestDaemonHub(t *testing.T, machineID string) *ws.DaemonHub {
+	t.Helper()
+	hub := ws.NewDaemonHub(slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go hub.Run(ctx)
+
+	// Insert a fake client so IsConnected returns true.
+	client := ws.NewDaemonClient(nil, machineID)
+	hub.RegisterTestClient(machineID, client)
+	return hub
+}
 
 type fakeOrchConvRepo struct {
 	conv       *model.Conversation
 	convAgents []model.ConversationAgent
 	convErr    error
 	agentsErr  error
+	member     *model.ConversationMember
+	memberErr  error
 }
 
 func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversation, error) {
@@ -22,6 +44,14 @@ func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversa
 
 func (f *fakeOrchConvRepo) ListAgents(_ context.Context, _, _ string) ([]model.ConversationAgent, error) {
 	return f.convAgents, f.agentsErr
+}
+
+func (f *fakeOrchConvRepo) GetMember(_ context.Context, _, _ string) (*model.ConversationMember, error) {
+	return f.member, f.memberErr
+}
+
+func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string, error) {
+	return []string{}, nil
 }
 
 type fakeOrchAgentRepo struct {
@@ -46,6 +76,12 @@ func (f *fakeOrchAgentRepo) GetDaemonTask(_ context.Context, _ string) (*model.D
 
 func (f *fakeOrchAgentRepo) IsAgentInConversation(_ context.Context, _, _, _ string) (bool, error) {
 	return f.inConv, nil
+}
+
+func (f *fakeOrchAgentRepo) SetDaemonTaskOrch(_ context.Context, _, _, _ string) {}
+
+func (f *fakeOrchAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
+	return true, nil
 }
 
 // --- RouteMention tests ---
@@ -146,7 +182,7 @@ func TestDispatchSingleAgent_NotInConversation_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	_, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello", "")
 	if err == nil {
 		t.Fatal("expected error when agent not in conversation, got nil")
 	}
@@ -165,24 +201,41 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 		CLITool:   "claude",
 		MachineID: stringPtr("machine-1"),
 	}
+
+	taskResult := "hello world"
+
 	svc := NewOrchestratorService(
 		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
 		&fakeOrchAgentRepo{
 			agent:  agent,
 			inConv: true,
-			task:   &model.DaemonTask{ID: "task-2", Status: "completed", Result: "hello world"},
+			task:   &model.DaemonTask{ID: "task-2", Status: "completed", Result: taskResult},
 		},
 		&fakeMsgRepo{},
 	)
 
-	msg, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello")
+	// Wire up DaemonHub with fake connected client
+	hub := newTestDaemonHub(t, "machine-1")
+	svc.SetDaemonHub(hub)
+
+	// Resolve the task promise in background after a short delay
+	// (dispatch path registers the promise then waits on it)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-2", &ws.TaskResult{
+			TaskID: "task-2",
+			Result: taskResult,
+		})
+	}()
+
+	msg, err := svc.dispatchSingleAgent(context.Background(), "c1", userID, agent, "hello", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if msg == nil {
 		t.Fatal("expected message, got nil")
 	}
-	if msg.Content != "hello world" {
-		t.Fatalf("expected 'hello world', got %s", msg.Content)
+	if msg.Content != taskResult {
+		t.Fatalf("expected %q, got %s", taskResult, msg.Content)
 	}
 }

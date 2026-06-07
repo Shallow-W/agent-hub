@@ -2,10 +2,11 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
+)
+
+const (
+	daemonOpenPathTool = "__agenthub_open_path__"
 )
 
 // DiscoveredSkill 兼容旧 daemon 的字符串能力，也承载真实 SKILL.md 内容。
@@ -33,40 +34,23 @@ func (s *DiscoveredSkill) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func syncSkillFiles(capabilitiesJSON string) error {
+func hasDiscoveredSkillSource(capabilitiesJSON, sourcePath string) bool {
+	sourcePath = strings.TrimSpace(sourcePath)
+	if sourcePath == "" {
+		return false
+	}
+	for _, skill := range parseDiscoveredSkills(capabilitiesJSON) {
+		if strings.TrimSpace(skill.SourcePath) == sourcePath {
+			return true
+		}
+	}
+	return false
+}
+
+func parseDiscoveredSkills(capabilitiesJSON string) []DiscoveredSkill {
 	var skills []DiscoveredSkill
 	if err := json.Unmarshal([]byte(capabilitiesJSON), &skills); err != nil {
 		return nil
 	}
-	for _, skill := range skills {
-		sourcePath := strings.TrimSpace(skill.SourcePath)
-		if sourcePath == "" {
-			continue
-		}
-		if err := writeSkillFile(sourcePath, skill.Detail); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeSkillFile(sourcePath, detail string) error {
-	cleanPath, err := filepath.Abs(filepath.Clean(sourcePath))
-	if err != nil {
-		return fmt.Errorf("resolve skill path: %w", err)
-	}
-	if filepath.Base(cleanPath) != "SKILL.md" {
-		return ErrAgentInvalidInput
-	}
-	info, err := os.Stat(cleanPath)
-	if err != nil {
-		return fmt.Errorf("stat skill file: %w", err)
-	}
-	if info.IsDir() {
-		return ErrAgentInvalidInput
-	}
-	if err := os.WriteFile(cleanPath, []byte(detail), info.Mode().Perm()); err != nil {
-		return fmt.Errorf("write skill file: %w", err)
-	}
-	return nil
+	return skills
 }

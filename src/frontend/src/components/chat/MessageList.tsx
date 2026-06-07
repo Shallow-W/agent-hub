@@ -14,8 +14,20 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
 }
 
+/** Extract agent_name from artifacts_json, or null */
+function getAgentName(msg: Message): string | null {
+  if (!msg.artifacts_json) return null;
+  try { return (JSON.parse(msg.artifacts_json) as { agent_name?: string }).agent_name ?? null; } catch { return null; }
+}
+
 /** Check if two messages from the same sender are within 5 minutes */
 function isGrouped(prev: Message, curr: Message): boolean {
+  // Agent messages with different agent_name should NOT be grouped
+  if (prev.role === 'assistant' && curr.role === 'assistant') {
+    const prevAgent = getAgentName(prev);
+    const currAgent = getAgentName(curr);
+    if (prevAgent !== currAgent) return false;
+  }
   // 两者都有 sender_id 时严格比较
   if (prev.sender_id && curr.sender_id) {
     if (prev.sender_id !== curr.sender_id) return false;
@@ -48,9 +60,12 @@ function formatDividerTime(dateStr: string): string {
   if (msgDate.getTime() === yesterday.getTime()) {
     return `昨天 ${hh}:${mm}`;
   }
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}-${day} ${hh}:${mm}`;
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${month}月${day}日 ${hh}:${mm}`;
+  }
+  return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
 export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply, onForward }) => {

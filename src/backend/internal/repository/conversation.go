@@ -201,7 +201,7 @@ func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userI
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
 			        a.name, a.type, a.cli_tool, a.avatar, a.source, a.status, a.version,
-			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json
+			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json, a.system_prompt
 			 FROM conversation_agents ca
 			 JOIN conversations c ON c.id = ca.conversation_id
 			 JOIN agents a ON a.id = ca.agent_id
@@ -511,4 +511,44 @@ func (r *ConversationRepo) RemoveAgent(ctx context.Context, conversationID, agen
 		return false, fmt.Errorf("rows affected: %w", err)
 	}
 	return count > 0, nil
+}
+
+// UpdateAgentRole 更新会话中 Agent 的角色（用于 Orch 设置）
+func (r *ConversationRepo) UpdateAgentRole(ctx context.Context, conversationID, agentID, role string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_agents SET role = $1
+		 WHERE conversation_id = $2 AND agent_id = $3`,
+		role, conversationID, agentID,
+	)
+	if err != nil {
+		return fmt.Errorf("update agent role: %w", err)
+	}
+	count, _ := res.RowsAffected()
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// GetOrchestrator 获取会话中当前的 Orchestrator
+func (r *ConversationRepo) GetOrchestrator(ctx context.Context, conversationID string) (*model.ConversationAgent, error) {
+	var item model.ConversationAgent
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
+		 a.name, a.type, a.cli_tool, COALESCE(a.avatar, '') AS avatar,
+		 a.source, a.status, COALESCE(a.version, '') AS version,
+		 a.machine_id, COALESCE(a.machine_name, '') AS machine_name,
+		 a.last_seen_at, COALESCE(a.capabilities_json, '') AS capabilities_json
+		 FROM conversation_agents ca
+		 JOIN agents a ON a.id = ca.agent_id
+		 WHERE ca.conversation_id = $1 AND ca.role = 'orchestrator'`,
+		conversationID,
+	).StructScan(&item)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get orchestrator: %w", err)
+	}
+	return &item, nil
 }

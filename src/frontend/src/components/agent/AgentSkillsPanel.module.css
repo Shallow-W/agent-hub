@@ -210,6 +210,35 @@
   color: var(--color-text);
 }
 
+.sourcePath {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 143, 107, 0.16);
+  border-radius: 8px;
+  background: rgba(47, 143, 107, 0.05);
+}
+
+.sourcePathText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sourcePathText span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -259,4 +288,13 @@
   .skillList {
     max-height: 260px;
   }
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .skillCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .detailPane {
+  border-color: rgba(255, 255, 255, 0.08);
 }

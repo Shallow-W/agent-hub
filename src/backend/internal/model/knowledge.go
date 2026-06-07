@@ -24,5 +24,7 @@ type KnowledgeFile struct {
 	FilePath        string    `json:"-" db:"file_path"`
 	FileSize        int64     `json:"size" db:"file_size"`
 	MimeType        string    `json:"mime_type" db:"mime_type"`
+	PreviewText     string    `json:"preview_text,omitempty" db:"preview_text"`
+	PreviewType     string    `json:"preview_type" db:"preview_type"`
 	CreatedAt       time.Time `json:"uploaded_at" db:"created_at"`
 }

@@ -35,6 +35,11 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
 }
 
+/* ── 暗色模式 ── */
+:global(html.dark) .machineAvatar {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
 .titleRow {
   display: flex;
   align-items: center;
@@ -208,13 +213,26 @@
   flex: 1;
 }
 
+.agentActions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.agentRow:hover .agentActions {
+  opacity: 1;
+}
+
 .emptyRow,
 .empty {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 92px;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 
@@ -239,4 +257,21 @@
   .agentList {
     grid-template-columns: 1fr;
   }
+}
+
+/* 重连命令：去除 antd Typography 自动链接的蓝色 */
+.reconnectBox :global(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* 暗色模式：重连命令代码块 */
+:global(html.dark) .reconnectBox :global(code) {
+  color: #e2e8f0 !important;
+  background: #1e293b !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(html.dark) .reconnectBox :global(a) {
+  color: #94a3b8 !important;
 }

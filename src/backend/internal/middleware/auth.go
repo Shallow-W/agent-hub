@@ -71,6 +71,29 @@ func Auth(cfg JWTConfig) gin.HandlerFunc {
 	}
 }
 
+// MCPAuth 返回 MCP 路由的 daemon token 鉴权中间件。
+// 验证 Bearer token 后，若请求携带 user_id 查询参数则写入 gin context。
+func MCPAuth(token string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			ErrorResponse(c, http.StatusUnauthorized, 40101, "缺少 Authorization 头")
+			c.Abort()
+			return
+		}
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" || parts[1] != token {
+			ErrorResponse(c, http.StatusUnauthorized, 40103, "无效的 daemon token")
+			c.Abort()
+			return
+		}
+		if uid := c.Query("user_id"); uid != "" {
+			c.Set("user_id", uid)
+		}
+		c.Next()
+	}
+}
+
 // GetUserID 从上下文提取用户 ID
 func GetUserID(c *gin.Context) string {
 	v, _ := c.Get("user_id")

@@ -20,7 +20,7 @@ export interface ConversationAgent {
   conversation_id: string;
   agent_id: string;
   added_by: string;
-  role: 'robot';
+  role: 'robot' | 'orchestrator' | 'worker';
   joined_at: string;
   name: string;
   type: string;

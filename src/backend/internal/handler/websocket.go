@@ -197,7 +197,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					continue
 				}
 				h.hub.SendToRoomExcept(payload.ConversationID, client, ws.WSMessage{
-					Type: "user.typing",
+					Type: "user.typing_start",
 					Data: map[string]string{
 						"user_id":         client.UserID,
 						"username":        client.Username,

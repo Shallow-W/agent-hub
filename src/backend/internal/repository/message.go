@@ -14,11 +14,12 @@ import (
 type MessageRepo struct {
 	db             *sqlx.DB
 	attachmentRepo *AttachmentRepo
+	artifactRepo   *ArtifactRepo
 }
 
 // NewMessageRepo 创建消息仓库
-func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo) *MessageRepo {
-	return &MessageRepo{db: db, attachmentRepo: attachmentRepo}
+func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *ArtifactRepo) *MessageRepo {
+	return &MessageRepo{db: db, attachmentRepo: attachmentRepo, artifactRepo: artifactRepo}
 }
 
 // messageCols 通用消息查询列（含 JOIN users 获取 username）
@@ -96,6 +97,15 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	m.Mentions = mentions
 
 	return &m, nil
+}
+
+// SaveArtifacts 保存 assistant 消息的结构化产物（产物来源于 daemon 解析的回复）。
+// 与消息创建解耦：在 assistant 消息持久化后调用，落到独立 artifacts 表。
+func (r *MessageRepo) SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error {
+	if r.artifactRepo == nil || len(artifacts) == 0 {
+		return nil
+	}
+	return r.artifactRepo.CreateArtifacts(ctx, messageID, artifacts)
 }
 
 // MarkConversationRead 更新会话成员的已读时间戳
@@ -276,6 +286,12 @@ func (r *MessageRepo) fillAttachmentsAndReply(ctx context.Context, messages []mo
 		return nil, err
 	}
 
+	// 填充产物
+	messages, err = r.fillArtifacts(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+
 	// 填充回复引用
 	messages, err = r.fillReplyTo(ctx, messages)
 	if err != nil {
@@ -306,6 +322,25 @@ func (r *MessageRepo) fillAttachments(ctx context.Context, messages []model.Mess
 	}
 	for i := range messages {
 		messages[i].Attachments = attMap[messages[i].ID]
+	}
+	return messages, nil
+}
+
+// fillArtifacts 批量填充消息的产物字段
+func (r *MessageRepo) fillArtifacts(ctx context.Context, messages []model.Message) ([]model.Message, error) {
+	if r.artifactRepo == nil || len(messages) == 0 {
+		return messages, nil
+	}
+	ids := make([]string, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	artMap, err := r.artifactRepo.ListByMessageIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("fill artifacts: %w", err)
+	}
+	for i := range messages {
+		messages[i].Artifacts = artMap[messages[i].ID]
 	}
 	return messages, nil
 }

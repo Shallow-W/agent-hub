@@ -8,13 +8,13 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { getDefaultAgentName, parseCapabilities } from './agentPresentation';
 import type {
   Agent,
   AgentCandidate,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
-import { parseCapabilities } from './agentPresentation';
 import styles from './ConnectComputerModal.module.css';
 
 interface ConnectComputerModalProps {
@@ -24,7 +24,7 @@ interface ConnectComputerModalProps {
   loading: boolean;
   onClose: () => void;
   onCreate: (name: string) => Promise<CreateDaemonMachineResponse>;
-  onAddCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
+  onAddCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
   onDeleteMachine: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
 }
@@ -155,11 +155,11 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
   };
 
   const handleAddCandidate = async (candidate: AgentCandidate) => {
-    const displayName = (candidateNames[candidate.id] || candidate.name).trim();
+    const displayName = (candidateNames[candidate.id] || getDefaultAgentName(candidate.name, candidate.cli_tool)).trim();
     if (!displayName) return;
     setAddingID(candidate.id);
     try {
-      await onAddCandidate(candidate.id, displayName);
+      await onAddCandidate(candidate.id, displayName, candidate.cli_tool);
       await handleRefresh();
       message.success(`${displayName} 已添加`);
     } catch (err) {
@@ -275,7 +275,10 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
         </div>
 
         <div className={styles.candidatePanel}>
-          <div className={styles.candidateTitle}>DETECTED CLI TOOLS</div>
+          <div className={styles.candidateTitle}>
+            <span>DETECTED CLI TOOLS</span>
+            <span>{safeCandidates.length} Agents</span>
+          </div>
           <div className={styles.candidateList}>
             {safeCandidates.length === 0 ? (
               <div className={styles.candidateEmpty}>
@@ -285,8 +288,8 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
               </div>
             ) : (
               safeCandidates.map((candidate) => {
-                const capabilities = parseCapabilities(candidate.capabilities_json);
-                return (
+                      const capabilities = parseCapabilities(candidate.capabilities_json);
+                      return (
                   <div className={styles.candidateItem} key={candidate.id}>
                     <div className={styles.candidateMeta}>
                       <strong>{candidate.name}</strong>
@@ -305,7 +308,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                     </div>
                     <Input
                       maxLength={100}
-                      value={candidateNames[candidate.id] ?? candidate.name}
+                      value={candidateNames[candidate.id] ?? getDefaultAgentName(candidate.name, candidate.cli_tool)}
                       onChange={(event) => setCandidateNames((state) => ({
                         ...state,
                         [candidate.id]: event.target.value,
@@ -314,13 +317,14 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                     <Button
                       icon={<PlusOutlined />}
                       loading={addingID === candidate.id}
+                      disabled={addingID !== null && addingID !== candidate.id}
                       type="primary"
                       onClick={() => handleAddCandidate(candidate)}
                     >
                       添加 Agent
                     </Button>
                   </div>
-                );
+              );
               })
             )}
           </div>

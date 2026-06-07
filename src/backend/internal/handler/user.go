@@ -38,9 +38,10 @@ func (h *UserHandler) Search(c *gin.Context) {
 	middleware.SuccessResponse(c, list)
 }
 
-// UpdateProfileRequest 更新资料请求体
+// UpdateProfileRequest 更新资料请求体。两字段均可选，至少传一个。
 type UpdateProfileRequest struct {
-	Username string `json:"username" binding:"required,max=20"`
+	Username *string `json:"username" binding:"omitempty,max=20"`
+	Avatar   *string `json:"avatar" binding:"omitempty,max=256"`
 }
 
 // GetProfile 获取当前用户资料
@@ -68,7 +69,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	user, err := h.userSvc.UpdateProfile(c.Request.Context(), userID, req.Username)
+	user, err := h.userSvc.UpdateProfile(c.Request.Context(), userID, req.Username, req.Avatar)
 	if err != nil {
 		if errors.Is(err, service.ErrUsernameEmpty) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40603, err.Error())

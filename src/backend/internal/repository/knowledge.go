@@ -103,7 +103,7 @@ func (r *KnowledgeRepo) Delete(ctx context.Context, id string) error {
 func (r *KnowledgeRepo) ListFiles(ctx context.Context, kbID string) ([]model.KnowledgeFile, error) {
 	var files []model.KnowledgeFile
 	err := r.db.SelectContext(ctx, &files,
-		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at
 		 FROM knowledge_files
 		 WHERE knowledge_base_id = $1
 		 ORDER BY created_at DESC`,
@@ -119,13 +119,13 @@ func (r *KnowledgeRepo) ListFiles(ctx context.Context, kbID string) ([]model.Kno
 }
 
 // AddFile 添加文件到知识库
-func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath string, fileSize int64, mimeType, sha256 string) (*model.KnowledgeFile, error) {
+func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath string, fileSize int64, mimeType, sha256, previewText, previewType string) (*model.KnowledgeFile, error) {
 	var f model.KnowledgeFile
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO knowledge_files (knowledge_base_id, filename, file_path, file_size, mime_type, sha256)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, knowledge_base_id, filename, file_path, file_size, mime_type, created_at`,
-		kbID, filename, filePath, fileSize, mimeType, sha256,
+		`INSERT INTO knowledge_files (knowledge_base_id, filename, file_path, file_size, mime_type, sha256, preview_text, preview_type)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at`,
+		kbID, filename, filePath, fileSize, mimeType, sha256, previewText, previewType,
 	).StructScan(&f)
 	if err != nil {
 		return nil, fmt.Errorf("insert knowledge file: %w", err)
@@ -138,7 +138,7 @@ func (r *KnowledgeRepo) AddFile(ctx context.Context, kbID, filename, filePath st
 	return &f, nil
 }
 
-// DeleteFile 删除知识库文件
+// DeleteFile 删除知识库文件，返回文件路径用于删除物理文件
 func (r *KnowledgeRepo) DeleteFile(ctx context.Context, kbID, fileID string) (string, error) {
 	// 先获取文件路径以便删除物理文件
 	var filePath string
@@ -146,6 +146,9 @@ func (r *KnowledgeRepo) DeleteFile(ctx context.Context, kbID, fileID string) (st
 		`SELECT file_path FROM knowledge_files WHERE id = $1 AND knowledge_base_id = $2`,
 		fileID, kbID,
 	).Scan(&filePath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil // 文件不存在，返回空路径
+	}
 	if err != nil {
 		return "", fmt.Errorf("get knowledge file path: %w", err)
 	}
@@ -200,7 +203,57 @@ func (r *KnowledgeRepo) FindByUserAndName(ctx context.Context, userID, kbName st
 	return &kb, nil
 }
 
+// GetFileByID 按文件ID获取单个文件记录
+func (r *KnowledgeRepo) GetFileByID(ctx context.Context, kbID, fileID string) (*model.KnowledgeFile, error) {
+	var f model.KnowledgeFile
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at
+		 FROM knowledge_files
+		 WHERE id = $1 AND knowledge_base_id = $2`,
+		fileID, kbID,
+	).StructScan(&f)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get knowledge file: %w", err)
+	}
+	return &f, nil
+}
+
 // GetFileContent 获取知识库文件路径列表（用于Agent引用）
 func (r *KnowledgeRepo) GetFileContent(ctx context.Context, kbID string) ([]model.KnowledgeFile, error) {
 	return r.ListFiles(ctx, kbID)
+}
+
+// ListPublicByUsers 列出指定用户列表中其他用户的公开知识库。
+// excludeUserID 用于排除当前用户（当前用户的 KB 通过 ListByUser 单独获取）。
+func (r *KnowledgeRepo) ListPublicByUsers(ctx context.Context, userIDs []string, excludeUserID string) ([]model.KnowledgeBase, error) {
+	if len(userIDs) == 0 {
+		return []model.KnowledgeBase{}, nil
+	}
+
+	query, args, err := sqlx.In(
+		`SELECT kb.id, kb.user_id, kb.name, kb.description, kb.visibility, kb.created_at, kb.updated_at,
+		        u.username,
+		        (SELECT COUNT(*) FROM knowledge_files kf WHERE kf.knowledge_base_id = kb.id) AS file_count
+		 FROM knowledge_bases kb
+		 JOIN users u ON u.id = kb.user_id
+		 WHERE kb.user_id IN (?) AND kb.visibility = 'public' AND kb.user_id != ?
+		 ORDER BY kb.updated_at DESC`,
+		userIDs, excludeUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build in query for list public by users: %w", err)
+	}
+	query = r.db.Rebind(query)
+
+	var kbs []model.KnowledgeBase
+	if err := r.db.SelectContext(ctx, &kbs, query, args...); err != nil {
+		return nil, fmt.Errorf("list public knowledge bases by users: %w", err)
+	}
+	if kbs == nil {
+		kbs = []model.KnowledgeBase{}
+	}
+	return kbs, nil
 }

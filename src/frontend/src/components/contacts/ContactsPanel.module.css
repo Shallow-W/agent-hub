@@ -55,7 +55,7 @@
 
 .managerHint {
   overflow: hidden;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -131,7 +131,7 @@
 .contactMeta {
   display: block;
   overflow: hidden;
-  color: #6f7b86;
+  color: var(--color-text-tertiary);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -166,4 +166,29 @@
 
 .empty {
   padding: 14px 0 10px;
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .searchBar :global(.ant-input-search .ant-input-affix-wrapper) {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
+}
+
+:global(html.dark) .contactItem:hover {
+  background: var(--color-surface-muted);
+}
+
+:global(html.dark) .friendAvatar,
+:global(html.dark) .agentAvatar {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+:global(html.dark) .managerCard {
+  border-top-color: rgba(255, 255, 255, 0.06);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .managerHint,
+:global(html.dark) .contactMeta {
+  color: var(--color-text-tertiary);
 }

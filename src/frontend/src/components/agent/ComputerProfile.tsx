@@ -1,17 +1,20 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, message, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, message, Tooltip, Typography } from 'antd';
 import {
+  CaretRightOutlined,
   DeleteOutlined,
   DesktopOutlined,
   LinkOutlined,
   PlusOutlined,
+  PoweroffOutlined,
   ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
-import { formatDateTime, parseCapabilities } from './agentPresentation';
+import { AvatarPickerModal } from './AvatarPickerModal';
+import { formatDateTime, parseCapabilities, resolveAgentAvatar } from './agentPresentation';
 import styles from './ComputerProfile.module.css';
 
 interface ComputerProfileProps {
@@ -31,6 +34,22 @@ const machineStatusColor: Record<DaemonMachine['status'], string> = {
   connected: 'green',
   pending: 'gold',
   offline: 'default',
+};
+
+const agentStatusLabel: Record<Agent['status'], string> = {
+  online: '运行中',
+  offline: '离线',
+  busy: '忙碌',
+  error: '异常',
+  stopped: '已停止',
+};
+
+const agentStatusColor: Record<Agent['status'], string> = {
+  online: 'green',
+  offline: 'default',
+  busy: 'processing',
+  error: 'red',
+  stopped: 'default',
 };
 
 function inferOS(machine: DaemonMachine): string {
@@ -56,9 +75,14 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   const refreshCandidates = useAgentStore((s) => s.fetchAgentCandidates);
   const refreshAgents = useAgentStore((s) => s.fetchAgents);
   const addAgentCandidate = useAgentStore((s) => s.addAgentCandidate);
+  const startAgent = useAgentStore((s) => s.startAgent);
+  const stopAgent = useAgentStore((s) => s.stopAgent);
+  const restartAgent = useAgentStore((s) => s.restartAgent);
   const [createOpen, setCreateOpen] = useState(false);
+  const [avatarPickerAgent, setAvatarPickerAgent] = useState<Agent | null>(null);
   const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [lifecycleLoading, setLifecycleLoading] = useState<Record<string, boolean>>({});
 
   const machine = machines.find((item) => item.id === machineId) ?? null;
   const machineAgents = useMemo(
@@ -95,10 +119,13 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(machine.id);
-      // Use daemon_npm_path to build a working local command
+      // 后端返回的 command 包含正确的 --server-url，前端不自行拼接
       if (result.daemon_npm_path) {
         setReconnectCmd(
-          `npx "@agenthub/daemon@file:${result.daemon_npm_path}" --server-url "${window.location.protocol}//${window.location.hostname}:${window.location.port === '5173' ? '8080' : window.location.port}" --api-key "${result.api_key}"`,
+          result.command.replace(
+            /npx\s+@agenthub\/daemon(\S+)?/,
+            `npx "@agenthub/daemon@file:${result.daemon_npm_path}"`,
+          ),
         );
       } else {
         setReconnectCmd(result.command);
@@ -111,7 +138,48 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   };
 
   const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string) => {
-    await addAgentCandidate(candidateId, name, systemPrompt);
+    const candidate = machineCandidates.find((item) => item.id === candidateId);
+    if (!candidate) {
+      message.error('Agent 底座不存在，请刷新后重试');
+      return;
+    }
+    await addAgentCandidate(candidateId, name, candidate.cli_tool, systemPrompt);
+  };
+
+  const handleStartAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await startAgent(agentId);
+      message.success('Agent 已启动');
+    } catch {
+      message.error('启动 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
+  };
+
+  const handleStopAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await stopAgent(agentId);
+      message.success('Agent 已停止');
+    } catch {
+      message.error('停止 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
+  };
+
+  const handleRestartAgent = async (agentId: string) => {
+    setLifecycleLoading((prev) => ({ ...prev, [agentId]: true }));
+    try {
+      await restartAgent(agentId);
+      message.success('Agent 已重启');
+    } catch {
+      message.error('重启 Agent 失败');
+    } finally {
+      setLifecycleLoading((prev) => ({ ...prev, [agentId]: false }));
+    }
   };
 
   if (!machine) {
@@ -171,7 +239,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         </div>
       </div>
       {reconnectCmd && (
-        <div style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
+        <div className={styles.reconnectBox} style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
             在目标电脑上执行以下命令重新连接：
           </div>
@@ -232,8 +300,8 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         ) : (
           <div className={styles.baseList}>
             {machineCandidates.map((candidate: AgentCandidate) => {
-              const capabilityList = parseCapabilities(candidate.capabilities_json);
-              return (
+                const capabilityList = parseCapabilities(candidate.capabilities_json);
+                return (
                 <div className={styles.baseCard} key={candidate.id}>
                   <div className={styles.baseName}>{candidate.name}</div>
                   <div className={styles.baseMeta}>
@@ -249,7 +317,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                     </div>
                   )}
                 </div>
-              );
+            );
             })}
           </div>
         )}
@@ -291,9 +359,23 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                   }}
                 >
                   <div className={styles.agentMain}>
-                    <Avatar size={32} icon={<RobotOutlined />} />
+                    <Avatar
+                      size={32}
+                      src={resolveAgentAvatar(agent)}
+                      icon={<RobotOutlined />}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(event) => {
+                        event?.stopPropagation();
+                        setAvatarPickerAgent(agent);
+                      }}
+                    />
                     <div className={styles.agentInfo}>
-                      <div className={styles.agentName}>{agent.name}</div>
+                      <div className={styles.agentName}>
+                        {agent.name}
+                        <Tag color={agentStatusColor[agent.status]} style={{ marginLeft: 6, fontSize: 10 }}>
+                          {agentStatusLabel[agent.status]}
+                        </Tag>
+                      </div>
                       <div className={styles.agentMeta}>
                         {agent.cli_tool}
                         {agent.version ? ` · ${agent.version}` : ''}
@@ -302,6 +384,51 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                         <div className={styles.agentPrompt}>{agent.system_prompt}</div>
                       )}
                     </div>
+                  </div>
+                  <div className={styles.agentActions}>
+                    {(agent.status === 'stopped' || agent.status === 'offline' || agent.status === 'error') && (
+                      <Tooltip title="启动">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CaretRightOutlined />}
+                          loading={lifecycleLoading[agent.id]}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartAgent(agent.id);
+                          }}
+                        />
+                      </Tooltip>
+                    )}
+                    {(agent.status === 'online' || agent.status === 'busy') && (
+                      <>
+                        <Tooltip title="重启">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={lifecycleLoading[agent.id]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRestartAgent(agent.id);
+                            }}
+                          />
+                        </Tooltip>
+                        <Tooltip title="停止">
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<PoweroffOutlined />}
+                            loading={lifecycleLoading[agent.id]}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStopAgent(agent.id);
+                            }}
+                          />
+                        </Tooltip>
+                      </>
+                    )}
                   </div>
                   {capabilityList.length > 0 && (
                     <div className={styles.agentTags}>
@@ -324,6 +451,11 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         candidates={machineCandidates}
         onClose={() => setCreateOpen(false)}
         onCreate={handleCreateAgent}
+      />
+      <AvatarPickerModal
+        agent={avatarPickerAgent}
+        open={avatarPickerAgent !== null}
+        onClose={() => setAvatarPickerAgent(null)}
       />
     </div>
   );

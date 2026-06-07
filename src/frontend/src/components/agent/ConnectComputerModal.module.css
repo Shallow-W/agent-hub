@@ -128,12 +128,22 @@
 }
 
 .candidateTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 12px;
   border-bottom: 1px solid #111;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 1px;
+}
+
+.candidateTitle span:last-child {
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text);
 }
 
 .candidateList {
@@ -171,13 +181,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.candidateTags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
 }
 
 @media (max-width: 640px) {

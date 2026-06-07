@@ -107,10 +107,12 @@ func main() {
 	userRepo := repository.NewUserRepo(db)
 	convRepo := repository.NewConversationRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
-	msgRepo := repository.NewMessageRepo(db, attachmentRepo)
+	artifactRepo := repository.NewArtifactRepo(db)
+	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
+	orchTaskRepo := repository.NewOrchTaskRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -122,6 +124,7 @@ func main() {
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
 	taskSvc := service.NewTaskService(taskRepo)
+	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -143,20 +146,33 @@ func main() {
 		logger.Warn("redis init failed, running without cache", "error", err)
 	} else {
 		logger.Info("redis connected")
-		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
 	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
+	orchSvc.SetArtifactRepo(artifactRepo)
+	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
+	daemonHub := ws.NewDaemonHub(logger)
+	orchSvc.SetDaemonHub(daemonHub)
+	orchSvc.SetNotifier(hub)
+	if rdb != nil {
+		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
+		msgSvc.SetCacher(redisMsgRepo)
+		orchSvc.SetCacher(redisMsgRepo)
+	} else {
+		msgSvc.SetCacher(nil)
+	}
+	agentSvc.SetDaemonHub(daemonHub)
+	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
@@ -164,11 +180,14 @@ func main() {
 	groupHandler := handler.NewGroupHandler(groupSvc)
 	userHandler := handler.NewUserHandler(friendSvc, userSvc)
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
+	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
-	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc)
+	artifactHandler := handler.NewArtifactHandler(artifactSvc)
+	artifactHandler.SetOrchestratorService(orchSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -233,6 +252,7 @@ func main() {
 
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
+		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
 
 		// 知识库路由（需要鉴权）
 		kbRoutes := apiGroup.Group("/knowledge-bases")
@@ -242,7 +262,10 @@ func main() {
 			kbRoutes.PUT("/:id", knowledgeHandler.Update)
 			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
+			kbRoutes.GET("/:id/files", knowledgeHandler.ListFiles)
+			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
+			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
 			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
 		}
 
@@ -270,13 +293,17 @@ func main() {
 		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
 		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
 		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
+		apiGroup.PUT("/conversations/:id/agents/:agentID/role", convHandler.SetAgentRole)
 		apiGroup.GET("/agents", agentHandler.List)
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
+		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
+		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
 		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
+		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
@@ -291,6 +318,15 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
+		artifactRoutes := apiGroup.Group("/artifacts")
+		artifactRoutes.Use(middleware.ValidateUUIDParam("rootId"))
+		{
+			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
+			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
+			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
 		}
 	}
 
@@ -331,14 +367,40 @@ func main() {
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
 	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
+	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
 	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
 	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-		router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+
+	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
+	mcpGroup := router.Group("/mcp")
+	mcpGroup.Use(middleware.MCPAuth(cfg.Daemon.Token))
+	{
+		mcpGroup.GET("/conversations", convHandler.List)
+		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+
+		mcpTaskRoutes := mcpGroup.Group("/tasks")
+		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
+		{
+			mcpTaskRoutes.GET("", taskHandler.List)
+			mcpTaskRoutes.POST("", taskHandler.Create)
+			mcpTaskRoutes.PUT("/:id", taskHandler.Update)
+			mcpTaskRoutes.POST("/:id/status", taskHandler.MoveStatus)
+			mcpTaskRoutes.DELETE("/:id", taskHandler.Delete)
+		}
+
+		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
+		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
+		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
+	}
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
+	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
 
 	// 启动 HTTP 服务器
@@ -368,7 +430,8 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
-	cancel() // 停止 Hub
+	cancel() // stops Hub, DaemonHub, and MachineTracker
+	daemonHub.Shutdown(shutdownCtx)
 
 	if rdb != nil {
 		if err := rdb.Close(); err != nil {

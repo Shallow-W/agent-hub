@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAgentStore } from '@/store/agentStore';
+import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
 import type { Agent } from '@/types/agent';
@@ -123,7 +124,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
         <List.Item.Meta
           avatar={
             <Badge dot color="green">
-              <Avatar className={styles.friendAvatar} size={28} icon={<UserOutlined />}>
+              <Avatar className={styles.friendAvatar} size={28} src={resolveUserAvatar({ id: friend.friend_id, username: friendName })}>
                 {friendName.charAt(0).toUpperCase()}
               </Avatar>
             </Badge>
@@ -234,9 +235,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
                       <List.Item className={styles.contactItem} onClick={() => onStartAgentChat(agent)}>
                         <List.Item.Meta
                           avatar={
-                            <Avatar className={styles.agentAvatar} size={28}>
-                              <RobotOutlined />
-                            </Avatar>
+                            <Avatar className={styles.agentAvatar} size={28} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} />
                           }
                           title={<span className={styles.contactName}>{agent.name}</span>}
                           description={<span className={styles.contactMeta}>{agent.cli_tool}</span>}

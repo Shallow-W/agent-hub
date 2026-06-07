@@ -9,10 +9,11 @@ import {
   RobotOutlined,
   TeamOutlined,
   UserAddOutlined,
-  UserOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
+import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
+import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './ConversationItem.module.css';
 
 interface ConversationItemProps {
@@ -87,6 +88,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const agents = useAgentStore((s) => s.agents);
   const isGroup = conversation.type === 'group';
   const isAgent = conversation.type === 'agent';
   const isOwner = conversation.user_id === currentUserId;
@@ -176,17 +178,28 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       }}
     >
       <div className={styles.avatarWrapper}>
-        <Avatar
-          style={{
-            backgroundColor: isAgent ? '#2f9d74' : isGroup ? '#722ed1' : avatarColor,
-            flexShrink: 0,
-            borderRadius: isGroup ? 10 : 50,
-          }}
-          size={32}
-          icon={isAgent ? <RobotOutlined /> : isGroup ? <TeamOutlined /> : <UserOutlined />}
-        >
-          {!isGroup && !isAgent ? firstChar : undefined}
-        </Avatar>
+        {isAgent ? (
+          <Avatar
+            style={{ backgroundColor: '#2f9d74', flexShrink: 0 }}
+            size={32}
+            src={resolveAgentAvatar(agents.find((a) => a.id === conversation.peer_id) || { id: conversation.peer_id || '', name: conversation.peer_name || conversation.title })}
+            icon={<RobotOutlined />}
+          />
+        ) : isGroup ? (
+          <Avatar
+            style={{ backgroundColor: '#722ed1', flexShrink: 0, borderRadius: 10 }}
+            size={32}
+            icon={<TeamOutlined />}
+          />
+        ) : (
+          <Avatar
+            style={{ backgroundColor: avatarColor, flexShrink: 0 }}
+            size={32}
+            src={resolveUserAvatar({ id: conversation.peer_id, username: conversation.peer_name || conversation.title })}
+          >
+            {firstChar}
+          </Avatar>
+        )}
         {!isGroup && !isAgent && (
           <span className={`${styles.onlineDot} ${online ? styles.online : styles.offline}`} />
         )}

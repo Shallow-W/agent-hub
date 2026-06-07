@@ -7,6 +7,7 @@ import type {
   CreateDaemonMachineRequest,
   CreateDaemonMachineResponse,
   DaemonMachine,
+  OpenSkillLocationRequest,
 } from '@/types/agent';
 
 export async function getAgents(): Promise<Agent[]> {
@@ -20,6 +21,10 @@ export async function createAgent(body: AgentRequest): Promise<Agent> {
 
 export async function updateAgent(id: string, body: AgentRequest): Promise<Agent> {
   return put<Agent>(`/api/agents/${id}`, body);
+}
+
+export async function updateAgentAvatar(id: string, avatar: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/avatar`, { avatar });
 }
 
 export async function deleteAgent(id: string): Promise<void> {
@@ -62,4 +67,23 @@ export interface MachineConnectResponse {
 
 export async function getMachineConnectCommand(id: string): Promise<MachineConnectResponse> {
   return get<MachineConnectResponse>(`/api/daemon/machines/${id}/connect`);
+}
+
+export async function openSkillLocation(
+  id: string,
+  body: OpenSkillLocationRequest,
+): Promise<void> {
+  return post<void>(`/api/agents/${id}/skills/open-location`, body);
+}
+
+export async function startAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/start`);
+}
+
+export async function stopAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/stop`);
+}
+
+export async function restartAgent(id: string): Promise<void> {
+  return post<void>(`/api/agents/${id}/restart`);
 }

@@ -21,6 +21,9 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
+| [Core Principles](./core-principles.md) | 4 条 AI 行为准则（先想后写/简单至上/外科手术/目标驱动） | 每次任务 |
+| [Workflow Rules](./workflow-rules.md) | 任务全生命周期规则（commit/review/test/docs） | 每次任务 |
+| [General Conventions](./general-conventions.md) | 前后端通用硬性规则（注释/换行/文件长度/测试） | 编码时 |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
