@@ -16,11 +16,12 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
-import type { Message, OptimisticStatus, Artifact } from '@/types/message';
+import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
+import { DeployStatusCard } from './DeployStatusCard';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
@@ -215,12 +216,13 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
 
-  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool}）。
-  const agentMeta = useMemo((): { agent_id?: string; agent_name?: string } => {
+  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool, deployment?}）。
+  const agentMeta = useMemo((): MessageArtifacts => {
     if (message.role !== 'assistant' || !message.artifacts_json) return {};
-    try { return JSON.parse(message.artifacts_json) as { agent_id?: string; agent_name?: string }; } catch { return {}; }
+    try { return JSON.parse(message.artifacts_json) as MessageArtifacts; } catch { return {}; }
   }, [message.role, message.artifacts_json]);
   const agentName = agentMeta.agent_name ?? null;
+  const deployment = agentMeta.deployment ?? null;
 
   // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
   // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
@@ -452,6 +454,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             )}
             {cardArtifacts.length > 0 && (
               <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
+            )}
+            {deployment && (
+              <div className={styles.deployCard}>
+                <DeployStatusCard deployment={deployment} />
+              </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}
             {streaming && <span className={styles.streamingCursor} />}

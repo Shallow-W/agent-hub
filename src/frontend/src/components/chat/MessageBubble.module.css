@@ -443,3 +443,8 @@
 .innerUser .mention {
   color: rgba(255, 255, 255, 0.92);
 }
+
+.deployCard {
+  margin-top: 8px;
+  max-width: 460px;
+}

@@ -211,6 +211,27 @@ func (r *ArtifactRepo) ListByMessageIDs(ctx context.Context, messageIDs []string
 	return result, nil
 }
 
+// GetLatestRootByConversation 返回某对话中最近一次产生的产物的血缘根（按产物 created_at 取最新）。
+// 用于聊天「部署」指令：部署对话里最新的那个产物。无产物时返回 ErrArtifactRootNotFound。
+func (r *ArtifactRepo) GetLatestRootByConversation(ctx context.Context, convID string) (string, error) {
+	var rootID string
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT a.root_id
+		 FROM artifacts a JOIN messages m ON m.id = a.message_id
+		 WHERE m.conversation_id = $1
+		 ORDER BY a.created_at DESC, a.version DESC
+		 LIMIT 1`,
+		convID,
+	).Scan(&rootID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrArtifactRootNotFound
+		}
+		return "", fmt.Errorf("get latest artifact root by conversation: %w", err)
+	}
+	return rootID, nil
+}
+
 // GetConversationIDByRoot 通过血缘根回溯所属对话（用于鉴权）。
 func (r *ArtifactRepo) GetConversationIDByRoot(ctx context.Context, rootID string) (string, error) {
 	var convID string
