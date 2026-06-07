@@ -19,6 +19,7 @@ type WorkspaceTask struct {
 	AgentName      string    `json:"agent_name,omitempty" db:"agent_name"`
 	OrchTaskID     *string   `json:"orch_task_id,omitempty" db:"orch_task_id"`
 	WorkerName     *string   `json:"worker_name,omitempty" db:"worker_name"`
+	TaskHash       *string   `json:"task_hash,omitempty" db:"task_hash"`
 }
 
 // TaskFilter 表示任务列表查询条件。
@@ -38,6 +39,7 @@ type TaskCreateInput struct {
 	Priority       string
 	OrchTaskID     *string
 	WorkerName     *string
+	TaskHash       *string
 }
 
 // TaskUpdateInput 表示更新任务的输入。

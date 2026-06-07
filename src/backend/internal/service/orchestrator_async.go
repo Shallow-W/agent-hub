@@ -44,6 +44,15 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		}
 	}
 
+	// 标记为执行中
+	if s.taskSvc != nil && orchTaskID != "" {
+		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, orchTaskID, task.AgentName, "in_progress"); err != nil {
+			slog.Warn("update orch worker task to in_progress failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
+		} else {
+			s.pushTaskChanged(ctx, convID, userID)
+		}
+	}
+
 	// 构建 dispatch 上下文
 	dispatchCtx := fmt.Sprintf("[群聊背景]\n- Orchestrator: %s\n\n[调度指令]\nOrch @你，分配了以下任务：\n%s\n\n请完成这个任务并在回复末尾 @%s 表示完成。",
 		orchestratorName, truncateString(task.Task, 2000), orchestratorName)

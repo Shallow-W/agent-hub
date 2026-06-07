@@ -8,7 +8,15 @@ import (
 )
 
 type fakeTaskRepo struct {
-	task *model.WorkspaceTask
+	task     *model.WorkspaceTask
+	tasks    []*model.WorkspaceTask
+	hashIdx  map[string]*model.WorkspaceTask
+}
+
+func newFakeTaskRepo() *fakeTaskRepo {
+	return &fakeTaskRepo{
+		hashIdx: make(map[string]*model.WorkspaceTask),
+	}
 }
 
 func (r *fakeTaskRepo) List(context.Context, string, model.TaskFilter) ([]*model.WorkspaceTask, error) {
@@ -23,6 +31,11 @@ func (r *fakeTaskRepo) Create(_ context.Context, userID string, input model.Task
 		Description: input.Description,
 		Status:      input.Status,
 		Priority:    input.Priority,
+		TaskHash:    input.TaskHash,
+	}
+	r.tasks = append(r.tasks, r.task)
+	if input.TaskHash != nil {
+		r.hashIdx[*input.TaskHash] = r.task
 	}
 	return r.task, nil
 }
@@ -60,12 +73,19 @@ func (r *fakeTaskRepo) GetByOrchTaskAndWorker(context.Context, string, string) (
 	return r.task, nil
 }
 
+func (r *fakeTaskRepo) GetByTaskHash(_ context.Context, hash string) (*model.WorkspaceTask, error) {
+	if t, ok := r.hashIdx[hash]; ok {
+		return t, nil
+	}
+	return nil, nil
+}
+
 func (r *fakeTaskRepo) FailAllByOrchTask(context.Context, string) error {
 	return nil
 }
 
 func TestTaskServiceCreateDefaults(t *testing.T) {
-	svc := NewTaskService(&fakeTaskRepo{})
+	svc := NewTaskService(newFakeTaskRepo())
 	task, err := svc.Create(context.Background(), "user-1", model.TaskCreateInput{Title: "  设计任务看板  "})
 	if err != nil {
 		t.Fatalf("create task: %v", err)
@@ -79,7 +99,7 @@ func TestTaskServiceCreateDefaults(t *testing.T) {
 }
 
 func TestTaskServiceRejectsInvalidStatus(t *testing.T) {
-	svc := NewTaskService(&fakeTaskRepo{})
+	svc := NewTaskService(newFakeTaskRepo())
 	_, err := svc.MoveStatus(context.Background(), "user-1", "task-1", "unknown")
 	if err != ErrTaskInvalid {
 		t.Fatalf("expected ErrTaskInvalid, got %v", err)

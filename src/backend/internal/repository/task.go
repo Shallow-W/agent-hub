@@ -26,7 +26,7 @@ func selectTaskSQL(from string) string {
 		t.title, t.description, t.status, t.priority, t.created_at, t.updated_at,
 		COALESCE(u.username, '') AS assignee_name,
 		COALESCE(a.name, '') AS agent_name,
-		t.orch_task_id, t.worker_name
+		t.orch_task_id, t.worker_name, t.task_hash
 		FROM ` + from + `
 		LEFT JOIN users u ON u.id = t.assignee_id
 		LEFT JOIN agents a ON a.id = t.agent_id`
@@ -69,13 +69,13 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 	var task model.WorkspaceTask
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO workspace_tasks
-		 (user_id, conversation_id, assignee_id, agent_id, title, description, status, priority, orch_task_id, worker_name)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		 (user_id, conversation_id, assignee_id, agent_id, title, description, status, priority, orch_task_id, worker_name, task_hash)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING id, user_id, conversation_id, assignee_id, agent_id, title, description,
 		 status, priority, created_at, updated_at, '' AS assignee_name, '' AS agent_name,
-		 orch_task_id, worker_name`,
+		 orch_task_id, worker_name, task_hash`,
 		nilIfEmpty(userID), input.ConversationID, input.AssigneeID, input.AgentID, input.Title,
-		input.Description, input.Status, input.Priority, input.OrchTaskID, input.WorkerName,
+		input.Description, input.Status, input.Priority, input.OrchTaskID, input.WorkerName, input.TaskHash,
 	).StructScan(&task)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
@@ -107,6 +107,20 @@ func (r *TaskRepo) GetByOrchTaskAndWorker(ctx context.Context, orchTaskID, worke
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get task by orch: %w", err)
+	}
+	return &task, nil
+}
+
+// GetByTaskHash 按 task_hash 查找任务。
+func (r *TaskRepo) GetByTaskHash(ctx context.Context, taskHash string) (*model.WorkspaceTask, error) {
+	query := selectTaskSQL("workspace_tasks t") + " WHERE t.task_hash = $1"
+	var task model.WorkspaceTask
+	err := r.db.QueryRowxContext(ctx, query, taskHash).StructScan(&task)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get task by hash: %w", err)
 	}
 	return &task, nil
 }

@@ -18,6 +18,7 @@ export interface WorkspaceTask {
   agent_name?: string;
   orch_task_id?: string;
   worker_name?: string;
+  task_hash?: string;
 }
 
 export interface TaskQuery {

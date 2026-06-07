@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +18,7 @@ type TaskRepo interface {
 	Create(ctx context.Context, userID string, input model.TaskCreateInput) (*model.WorkspaceTask, error)
 	GetByID(ctx context.Context, userID, id string) (*model.WorkspaceTask, error)
 	GetByOrchTaskAndWorker(ctx context.Context, orchTaskID, workerName string) (*model.WorkspaceTask, error)
+	GetByTaskHash(ctx context.Context, taskHash string) (*model.WorkspaceTask, error)
 	Update(ctx context.Context, userID, id string, input model.TaskUpdateInput) (*model.WorkspaceTask, error)
 	MoveStatus(ctx context.Context, userID, id, status string) (*model.WorkspaceTask, error)
 	Delete(ctx context.Context, userID, id string) (bool, error)
@@ -147,30 +150,24 @@ func (s *TaskService) Delete(ctx context.Context, userID, id string) error {
 	return nil
 }
 
-// CreateOrchWorkerTask Orch 派发时创建任务卡片。
-// 幂等：如果上一轮已创建同名 worker 卡片，则重置状态为 todo 而非重复插入。
-func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error) {
-	// 检查上一轮是否已存在
-	existing, err := s.repo.GetByOrchTaskAndWorker(ctx, orchTaskID, workerName)
-	if err != nil {
-		return nil, fmt.Errorf("lookup existing orch worker task: %w", err)
-	}
-		if existing != nil {
-		// 更新 title 和 description 为新一轮的值
-		if _, err := s.repo.Update(ctx, "", existing.ID, model.TaskUpdateInput{
-			Title:       &title,
-			Description: &desc,
-		}); err != nil {
-			return nil, fmt.Errorf("update orch worker task: %w", err)
-		}
-		// 重置为 todo，开始新一轮
-		updated, err := s.repo.MoveStatus(ctx, "", existing.ID, "todo")
-		if err != nil {
-			return nil, fmt.Errorf("reset orch worker task status: %w", err)
-		}
-		return updated, nil
-		}
+// computeTaskHash 生成任务内容的短 hash，用于跨轮次去重。
+func computeTaskHash(orchTaskID, workerName, title string) string {
+	h := sha256.Sum256([]byte(orchTaskID + ":" + workerName + ":" + title))
+	return hex.EncodeToString(h[:])[:16]
+}
 
+// CreateOrchWorkerTask Orch 派发时创建任务卡片。
+// 幂等：基于内容 hash 查重，相同任务描述不会覆盖，而是直接返回已有卡片。
+func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error) {
+	taskHash := computeTaskHash(orchTaskID, workerName, title)
+
+	// 用 hash 查重：相同任务描述 → 幂等返回
+	existing, _ := s.repo.GetByTaskHash(ctx, taskHash)
+	if existing != nil {
+		return existing, nil // 幂等，不覆盖
+	}
+
+	// 创建新卡片
 	task, err := s.repo.Create(ctx, userID, model.TaskCreateInput{
 		ConversationID: &convID,
 		AgentID:        &agentID,
@@ -180,6 +177,7 @@ func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, 
 		Priority:       "medium",
 		OrchTaskID:     &orchTaskID,
 		WorkerName:     &workerName,
+		TaskHash:       &taskHash,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create orch worker task: %w", err)
