@@ -16,6 +16,8 @@ export interface WorkspaceTask {
   updated_at: string;
   assignee_name?: string;
   agent_name?: string;
+  orch_task_id?: string;
+  worker_name?: string;
 }
 
 export interface TaskQuery {

@@ -73,7 +73,7 @@ export interface MessageArtifacts {
 }
 
 export interface StreamMessage {
-  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'agent.typing_start' | 'agent.typing_stop' | 'message.recall' | 'error';
+  type: 'message.streaming' | 'message.complete' | 'agent.status' | 'user.typing_start' | 'user.typing_stop' | 'agent.typing_start' | 'agent.typing_stop' | 'message.recall' | 'task.changed' | 'error';
   data: {
     conversationId?: string;
     conversation_id?: string;

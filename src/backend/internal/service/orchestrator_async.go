@@ -34,6 +34,14 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		return
 	}
 
+	// 创建 WorkspaceTask 卡片 + 推送 WS 信号
+	if s.taskSvc != nil && orchTaskID != "" {
+		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, userID, agentID, task.Task, task.Task, orchTaskID, task.AgentName); err != nil {
+			slog.Warn("create orch worker task board card failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
+		}
+		s.pushTaskChanged(ctx, convID, userID)
+	}
+
 	// 构建 dispatch 上下文
 	dispatchCtx := fmt.Sprintf("[群聊背景]\n- Orchestrator: %s\n\n[调度指令]\nOrch @你，分配了以下任务：\n%s\n\n请完成这个任务并在回复末尾 @%s 表示完成。",
 		orchestratorName, truncateString(task.Task, 2000), orchestratorName)
@@ -63,6 +71,15 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 			slog.Warn("update worker result failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
 			return
 		}
+
+		// 同步 WorkspaceTask 状态为 done
+		if s.taskSvc != nil {
+			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, orchTaskID, task.AgentName, "done"); err != nil {
+				slog.Warn("update orch worker task board status failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
+			}
+			s.pushTaskChanged(ctx, convID, userID)
+		}
+
 		if allDone {
 			s.goStartOrchSummary(orchTaskID)
 		}
@@ -82,9 +99,36 @@ func (s *OrchestratorService) markWorkerFailed(orchTaskID, workerName, reason st
 		slog.Warn("mark worker failed error", "orch_task", orchTaskID, "worker", workerName, "error", err)
 		return
 	}
+
+	// 同步 WorkspaceTask 状态为 blocked
+	if s.taskSvc != nil {
+		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, orchTaskID, workerName, "blocked"); err != nil {
+			slog.Warn("update orch worker task board status (failed) error", "orch_task", orchTaskID, "worker", workerName, "error", err)
+		}
+		// 获取 convID 用于推送 WS 信号
+		orchTask, _ := s.orchTaskRepo.GetByID(ctx, orchTaskID)
+		if orchTask != nil {
+			s.pushTaskChanged(ctx, orchTask.ConversationID, orchTask.UserID)
+		}
+	}
+
 	if allDone {
 		s.goStartOrchSummary(orchTaskID)
 	}
+}
+
+// pushTaskChanged 推送 task.changed WS 信号通知前端刷新任务列表。
+func (s *OrchestratorService) pushTaskChanged(ctx context.Context, convID, userID string) {
+	if s.notifier == nil {
+		return
+	}
+	memberIDs, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(memberIDs) == 0 {
+		memberIDs = []string{userID}
+	}
+	s.notifier.PushCustomEvent(convID, memberIDs, "task.changed", map[string]any{
+		"conversation_id": convID,
+	})
 }
 
 // goStartOrchSummary launches startOrchSummary in a goroutine with panic recovery.

@@ -20,10 +20,12 @@ import {
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RobotOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { createTask, deleteTask, getTasks, moveTaskStatus, updateTask } from '@/api/task';
+import { onTaskChanged } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import type { CreateTaskPayload, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
 import styles from './TaskBoardView.module.css';
@@ -99,6 +101,16 @@ const TaskBoardView: React.FC = () => {
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
+
+  // Subscribe to task.changed WS events for auto-refresh
+  useEffect(() => {
+    const unsubscribe = onTaskChanged((convId) => {
+      if (convId === activeConversationId) {
+        fetchTasks();
+      }
+    });
+    return unsubscribe;
+  }, [activeConversationId, fetchTasks]);
 
   useEffect(() => {
     const firstConversation = conversations[0];
@@ -192,10 +204,14 @@ const TaskBoardView: React.FC = () => {
 
   const renderTaskCard = (task: WorkspaceTask) => {
     const targetStatus = nextStatus[task.status];
+    const isOrchTask = Boolean(task.orch_task_id);
     return (
       <article className={styles.taskCard} key={task.id}>
         <div className={styles.cardHeader}>
-          <div className={styles.cardTitle}>{task.title}</div>
+          <div className={styles.cardTitle}>
+            {isOrchTask && <RobotOutlined style={{ marginRight: 4, color: '#722ed1' }} />}
+            {task.title}
+          </div>
           <Dropdown
             trigger={['click']}
             menu={{
@@ -219,6 +235,9 @@ const TaskBoardView: React.FC = () => {
         {task.description && <p className={styles.cardDescription}>{task.description}</p>}
         <div className={styles.cardMeta}>
           <Tag className={styles.priorityTag}>{priorityLabels[task.priority]}</Tag>
+          {isOrchTask && task.worker_name && (
+            <Tag color="purple">{task.worker_name}</Tag>
+          )}
           {task.agent_name && <span>{task.agent_name}</span>}
           {task.assignee_name && <span>{task.assignee_name}</span>}
         </div>

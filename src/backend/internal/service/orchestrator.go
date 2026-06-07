@@ -89,6 +89,7 @@ type OrchestratorService struct {
 	artifactRepo OrchArtifactRepo
 	notifier     MessageNotifier
 	cacher       OrchMessageCacher
+	taskSvc      TaskBoardSync
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
@@ -136,6 +137,11 @@ func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
 // SetCacher injects the message cacher for persisting async messages to Redis.
 func (s *OrchestratorService) SetCacher(c OrchMessageCacher) {
 	s.cacher = c
+}
+
+// SetTaskSvc injects the task board sync service.
+func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
+	s.taskSvc = svc
 }
 
 // NewOrchestratorService creates a new orchestrator service.

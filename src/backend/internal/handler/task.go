@@ -22,7 +22,7 @@ func NewTaskHandler(svc *service.TaskService) *TaskHandler {
 
 // CreateTaskRequest 创建任务请求。
 type CreateTaskRequest struct {
-	ConversationID *string `json:"conversation_id"`
+	ConversationID *string `json:"conversation_id" binding:"required"`
 	AssigneeID     *string `json:"assignee_id"`
 	AgentID        *string `json:"agent_id"`
 	Title          string  `json:"title" binding:"required,min=1,max=120"`
@@ -45,11 +45,15 @@ type MoveTaskStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 }
 
-// List 查询任务列表。
+// List 查询任务列表。conversation_id 为必填 query 参数。
 func (h *TaskHandler) List(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	tasks, err := h.svc.List(c.Request.Context(), userID, model.TaskFilter{
-		ConversationID: c.Query("conversation_id"),
+	convID := c.Query("conversation_id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40400, "conversation_id 必填")
+		return
+	}
+	tasks, err := h.svc.List(c.Request.Context(), "", model.TaskFilter{
+		ConversationID: convID,
 		Status:         c.Query("status"),
 	})
 	if err != nil {
@@ -63,7 +67,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 	middleware.SuccessResponse(c, tasks)
 }
 
-// Create 新建任务。
+// Create 新建任务。conversation_id 为必填字段。
 func (h *TaskHandler) Create(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -98,7 +102,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40402, "任务参数错误: "+err.Error())
 		return
 	}
-	task, err := h.svc.Update(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), model.TaskUpdateInput{
+	task, err := h.svc.Update(c.Request.Context(), "", c.Param("id"), model.TaskUpdateInput{
 		Title:       req.Title,
 		Description: req.Description,
 		Priority:    req.Priority,
@@ -119,7 +123,7 @@ func (h *TaskHandler) MoveStatus(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40403, "状态参数错误: "+err.Error())
 		return
 	}
-	task, err := h.svc.MoveStatus(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Status)
+	task, err := h.svc.MoveStatus(c.Request.Context(), "", c.Param("id"), req.Status)
 	if err != nil {
 		writeTaskError(c, err, 40403, "任务状态流转失败")
 		return
@@ -130,7 +134,7 @@ func (h *TaskHandler) MoveStatus(c *gin.Context) {
 // Delete 删除任务。
 func (h *TaskHandler) Delete(c *gin.Context) {
 	taskID := c.Param("id")
-	if err := h.svc.Delete(c.Request.Context(), middleware.GetUserID(c), taskID); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), "", taskID); err != nil {
 		writeTaskError(c, err, 40404, "删除任务失败")
 		return
 	}

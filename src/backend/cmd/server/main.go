@@ -157,6 +157,7 @@ func main() {
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
+	orchSvc.SetTaskSvc(taskSvc)
 	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
