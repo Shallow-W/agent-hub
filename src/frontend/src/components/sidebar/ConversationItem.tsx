@@ -23,6 +23,7 @@ interface ConversationItemProps {
   onDelete: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
+  onUnarchive?: () => void;
   onInviteMembers?: () => void;
   onRename?: (newTitle: string) => void;
   lastMessage?: string;
@@ -79,6 +80,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onDelete,
   onTogglePin,
   onArchive,
+  onUnarchive,
   onInviteMembers,
   onRename,
   lastMessage,
@@ -134,10 +136,10 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
     {
       key: 'archive',
       icon: <InboxOutlined />,
-      label: '归档',
+      label: onUnarchive ? '取消归档' : '归档',
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        onArchive();
+        onUnarchive ? onUnarchive() : onArchive();
       },
     },
     { type: 'divider' },

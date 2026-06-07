@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Skeleton, Button, Input, message as antMessage } from 'antd';
-import { MessageOutlined, TeamOutlined, SearchOutlined } from '@ant-design/icons';
+import { MessageOutlined, TeamOutlined, SearchOutlined, FolderOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
 import * as convApi from '@/api/conversation';
 import type { Message } from '@/types/message';
+import type { Conversation } from '@/types/conversation';
 import { ConversationItem } from './ConversationItem';
 import styles from './ConversationList.module.css';
 
@@ -21,6 +22,19 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
   const [searchQuery, setSearchQuery] = useState('');
   const archiveConversationLocal = useConversationStore((s) => s.archiveConversationLocal);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
+  const fetchConversations = useConversationStore((s) => s.fetchConversations);
+
+  // Archived view state
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
+  const [archivedCount, setArchivedCount] = useState(0);
+
+  // Fetch archived count on mount
+  useEffect(() => {
+    convApi.getArchivedConversations()
+      .then((list) => setArchivedCount(list?.length ?? 0))
+      .catch(() => {});
+  }, []);
 
   if (loading && conversations.length === 0) {
     return (
@@ -39,7 +53,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
     );
   }
 
-  if (conversations.length === 0) {
+  if (conversations.length === 0 && !showArchived) {
     return (
       <div className={styles.list}>
         <div className={styles.empty}>
@@ -68,6 +82,32 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
     );
   }
 
+  const handleOpenArchived = async () => {
+    try {
+      const list = await convApi.getArchivedConversations();
+      setArchivedConvs(list ?? []);
+      setShowArchived(true);
+    } catch {
+      antMessage.error('获取归档对话失败');
+    }
+  };
+
+  const handleUnarchive = async (convId: string) => {
+    try {
+      await convApi.unarchiveConversation(convId);
+      const next = archivedConvs.filter((c) => c.id !== convId);
+      setArchivedConvs(next);
+      setArchivedCount(next.length);
+      await fetchConversations();
+      antMessage.success('已取消归档');
+      if (next.length === 0) {
+        setShowArchived(false);
+      }
+    } catch {
+      antMessage.error('取消归档失败');
+    }
+  };
+
   const filtered = searchQuery
     ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
     : conversations;
@@ -95,6 +135,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
               try {
                 await convApi.archiveConversation(conv.id);
                 archiveConversationLocal(conv.id);
+                setArchivedCount((prev) => prev + 1);
               } catch {
                 antMessage.error('归档失败');
               }
@@ -112,6 +153,36 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
       </>
     );
 
+  // Archived view
+  if (showArchived) {
+    return (
+      <div className={styles.list}>
+        <div className={styles.searchWrap} data-conv-search>
+          <div className={styles.archiveHeader}>
+            <button className={styles.archiveBack} type="button" onClick={() => setShowArchived(false)}>
+              <LeftOutlined /> 返回对话
+            </button>
+            <span className={styles.archiveHeaderTitle}>归档对话</span>
+          </div>
+        </div>
+        <div className={styles.items}>
+          {archivedConvs.length === 0 ? (
+            <div className={styles.noResults}>暂无归档对话</div>
+          ) : (
+            archivedConvs.map((conv) => (
+              <ArchivedConversationItemWrapper
+                key={conv.id}
+                conversation={conv}
+                onUnarchive={() => handleUnarchive(conv.id)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Normal view
   return (
     <div className={styles.list}>
       <div className={styles.searchWrap} data-conv-search>
@@ -125,6 +196,18 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
         />
       </div>
       <div className={styles.items}>
+        {archivedCount > 0 && (
+          <button className={styles.archiveFolder} type="button" onClick={handleOpenArchived}>
+            <div className={styles.archiveFolderIcon}>
+              <FolderOutlined />
+            </div>
+            <div className={styles.archiveFolderInfo}>
+              <span className={styles.archiveFolderTitle}>归档对话</span>
+              <span className={styles.archiveFolderCount}>{archivedCount} 个对话</span>
+            </div>
+            <RightOutlined className={styles.archiveFolderArrow} />
+          </button>
+        )}
         {renderGroup(pinnedConvs, '置顶')}
         {renderGroup(agentConvs, '智能体')}
         {renderGroup(groupConvs, '群聊')}
@@ -134,7 +217,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
   );
 };
 
-/** Wrapper that reads last message and unread count from message store */
+/** Wrapper for normal conversations */
 const ConversationItemWrapper: React.FC<{
   conversation: Parameters<typeof ConversationItem>[0]['conversation'];
   active: boolean;
@@ -168,6 +251,32 @@ const ConversationItemWrapper: React.FC<{
       onInviteMembers={onInviteMembers}
       lastMessage={lastMessage}
       unreadCount={unreadCount}
+    />
+  );
+};
+
+/** Wrapper for archived conversations */
+const ArchivedConversationItemWrapper: React.FC<{
+  conversation: Conversation;
+  onUnarchive: () => void;
+}> = ({ conversation, onUnarchive }) => {
+  const messages = useMessageStore(
+    (s) => s.messages[conversation.id] ?? EMPTY_MESSAGES,
+  );
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const lastMessage = lastMsg?.content || conversation.last_message;
+
+  return (
+    <ConversationItem
+      conversation={conversation}
+      active={false}
+      onSelect={() => {}}
+      onDelete={() => {}}
+      onTogglePin={() => {}}
+      onArchive={() => {}}
+      onUnarchive={onUnarchive}
+      lastMessage={lastMessage}
+      unreadCount={0}
     />
   );
 };

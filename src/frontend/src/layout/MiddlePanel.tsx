@@ -7,7 +7,7 @@ import { AgentList } from '@/components/agent/AgentList';
 import KnowledgePanel from '@/components/knowledge/KnowledgePanel';
 import type { KnowledgeFile } from '@/types/knowledge';
 import { useAgentStore } from '@/store/agentStore';
-import { parseSkills } from '@/components/agent/agentPresentation';
+import { parseSkills, resolveAgentAvatar } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
 import type { Agent } from '@/types/agent';
 import styles from './AppLayout.module.css';
@@ -20,7 +20,6 @@ interface MiddlePanelProps {
   onCreateGroup: () => void;
   onRefresh: () => void;
   onUpload: () => void;
-  onShowArchived: () => void;
   onStartChat: (friendId: string) => void;
   onStartAgentChat: (agent: Agent) => void;
   onSwitchChat: () => void;
@@ -42,7 +41,6 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
   onCreateGroup,
   onRefresh,
   onUpload,
-  onShowArchived,
   onStartChat,
   onStartAgentChat,
   onSwitchChat,
@@ -123,9 +121,6 @@ const MiddlePanel: React.FC<MiddlePanelProps> = ({
         {renderPanelTools(onCreate)}
       </div>
       <ConversationList onNavigateContacts={onSwitchContacts} />
-      <button className={styles.archivedLink} onClick={onShowArchived} type="button">
-        查看归档对话
-      </button>
     </>
   );
 };
@@ -163,7 +158,7 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
                 type="button"
                 onClick={() => onSelectAgent(agent)}
               >
-                <Avatar size={36} src={agent.avatar || undefined} icon={<RobotOutlined />} className={skillStyles.avatar} />
+                <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
                 <div className={skillStyles.info}>
                   <span className={skillStyles.name}>{agent.name}</span>
                   <span className={skillStyles.meta}>{skillCount} skills</span>

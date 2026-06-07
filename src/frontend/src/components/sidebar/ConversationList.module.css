@@ -112,3 +112,94 @@
 :global(html.dark) .searchInput {
   border-color: rgba(255, 255, 255, 0.08);
 }
+
+.archiveFolder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  margin-bottom: 4px;
+}
+
+.archiveFolder:hover {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(22, 163, 101, 0.1);
+}
+
+.archiveFolderIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.archiveFolderInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.archiveFolderTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.archiveFolderCount {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.archiveFolderArrow {
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+}
+
+:global(html.dark) .archiveFolder:hover {
+  background: var(--color-surface-muted);
+}
+
+.archiveHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.archiveBack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color var(--transition-fast);
+}
+
+.archiveBack:hover {
+  background: var(--color-surface-strong);
+}
+
+.archiveHeaderTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
