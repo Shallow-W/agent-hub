@@ -207,6 +207,24 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	middleware.SuccessResponse(c, gin.H{"deleted": true, "id": taskID})
 }
 
+// ListOrchCards 查询 Orch 任务卡片列表。conversation_id 为必填 query 参数。
+func (h *TaskHandler) ListOrchCards(c *gin.Context) {
+	convID := c.Query("conversation_id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40400, "conversation_id 必填")
+		return
+	}
+	if !h.requireMember(c, convID) {
+		return
+	}
+	cards, err := h.svc.ListOrchTaskCards(c.Request.Context(), convID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50400, "查询 Orch 任务卡片失败")
+		return
+	}
+	middleware.SuccessResponse(c, cards)
+}
+
 func writeTaskError(c *gin.Context, err error, badRequestCode int, fallback string) {
 	if errors.Is(err, service.ErrTaskInvalid) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, badRequestCode, "任务参数错误")

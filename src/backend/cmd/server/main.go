@@ -123,7 +123,9 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
+	orchCardRepo := repository.NewOrchTaskCardRepo(db)
 	taskSvc := service.NewTaskService(taskRepo)
+	taskSvc.SetOrchCardRepo(orchCardRepo)
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
@@ -319,6 +321,7 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+			taskRoutes.GET("/orch-cards", taskHandler.ListOrchCards)
 		}
 
 		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）

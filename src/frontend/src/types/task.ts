@@ -23,6 +23,29 @@ export interface WorkspaceTask {
   completed_at?: string;
 }
 
+export interface OrchTaskCard {
+  id: string;
+  conversation_id: string;
+  orch_task_id: string;
+  sender_id: string;
+  sender_name: string;
+  sender_avatar: string;
+  worker_id: string;
+  worker_name: string;
+  worker_avatar: string;
+  task_content: string;
+  task_summary: string;
+  worker_result: string;
+  status: 'todo' | 'in_progress' | 'done' | 'failed';
+  priority: string;
+  task_hash: string;
+  dispatched_at: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskQuery {
   conversation_id?: string;
   status?: TaskStatus;

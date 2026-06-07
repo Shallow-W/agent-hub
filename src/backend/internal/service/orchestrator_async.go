@@ -10,15 +10,19 @@ import (
 	"github.com/agent-hub/backend/internal/model"
 )
 
+// OrchSender 包含 Orch agent 的身份信息，在创建任务卡片时写入。
+type OrchSender struct {
+	ID     string
+	Name   string
+	Avatar string
+}
+
 // dispatchOrchWorker dispatches a single worker task using the unified dispatchAndWait path.
 // Runs in a goroutine: synchronously waits for the WS result, creates message, pushes to user,
 // then updates OrchTask worker state and triggers summary if all workers are done.
-func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task DispatchTask, agentID, orchestratorName, kbPreload, orchTaskID string) {
+func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task DispatchTask, agentID, orchestratorName, kbPreload, orchTaskID string, orchSender OrchSender) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-
-	// 计算 taskHash，与 CreateOrchWorkerTask 保持一致，用于精确定位 WorkspaceTask 卡片
-	taskHash := computeTaskHash(orchTaskID, task.AgentName, truncateString(task.Task, 80))
 
 	agent, err := s.agentRepo.GetByID(ctx, agentID)
 	if err != nil || agent == nil {
@@ -38,9 +42,27 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		return
 	}
 
-	// 创建 WorkspaceTask 卡片 + 推送 WS 信号
+	// 创建 OrchTaskCard 卡片 + 推送 WS 信号
+	taskSummary := truncateString(task.Task, 80)
+	taskHash := computeTaskHash(orchTaskID, task.AgentName, taskSummary)
 	if s.taskSvc != nil && orchTaskID != "" {
-		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, convID, "", agentID, truncateString(task.Task, 80), task.Task, orchTaskID, task.AgentName); err != nil {
+		card := &model.OrchTaskCard{
+			ConversationID: convID,
+			OrchTaskID:     orchTaskID,
+			SenderID:       orchSender.ID,
+			SenderName:     orchSender.Name,
+			SenderAvatar:   orchSender.Avatar,
+			WorkerID:       agentID,
+			WorkerName:     task.AgentName,
+			WorkerAvatar:   agent.Avatar,
+			TaskContent:    task.Task,
+			TaskSummary:    taskSummary,
+			Status:         "todo",
+			Priority:       "medium",
+			TaskHash:       taskHash,
+			DispatchedAt:   time.Now(),
+		}
+		if _, err := s.taskSvc.CreateOrchWorkerTask(ctx, card); err != nil {
 			slog.Warn("create orch worker task board card failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
 		} else {
 			s.pushTaskChanged(ctx, convID, userID)
@@ -73,6 +95,9 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		return
 	}
 
+	// 诊断：检查 msg.Content 是否有内容
+	slog.Info("orch worker: dispatchAndWait completed", "agent", task.AgentName, "msg_nil", msg == nil, "content_len", len(msg.Content))
+
 	// 推送 worker 消息到用户 WS
 	if msg != nil {
 		s.postPersistAsync(convID, userID, msg)
@@ -86,7 +111,7 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 			return
 		}
 
-		// 同步 WorkspaceTask 状态为 done
+		// 同步 OrchTaskCard 状态为 done
 		if s.taskSvc != nil {
 			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "done", truncateString(msg.Content, 4000)); err != nil {
 				slog.Warn("update orch worker task board status failed", "orch_task", orchTaskID, "worker", task.AgentName, "error", err)
@@ -111,10 +136,10 @@ func (s *OrchestratorService) markWorkerFailed(orchTaskID, workerName, taskDesc,
 		return
 	}
 
-	// 同步 WorkspaceTask 状态为 blocked
+	// 同步 OrchTaskCard 状态为 failed
 	if s.taskSvc != nil {
 		taskHash := computeTaskHash(orchTaskID, workerName, truncateString(taskDesc, 80))
-		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "blocked", reason); err != nil {
+		if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "failed", reason); err != nil {
 			slog.Warn("update orch worker task board status (failed) error", "orch_task", orchTaskID, "worker", workerName, "error", err)
 		} else {
 			// 获取 convID 用于推送 WS 信号（仅在更新成功时推送）
@@ -128,7 +153,7 @@ func (s *OrchestratorService) markWorkerFailed(orchTaskID, workerName, taskDesc,
 }
 
 // startWorkersAndWait 派发所有 worker 并等待全部完成（包括 WS 推送），然后触发 summary。
-func (s *OrchestratorService) startWorkersAndWait(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, orchAgentName, kbPreload, orchTaskID string) {
+func (s *OrchestratorService) startWorkersAndWait(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, orchAgentName, kbPreload, orchTaskID string, orchSender OrchSender) {
 	var wg sync.WaitGroup
 	for _, t := range tasks {
 		agentID, ok := agentNameToID[t.AgentName]
@@ -139,7 +164,7 @@ func (s *OrchestratorService) startWorkersAndWait(ctx context.Context, convID, u
 		wg.Add(1)
 		go func(task DispatchTask, agentID string) {
 			defer wg.Done()
-			s.dispatchOrchWorker(convID, userID, task, agentID, orchAgentName, kbPreload, orchTaskID)
+			s.dispatchOrchWorker(convID, userID, task, agentID, orchAgentName, kbPreload, orchTaskID, orchSender)
 		}(t, agentID)
 	}
 	wg.Wait()
@@ -172,10 +197,10 @@ func (s *OrchestratorService) goStartOrchSummary(orchTaskID string) {
 				if s.orchTaskRepo != nil {
 					_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
 				}
-				// 将关联的 WorkspaceTask 标记为 blocked
+				// 将关联的 OrchTaskCard 标记为 failed
 				if s.taskSvc != nil {
 					if err := s.taskSvc.FailAllTasksForOrchTask(ctx, orchTaskID); err != nil {
-						slog.Warn("fail all workspace tasks after panic", "orch_task", orchTaskID, "error", err)
+						slog.Warn("fail all orch task cards after panic", "orch_task", orchTaskID, "error", err)
 					}
 				}
 			}
@@ -311,7 +336,13 @@ func (s *OrchestratorService) evaluateOrchResponse(orchTaskID string, orchTask *
 	}
 
 	slog.Info("orch re-dispatching workers", "orch_task", orchTaskID, "round", orchTask.Round+1, "workers", len(validTasks))
-	go s.startWorkersAndWait(ctx, orchTask.ConversationID, orchTask.UserID, validTasks, agentNameToID, orchestratorName, orchTask.KBPreload, orchTaskID)
+	// 解析 Orch agent 身份信息用于创建任务卡片
+	orchAgent, _ := s.agentRepo.GetByID(ctx, orchTask.OrchAgentID)
+	orchSender := OrchSender{ID: orchTask.OrchAgentID, Name: orchestratorName}
+	if orchAgent != nil {
+		orchSender.Avatar = orchAgent.Avatar
+	}
+	go s.startWorkersAndWait(ctx, orchTask.ConversationID, orchTask.UserID, validTasks, agentNameToID, orchestratorName, orchTask.KBPreload, orchTaskID, orchSender)
 }
 
 // postPersistAsync 推送消息到用户 WS 并缓存到 Redis（异步安全版）。

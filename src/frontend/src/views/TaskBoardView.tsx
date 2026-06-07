@@ -23,14 +23,14 @@ import {
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { createTask, deleteTask, getTasks, moveTaskStatus, updateTask } from '@/api/task';
+import { createTask, deleteTask, getOrchTaskCards, getTasks, moveTaskStatus, updateTask } from '@/api/task';
 import { getConversationAgents } from '@/api/conversation';
 import { onTaskChanged } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
-import type { CreateTaskPayload, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
+import type { CreateTaskPayload, OrchTaskCard, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
 import type { ConversationAgent } from '@/types/conversation';
 import styles from './TaskBoardView.module.css';
 
@@ -119,11 +119,14 @@ function calcDuration(createdAt: string, completedAt?: string): string | null {
 }
 
 const TaskDetailModal: React.FC<{
-  task: WorkspaceTask | null;
+  task: WorkspaceTask | OrchTaskCard | null;
   visible: boolean;
   onClose: () => void;
 }> = ({ task, visible, onClose }) => {
   if (!task) return null;
+  const isOrchCard = 'sender_id' in task;
+  const description = isOrchCard ? task.task_content : (task.description || task.title);
+  const result = task.worker_result;
   return (
     <Modal
       title="任务详情"
@@ -134,12 +137,12 @@ const TaskDetailModal: React.FC<{
     >
       <div className={styles.detailSection}>
         <h4 className={styles.detailTitle}>任务要求</h4>
-        <p className={styles.detailContent}>{task.description || task.title}</p>
+        <p className={styles.detailContent}>{description}</p>
       </div>
-      {task.worker_result && (
+      {result && (
         <div className={styles.detailSection}>
           <h4 className={styles.detailTitle}>执行结果</h4>
-          <p className={styles.detailContent}>{task.worker_result}</p>
+          <p className={styles.detailContent}>{result}</p>
         </div>
       )}
     </Modal>
@@ -148,10 +151,11 @@ const TaskDetailModal: React.FC<{
 
 const TaskBoardView: React.FC = () => {
   const [tasks, setTasks] = useState<WorkspaceTask[]>([]);
+  const [orchCards, setOrchCards] = useState<OrchTaskCard[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<WorkspaceTask | null>(null);
-  const [detailTask, setDetailTask] = useState<WorkspaceTask | null>(null);
+  const [detailTask, setDetailTask] = useState<WorkspaceTask | OrchTaskCard | null>(null);
   const [form] = Form.useForm<TaskFormValues>();
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const conversations = useConversationStore((s) => s.conversations);
@@ -179,22 +183,36 @@ const TaskBoardView: React.FC = () => {
   }, [activeConversationId]);
 
   const grouped = useMemo(() => {
-    const map = new Map<TaskStatus, WorkspaceTask[]>();
+    const map = new Map<TaskStatus, Array<WorkspaceTask | OrchTaskCard>>();
     columns.forEach((column) => map.set(column.key, []));
+    // Only add non-orch WorkspaceTasks (manual tasks). Orch tasks come from orchCards.
     tasks.forEach((task) => {
-      map.get(task.status)?.push(task);
+      if (!task.orch_task_id) {
+        map.get(task.status)?.push(task);
+      }
+    });
+    // Add OrchTaskCards
+    orchCards.forEach((card) => {
+      const col = map.get(card.status as TaskStatus);
+      if (col) col.push(card);
     });
     return map;
-  }, [tasks]);
+  }, [tasks, orchCards]);
 
   const fetchTasks = useCallback(async () => {
     if (!activeConversationId) {
       setTasks([]);
+      setOrchCards([]);
       return;
     }
     setLoading(true);
     try {
-      setTasks(await getTasks({ conversation_id: activeConversationId }));
+      const [taskList, cardList] = await Promise.all([
+        getTasks({ conversation_id: activeConversationId }),
+        getOrchTaskCards(activeConversationId),
+      ]);
+      setTasks(taskList);
+      setOrchCards(cardList);
     } catch {
       antMessage.error('获取对话任务失败');
     } finally {
@@ -306,7 +324,12 @@ const TaskBoardView: React.FC = () => {
     }
   };
 
-  const resolveCreatorAvatar = (task: WorkspaceTask): string => {
+  const resolveCreatorAvatar = (task: WorkspaceTask | OrchTaskCard): string => {
+    if ('sender_id' in task) {
+      // OrchTaskCard - use embedded sender_avatar directly
+      if (task.sender_avatar) return task.sender_avatar;
+      return resolveAgentAvatar({ id: task.sender_id, name: task.sender_name });
+    }
     if (task.orch_task_id) {
       if (orchAgent) return resolveAgentAvatar({ id: orchAgent.agent_id, name: orchAgent.name, avatar: orchAgent.avatar });
       return resolveAgentAvatar({ id: 'orch', name: 'Orch' });
@@ -320,7 +343,10 @@ const TaskBoardView: React.FC = () => {
     return resolveAgentAvatar({ id: 'orch', name: 'Orch' });
   };
 
-  const resolveCreatorName = (task: WorkspaceTask): string => {
+  const resolveCreatorName = (task: WorkspaceTask | OrchTaskCard): string => {
+    if ('sender_name' in task) {
+      return task.sender_name || 'Orch';
+    }
     if (task.orch_task_id) {
       return orchAgent?.name || 'Orch';
     }
@@ -330,7 +356,12 @@ const TaskBoardView: React.FC = () => {
     return 'Orch';
   };
 
-  const resolveWorkerAvatar = (task: WorkspaceTask): string => {
+  const resolveWorkerAvatar = (task: WorkspaceTask | OrchTaskCard): string => {
+    if ('worker_avatar' in task) {
+      // OrchTaskCard - use embedded worker_avatar directly
+      if (task.worker_avatar) return task.worker_avatar;
+      return resolveAgentAvatar({ id: task.worker_id, name: task.worker_name });
+    }
     if (task.agent_id) {
       const storeAgent = agents.find((a) => a.id === task.agent_id);
       if (storeAgent) return resolveAgentAvatar(storeAgent);
@@ -342,58 +373,68 @@ const TaskBoardView: React.FC = () => {
     return resolveAgentAvatar({ id: 'unknown', name: 'Worker' });
   };
 
-  const resolveWorkerName = (task: WorkspaceTask): string => {
-    return task.worker_name || task.agent_name || 'Worker';
+  const resolveWorkerName = (task: WorkspaceTask | OrchTaskCard): string => {
+    return task.worker_name || (('agent_name' in task) ? task.agent_name : '') || 'Worker';
   };
 
-  const renderTaskCard = (task: WorkspaceTask) => {
-    const targetStatus = nextStatus[task.status];
-    const isOrchTask = Boolean(task.orch_task_id);
-    const duration = calcDuration(task.created_at, task.completed_at);
-    const creatorAvatar = resolveCreatorAvatar(task);
-    const creatorName = resolveCreatorName(task);
-    const workerAvatar = resolveWorkerAvatar(task);
-    const workerName = resolveWorkerName(task);
+  const renderTaskCard = (item: WorkspaceTask | OrchTaskCard) => {
+    const isOrchCard = 'sender_id' in item;
+    const task = item as WorkspaceTask;
+    const card = item as OrchTaskCard;
+
+    const targetStatus = nextStatus[task.status as TaskStatus];
+    const isOrchTask = isOrchCard || Boolean(task.orch_task_id);
+    const duration = calcDuration(card.dispatched_at || task.created_at, card.completed_at || task.completed_at);
+    const creatorAvatar = resolveCreatorAvatar(item);
+    const creatorName = resolveCreatorName(item);
+    const workerAvatar = resolveWorkerAvatar(item);
+    const workerName = resolveWorkerName(item);
+
+    // For OrchTaskCard: use task_summary as title, task_content as description
+    // For WorkspaceTask: use title, description
+    const displayTitle = isOrchCard ? card.task_summary : (task.description || task.title);
+    const displayResult = isOrchCard ? card.worker_result : task.worker_result;
+    const displayTime = isOrchCard ? card.dispatched_at : task.created_at;
 
     return (
-      <article className={styles.taskCard} key={task.id}>
+      <article className={styles.taskCard} key={item.id}>
         {/* Row 1: Creator */}
         <div className={styles.cardRow}>
           <div className={styles.userInfo}>
             <img src={creatorAvatar} className={styles.avatar} alt="" />
             <div className={styles.userText}>
               <span className={styles.userName}>{creatorName}</span>
-              <span className={styles.time}>{formatTime(task.created_at)}</span>
+              <span className={styles.time}>{formatTime(displayTime)}</span>
             </div>
           </div>
           <div className={styles.content}>
-            <span className={styles.contentText}>{truncate(task.description || task.title, 120)}</span>
-            <button className={styles.detailBtn} type="button" onClick={() => setDetailTask(task)}>
+            <span className={styles.contentText}>{truncate(displayTitle, 120)}</span>
+            <button className={styles.detailBtn} type="button" onClick={() => setDetailTask(item)}>
               {'详情 →'}
             </button>
           </div>
         </div>
 
         {/* Row 2: Worker (hidden for todo status) */}
-        {task.status !== 'todo' && (
+        {item.status !== 'todo' && (
           <div className={styles.cardRow}>
             <div className={styles.userInfo}>
               <img src={workerAvatar} className={styles.avatar} alt="" />
               <div className={styles.userText}>
                 <span className={styles.userName}>{workerName}</span>
-                {task.status !== 'in_progress' && task.updated_at && (
-                  <span className={styles.time}>{formatTime(task.updated_at)}</span>
+                {item.status !== 'in_progress' && (card.completed_at || task.updated_at) && (
+                  <span className={styles.time}>{formatTime(card.completed_at || task.updated_at)}</span>
                 )}
               </div>
             </div>
             <div className={styles.content}>
-              {task.status === 'in_progress' ? (
+              {item.status === 'in_progress' ? (
                 <span className={styles.executing}>执行中...</span>
               ) : (
                 <>
-                  <span className={styles.contentText}>{truncate(task.worker_result, 120)}</span>
-                  {task.worker_result && (
-                    <button className={styles.detailBtn} type="button" onClick={() => setDetailTask(task)}>
+                  <span className={styles.contentText}>{truncate(displayResult, 120)}</span>
+                  {displayResult && (
+                    <button className={styles.detailBtn} type="button" onClick={() => setDetailTask(item)}>
                       {'详情 →'}
                     </button>
                   )}
@@ -406,37 +447,41 @@ const TaskBoardView: React.FC = () => {
         {/* Row 3: Footer */}
         <div className={styles.cardFooter}>
           <div className={styles.footerLeft}>
-            <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status]}</Tag>
+            <Tag color={statusColorMap[item.status as TaskStatus]}>{statusLabelMap[item.status as TaskStatus]}</Tag>
             {isOrchTask && <Tag color="purple">{workerName}</Tag>}
-            <Tag className={styles.priorityTag}>{priorityLabels[task.priority]}</Tag>
+            <Tag className={styles.priorityTag}>{priorityLabels[item.priority as TaskPriority]}</Tag>
           </div>
           <div className={styles.footerRight}>
             {duration && <span className={styles.duration}>{'用时 '}{duration}</span>}
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  { key: 'edit', label: '编辑任务' },
-                  { key: 'delete', label: '删除任务', danger: true },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'edit') openEdit(task);
-                  if (key === 'delete') handleDelete(task);
-                },
-              }}
-            >
-              <button className={styles.iconButton} type="button" aria-label="任务操作">
-                <MoreOutlined />
-              </button>
-            </Dropdown>
-            {targetStatus ? (
-              <button className={styles.moveButton} type="button" onClick={() => handleMove(task, targetStatus)}>
-                推进
-              </button>
-            ) : (
-              <button className={styles.deleteButton} type="button" onClick={() => handleDelete(task)}>
-                <DeleteOutlined />
-              </button>
+            {!isOrchCard && (
+              <>
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      { key: 'edit', label: '编辑任务' },
+                      { key: 'delete', label: '删除任务', danger: true },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === 'edit') openEdit(task);
+                      if (key === 'delete') handleDelete(task);
+                    },
+                  }}
+                >
+                  <button className={styles.iconButton} type="button" aria-label="任务操作">
+                    <MoreOutlined />
+                  </button>
+                </Dropdown>
+                {targetStatus ? (
+                  <button className={styles.moveButton} type="button" onClick={() => handleMove(task, targetStatus)}>
+                    推进
+                  </button>
+                ) : (
+                  <button className={styles.deleteButton} type="button" onClick={() => handleDelete(task)}>
+                    <DeleteOutlined />
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
