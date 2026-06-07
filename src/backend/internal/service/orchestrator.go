@@ -453,15 +453,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskRecord.ID, model.OrchTaskWorkersRunning)
 	}
 
-	// 所有 worker 并行派发：每个 goroutine 用统一路径 dispatchAndWait 同步等待结果
-	for _, t := range dispatch.Tasks {
-		agentID, ok := agentNameToID[t.AgentName]
-		if !ok {
-			slog.Warn("worker agent not found in conversation", "agent", t.AgentName)
-			continue
-		}
-		go s.dispatchOrchWorker(convID, userID, t, agentID, orchAgent.Name, kbPreload, orchTaskRecord.ID)
-	}
+	// 所有 worker 并行派发：startWorkersAndWait 内部用 WaitGroup 等待全部完成后触发 summary
+	go s.startWorkersAndWait(ctx, convID, userID, dispatch.Tasks, agentNameToID, orchAgent.Name, kbPreload, orchTaskRecord.ID)
 
 	return messages, nil
 }
