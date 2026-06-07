@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { useWsStore } from '@/store/wsStore';
+import { useWsStore, notifyTaskChanged } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
@@ -152,6 +152,13 @@ export function useWebSocket() {
           const recallMsgId = msg.data.message_id ?? msg.data.messageId;
           if (recallConvId && recallMsgId) {
             useMessageStore.getState().handleRecallPush(recallConvId, recallMsgId);
+          }
+          break;
+        }
+        case 'task.changed': {
+          const taskConvId = msg.data.conversation_id ?? msg.data.conversationId;
+          if (taskConvId) {
+            notifyTaskChanged(taskConvId);
           }
           break;
         }

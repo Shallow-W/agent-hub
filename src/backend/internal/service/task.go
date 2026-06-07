@@ -14,9 +14,16 @@ type TaskRepo interface {
 	List(ctx context.Context, userID string, filter model.TaskFilter) ([]*model.WorkspaceTask, error)
 	Create(ctx context.Context, userID string, input model.TaskCreateInput) (*model.WorkspaceTask, error)
 	GetByID(ctx context.Context, userID, id string) (*model.WorkspaceTask, error)
+	GetByOrchTaskAndWorker(ctx context.Context, orchTaskID, workerName string) (*model.WorkspaceTask, error)
 	Update(ctx context.Context, userID, id string, input model.TaskUpdateInput) (*model.WorkspaceTask, error)
 	MoveStatus(ctx context.Context, userID, id, status string) (*model.WorkspaceTask, error)
 	Delete(ctx context.Context, userID, id string) (bool, error)
+}
+
+// TaskBoardSync 定义 Orchestrator 到 TaskBoard 的同步接口。
+type TaskBoardSync interface {
+	CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error)
+	UpdateOrchWorkerStatus(ctx context.Context, orchTaskID, workerName, status string) error
 }
 
 var (
@@ -121,6 +128,40 @@ func (s *TaskService) Delete(ctx context.Context, userID, id string) error {
 	}
 	if !ok {
 		return ErrTaskNotFound
+	}
+	return nil
+}
+
+// CreateOrchWorkerTask Orch 派发时创建任务卡片。
+func (s *TaskService) CreateOrchWorkerTask(ctx context.Context, convID, userID, agentID, title, desc, orchTaskID, workerName string) (*model.WorkspaceTask, error) {
+	task, err := s.repo.Create(ctx, userID, model.TaskCreateInput{
+		ConversationID: &convID,
+		AgentID:        &agentID,
+		Title:          title,
+		Description:    desc,
+		Status:         "todo",
+		Priority:       "medium",
+		OrchTaskID:     &orchTaskID,
+		WorkerName:     &workerName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create orch worker task: %w", err)
+	}
+	return task, nil
+}
+
+// UpdateOrchWorkerStatus Worker 状态变化时更新。
+func (s *TaskService) UpdateOrchWorkerStatus(ctx context.Context, orchTaskID, workerName, status string) error {
+	task, err := s.repo.GetByOrchTaskAndWorker(ctx, orchTaskID, workerName)
+	if err != nil {
+		return fmt.Errorf("find orch worker task: %w", err)
+	}
+	if task == nil {
+		return nil
+	}
+	_, err = s.repo.MoveStatus(ctx, "", task.ID, status)
+	if err != nil {
+		return fmt.Errorf("update orch worker status: %w", err)
 	}
 	return nil
 }

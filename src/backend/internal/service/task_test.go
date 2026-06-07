@@ -56,6 +56,10 @@ func (r *fakeTaskRepo) Delete(context.Context, string, string) (bool, error) {
 	return r.task != nil, nil
 }
 
+func (r *fakeTaskRepo) GetByOrchTaskAndWorker(context.Context, string, string) (*model.WorkspaceTask, error) {
+	return r.task, nil
+}
+
 func TestTaskServiceCreateDefaults(t *testing.T) {
 	svc := NewTaskService(&fakeTaskRepo{})
 	task, err := svc.Create(context.Background(), "user-1", model.TaskCreateInput{Title: "  设计任务看板  "})
