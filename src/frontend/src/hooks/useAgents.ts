@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAgentStore } from '@/store/agentStore';
 
-const STATUS_POLL_MS = 30_000;
+const STATUS_POLL_MS = 300_000;
 
 export function useAgents() {
   const agents = useAgentStore((s) => s.agents);

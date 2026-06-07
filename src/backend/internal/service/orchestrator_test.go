@@ -50,6 +50,10 @@ func (f *fakeOrchConvRepo) GetMember(_ context.Context, _, _ string) (*model.Con
 	return f.member, f.memberErr
 }
 
+func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string, error) {
+	return []string{}, nil
+}
+
 type fakeOrchAgentRepo struct {
 	agent    *model.Agent
 	agentErr error
@@ -72,6 +76,12 @@ func (f *fakeOrchAgentRepo) GetDaemonTask(_ context.Context, _ string) (*model.D
 
 func (f *fakeOrchAgentRepo) IsAgentInConversation(_ context.Context, _, _, _ string) (bool, error) {
 	return f.inConv, nil
+}
+
+func (f *fakeOrchAgentRepo) SetDaemonTaskOrch(_ context.Context, _, _, _ string) {}
+
+func (f *fakeOrchAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
+	return true, nil
 }
 
 // --- RouteMention tests ---

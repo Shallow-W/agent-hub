@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "确认 hub.go、handler、service 的代码组织规范"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "WS 推送失败、daemon 断连等错误的处理规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量检查标准"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "daemon 连接、任务推送的日志规范"}
+{"file": ".trellis/spec/guides/core-principles.md", "reason": "最小改动原则，不引入多余抽象"}
+{"file": "doc/design/daemon-ws-push-architecture.md", "reason": "本任务的详细设计文档，包含 Hub 扩展设计和 WS 消息协议"}

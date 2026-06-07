@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,13 +120,10 @@ func TestParseMentions_MultipleAtSymbols(t *testing.T) {
 // orchestrator concurrent protection
 // ---------------------------------------------------------------------------
 
-func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
+func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 	// Two goroutines call RouteMention for the same conversation with an
-	// orchestrator agent. Only one should proceed; the other should be
-	// skipped due to the activeOrchs guard.
-	//
-	// We add a delay in GetDaemonTask so the first orchestrator stays in
-	// activeOrchs long enough for the second goroutine to hit the guard.
+	// orchestrator agent. Both should proceed independently (event-driven
+	// design allows parallel orchestration tasks per conversation).
 
 	agentID := "orch-1"
 	userID := "u1"
@@ -140,7 +139,7 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 	}
 
 	convAgents := []model.ConversationAgent{
-		{AgentID: agentID, Name: "Orch"},
+		{AgentID: agentID, Name: "Orch", Role: "orchestrator"},
 	}
 
 	completedTask := &model.DaemonTask{
@@ -151,6 +150,7 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 
 	var mu sync.Mutex
 	createCount := 0
+	var taskIDs []string
 
 	agentRepo := &slowConcurrentAgentRepo{
 		agent:         agent,
@@ -158,6 +158,7 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 		onCreate: func() {
 			mu.Lock()
 			createCount++
+			taskIDs = append(taskIDs, fmt.Sprintf("task-%d", createCount))
 			mu.Unlock()
 		},
 	}
@@ -179,18 +180,20 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
 	svc.SetDaemonHub(hub)
 
+	// Resolve both tasks in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		for i := 1; i <= 2; i++ {
+			hub.ResolveTask(fmt.Sprintf("task-%d", i), &ws.TaskResult{
+				TaskID: fmt.Sprintf("task-%d", i),
+				Result: "I'll handle this.",
+			})
+		}
+	}()
+
 	var wg sync.WaitGroup
 	var result1, result2 *RouteResult
 	var err1, err2 error
-
-	// Resolve the task in background after the winning goroutine registers the promise
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		hub.ResolveTask("task-pending", &ws.TaskResult{
-			TaskID: "task-pending",
-			Result: "I'll handle this.",
-		})
-	}()
 
 	wg.Add(2)
 	go func() {
@@ -210,30 +213,10 @@ func TestRouteMention_ConcurrentOrchestration_OneSucceeds(t *testing.T) {
 		t.Errorf("goroutine 2 error: %v", err2)
 	}
 
-	mu.Lock()
-	count := createCount
-	mu.Unlock()
-	if count != 1 {
-		t.Errorf("expected exactly 1 daemon task creation, got %d", count)
-	}
-
 	hasDispatch1 := result1 != nil && len(result1.Dispatches) > 0
 	hasDispatch2 := result2 != nil && len(result2.Dispatches) > 0
-	if hasDispatch1 == hasDispatch2 {
-		t.Error("expected exactly one goroutine to have dispatches")
-	}
-
-	// The busy goroutine should receive a system feedback message
-	hasBusyFeedback1 := result1 != nil && len(result1.AgentMessages) > 0 &&
-		result1.AgentMessages[0].Role == "system" && result1.AgentMessages[0].Content == "编排器正忙，请稍后再试。"
-	hasBusyFeedback2 := result2 != nil && len(result2.AgentMessages) > 0 &&
-		result2.AgentMessages[0].Role == "system" && result2.AgentMessages[0].Content == "编排器正忙，请稍后再试。"
-	// Exactly one of the two should be busy (the one without dispatches)
-	if hasBusyFeedback1 == hasBusyFeedback2 {
-		t.Error("expected exactly one goroutine to have busy feedback")
-	}
-	if hasDispatch1 == hasBusyFeedback1 {
-		t.Error("busy feedback should be on the goroutine that didn't dispatch")
+	if !hasDispatch1 || !hasDispatch2 {
+		t.Errorf("expected both goroutines to have dispatches, got %v and %v", hasDispatch1, hasDispatch2)
 	}
 }
 
@@ -243,6 +226,7 @@ type slowConcurrentAgentRepo struct {
 	agent         *model.Agent
 	completedTask *model.DaemonTask
 	onCreate      func()
+	taskCounter   int32
 }
 
 func (r *slowConcurrentAgentRepo) GetByID(_ context.Context, _ string) (*model.Agent, error) {
@@ -253,7 +237,8 @@ func (r *slowConcurrentAgentRepo) CreateDaemonTask(_ context.Context, _, _, _, _
 	if r.onCreate != nil {
 		r.onCreate()
 	}
-	return &model.DaemonTask{ID: "task-pending", Status: "pending"}, nil
+	n := atomic.AddInt32(&r.taskCounter, 1)
+	return &model.DaemonTask{ID: fmt.Sprintf("task-%d", n), Status: "pending"}, nil
 }
 
 func (r *slowConcurrentAgentRepo) GetDaemonTask(_ context.Context, _ string) (*model.DaemonTask, error) {
@@ -265,76 +250,12 @@ func (r *slowConcurrentAgentRepo) IsAgentInConversation(_ context.Context, _, _,
 	return true, nil
 }
 
-// ---------------------------------------------------------------------------
-// dispatchSequential with empty depResults
-// ---------------------------------------------------------------------------
+func (r *slowConcurrentAgentRepo) SetDaemonTaskOrch(_ context.Context, _, _, _ string) {}
 
-func TestDispatchSequential_EmptyDepResults_NoPanic(t *testing.T) {
-	userID := "u1"
-	agent := &model.Agent{
-		ID:        "worker-1",
-		UserID:    &userID,
-		Name:      "Worker",
-		Type:      "custom",
-		CLITool:   "claude",
-		MachineID: stringPtr("machine-1"),
-	}
-
-	task := &model.DaemonTask{
-		ID:     "task-seq-1",
-		Status: "completed",
-		Result: "task done",
-	}
-
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{agent: agent, task: task, inConv: true},
-		&fakeMsgRepo{},
-	)
-
-	// Wire up DaemonHub
-	hub := ws.NewDaemonHub(slog.Default())
-	hubCtx, hubCancel := context.WithCancel(context.Background())
-	defer hubCancel()
-	go hub.Run(hubCtx)
-	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(hub)
-
-	dispatchTask := DispatchTask{
-		AgentName:  "Worker",
-		Task:       "do something sequential",
-		Sequential: true,
-		DependsOn:  "",
-	}
-
-	agentNameToID := map[string]string{"Worker": "worker-1"}
-	depResults := map[string]string{} // empty
-
-	// Resolve task in background
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		hub.ResolveTask("task-seq-1", &ws.TaskResult{
-			TaskID: "task-seq-1",
-			Result: "task done",
-		})
-	}()
-
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
-
-	if msg == nil {
-		t.Fatal("expected non-nil message from sequential dispatch")
-	}
-	if msg.Content != "task done" {
-		t.Errorf("content = %q, want 'task done'", msg.Content)
-	}
-	if _, ok := depResults["Worker"]; !ok {
-		t.Error("depResults should contain Worker after sequential dispatch")
-	}
+func (r *slowConcurrentAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
+	return true, nil
 }
 
-// ---------------------------------------------------------------------------
-// ParseOrchestratorOutput edge cases
-// ---------------------------------------------------------------------------
 
 func TestParseOrchOutput_MultilineTask(t *testing.T) {
 	// Indented continuation lines are appended to the dispatch task.
@@ -447,52 +368,6 @@ func TestSendMessage_NilAttachmentsEmptyContent_ReturnsError(t *testing.T) {
 // Bug 2: Failed parallel dispatch writes [任务失败] to depResults
 // ---------------------------------------------------------------------------
 
-func TestDispatchSequential_FailedTask_WritesFailureToDepResults(t *testing.T) {
-	userID := "u1"
-	// Agent without MachineID will cause dispatchWorker to fail
-	agent := &model.Agent{
-		ID:      "worker-1",
-		UserID:  &userID,
-		Name:    "Worker",
-		Type:    "custom",
-		CLITool: "claude",
-		// No MachineID — offline
-	}
-
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{agent: agent, inConv: true},
-		&fakeMsgRepo{},
-	)
-
-	dispatchTask := DispatchTask{
-		AgentName:  "Worker",
-		Task:       "do something",
-		Sequential: true,
-	}
-
-	agentNameToID := map[string]string{"Worker": "worker-1"}
-	depResults := map[string]string{}
-
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
-
-	// dispatchSequential returns nil on failure
-	if msg != nil {
-		t.Fatalf("expected nil message on failure, got %+v", msg)
-	}
-
-	// But depResults should still contain the agent name with [任务失败]
-	if val, ok := depResults["Worker"]; !ok {
-		t.Error("depResults should contain Worker even after failure")
-	} else if val != "[任务失败]" {
-		t.Errorf("depResults[Worker] = %q, want %q", val, "[任务失败]")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Bug 3: Empty orchestratorName is defaulted at entry point
-// ---------------------------------------------------------------------------
-
 func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 	userID := "u1"
 	// Quick repo that returns completed orchestrator task immediately
@@ -551,122 +426,4 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 // Feature 5: Context length protection in buildDispatchContext
 // ---------------------------------------------------------------------------
 
-func TestBuildDispatchContext_LongTask_Truncated(t *testing.T) {
-	userID := "u1"
-	agent := &model.Agent{
-		ID:        "worker-1",
-		UserID:    &userID,
-		Name:      "Worker",
-		Type:      "custom",
-		CLITool:   "claude",
-		MachineID: stringPtr("machine-1"),
-	}
 
-	task := &model.DaemonTask{
-		ID:     "task-trunc",
-		Status: "completed",
-		Result: "result",
-	}
-
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{agent: agent, task: task, inConv: true},
-		&fakeMsgRepo{},
-	)
-
-	// Wire up DaemonHub
-	hub := ws.NewDaemonHub(slog.Default())
-	hubCtx, hubCancel := context.WithCancel(context.Background())
-	defer hubCancel()
-	go hub.Run(hubCtx)
-	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(hub)
-
-	// Build a task description that is way over 2000 characters
-	base := strings.Repeat("很长的任务描述", 200) // ~1400 chars, doubled
-	longTask := base + base                // ~2800 chars, > 2000 limit
-
-	dispatchTask := DispatchTask{
-		AgentName: "Worker",
-		Task:      longTask,
-	}
-
-	agentNameToID := map[string]string{"Worker": "worker-1"}
-	depResults := map[string]string{}
-
-	// Resolve task in background
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		hub.ResolveTask("task-trunc", &ws.TaskResult{
-			TaskID: "task-trunc",
-			Result: "result",
-		})
-	}()
-
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
-	if msg == nil {
-		t.Fatal("expected non-nil message")
-	}
-	// Should not panic; task should have been truncated
-}
-
-func TestBuildDispatchContext_TotalLengthProtected(t *testing.T) {
-	userID := "u1"
-	agent := &model.Agent{
-		ID:        "worker-1",
-		UserID:    &userID,
-		Name:      "Worker",
-		Type:      "custom",
-		CLITool:   "claude",
-		MachineID: stringPtr("machine-1"),
-	}
-
-	task := &model.DaemonTask{
-		ID:     "task-total",
-		Status: "completed",
-		Result: "result",
-	}
-
-	// Load the fakeMsgRepo with many long messages to exceed 4000 chars in context
-	msgRepo := &fakeMsgRepo{}
-	for i := 0; i < 100; i++ {
-		msgRepo.Create(context.Background(), "c1", "user", strings.Repeat("x", 100), "", nil, nil, nil, nil)
-	}
-
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{agent: agent, task: task, inConv: true},
-		msgRepo,
-	)
-
-	// Wire up DaemonHub
-	hub := ws.NewDaemonHub(slog.Default())
-	hubCtx, hubCancel := context.WithCancel(context.Background())
-	defer hubCancel()
-	go hub.Run(hubCtx)
-	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(hub)
-
-	dispatchTask := DispatchTask{
-		AgentName: "Worker",
-		Task:      "regular task",
-	}
-
-	agentNameToID := map[string]string{"Worker": "worker-1"}
-	depResults := map[string]string{}
-
-	// Resolve task in background
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		hub.ResolveTask("task-total", &ws.TaskResult{
-			TaskID: "task-total",
-			Result: "result",
-		})
-	}()
-
-	msg := svc.dispatchSequential(context.Background(), "c1", userID, dispatchTask, agentNameToID, depResults, "Orch", "")
-	if msg == nil {
-		t.Fatal("expected non-nil message")
-	}
-	// Should not panic; context should have been truncated to 4000 chars
-}

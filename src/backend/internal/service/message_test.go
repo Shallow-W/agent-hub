@@ -176,6 +176,23 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		}
 	}()
 
+	// Wire up DaemonHub for WS-based dispatch
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
+	// Resolve the daemon task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-1", &ws.TaskResult{
+			TaskID: "task-1",
+			Result: "鐪熷疄 CLI 鍥炲",
+		})
+	}()
+
 	result, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
 	if err != nil {
 		t.Fatalf("send message failed: %v", err)
@@ -302,7 +319,7 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	ownerID := "user-2"
 	msgRepo := &fakeMsgRepo{}
 	convRepo := &fakeConvRepoForMsg{
-		conv: &model.Conversation{ID: "conv-1", UserID: userID},
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
 	}
 	agentRepo := &fakeAgentRepoForMsg{
 		agent: &model.Agent{ID: "agent-1", UserID: &ownerID, Name: "Other Agent", CLITool: "claude"},

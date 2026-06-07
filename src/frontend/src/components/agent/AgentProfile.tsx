@@ -84,7 +84,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSystemPromptValue(agent.system_prompt ?? '');
     setToolsConfigValue(agent.tools_config ?? '');
     setEnableManagementTools(agent.enable_management_tools ?? false);
-  }, [agent]);
+  }, [agent?.id]);
 
   if (!agent) {
     return (
