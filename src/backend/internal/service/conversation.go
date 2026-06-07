@@ -203,6 +203,13 @@ func (s *ConversationService) TogglePin(ctx context.Context, userID, convID stri
 	if conv == nil {
 		return ErrConvNotFound
 	}
+	// agent type: only creator can pin
+	if conv.Type == "agent" {
+		if conv.UserID != userID {
+			return ErrConvNoPerm
+		}
+		return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)
+	}
 	// 私聊会话 owner 可操作
 	if conv.Type == "single" && conv.UserID == userID {
 		return s.repo.UpdatePinned(ctx, convID, !conv.Pinned)

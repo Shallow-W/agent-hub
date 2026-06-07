@@ -61,10 +61,9 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 			 ) latest_msg ON true
 			 WHERE (c.type = 'agent' AND c.archived_at IS NULL)
 			    OR (c.type != 'agent' AND c.archived_at IS NULL
-			        AND (c.user_id = $1
-			             OR EXISTS (SELECT 1 FROM conversation_members cm
-			                        WHERE cm.conversation_id = c.id AND cm.user_id = $1
-			                          AND cm.archived_at IS NULL)))
+			        AND EXISTS (SELECT 1 FROM conversation_members cm
+			                    WHERE cm.conversation_id = c.id AND cm.user_id = $1
+			                      AND cm.archived_at IS NULL))
 			 ORDER BY c.pinned DESC, c.updated_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
@@ -161,7 +160,7 @@ func (r *ConversationRepo) Unarchive(ctx context.Context, id string) error {
 	return nil
 }
 
-// ArchiveForMember 按成员归档：在 conversation_members 上设置 archived_at，并清除该用户对对话的 pinned
+// ArchiveForMember 按成员归档：在 conversation_members 上设置 archived_at
 func (r *ConversationRepo) ArchiveForMember(ctx context.Context, conversationID, userID string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE conversation_members SET archived_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
@@ -210,9 +209,9 @@ func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID stri
 			 ) latest_msg ON true
 			 WHERE (c.type = 'agent' AND c.archived_at IS NOT NULL AND c.user_id = $1)
 			    OR (c.type != 'agent' AND
-			        (EXISTS (SELECT 1 FROM conversation_members cm
-			                 WHERE cm.conversation_id = c.id AND cm.user_id = $1
-			                   AND cm.archived_at IS NOT NULL)))
+			        EXISTS (SELECT 1 FROM conversation_members cm
+			                WHERE cm.conversation_id = c.id AND cm.user_id = $1
+			                  AND cm.archived_at IS NOT NULL))
 			 ORDER BY c.archived_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
