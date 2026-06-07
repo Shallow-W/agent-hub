@@ -305,6 +305,19 @@ func (dh *DaemonHub) RegisterTestClient(machineID string, client *DaemonClient) 
 	dh.clients.Store(machineID, client)
 }
 
+// UpdateMachineID 更新 daemon 客户端的 machineID 标识（全局 token 连接时，收到
+// daemon.register 后才知道真实 machineID，需要更新 DaemonHub 注册）。
+func (dh *DaemonHub) UpdateMachineID(client *DaemonClient, newMachineID string) {
+	oldID := client.MachineID
+	if oldID == newMachineID {
+		return
+	}
+	dh.clients.Delete(oldID)
+	client.MachineID = newMachineID
+	dh.clients.Store(newMachineID, client)
+	dh.logger.Info("daemon machine_id updated", "old", oldID, "new", newMachineID)
+}
+
 // Shutdown 外部调用关闭 DaemonHub（委托给内部 shutdown，sync.Once 保证幂等）
 func (dh *DaemonHub) Shutdown(ctx context.Context) {
 	dh.shutdown()

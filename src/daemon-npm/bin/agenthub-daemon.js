@@ -144,7 +144,6 @@ function killSessionProcess(sessionId) {
 
 const OPEN_PATH_TIMEOUT_MS = 5000;
 const MIN_DESCRIPTION_CHARS = 6;
-const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
 const CANDIDATES = [
@@ -770,9 +769,6 @@ function commandForTask(task) {
 }
 
 async function executeTask(task) {
-  if (task.cli_tool === SKILL_SYNC_TOOL) {
-    return syncSkillFiles(task.prompt);
-  }
   if (task.cli_tool === OPEN_PATH_TOOL) {
     return openSkillLocation(task.prompt);
   }
@@ -825,39 +821,6 @@ async function executeTask(task) {
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   return text || '(Agent CLI 没有返回内容)';
-}
-
-function syncSkillFiles(prompt) {
-  let payload = null;
-  try {
-    payload = JSON.parse(prompt);
-  } catch {
-    throw new Error('Invalid skill sync payload');
-  }
-  let skills = [];
-  try {
-    skills = JSON.parse(String(payload.capabilities_json || '[]'));
-  } catch {
-    throw new Error('Invalid skills JSON');
-  }
-  let count = 0;
-  for (const skill of skills) {
-    if (!skill || typeof skill !== 'object') continue;
-    const sourcePath = String(skill.source_path || '').trim();
-    if (!sourcePath) continue;
-    if (path.basename(sourcePath) !== 'SKILL.md') {
-      throw new Error(`Refuse to write non-skill file: ${sourcePath}`);
-    }
-    if (agentHubWorkspaceForPath(sourcePath)) {
-      throw new Error('Refuse to write stale AgentHub workspace skill source. Reconnect this computer to refresh skills.');
-    }
-    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
-      throw new Error(`Skill file not found: ${sourcePath}`);
-    }
-    fs.writeFileSync(sourcePath, String(skill.detail || ''), 'utf8');
-    count += 1;
-  }
-  return `Synced ${count} skill file(s).`;
 }
 
 function openSkillLocation(prompt) {
@@ -1756,6 +1719,31 @@ const MCP_TOOLS = [
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+  },
+  {
+    name: 'list_group_agents',
+    description: '列出指定群聊中的智能体，包括名称(name)、角色(role: orchestrator/worker/robot)、状态(status: online/offline)、CLI工具(cli_tool)、能力描述(system_prompt)等信息。用于 orchestrator 了解群内 agent 的能力并合理分派任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '群聊会话 ID（默认为当前会话）' },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const convId = args.conversation_id || ctx.conversationId || '';
+      const res = await ctx.callApi('GET', `/api/conversations/${encodeURIComponent(convId)}/agents`);
+      if (!res || !Array.isArray(res.data)) return res;
+      // 只返回 orch 需要的关键字段
+      res.data = res.data.map(a => ({
+        name: a.name,
+        role: a.role,
+        status: a.status,
+        cli_tool: a.cli_tool,
+        description: a.system_prompt || '',
+      }));
+      return res;
+    },
   },
   // ── 任务管理（通过 /mcp/ 端点，daemon token 鉴权） ──
   {

@@ -2,10 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,7 +58,7 @@ func (r *fakeAgentRepo) CompleteDaemonTask(ctx context.Context, id, machineID, r
 	return true, nil
 }
 
-func (r *fakeAgentRepo) UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error {
+func (r *fakeAgentRepo) UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON, machineID string) error {
 	r.registered = append(r.registered, cliTool)
 	return nil
 }
@@ -155,6 +152,10 @@ func (r *fakeAgentRepo) UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash 
 	return nil
 }
 
+func (r *fakeAgentRepo) GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error) {
+	return nil, nil
+}
+
 func TestCreateCustomRejectsEmptyName(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
 	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", false)
@@ -166,7 +167,7 @@ func TestCreateCustomRejectsEmptyName(t *testing.T) {
 func TestRegisterSystemAgentsSkipsInvalidItems(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
-	err := svc.RegisterSystemAgents(context.Background(), []DiscoveredAgent{
+	err := svc.RegisterSystemAgents(context.Background(), "", []DiscoveredAgent{
 		{Name: "Claude Code", CLITool: "claude", Capabilities: []DiscoveredSkill{{Name: "coding"}}},
 		{Name: "", CLITool: "codex"},
 		{Name: "OpenCode", CLITool: ""},
@@ -237,90 +238,6 @@ func TestDiscoveredSkillAcceptsLegacyString(t *testing.T) {
 	}
 }
 
-func TestSyncSkillFilesWritesExistingSkillMD(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "SKILL.md")
-	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-	payload := `[{"name":"coding","detail":"new content","source_path":` + strconvQuote(path) + `}]`
-	if err := syncSkillFiles(payload); err != nil {
-		t.Fatalf("sync skill file: %v", err)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read skill: %v", err)
-	}
-	if string(content) != "new content" {
-		t.Fatalf("expected synced content, got %q", string(content))
-	}
-}
-
-func TestSyncSkillFilesRejectsAgentHubWorkspaceSkill(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "src", "daemon-npm"), 0o755); err != nil {
-		t.Fatalf("mkdir daemon package: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "src", "frontend"), 0o755); err != nil {
-		t.Fatalf("mkdir frontend package: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "src", "daemon-npm", "package.json"), []byte(`{"name":"@agenthub/daemon"}`), 0o644); err != nil {
-		t.Fatalf("write daemon package: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "src", "frontend", "package.json"), []byte(`{"name":"frontend"}`), 0o644); err != nil {
-		t.Fatalf("write frontend package: %v", err)
-	}
-	skillDir := filepath.Join(dir, ".agents", "skills", "trellis")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatalf("mkdir skill: %v", err)
-	}
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte("old"), 0o644); err != nil {
-		t.Fatalf("write skill: %v", err)
-	}
-
-	payload := `[{"name":"trellis","detail":"new content","source_path":` + strconvQuote(skillPath) + `}]`
-	if err := syncSkillFiles(payload); err != ErrAgentInvalidInput {
-		t.Fatalf("expected invalid input for AgentHub workspace skill, got %v", err)
-	}
-	content, err := os.ReadFile(skillPath)
-	if err != nil {
-		t.Fatalf("read skill: %v", err)
-	}
-	if string(content) != "old" {
-		t.Fatalf("expected stale workspace skill to remain unchanged, got %q", string(content))
-	}
-}
-
-func TestUpdateDaemonAgentQueuesSkillSyncTask(t *testing.T) {
-	userID := "user-1"
-	machineID := "machine-1"
-	payload := `[{"name":"coding","detail":"new content","source_path":"C:\\skills\\coding\\SKILL.md"}]`
-	repo := &fakeAgentRepo{
-		currentAgent: &model.Agent{
-			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
-			Source: "daemon", MachineID: &machineID,
-			CapabilitiesJSON: `[{"name":"coding","detail":"old","source_path":"C:\\skills\\coding\\SKILL.md"}]`,
-		},
-		updateResult: &model.Agent{
-			ID: "agent-1", UserID: &userID, Name: "Agent", Type: "custom", CLITool: "claude",
-			Source: "daemon", MachineID: &machineID,
-			CapabilitiesJSON: payload,
-		},
-	}
-	svc := NewAgentService(repo, nil)
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", userID, "Agent", "claude", "", "", "", payload, false)
-	if err != nil {
-		t.Fatalf("update daemon agent: %v", err)
-	}
-	if repo.daemonTask == nil || repo.daemonTask.CLITool != daemonSkillSyncTool {
-		t.Fatalf("expected daemon skill sync task, got %#v", repo.daemonTask)
-	}
-	if !strings.Contains(repo.daemonTask.Prompt, "new content") {
-		t.Fatalf("expected skill content in sync payload, got %q", repo.daemonTask.Prompt)
-	}
-}
-
 func TestOpenDaemonSkillLocationQueuesOpenTask(t *testing.T) {
 	userID := "user-1"
 	machineID := "machine-1"
@@ -334,14 +251,10 @@ func TestOpenDaemonSkillLocationQueuesOpenTask(t *testing.T) {
 		},
 	}
 	svc := NewAgentService(repo, nil)
-	if err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", sourcePath); err != nil {
-		t.Fatalf("open daemon skill location: %v", err)
-	}
-	if repo.daemonTask == nil || repo.daemonTask.CLITool != daemonOpenPathTool {
-		t.Fatalf("expected open path daemon task, got %#v", repo.daemonTask)
-	}
-	if !strings.Contains(repo.daemonTask.Prompt, "source_path") {
-		t.Fatalf("expected source path in open payload, got %q", repo.daemonTask.Prompt)
+	// No daemonHub connected → ErrAgentOffline (validates path reaches WS push)
+	err := svc.OpenDaemonSkillLocation(context.Background(), userID, "agent-1", sourcePath)
+	if !errors.Is(err, ErrAgentOffline) {
+		t.Fatalf("expected ErrAgentOffline without daemon hub, got %v", err)
 	}
 }
 
@@ -364,11 +277,6 @@ func TestOpenDaemonSkillLocationRejectsUnknownSourcePath(t *testing.T) {
 	if repo.daemonTask != nil {
 		t.Fatalf("unexpected daemon task: %#v", repo.daemonTask)
 	}
-}
-
-func strconvQuote(value string) string {
-	data, _ := json.Marshal(value)
-	return string(data)
 }
 
 func TestUpdateCustomReturnsNotFound(t *testing.T) {

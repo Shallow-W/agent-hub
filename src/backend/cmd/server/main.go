@@ -111,6 +111,7 @@ func main() {
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
+	orchTaskRepo := repository.NewOrchTaskRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -154,12 +155,21 @@ func main() {
 	orchSvc.SetJWTSecret(cfg.JWT.Secret)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
+	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
 	daemonHub := ws.NewDaemonHub(logger)
 	orchSvc.SetDaemonHub(daemonHub)
+	orchSvc.SetNotifier(hub)
+	if rdb != nil {
+		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
+		msgSvc.SetCacher(redisMsgRepo)
+		orchSvc.SetCacher(redisMsgRepo)
+	} else {
+		msgSvc.SetCacher(nil)
+	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
@@ -171,7 +181,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 

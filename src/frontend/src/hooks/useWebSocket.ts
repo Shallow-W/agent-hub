@@ -4,6 +4,7 @@ import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
+import { useAgentStore } from '@/store/agentStore';
 import type { StreamMessage } from '@/types/message';
 
 let audioCtx: AudioContext | null = null;
@@ -126,6 +127,14 @@ export function useWebSocket() {
               clearTimeout(typingTimers[timerKey]);
               delete typingTimers[timerKey];
             }
+          }
+          break;
+        }
+        case 'agent.status': {
+          const agentId = msg.data.agent_id;
+          const agentStatus = msg.data.agent_status;
+          if (agentId && agentStatus) {
+            useAgentStore.getState().updateAgentStatus(agentId, agentStatus as import('@/types/agent').AgentStatus);
           }
           break;
         }

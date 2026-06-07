@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 type fakeMsgRepo struct {
@@ -140,13 +142,30 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	userID := "user-1"
 	msgRepo := &fakeMsgRepo{}
 	convRepo := &fakeConvRepoForMsg{
-		conv: &model.Conversation{ID: "conv-1", UserID: userID},
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
 	}
 	agentRepo := &fakeAgentRepoForMsg{
 		agent:          &model.Agent{ID: "agent-1", UserID: &userID, Name: "Codex Agent", CLITool: "codex", MachineID: stringPtr("machine-1")},
 		inConversation: true,
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
+
+	// Wire up DaemonHub for WS-based dispatch
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
+	// Resolve the daemon task in background
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-1", &ws.TaskResult{
+			TaskID: "task-1",
+			Result: "鐪熷疄 CLI 鍥炲",
+		})
+	}()
 
 	result, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil)
 	if err != nil {
@@ -191,7 +210,7 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	ownerID := "user-2"
 	msgRepo := &fakeMsgRepo{}
 	convRepo := &fakeConvRepoForMsg{
-		conv: &model.Conversation{ID: "conv-1", UserID: userID},
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
 	}
 	agentRepo := &fakeAgentRepoForMsg{
 		agent: &model.Agent{ID: "agent-1", UserID: &ownerID, Name: "Other Agent", CLITool: "claude"},

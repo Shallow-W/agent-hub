@@ -26,12 +26,13 @@ type AgentRepo interface {
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	ClaimDaemonTask(ctx context.Context, machineID string) (*model.DaemonTask, error)
 	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
-	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error
+	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON, machineID string) error
 	CreateDaemonMachine(ctx context.Context, userID, name, apiKeyHash string) (*model.DaemonMachine, error)
 	ListDaemonMachines(ctx context.Context, userID string) ([]model.DaemonMachine, error)
 	DeleteDaemonMachine(ctx context.Context, id, userID string) (bool, error)
 	GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash string) (*model.DaemonMachine, error)
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
+	GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
@@ -126,6 +127,24 @@ func (s *AgentService) ListAvailable(ctx context.Context, userID string) ([]mode
 	return list, nil
 }
 
+// GetAgentByID 按 ID 查询 Agent
+func (s *AgentService) GetAgentByID(ctx context.Context, id string) (*model.Agent, error) {
+	agent, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+	return agent, nil
+}
+
+// GetAgentsByMachine 查询指定 machine_id 下的所有 Agent
+func (s *AgentService) GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error) {
+	list, err := s.repo.GetAgentsByMachine(ctx, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("get agents by machine: %w", err)
+	}
+	return list, nil
+}
+
 // TouchMachine 更新机器心跳（内存操作，零 DB 开销）。
 func (s *AgentService) TouchMachine(machineID string) {
 	if s.tracker != nil {
@@ -169,8 +188,8 @@ func (s *AgentService) IsMachineOnline(machineID string) bool {
 	return false
 }
 
-// RegisterSystemAgents 保存 daemon 上报的系统 Agent
-func (s *AgentService) RegisterSystemAgents(ctx context.Context, agents []DiscoveredAgent) error {
+// RegisterSystemAgents 保存 daemon 上报的系统 Agent。machineID 非空时绑定到指定电脑。
+func (s *AgentService) RegisterSystemAgents(ctx context.Context, machineID string, agents []DiscoveredAgent) error {
 	for _, agent := range agents {
 		name := strings.TrimSpace(agent.Name)
 		cliTool := strings.TrimSpace(agent.CLITool)
@@ -181,7 +200,7 @@ func (s *AgentService) RegisterSystemAgents(ctx context.Context, agents []Discov
 		if err != nil {
 			return fmt.Errorf("marshal capabilities: %w", err)
 		}
-		if err := s.repo.UpsertSystemAgent(ctx, name, cliTool, agent.Version, string(capabilities)); err != nil {
+		if err := s.repo.UpsertSystemAgent(ctx, name, cliTool, agent.Version, string(capabilities), machineID); err != nil {
 			return fmt.Errorf("upsert system agent: %w", err)
 		}
 	}
@@ -316,9 +335,6 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	if err := syncSkillFiles(capabilitiesJSON); err != nil {
-		return nil, err
-	}
 	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("create custom agent: %w", err)
@@ -339,18 +355,6 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	}
 	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
 		return nil, ErrAgentNotFound
-	}
-	if current.Source == "daemon" && current.MachineID != nil && *current.MachineID != "" {
-		if err := validateDaemonSkillFiles(current.CapabilitiesJSON, capabilitiesJSON); err != nil {
-			return nil, err
-		}
-		if err := s.syncDaemonSkillFiles(ctx, current, userID, capabilitiesJSON); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := syncSkillFiles(capabilitiesJSON); err != nil {
-			return nil, err
-		}
 	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {

@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentCandidate,
   AgentRequest,
+  AgentStatus,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
@@ -28,6 +29,7 @@ interface AgentState {
   startAgent: (id: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   restartAgent: (id: string) => Promise<void>;
+  updateAgentStatus: (agentId: string, status: AgentStatus) => void;
 }
 
 function sortAgents(list: Agent[]): Agent[] {
@@ -155,5 +157,13 @@ export const useAgentStore = create<AgentState>((set) => ({
     await agentApi.restartAgent(id);
     const agents = await agentApi.getAgents();
     set({ agents: sortAgents(agents) });
+  },
+
+  updateAgentStatus: (agentId, status) => {
+    set((state) => ({
+      agents: sortAgents(
+        state.agents.map((a): Agent => (a.id === agentId ? { ...a, status } : a)),
+      ),
+    }));
   },
 }));

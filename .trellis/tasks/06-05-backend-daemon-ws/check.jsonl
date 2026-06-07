@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量验收标准"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "错误处理检查：断连、推送失败、超时等边界"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Hub → Handler → Service 跨层一致性检查"}

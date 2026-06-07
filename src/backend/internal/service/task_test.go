@@ -18,7 +18,7 @@ func (r *fakeTaskRepo) List(context.Context, string, model.TaskFilter) ([]*model
 func (r *fakeTaskRepo) Create(_ context.Context, userID string, input model.TaskCreateInput) (*model.WorkspaceTask, error) {
 	r.task = &model.WorkspaceTask{
 		ID:          "task-1",
-		UserID:      userID,
+		UserID:      &userID,
 		Title:       input.Title,
 		Description: input.Description,
 		Status:      input.Status,

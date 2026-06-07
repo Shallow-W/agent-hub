@@ -53,20 +53,20 @@ func (r *AgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.A
 	return list, nil
 }
 
-// UpsertSystemAgent 写入 daemon 上报的系统 Agent
-func (r *AgentRepo) UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error {
+// UpsertSystemAgent 写入 daemon 上报的系统 Agent。machineID 为空时不绑定电脑。
+func (r *AgentRepo) UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON, machineID string) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO agents (name, type, cli_tool, capabilities_json, source, status, version, last_seen_at)
-		 VALUES ($1, 'system', $2, $3, 'daemon', 'online', $4, NOW())
+		`INSERT INTO agents (name, type, cli_tool, capabilities_json, source, status, version, machine_id, last_seen_at)
+		 VALUES ($1, 'system', $2, $3, 'daemon', 'online', $4, NULLIF($5,''), NOW())
 		 ON CONFLICT (cli_tool) WHERE user_id IS NULL DO UPDATE
 		 SET name = EXCLUDED.name,
-		     capabilities_json = EXCLUDED.capabilities_json,
 		     source = 'daemon',
 		     status = 'online',
 		     version = EXCLUDED.version,
+		     machine_id = EXCLUDED.machine_id,
 		     last_seen_at = NOW(),
 		     updated_at = NOW()`,
-		name, cliTool, capabilitiesJSON, version,
+		name, cliTool, capabilitiesJSON, version, machineID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert system agent: %w", err)
@@ -146,6 +146,29 @@ func (r *AgentRepo) CreateDaemonTask(_ context.Context, userID, conversationID, 
 	return cloneDaemonTask(task), nil
 }
 
+// SetDaemonTaskOrch 关联内存中的 daemon task 到一个编排任务。
+func (r *AgentRepo) SetDaemonTaskOrch(_ context.Context, taskID, orchTaskID, workerName string) {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	if t, ok := r.tasks[taskID]; ok {
+		t.OrchTaskID = orchTaskID
+		t.WorkerName = workerName
+	}
+}
+
+// GetDaemonTaskByOrch 查询属于指定编排任务的内存 daemon task 列表。
+func (r *AgentRepo) GetDaemonTasksByOrch(_ context.Context, orchTaskID string) []*model.DaemonTask {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	var result []*model.DaemonTask
+	for _, t := range r.tasks {
+		if t.OrchTaskID == orchTaskID {
+			result = append(result, cloneDaemonTask(t))
+		}
+	}
+	return result
+}
+
 // GetDaemonTask 按 ID 查询 daemon 任务（内存）。
 func (r *AgentRepo) GetDaemonTask(_ context.Context, id string) (*model.DaemonTask, error) {
 	r.taskMu.Lock()
@@ -184,7 +207,7 @@ func (r *AgentRepo) CompleteDaemonTask(_ context.Context, id, machineID, result,
 	r.taskMu.Lock()
 	defer r.taskMu.Unlock()
 	task, ok := r.tasks[id]
-	if !ok || task.MachineID != machineID || task.Status != "running" {
+	if !ok || task.MachineID != machineID || (task.Status != "running" && task.Status != "pending") {
 		return false, nil
 	}
 	now := time.Now()
@@ -289,6 +312,22 @@ func (r *AgentRepo) MarkMachineAgentsStopped(ctx context.Context, machineID stri
 		return fmt.Errorf("mark machine agents stopped: %w", err)
 	}
 	return nil
+}
+
+// GetAgentsByMachine 查询指定 machine_id 下的所有 Agent
+func (r *AgentRepo) GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error) {
+	var list []model.Agent
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        last_seen_at, created_at, updated_at
+		 FROM agents WHERE machine_id = $1`,
+		machineID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get agents by machine: %w", err)
+	}
+	return list, nil
 }
 
 // DeleteOwned 删除当前用户拥有的 Agent，包括自建 Agent 和电脑上报的系统 Agent。
