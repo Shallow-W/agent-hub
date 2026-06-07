@@ -19,6 +19,7 @@ type OrchConvRepo interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
+	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
 }
 
 // OrchAgentRepo queries agent details and creates daemon tasks.
@@ -27,6 +28,18 @@ type OrchAgentRepo interface {
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
 	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
+	SetDaemonTaskOrch(ctx context.Context, taskID, orchTaskID, workerName string)
+	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
+}
+
+// OrchTaskStore 定义编排任务的 DB 操作。
+type OrchTaskStore interface {
+	Create(ctx context.Context, task *model.OrchTask) error
+	GetByID(ctx context.Context, id string) (*model.OrchTask, error)
+	UpdateStatus(ctx context.Context, id, status string) error
+	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
+	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
+	SetSummary(ctx context.Context, id, summary string) error
 }
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
@@ -55,11 +68,17 @@ type OrchArtifactRepo interface {
 	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
 }
 
+// OrchMessageCacher 缓存异步消息到 Redis，避免刷新后丢失。
+type OrchMessageCacher interface {
+	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
+}
+
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
-	convRepo  OrchConvRepo
-	agentRepo OrchAgentRepo
-	msgRepo   MsgRepo
+	convRepo    OrchConvRepo
+	agentRepo   OrchAgentRepo
+	msgRepo     MsgRepo
+	orchTaskRepo OrchTaskStore
 
 	jwtSecret string
 	serverURL string
@@ -67,6 +86,8 @@ type OrchestratorService struct {
 	kbResolver   OrchKBResolver
 	daemonHub    *ws.DaemonHub
 	artifactRepo OrchArtifactRepo
+	notifier     MessageNotifier
+	cacher       OrchMessageCacher
 
 	// 编排并发保护：同一对话同时只允许一个编排流程
 	mu          sync.Mutex
@@ -101,13 +122,27 @@ func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
 	s.artifactRepo = repo
 }
 
+// SetOrchTaskRepo sets the orchestration task store.
+func (s *OrchestratorService) SetOrchTaskRepo(repo OrchTaskStore) {
+	s.orchTaskRepo = repo
+}
+
+// SetNotifier injects the message notifier for pushing async messages to user WS.
+func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
+	s.notifier = n
+}
+
+// SetCacher injects the message cacher for persisting async messages to Redis.
+func (s *OrchestratorService) SetCacher(c OrchMessageCacher) {
+	s.cacher = c
+}
+
 // NewOrchestratorService creates a new orchestrator service.
 func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
 	return &OrchestratorService{
-		convRepo:    convRepo,
-		agentRepo:   agentRepo,
-		msgRepo:     msgRepo,
-		activeOrchs: make(map[string]struct{}),
+		convRepo:  convRepo,
+		agentRepo: agentRepo,
+		msgRepo:   msgRepo,
 	}
 }
 
@@ -157,31 +192,16 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			continue
 		}
 
-		if agent.Type == "orchestrator" {
-			// 并发保护：同一对话同时只允许一个编排
-			s.mu.Lock()
-			if _, active := s.activeOrchs[convID]; active {
-				s.mu.Unlock()
-				slog.Warn("orchestration already active for conversation", "conv_id", convID)
-				// 返回提示消息给用户（直接构造，避免并发调用 msgRepo.Create）
-				result.AgentMessages = append(result.AgentMessages, &model.Message{
-					ConversationID: convID,
-					Role:           "system",
-					Content:        "编排器正忙，请稍后再试。",
-					CreatedAt:      time.Now(),
-				})
-				continue
+		// Check conversation agent role (set per group chat, not agent type)
+			var isOrchestrator bool
+			for _, ca := range convAgents {
+				if ca.AgentID == agentID && ca.Role == "orchestrator" {
+					isOrchestrator = true
+					break
+				}
 			}
-			s.activeOrchs[convID] = struct{}{}
-			s.mu.Unlock()
 
-			// 确保 panic 时也能清理 activeOrchs，避免对话永久被锁
-			defer func() {
-				s.mu.Lock()
-				delete(s.activeOrchs, convID)
-				s.mu.Unlock()
-			}()
-
+			if isOrchestrator {
 			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
 
 			if err != nil {
@@ -211,6 +231,55 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 	}
 
 	return result, nil
+}
+
+// dispatchAndWait creates a daemon task, sends it via WS, waits for the result
+// via channel-based notification, creates a message, and returns it.
+// This is the unified dispatch path shared by both user @mention and orch worker dispatch.
+func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string) (*model.Message, error) {
+	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
+	if err != nil {
+		return nil, fmt.Errorf("create daemon task: %w", err)
+	}
+
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+	}
+	s.daemonHub.RegisterTaskPromise(task.ID)
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         agent.CLITool,
+			"prompt":           prompt,
+			"context_messages": contextMessages,
+			"agent_id":         agent.ID,
+			"conversation_id":  convID,
+			"user_id":          userID,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("dispatch to daemon: %w", err)
+	}
+
+	task, err = s.waitDaemonTask(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if task.Status == "failed" {
+		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
+	}
+
+	artifacts, _ := json.Marshal(map[string]string{
+		"agent_id":   agent.ID,
+		"agent_name": agent.Name,
+		"cli_tool":   agent.CLITool,
+	})
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create agent reply: %w", err)
+	}
+		s.persistArtifacts(ctx, msg, task.Artifacts)
+	return msg, nil
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
@@ -245,50 +314,10 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	// 注入 Agent 系统提示词和工具配置到 context
 	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
 
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, content, agentCtx)
-	if err != nil {
-		return nil, fmt.Errorf("create daemon task: %w", err)
-	}
-
-	// Daemon must be connected via WS to dispatch
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
-	}
-	s.daemonHub.RegisterTaskPromise(task.ID)
-	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          task.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           content,
-			"context_messages": agentCtx,
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("dispatch to daemon: %w", err)
-	}
-
-	task, err = s.waitDaemonTask(ctx, task.ID)
+	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
 	if err != nil {
 		return nil, err
 	}
-	if task.Status == "failed" {
-		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
-	}
-
-	artifacts, _ := json.Marshal(map[string]string{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-		"cli_tool":   agent.CLITool,
-	})
-
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create agent reply: %w", err)
-	}
-	s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -298,7 +327,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
-	// 确保 orchestratorName 非空，后续 dispatchWorker 依赖它构建上下文
+	// 确保 orchestratorName 非空，后续 dispatchAsyncWorker 依赖它构建上下文
 	if orchAgent.Name == "" {
 		orchAgent.Name = "Orchestrator"
 	}
@@ -317,10 +346,12 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 
 	fullPrompt := BuildOrchestratorPrompt(convTitle, agentNames, recentSummary, content)
 
-	// 将 KB 上下文和 orchestrator 自身的 Agent 配置注入到 contextMessages，
-	// 确保 orchestrator 能感知知识库内容和自身工具配置
-	orchCtx := kbPreload
-	orchCtx = s.InjectAgentConfig(orchAgent, orchCtx, userID)
+	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
+	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
+	// agent.Type 可能是 "system" 或 "custom"。
+	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
+	orchCtx += kbPreload
+	orchCtx += s.InjectAgentConfig(orchAgent, orchCtx, userID)
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
@@ -368,22 +399,24 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
+			s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
-	// Post orchestrator preamble if present
+	// Post orchestrator's full dispatch message (including @mentions) to group chat
 	var messages []*model.Message
-	if dispatch.Preamble != "" {
+	{
 		artifacts, _ := json.Marshal(map[string]string{
 			"agent_id":   orchAgent.ID,
 			"agent_name": orchAgent.Name,
 			"cli_tool":   orchAgent.CLITool,
 		})
-		preambleMsg, err := s.msgRepo.Create(ctx, convID, "assistant", dispatch.Preamble, string(artifacts), nil, nil, nil, nil)
+		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, string(artifacts), nil, nil, nil, nil)
 		if err != nil {
-			slog.Warn("create orchestrator preamble message failed", "error", err)
+			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
-			messages = append(messages, preambleMsg)
+				s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
+			messages = append(messages, dispatchMsg)
 		}
 	}
 
@@ -393,191 +426,39 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		agentNameToID[ca.Name] = ca.AgentID
 	}
 
-	// Dispatch worker tasks
-	depResults := make(map[string]string) // agentName -> result summary
+	// --- 事件驱动：创建 OrchTask，异步派发 worker，不阻塞等待 ---
 
-	// Collect parallel tasks and process sequential/dependent tasks in order
-	var parallelTasks []DispatchTask
-	for _, t := range dispatch.Tasks {
-		if t.Sequential || t.DependsOn != "" {
-			// First execute any accumulated parallel tasks
-			if len(parallelTasks) > 0 {
-				workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name, kbPreload)
-				messages = append(messages, workerMsgs...)
-				parallelTasks = nil
-			}
-			// Execute sequential/dependent task
-			workerMsg := s.dispatchSequential(ctx, convID, userID, t, agentNameToID, depResults, orchAgent.Name, kbPreload)
-			if workerMsg != nil {
-				messages = append(messages, workerMsg)
-			}
-		} else {
-			parallelTasks = append(parallelTasks, t)
-		}
+	// 创建 OrchTask 记录
+	orchTaskRecord := &model.OrchTask{
+		ConversationID:  convID,
+		UserID:          userID,
+		OrchAgentID:     orchAgent.ID,
+		Status:          model.OrchTaskDispatching,
+		DispatchPlan:    orchTask.Result,
+		OriginalMessage: content,
+		KBPreload:       kbPreload,
 	}
-	// Flush remaining parallel tasks
-	if len(parallelTasks) > 0 {
-		workerMsgs := s.dispatchParallel(ctx, convID, userID, parallelTasks, agentNameToID, depResults, orchAgent.Name, kbPreload)
-		messages = append(messages, workerMsgs...)
+	if s.orchTaskRepo != nil {
+		if err := s.orchTaskRepo.Create(ctx, orchTaskRecord); err != nil {
+			slog.Warn("create orch task record failed", "error", err)
+		}
+		// 先更新状态为 workers_running，再启动 goroutine，避免竞态
+		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskRecord.ID, model.OrchTaskWorkersRunning)
+	}
+
+	// 所有 worker 并行派发：每个 goroutine 用统一路径 dispatchAndWait 同步等待结果
+	for _, t := range dispatch.Tasks {
+		agentID, ok := agentNameToID[t.AgentName]
+		if !ok {
+			slog.Warn("worker agent not found in conversation", "agent", t.AgentName)
+			continue
+		}
+		go s.dispatchOrchWorker(convID, userID, t, agentID, orchAgent.Name, kbPreload, orchTaskRecord.ID)
 	}
 
 	return messages, nil
 }
 
-// dispatchParallel creates daemon tasks for multiple agents simultaneously and waits for all.
-func (s *OrchestratorService) dispatchParallel(ctx context.Context, convID, userID string, tasks []DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) []*model.Message {
-	type taskResult struct {
-		index     int
-		msg       *model.Message
-		agentName string
-		failed    bool
-	}
-
-	// 快照 depResults 避免并发 map 读写竞争
-	depSnapshot := make(map[string]string, len(depResults))
-	for k, v := range depResults {
-		depSnapshot[k] = v
-	}
-
-	resultCh := make(chan taskResult, len(tasks))
-	for i, t := range tasks {
-		go func(idx int, task DispatchTask) {
-			msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depSnapshot, orchestratorName, kbPreload)
-			if err != nil {
-				slog.Warn("parallel dispatch failed", "agent", task.AgentName, "error", err)
-				resultCh <- taskResult{index: idx, msg: nil, agentName: task.AgentName, failed: true}
-				return
-			}
-			resultCh <- taskResult{index: idx, msg: msg, agentName: task.AgentName}
-		}(i, t)
-	}
-
-	var results []*model.Message
-	for range tasks {
-		tr := <-resultCh
-		if tr.msg != nil {
-			depResults[tr.agentName] = truncateString(tr.msg.Content, 500)
-			results = append(results, tr.msg)
-		} else if tr.failed {
-			depResults[tr.agentName] = "[任务失败]"
-		}
-	}
-	return results
-}
-
-// dispatchSequential creates a daemon task for one agent, waits, then returns.
-func (s *OrchestratorService) dispatchSequential(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) *model.Message {
-	msg, err := s.dispatchWorker(ctx, convID, userID, task, agentNameToID, depResults, orchestratorName, kbPreload)
-	if err != nil {
-		slog.Warn("sequential dispatch failed", "agent", task.AgentName, "error", err)
-		depResults[task.AgentName] = "[任务失败]"
-		return nil
-	}
-	depResults[task.AgentName] = truncateString(msg.Content, 500)
-	return msg
-}
-
-// dispatchWorker dispatches to a single worker agent and returns its reply message.
-func (s *OrchestratorService) dispatchWorker(ctx context.Context, convID, userID string, task DispatchTask, agentNameToID map[string]string, depResults map[string]string, orchestratorName string, kbPreload string) (*model.Message, error) {
-	agentID, ok := agentNameToID[task.AgentName]
-	if !ok {
-		return nil, fmt.Errorf("agent %q not found in conversation", task.AgentName)
-	}
-
-	agent, err := s.agentRepo.GetByID(ctx, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("get worker agent: %w", err)
-	}
-	if agent == nil {
-		return nil, fmt.Errorf("worker agent %q not found", task.AgentName)
-	}
-	if agent.MachineID == nil || *agent.MachineID == "" {
-		return nil, fmt.Errorf("worker agent %q offline", task.AgentName)
-	}
-
-	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
-	newSem := make(chan struct{}, 1)
-	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
-	sem := actual.(chan struct{})
-	sem <- struct{}{} // blocks until slot available
-	defer func() { <-sem }()
-
-	// 权限校验：与 dispatchSingleAgent 保持一致
-	if agent.UserID != nil && *agent.UserID != userID {
-		return nil, ErrMsgAgentNoPerm
-	}
-	inConv, checkErr := s.agentRepo.IsAgentInConversation(ctx, convID, agent.ID, userID)
-	if checkErr != nil {
-		return nil, fmt.Errorf("check worker conversation agent: %w", checkErr)
-	}
-	if !inConv {
-		return nil, ErrMsgAgentNoPerm
-	}
-
-	dispatchCtx, err := s.buildDispatchContext(ctx, convID, task, depResults, orchestratorName)
-	if err != nil {
-		slog.Warn("build worker dispatch context failed", "agent", task.AgentName, "error", err)
-		dispatchCtx = ""
-	}
-
-	// 注入知识库上下文：优先使用预加载内容，否则从任务描述中实时解析
-	if kbPreload != "" {
-		dispatchCtx = kbPreload + dispatchCtx
-	} else {
-		dispatchCtx = s.injectKBContext(ctx, task.Task, dispatchCtx, userID)
-	}
-
-	// 注入 Agent 的系统提示词和工具配置
-	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID)
-
-	daemonTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, task.Task, dispatchCtx)
-	if err != nil {
-		return nil, fmt.Errorf("create worker daemon task: %w", err)
-	}
-
-	// Worker daemon must be connected via WS to dispatch
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-		return nil, fmt.Errorf("worker agent %q 的 daemon 未通过 WS 连接", agent.Name)
-	}
-	s.daemonHub.RegisterTaskPromise(daemonTask.ID)
-	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          daemonTask.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           task.Task,
-			"context_messages": dispatchCtx,
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("dispatch to worker daemon: %w", err)
-	}
-
-	daemonTask, err = s.waitDaemonTask(ctx, daemonTask.ID)
-	if err != nil {
-		return nil, err
-	}
-	if daemonTask.Status == "failed" {
-		return nil, fmt.Errorf("worker daemon task failed: %s", daemonTask.Error)
-	}
-
-	artifacts, _ := json.Marshal(map[string]string{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-		"cli_tool":   agent.CLITool,
-	})
-
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", daemonTask.Result, string(artifacts), nil, nil, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create worker reply: %w", err)
-	}
-	s.persistArtifacts(ctx, msg, daemonTask.Artifacts)
-	return msg, nil
-}
-
-// persistArtifacts 将 daemon 解析出的产物落到独立 artifacts 表（失败不影响消息）。
 func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
 	if msg == nil || len(artifacts) == 0 {
 		return
@@ -727,9 +608,8 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	}
 }
 
-// InjectAgentConfig 将 Agent 的系统提示词和工具配置注入到 dispatch 上下文前面。
-// 管理操作（agent/machine CRUD）通过 MCP daemon 工具提供，不在此注入 JWT/curl。
-// 如果消息中包含 {{用户名/知识库名}} 引用且 kbResolver 已设置，会解析引用并注入文件上下文。
+// InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
+// Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
 func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {

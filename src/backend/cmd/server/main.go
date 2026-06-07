@@ -113,6 +113,7 @@ func main() {
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
+	orchTaskRepo := repository.NewOrchTaskRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -148,8 +149,6 @@ func main() {
 		logger.Warn("redis init failed, running without cache", "error", err)
 	} else {
 		logger.Info("redis connected")
-		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
@@ -160,6 +159,7 @@ func main() {
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
+	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
 
@@ -167,6 +167,14 @@ func main() {
 	msgSvc.SetNotifier(hub)
 	daemonHub := ws.NewDaemonHub(logger)
 	orchSvc.SetDaemonHub(daemonHub)
+	orchSvc.SetNotifier(hub)
+	if rdb != nil {
+		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
+		msgSvc.SetCacher(redisMsgRepo)
+		orchSvc.SetCacher(redisMsgRepo)
+	} else {
+		msgSvc.SetCacher(nil)
+	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
@@ -179,7 +187,7 @@ func main() {
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	taskHandler := handler.NewTaskHandler(taskSvc)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)

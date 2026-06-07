@@ -15,6 +15,8 @@ type DaemonTask struct {
 	// 直接 dispatch 时为 agentHandoff 的 JSON 数组（最多 5 条）。
 	// 空字符串表示无历史上下文（首条消息）。
 	ContextMessages string     `json:"context_messages" db:"context_messages"`
+	OrchTaskID      string     `json:"orch_task_id,omitempty" db:"orch_task_id"`
+	WorkerName      string     `json:"worker_name,omitempty" db:"worker_name"`
 	Status          string     `json:"status" db:"status"`
 	Result          string     `json:"result" db:"result"`
 	Error           string     `json:"error" db:"error"`

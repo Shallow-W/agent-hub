@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/06-05-mcp-server-list-agents/prd.md", "reason": "完整需求文档：认证方案、list_agents瘦身、delete_task确认信息"}
+{"file": "src/daemon/mcp/handlers.go", "reason": "APIClient 路径从 /api/ 改为 /mcp/"}
+{"file": "src/daemon/mcp/tools.go", "reason": "工具定义（12个工具）"}
+{"file": "src/backend/internal/middleware/auth.go", "reason": "参考 JWT 中间件写 MCPAuth"}
+{"file": "src/backend/cmd/server/main.go", "reason": "路由注册，新增 /mcp/ 路由组"}
+{"file": "src/backend/internal/handler/task.go", "reason": "task handler 需兼容无 user_id 场景"}
+{"file": "src/backend/internal/handler/agent.go", "reason": "list_agents 需新增瘦身版本"}

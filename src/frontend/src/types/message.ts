@@ -99,5 +99,7 @@ export interface StreamMessage {
     artifacts?: Artifact[];
     reply_to?: string | null;
     reply_to_message?: ReplyToPreview | null;
+    agent_id?: string;
+    agent_status?: string;
   };
 }

@@ -17,20 +17,24 @@ import (
 // DaemonHandler 处理本地守护进程连接
 type DaemonHandler struct {
 	agentSvc       *service.AgentService
+	orchSvc        *service.OrchestratorService
 	token          string
 	logger         *slog.Logger
 	allowedOrigins []string
 	daemonHub      *ws.DaemonHub
+	userHub        *ws.Hub
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
-func NewDaemonHandler(agentSvc *service.AgentService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub) *DaemonHandler {
+func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub) *DaemonHandler {
 	return &DaemonHandler{
 		agentSvc:       agentSvc,
+		orchSvc:        orchSvc,
 		token:          token,
 		logger:         logger,
 		allowedOrigins: allowedOrigins,
 		daemonHub:      daemonHub,
+		userHub:        userHub,
 	}
 }
 
@@ -78,6 +82,15 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	h.daemonHub.Unregister(client)
 	if machine != nil {
 		h.agentSvc.MarkMachineOffline(machine.ID)
+		// Push offline status for all agents on this machine
+		ctxOff, cancelOff := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelOff()
+		agents, err := h.agentSvc.GetAgentsByMachine(ctxOff, machine.ID)
+		if err == nil {
+			for _, a := range agents {
+				h.pushAgentStatus(a.ID, "offline")
+			}
+		}
 	}
 }
 
@@ -116,7 +129,7 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 		return
 	}
 
-	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.Agents); err != nil {
+	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.MachineID, req.Agents); err != nil {
 		h.logger.Error("register system agents failed", "machine_id", req.MachineID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 50041, "message": "注册系统 Agent 失败", "data": nil})
 		return
@@ -267,7 +280,7 @@ func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, m
 
 		switch envelope.Type {
 		case "daemon.register":
-			h.handleRegister(ctx, envelope.Data, machine)
+			h.handleRegister(ctx, client, envelope.Data, machine)
 		case "task.complete":
 			h.handleTaskComplete(envelope.Data, machine)
 		case "agent.started":
@@ -316,9 +329,11 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 			h.logger.Warn("persist task result failed", "task_id", req.TaskID, "error", err)
 		}
 	}
+
+	// Orch worker results are now handled by goroutines using dispatchAndWait.
 }
 
-func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage, machine *model.DaemonMachine) {
+func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
 		MachineID string                    `json:"machine_id"`
 		Agents    []service.DiscoveredAgent `json:"agents"`
@@ -326,6 +341,12 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid daemon register data", "error", err)
 		return
+	}
+
+	// 全局 token 连接时 machine == nil，但 daemon 会自报 machineID。
+	// 用它更新 DaemonHub 注册，使 SendToMachine / IsConnected 可用。
+	if machine == nil && req.MachineID != "" && client.MachineID != req.MachineID {
+		h.daemonHub.UpdateMachineID(client, req.MachineID)
 	}
 
 	registerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -340,7 +361,7 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, data json.RawMessage
 		return
 	}
 
-	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.Agents); err != nil {
+	if err := h.agentSvc.RegisterSystemAgents(registerCtx, req.MachineID, req.Agents); err != nil {
 		h.logger.Error("register system agents failed", "machine_id", req.MachineID, "error", err)
 		return
 	}
@@ -371,6 +392,7 @@ func (h *DaemonHandler) handleAgentStarted(data json.RawMessage) {
 	if err := h.agentSvc.SetAgentStatus(ctx, req.AgentID, status); err != nil {
 		h.logger.Warn("update agent status after started failed", "agent_id", req.AgentID, "error", err)
 	}
+	h.pushAgentStatus(req.AgentID, status)
 }
 
 func (h *DaemonHandler) handleAgentStopped(data json.RawMessage) {
@@ -391,4 +413,22 @@ func (h *DaemonHandler) handleAgentStopped(data json.RawMessage) {
 	if err := h.agentSvc.SetAgentStatus(ctx, req.AgentID, "stopped"); err != nil {
 		h.logger.Warn("update agent status after stopped failed", "agent_id", req.AgentID, "error", err)
 	}
+	h.pushAgentStatus(req.AgentID, "stopped")
+}
+
+// pushAgentStatus pushes a real-time agent status update to the agent owner via WS.
+func (h *DaemonHandler) pushAgentStatus(agentID, status string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	agent, err := h.agentSvc.GetAgentByID(ctx, agentID)
+	if err != nil || agent == nil || agent.UserID == nil {
+		return
+	}
+	h.userHub.SendToUser(*agent.UserID, ws.WSMessage{
+		Type: "agent.status",
+		Data: map[string]string{
+			"agent_id":     agentID,
+			"agent_status": status,
+		},
+	})
 }
