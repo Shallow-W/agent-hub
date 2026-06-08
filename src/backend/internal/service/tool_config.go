@@ -9,7 +9,7 @@ var platformToolsets = map[string][]string{
 	"none":          {},
 	"basic":         {"list_group_agents", "get_messages"},
 	"tasks":         {"list_group_agents", "get_messages", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "get_messages", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
+	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
 	"agent_builder": {"list_agents", "list_group_agents", "list_agent_candidates", "list_machines"},
 }
 
@@ -33,7 +33,7 @@ var platformToolCatalog = map[string]bool{
 
 type agentToolsConfig struct {
 	Toolset      string   `json:"toolset,omitempty"`
-	AllowedTools []string `json:"allowed_tools,omitempty"`
+	AllowedTools []string `json:"allowed_tools"`
 }
 
 func normalizeToolsConfig(raw string) (string, error) {
@@ -44,8 +44,8 @@ func normalizeToolsConfig(raw string) (string, error) {
 
 	var cfg agentToolsConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		// Legacy markdown/free-text configs are preserved for display but do not
-		// grant MCP tools. Runtime falls back to the default safe toolset.
+		// Legacy markdown/free-text configs are preserved for display. Runtime
+		// treats them as no tool authorization.
 		return raw, nil
 	}
 
@@ -62,6 +62,9 @@ func normalizeToolsConfig(raw string) (string, error) {
 }
 
 func normalizeToolNames(names []string) []string {
+	if names == nil {
+		return nil
+	}
 	seen := map[string]bool{}
 	result := make([]string, 0, len(names))
 	for _, name := range names {

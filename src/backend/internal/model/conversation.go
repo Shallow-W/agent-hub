@@ -43,6 +43,7 @@ type ConversationAgent struct {
 	MachineName      string     `json:"machine_name" db:"machine_name"`
 	LastSeenAt       *time.Time `json:"last_seen_at,omitempty" db:"last_seen_at"`
 	CapabilitiesJSON string     `json:"capabilities_json" db:"capabilities_json"`
+	CustomSkills     string     `json:"custom_skills,omitempty" db:"custom_skills"`
 	SystemPrompt     string     `json:"system_prompt,omitempty" db:"system_prompt"`
 	Tags             string     `json:"tags,omitempty" db:"tags"`
 }

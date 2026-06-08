@@ -105,6 +105,7 @@ func TestBuildOrchestratorPromptWithAgents_DoesNotLeakToolPrompts(t *testing.T) 
 	for _, forbidden := range []string{
 		"CLI工具：",
 		"能力：",
+		"Skills：",
 		"ablation-planner",
 		"你可以通过平台提供的管理工具执行以下操作",
 		"查看平台上的所有 Agent 列表",

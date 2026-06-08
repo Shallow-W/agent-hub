@@ -394,6 +394,97 @@ null
 
 ---
 
+## Agent 管理
+
+### GET /api/agents
+
+获取当前用户可用的 Agent 列表。
+
+**成功响应** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "name": "代码助手",
+    "type": "custom",
+    "cli_tool": "codex",
+    "system_prompt": "你是一个资深工程师",
+    "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_tasks\"]}",
+    "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]",
+    "tags": "[\"coding\"]",
+    "status": "online"
+  }
+]
+```
+
+### POST /api/daemon/agent-candidates/:id/add
+
+把当前电脑扫描到的候选底座添加为用户自建 Agent。`cli_tool` 必须与候选底座匹配，避免候选列表刷新后误建到错误 CLI。
+
+**请求体**
+```json
+{
+  "name": "代码助手",
+  "cli_tool": "codex",
+  "system_prompt": "你是一个资深工程师",
+  "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_group_agents\",\"get_messages\",\"list_tasks\"]}",
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+}
+```
+
+**工具集配置**
+
+`tools_config` 是字符串形式的 JSON，当前支持：
+
+```json
+{
+  "toolset": "none | basic | tasks | orchestrator | agent_builder | 空字符串",
+  "allowed_tools": ["list_tasks"]
+}
+```
+
+- `allowed_tools` 保存前会过滤未知工具名。
+- `{"toolset":"none","allowed_tools":[]}` 表示该 Agent 不授予平台 MCP 工具。
+- 无法解析的旧文本配置仅保留展示，不授予 MCP 工具。
+
+**成功响应** `201 Created`
+```json
+{
+  "id": "uuid",
+  "name": "代码助手",
+  "type": "custom",
+  "cli_tool": "codex",
+  "system_prompt": "你是一个资深工程师",
+  "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_group_agents\",\"get_messages\",\"list_tasks\"]}",
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 参数校验失败
+- `404 Not Found` — 候选底座不存在、无权限，或 `cli_tool` 与候选底座不匹配
+
+### PUT /api/agents/:id/custom-skills
+
+更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力标签，不会被 daemon 底座扫描覆盖。
+
+**请求体**
+```json
+{
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "id": "uuid",
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+}
+```
+
+---
+
 ## 错误码
 
 所有错误响应遵循统一格式：

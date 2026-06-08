@@ -20,6 +20,8 @@ type fakeAgentRepo struct {
 	candidates   []string
 	addedPrompt  string
 	addedCLITool string
+	addedTools   string
+	addedSkills  string
 }
 
 func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
@@ -111,9 +113,11 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
 	r.addedPrompt = systemPrompt
 	r.addedCLITool = expectedCLITool
+	r.addedTools = toolsConfig
+	r.addedSkills = customSkills
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
@@ -304,7 +308,16 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
-	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "codex", "persona")
+	_, err := svc.AddCandidateAgent(
+		context.Background(),
+		"user-1",
+		"candidate-1",
+		"My Agent",
+		"codex",
+		"persona",
+		`{"toolset":"custom","allowed_tools":["list_tasks","unknown"]}`,
+		`[{"name":"审查"}]`,
+	)
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
 	}
@@ -313,6 +326,12 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	}
 	if repo.addedCLITool != "codex" {
 		t.Fatalf("expected cli tool checked, got %q", repo.addedCLITool)
+	}
+	if repo.addedTools != `{"allowed_tools":["list_tasks"]}` {
+		t.Fatalf("expected normalized tools config, got %q", repo.addedTools)
+	}
+	if repo.addedSkills != `[{"name":"审查"}]` {
+		t.Fatalf("expected custom skills passed through, got %q", repo.addedSkills)
 	}
 }
 

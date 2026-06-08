@@ -34,4 +34,5 @@ export interface ConversationAgent {
   machine_name: string;
   last_seen_at?: string;
   capabilities_json: string;
+  custom_skills?: string;
 }

@@ -122,6 +122,8 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 			return api.doGet("/mcp/conversations/"+id+"/agents", nil)
 		case "get_messages":
 			return handleGetMessages(api, args)
+		case "create_group":
+			return handleCreateGroup(api, args)
 		// 任务看板
 		case "list_tasks":
 			return handleListTasks(api, args)
@@ -158,6 +160,24 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
 	}
+}
+
+func handleCreateGroup(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	body := map[string]interface{}{"name": name}
+	if ids, ok := args["member_ids"].([]interface{}); ok {
+		members := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if value, ok := id.(string); ok && value != "" {
+				members = append(members, value)
+			}
+		}
+		body["member_ids"] = members
+	}
+	return api.doPost("/mcp/groups", body)
 }
 
 func handleGetMessages(api *APIClient, args map[string]interface{}) (interface{}, error) {

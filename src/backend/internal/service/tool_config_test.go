@@ -33,3 +33,47 @@ func TestNormalizeToolsConfig_PreservesLegacyText(t *testing.T) {
 		t.Fatalf("expected legacy text preserved, got %q", got)
 	}
 }
+
+func TestNormalizeToolsConfig_PreservesNoneAndEmptyAllowedTools(t *testing.T) {
+	got, err := normalizeToolsConfig(`{"toolset":"none","allowed_tools":[]}`)
+	if err != nil {
+		t.Fatalf("normalizeToolsConfig error: %v", err)
+	}
+	var cfg agentToolsConfig
+	if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+		t.Fatalf("unmarshal normalized config: %v", err)
+	}
+	if cfg.Toolset != "none" {
+		t.Fatalf("expected none toolset, got %q", cfg.Toolset)
+	}
+	if cfg.AllowedTools == nil || len(cfg.AllowedTools) != 0 {
+		t.Fatalf("expected explicit empty allowed tools, got %#v", cfg.AllowedTools)
+	}
+}
+
+func TestNormalizeToolsConfig_PreservesTemplateWithoutExplicitAllowedTools(t *testing.T) {
+	got, err := normalizeToolsConfig(`{"toolset":"basic"}`)
+	if err != nil {
+		t.Fatalf("normalizeToolsConfig error: %v", err)
+	}
+	var cfg agentToolsConfig
+	if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+		t.Fatalf("unmarshal normalized config: %v", err)
+	}
+	if cfg.Toolset != "basic" {
+		t.Fatalf("expected basic toolset, got %q", cfg.Toolset)
+	}
+	if cfg.AllowedTools != nil {
+		t.Fatalf("expected absent allowed tools to stay nil, got %#v", cfg.AllowedTools)
+	}
+}
+
+func TestPlatformToolCatalogIncludesTemplateTools(t *testing.T) {
+	for toolset, tools := range platformToolsets {
+		for _, tool := range tools {
+			if !platformToolCatalog[tool] {
+				t.Fatalf("toolset %s references unknown tool %s", toolset, tool)
+			}
+		}
+	}
+}

@@ -54,6 +54,8 @@ type AddCandidateAgentRequest struct {
 	Name         string `json:"name" binding:"required,max=100"`
 	CLITool      string `json:"cli_tool" binding:"required,max=50"`
 	SystemPrompt string `json:"system_prompt"`
+	ToolsConfig  string `json:"tools_config"`
+	CustomSkills string `json:"custom_skills"`
 }
 
 // List 查询可用 Agent 列表
@@ -126,7 +128,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt)
+	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt, req.ToolsConfig, req.CustomSkills)
 	if err != nil {
 		middleware.HandleServiceError(c, err, "添加候选 Agent 失败")
 		return

@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,36 @@ func TestAllowedToolsFromConfig_EmptyAllowedToolsMeansNoTools(t *testing.T) {
 	allowed := allowedToolsFromConfig(`{"toolset":"","allowed_tools":[]}`)
 	if len(allowed) != 0 {
 		t.Fatalf("expected no allowed tools, got %#v", allowed)
+	}
+}
+
+func TestAllowedToolsFromConfig_LegacyTextMeansNoTools(t *testing.T) {
+	allowed := allowedToolsFromConfig("## legacy docs")
+	if len(allowed) != 0 {
+		t.Fatalf("expected no allowed tools for legacy text, got %#v", allowed)
+	}
+}
+
+func TestAllowedToolsForAgent_UsesBackendAgentConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/agents" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token-1" {
+			t.Fatalf("unexpected authorization header: %s", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"data":[{"id":"agent-1","tools_config":"{\"allowed_tools\":[\"list_tasks\"]}"},{"id":"agent-2","tools_config":"{\"allowed_tools\":[\"list_agents\"]}"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "token-1")
+	allowed := client.AllowedToolsForAgent("agent-1")
+	if !allowed["list_tasks"] {
+		t.Fatalf("expected list_tasks to be allowed, got %#v", allowed)
+	}
+	if allowed["list_agents"] {
+		t.Fatalf("expected list_agents to be denied for agent-1, got %#v", allowed)
 	}
 }
 

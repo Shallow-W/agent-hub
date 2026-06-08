@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal, Select, message } from 'antd';
+import { Button, Checkbox, Input, Modal, Select, Tag, message } from 'antd';
 import type { AgentCandidate } from '@/types/agent';
-import { getDefaultAgentName } from './agentPresentation';
+import { getDefaultAgentName, parseSkills } from './agentPresentation';
+import {
+  getTemplateTools,
+  toolCatalog,
+  toolsConfigToJSON,
+  toolsetOptions,
+} from './toolAssignments';
 import styles from './AgentCreateModal.module.css';
 
 interface AgentCreateModalProps {
@@ -9,7 +15,23 @@ interface AgentCreateModalProps {
   machineName: string;
   candidates: AgentCandidate[];
   onClose: () => void;
-  onCreate: (candidateId: string, name: string, systemPrompt: string) => Promise<void>;
+  onCreate: (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => Promise<void>;
+}
+
+function skillsInputToJSON(value: string): string {
+  const skills = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, ...descriptionParts] = line.split(/\s+-\s+/);
+      return {
+        name: (name ?? '').trim(),
+        description: descriptionParts.join(' - ').trim() || undefined,
+      };
+    })
+    .filter((skill) => skill.name.length > 0);
+  return skills.length > 0 ? JSON.stringify(skills) : '';
 }
 
 export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
@@ -22,6 +44,9 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [candidateId, setCandidateId] = useState('');
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [toolset, setToolset] = useState('tasks');
+  const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
+  const [skillInput, setSkillInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const options = useMemo(
@@ -38,6 +63,9 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setCandidateId(first?.id ?? '');
     setName(first ? getDefaultAgentName(first.name, first.cli_tool) : '');
     setSystemPrompt('');
+    setToolset('tasks');
+    setSelectedTools(getTemplateTools('tasks'));
+    setSkillInput('');
   }, [open, candidates]);
 
   const handleCandidateChange = (value: string) => {
@@ -52,7 +80,14 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     if (!candidateId || !name.trim()) return;
     setSubmitting(true);
     try {
-      await onCreate(candidateId, name.trim(), systemPrompt.trim());
+      const customSkills = skillsInputToJSON(skillInput);
+      await onCreate(
+        candidateId,
+        name.trim(),
+        systemPrompt.trim(),
+        toolsConfigToJSON(toolset, selectedTools),
+        customSkills,
+      );
       message.success('Agent 已创建');
       onClose();
     } catch {
@@ -65,6 +100,20 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const title = machineName ? `创建 Agent · ${machineName}` : '创建 Agent';
   const canSubmit = Boolean(candidateId && name.trim());
   const hasCandidates = options.length > 0;
+  const selectedCandidate = candidates.find((candidate) => candidate.id === candidateId);
+  const baseSkills = parseSkills(selectedCandidate?.capabilities_json);
+
+  const handleToolsetChange = (value: string) => {
+    setToolset(value);
+    if (value !== 'custom') {
+      setSelectedTools(getTemplateTools(value));
+    }
+  };
+
+  const handleToolsChange = (values: string[]) => {
+    setToolset('custom');
+    setSelectedTools(values);
+  };
 
   return (
     <Modal
@@ -73,7 +122,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       footer={null}
       title={title}
       centered
-      width={520}
+      width={720}
     >
       <div className={styles.content}>
         <div className={styles.field}>
@@ -107,6 +156,45 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
             onChange={(event) => setSystemPrompt(event.target.value)}
           />
           <span className={styles.helper}>支持空白，后续可在详情中继续调整。</span>
+        </div>
+        <div className={styles.field}>
+          <span className={styles.label}>工具集</span>
+          <Select
+            className={styles.select}
+            value={toolset}
+            options={toolsetOptions}
+            onChange={handleToolsetChange}
+          />
+          <Checkbox.Group value={selectedTools} onChange={(values) => handleToolsChange(values as string[])}>
+            <div className={styles.toolGrid}>
+              {toolCatalog.map((tool) => (
+                <label className={styles.toolItem} key={tool.name}>
+                  <Checkbox value={tool.name} />
+                  <span>
+                    <span className={styles.toolName}>{tool.label}</span>
+                    <span className={styles.toolMeta}>{tool.name}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Checkbox.Group>
+        </div>
+        <div className={styles.field}>
+          <span className={styles.label}>平台 Skills</span>
+          {baseSkills.length > 0 && (
+            <div className={styles.baseSkills}>
+              {baseSkills.slice(0, 6).map((skill) => <Tag key={skill.name}>{skill.name}</Tag>)}
+              {baseSkills.length > 6 && <Tag>+{baseSkills.length - 6}</Tag>}
+            </div>
+          )}
+          <Input.TextArea
+            className={styles.textarea}
+            value={skillInput}
+            placeholder="每行一个平台 Skill，例如：代码审查 - 检查 bug 和测试缺口"
+            autoSize={{ minRows: 3, maxRows: 6 }}
+            onChange={(event) => setSkillInput(event.target.value)}
+          />
+          <span className={styles.helper}>底座 Skills 只读；平台 Skills 会写入该 Agent 的可分配能力标签。</span>
         </div>
         <div className={styles.footer}>
           <Button onClick={onClose}>取消</Button>

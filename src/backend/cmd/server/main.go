@@ -421,6 +421,7 @@ func main() {
 		mcpGroup.GET("/agents", agentHandler.MCPList)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
 	}

@@ -2,7 +2,7 @@
 
 ## 目标
 
-本机 daemon 暴露一个 `agenthub-platform` MCP server，让支持 MCP 的 Agent（Claude Code / Codex 等）通过标准 MCP 工具直接操作 AgentHub 平台（发消息、查会话、建群等），替代现有 prompt 内注入 curl 说明的方式。
+本机 daemon 暴露一个 `agenthub-platform` MCP server，让支持 MCP 的 Agent（Claude Code / Codex 等）通过标准 MCP 工具直接操作 AgentHub 平台（发消息、查会话、建群等），替代现有 prompt 内注入 curl 说明的方式。每个自建 Agent 通过 `agents.tools_config` 单独配置可用工具，runtime 按 `agent_id` 强制过滤 `tools/list` 与 `tools/call`。
 
 ## 背景
 
@@ -29,10 +29,28 @@
 | 工具 | REST |
 |------|------|
 | `list_conversations` | `GET /api/conversations` |
+| `list_conversation_agents` | `GET /api/conversations/:id/agents` |
+| `list_group_agents` | `GET /api/conversations/:id/agents` |
 | `get_messages` | `GET /api/conversations/:id/messages?limit=` |
-| `send_message` | `POST /api/conversations/:id/messages` |
 | `create_group` | `POST /api/groups` |
+| `get_group_info` | `GET /api/groups/:id` |
+| `list_group_members` | `GET /api/groups/:id/members` |
+| `list_tasks` | `GET /api/tasks` |
+| `create_task` | `POST /api/tasks` |
+| `update_task` | `PUT /api/tasks/:id` |
+| `move_task_status` | `POST /api/tasks/:id/status` |
+| `delete_task` | `DELETE /api/tasks/:id` |
 | `list_agents` | `GET /api/agents` |
+| `list_agent_candidates` | `GET /api/daemon/agent-candidates` |
+| `list_machines` | `GET /api/daemon/machines` |
+
+### M11-5 per-Agent 工具授权（已完成）
+
+- `agents.tools_config` 支持 `{"toolset": string, "allowed_tools": string[]}`。
+- 后端保存 Agent 配置时过滤未知工具名，避免 UI 或旧配置授予不存在的工具。
+- daemon MCP server 启动时按当前 `agent_id` 查询后端 Agent 配置。
+- `tools/list` 只返回该 Agent 被授权的工具；`tools/call` 在执行 handler 前拒绝未授权工具。
+- 显式 `allowed_tools: []` 或 `toolset: "none"` 表示无工具；无法解析的旧文本配置不授予工具。
 
 ### M11-4 自动注入（已完成，全 CLI 覆盖）
 
@@ -55,6 +73,7 @@
 - [x] daemon 启动时为 OpenClaw 幂等写入全局 MCP 配置（set/show/unset 实测通过）
 - [x] daemon 为 Codex 幂等写入全局 MCP 配置（用 VSCode 扩展自带 codex.exe，add/get/remove 实测通过）
 - [x] 真实端到端：真 daemon(--mcp) + 真后端 + 真 machine key，`list_agents`/`list_conversations` 返回真实后端数据（换 token → 带 JWT 调 REST 全链路打通）
+- [x] per-Agent 工具授权生效：无 `agent_id` 或未知 Agent 不暴露工具，显式空工具集不回退默认工具，未授权 `tools/call` 被拒绝
 
 ## 备注：Codex 可用性
 

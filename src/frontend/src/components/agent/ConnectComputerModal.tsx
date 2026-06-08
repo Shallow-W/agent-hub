@@ -11,10 +11,12 @@ import {
 import { getDefaultAgentName, parseCapabilities } from './agentPresentation';
 import type {
   Agent,
+  AddCandidateAgentRequest,
   AgentCandidate,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
+import { toolsConfigToJSON, getTemplateTools } from './toolAssignments';
 import styles from './ConnectComputerModal.module.css';
 
 interface ConnectComputerModalProps {
@@ -24,7 +26,7 @@ interface ConnectComputerModalProps {
   loading: boolean;
   onClose: () => void;
   onCreate: (name: string) => Promise<CreateDaemonMachineResponse>;
-  onAddCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
+  onAddCandidate: (id: string, body: AddCandidateAgentRequest) => Promise<Agent>;
   onDeleteMachine: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
 }
@@ -159,7 +161,11 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
     if (!displayName) return;
     setAddingID(candidate.id);
     try {
-      await onAddCandidate(candidate.id, displayName, candidate.cli_tool);
+      await onAddCandidate(candidate.id, {
+        name: displayName,
+        cli_tool: candidate.cli_tool,
+        tools_config: toolsConfigToJSON('tasks', getTemplateTools('tasks')),
+      });
       await handleRefresh();
       message.success(`${displayName} 已添加`);
     } catch (err) {

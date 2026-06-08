@@ -19,7 +19,7 @@ var toolsetTemplates = map[string][]string{
 	"none":          {},
 	"basic":         {"list_group_agents", "get_messages"},
 	"tasks":         defaultAgentTools,
-	"orchestrator":  append([]string{}, append(defaultAgentTools, "list_conversations", "get_group_info", "list_group_members")...),
+	"orchestrator":  append([]string{}, append(defaultAgentTools, "list_conversation_agents", "list_conversations", "get_group_info", "list_group_members")...),
 	"agent_builder": {"list_agents", "list_group_agents", "list_agent_candidates", "list_machines"},
 }
 
@@ -31,7 +31,10 @@ type toolsConfig struct {
 
 func allowedToolsFromConfig(raw string) map[string]bool {
 	cfg := toolsConfig{}
-	if raw != "" && json.Unmarshal([]byte(raw), &cfg) == nil {
+	if raw != "" {
+		if json.Unmarshal([]byte(raw), &cfg) != nil {
+			return noAgentToolSet()
+		}
 		if cfg.AllowedTools != nil {
 			return toolSet(cfg.AllowedTools)
 		}
@@ -41,6 +44,7 @@ func allowedToolsFromConfig(raw string) map[string]bool {
 		if tools, ok := toolsetTemplates[cfg.Toolset]; ok {
 			return toolSet(tools)
 		}
+		return noAgentToolSet()
 	}
 	return toolSet(defaultAgentTools)
 }

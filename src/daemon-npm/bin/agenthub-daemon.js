@@ -1690,8 +1690,38 @@ const MCP_TOOLS = [
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
   },
   {
+    name: 'list_agent_candidates',
+    description: '列出当前用户电脑上扫描到的 Agent 底座候选。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates'),
+  },
+  {
+    name: 'list_conversation_agents',
+    description: '列出指定会话中的智能体，用于了解当前会话可分派的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const convId = args.conversation_id || ctx.conversationId || '';
+      if (!convId) throw new Error('conversation_id is required (no conversation context)');
+      const res = await ctx.callApi('GET', `/api/conversations/${encodeURIComponent(convId)}/agents`);
+      if (!res || !Array.isArray(res.data)) return res;
+      res.data = res.data.map(a => ({
+        name: a.name,
+        role: a.role,
+        status: a.status,
+        tags: a.tags || '',
+      }));
+      return res;
+    },
+  },
+  {
     name: 'list_group_agents',
-    description: '列出指定群聊中的智能体，包括名称(name)、角色(role: orchestrator/worker/robot)、状态(status: online/offline)、CLI工具(cli_tool)、能力描述(system_prompt)等信息。用于 orchestrator 了解群内 agent 的能力并合理分派任务。',
+    description: '列出指定群聊中的智能体，包括名称、角色、状态和标签，用于 orchestrator 了解群内可分派 Agent。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1708,8 +1738,7 @@ const MCP_TOOLS = [
         name: a.name,
         role: a.role,
         status: a.status,
-        cli_tool: a.cli_tool,
-        description: a.system_prompt || '',
+        tags: a.tags || '',
       }));
       return res;
     },
@@ -1873,6 +1902,7 @@ const TOOLSET_TEMPLATES = {
   tasks: DEFAULT_AGENT_TOOLS,
   orchestrator: [
     ...DEFAULT_AGENT_TOOLS,
+    'list_conversation_agents',
     'list_conversations',
     'get_group_info',
     'list_group_members',
@@ -1894,25 +1924,29 @@ function uniqueToolNames(values) {
 }
 
 function parseToolsConfig(raw) {
-  if (!raw || typeof raw !== 'string') return null;
+  if (!raw || typeof raw !== 'string') return { ok: true, config: null };
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, config: null };
+    }
+    return { ok: true, config: parsed };
   } catch {
-    return null;
+    return { ok: false, config: null };
   }
 }
 
 function allowedToolsFromConfig(raw) {
-  const config = parseToolsConfig(raw);
+  const parsed = parseToolsConfig(raw);
+  if (!parsed.ok) return NO_AGENT_TOOLS;
+  const config = parsed.config;
   if (!config) return DEFAULT_AGENT_TOOLS;
   if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
   if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
   if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
     return TOOLSET_TEMPLATES[config.toolset];
   }
-  return DEFAULT_AGENT_TOOLS;
+  return NO_AGENT_TOOLS;
 }
 
 async function resolveAllowedTools(ctx) {

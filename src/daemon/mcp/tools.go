@@ -78,6 +78,25 @@ func ConversationTools() []Tool {
 				"required": []string{"conversation_id"},
 			},
 		},
+		{
+			Name:        "create_group",
+			Description: "创建一个群聊，可指定初始成员用户 ID 列表",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "群聊名称（必填）",
+					},
+					"member_ids": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "初始成员用户 ID 列表",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
 	}
 }
 

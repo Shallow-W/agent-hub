@@ -86,7 +86,7 @@ func (r *fakeDaemonAgentRepo) UpsertMachineAgentCandidate(_ context.Context, _, 
 func (r *fakeDaemonAgentRepo) ListAgentCandidates(_ context.Context, _ string) ([]model.AgentCandidate, error) {
 	return nil, nil
 }
-func (r *fakeDaemonAgentRepo) AddCandidateAgent(_ context.Context, _, _, _, _, _ string) (*model.Agent, error) {
+func (r *fakeDaemonAgentRepo) AddCandidateAgent(_ context.Context, _, _, _, _, _, _, _ string) (*model.Agent, error) {
 	return nil, nil
 }
 func (r *fakeDaemonAgentRepo) CreateCustom(_ context.Context, _, _, _, _, _, _, _ string, _ bool) (*model.Agent, error) {
