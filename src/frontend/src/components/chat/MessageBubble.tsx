@@ -259,11 +259,20 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
   // 代码块回到正文原位（散文↔代码交错），仅 webpage 产物走底部卡片
   const displayContent = message.content ?? '';
-  const cardArtifacts = useMemo(
-    () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
-    [message.artifacts],
-  );
-  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）。
+  // 卡片类产物（webpage/document）每个血缘只渲染最新版本，避免历史版本产生重复卡片。
+  // （后端返回全部版本以支撑代码块的内容匹配，故此处需按 root_id 去重取最新。）
+  const cardArtifacts = useMemo(() => {
+    const all = message.artifacts?.filter((a) => a.type !== 'code') ?? [];
+    const latest = new Map<string, Artifact>();
+    for (const a of all) {
+      const key = a.root_id || a.id || '';
+      const prev = latest.get(key);
+      if (!prev || a.version > prev.version) latest.set(key, a);
+    }
+    return Array.from(latest.values());
+  }, [message.artifacts]);
+  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）；保留全部版本，
+  // 使消息 markdown 里的原始代码块总能匹配到对应版本的 root_id。
   const codeArtifacts = useMemo(
     () => message.artifacts?.filter((a) => a.type === 'code') ?? [],
     [message.artifacts],
