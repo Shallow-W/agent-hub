@@ -3,8 +3,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 
 const apiBaseURL = 'http://127.0.0.1:5173';
 const backendURL = 'http://127.0.0.1:8080';
-const username = '121';
-const password = '121';
+const username = process.env.AGENTHUB_E2E_USERNAME || 'yzk';
+const password = process.env.AGENTHUB_E2E_PASSWORD || '123456';
 
 interface APIResponse<T> {
   code: number;
