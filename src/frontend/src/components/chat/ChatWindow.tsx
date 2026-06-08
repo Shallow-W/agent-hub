@@ -44,6 +44,14 @@ const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 const BLACKBOARD_MAX_LEN = 8000;
 const { Text } = Typography;
 
+function getPinnedMessageAuthor(item: PinnedMessage): string {
+  const username = item.username?.trim();
+  if (username) return username;
+  if (item.role === 'assistant') return '助手';
+  if (item.role === 'system') return '系统';
+  return '用户';
+}
+
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
   const user = useAuthStore((s) => s.user);
@@ -619,7 +627,7 @@ export const ChatWindow: React.FC = () => {
                   <div key={item.id} className={styles.pinnedItem}>
                     <div className={styles.pinnedItemBody}>
                       <div className={styles.pinnedItemMeta}>
-                        <Text strong>{item.username || item.pinned_by_name || (item.role === 'assistant' ? '助手' : '用户')}</Text>
+                        <Text strong>{getPinnedMessageAuthor(item)}</Text>
                         <Text type="secondary">
                           {new Date(item.message_created_at).toLocaleString()}
                         </Text>

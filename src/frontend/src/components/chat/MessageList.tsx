@@ -124,15 +124,21 @@ export const MessageList: React.FC<MessageListProps> = ({
     setUnreadSinceScroll(0);
   }, []);
 
-  const prevMsgCountRef = useRef(messages.length);
+  const prevMessageSnapshotRef = useRef({
+    count: messages.length,
+    lastId: messages[messages.length - 1]?.id ?? null,
+  });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const msgCountIncreased = messages.length > prevMsgCountRef.current;
-    prevMsgCountRef.current = messages.length;
+    const prev = prevMessageSnapshotRef.current;
+    const lastId = messages[messages.length - 1]?.id ?? null;
+    const msgAppended = messages.length > prev.count && lastId !== prev.lastId;
+    prevMessageSnapshotRef.current = { count: messages.length, lastId };
+    if (!msgAppended && !nearBottomRef.current) return;
     // Always scroll to bottom when a new message is added (user sent or received)
-    if (msgCountIncreased || nearBottomRef.current) {
+    if (msgAppended || nearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' });
     } else {
       setShowNewMsgBtn(true);
