@@ -13,4 +13,7 @@ if ! command -v "$GO_BIN" >/dev/null 2>&1; then
 fi
 
 cd src/backend
-exec "$GO_BIN" test ./internal/... -count=1 -timeout 60s "$@"
+if [[ $# -eq 0 ]]; then
+  set -- ./...
+fi
+exec "$GO_BIN" test "$@" -count=1 -timeout 60s

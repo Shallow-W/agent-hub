@@ -59,14 +59,14 @@ func (h *DeploymentHandler) ServeSite(c *gin.Context) {
 		rel = "/index.html"
 	}
 
-	root, err := filepath.Abs(h.svc.BaseDir())
+	siteRoot, err := filepath.Abs(h.svc.SiteDir(id))
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 	// id 经路由 UUID 校验，rel 经 Clean + 前缀校验，双重防目录穿越。
-	target, err := filepath.Abs(filepath.Join(root, filepath.Clean("/"+id), filepath.Clean("/"+rel)))
-	if err != nil || (!strings.HasPrefix(target, root+string(os.PathSeparator)) && target != root) {
+	target, err := filepath.Abs(filepath.Join(siteRoot, filepath.Clean("/"+rel)))
+	if err != nil || (!strings.HasPrefix(target, siteRoot+string(os.PathSeparator)) && target != siteRoot) {
 		c.Status(http.StatusForbidden)
 		return
 	}

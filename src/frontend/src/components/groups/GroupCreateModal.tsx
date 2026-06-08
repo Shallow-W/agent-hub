@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Modal, Form, Input, Checkbox, Empty } from 'antd';
 import { useFriendStore } from '@/store/friendStore';
+import type { Friend } from '@/types/friend';
 
 interface GroupCreateModalProps {
   open: boolean;
@@ -8,12 +9,14 @@ interface GroupCreateModalProps {
   onOk: (name: string, memberIds: string[]) => void;
 }
 
+const EMPTY_FRIENDS: Friend[] = [];
+
 const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
   open,
   onCancel,
   onOk,
 }) => {
-  const friends = useFriendStore((s) => s.friends) ?? [];
+  const friends = useFriendStore((s) => s.friends) ?? EMPTY_FRIENDS;
   const [form] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');

@@ -137,6 +137,49 @@ router.StaticFS("/", http.Dir(distDir))
 router.NoRoute(spaFallbackHandler(distDir, indexPath))
 ```
 
+### Published File Path Boundaries
+
+**Scope / Trigger**: Applies when changing any handler that serves files from disk, including deployment previews, uploads, knowledge files, PPT previews, and SPA static assets.
+
+**Signatures**:
+- Deployment site route: `GET /api/sites/:id/*filepath`.
+- Knowledge file route: `GET /api/knowledge-bases/:id/files/:fileId/content`.
+- Upload/PPT routes: `GET /api/uploads/*filepath`, `GET /api/ppt-preview/*filepath`.
+
+**Contracts**:
+- A route scoped by an object ID must serve files only under that object's directory, not merely under the broader storage root.
+- Paths stored in the database are not automatically trusted; handlers must re-validate them before serving or deleting files.
+- Normalize URL-style paths and Windows backslash paths before checking traversal.
+- Existing files outside the allowed root must return `403`, not `200`.
+
+**Validation & Error Matrix**:
+- `../` traversal or encoded traversal -> `403`.
+- Absolute path or Windows drive/rooted path -> `403`.
+- Valid in-root path that does not exist -> `404`.
+- Valid existing file in the scoped root -> `200`.
+
+**Good/Base/Bad Cases**:
+- Good: `/api/sites/{id}/../{otherID}/secret.html` is rejected even though `{otherID}` is under the deployment base directory.
+- Base: `/api/sites/{id}/index.html` serves the current deployment's index.
+- Bad: checking only against `BaseDir()` lets one deployment ID read another deployment's files.
+
+**Tests Required**:
+- Handler test asserts traversal into another deployment is rejected.
+- Helper or handler test asserts knowledge file paths reject `../`, absolute paths, and rooted Windows-style paths.
+- Existing happy-path tests must still assert valid files are served.
+
+**Wrong vs Correct**:
+```go
+// Wrong: only constrains access to the broad deployment root.
+target := filepath.Join(baseDir, id, rel)
+checkWithin(target, baseDir)
+
+// Correct: constrains access to the current object's directory.
+siteRoot := svc.SiteDir(id)
+target := filepath.Join(siteRoot, rel)
+checkWithin(target, siteRoot)
+```
+
 ---
 
 ## Testing Requirements
