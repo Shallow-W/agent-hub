@@ -294,8 +294,11 @@ func main() {
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.GET("/:id/messages/search", msgHandler.Search)
+			convRoutes.GET("/:id/pinned-context", msgHandler.PinnedContext)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
 			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
+			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
+			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)

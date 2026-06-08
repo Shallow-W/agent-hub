@@ -12,7 +12,8 @@ import (
 )
 
 type fakeMsgRepo struct {
-	messages      []model.Message
+	messages       []model.Message
+	pinnedMessages []model.PinnedMessage
 	savedArtifacts map[string][]model.Artifact
 }
 
@@ -72,6 +73,24 @@ func (r *fakeMsgRepo) SaveArtifacts(ctx context.Context, messageID string, artif
 	}
 	r.savedArtifacts[messageID] = artifacts
 	return nil
+}
+
+func (r *fakeMsgRepo) PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error) {
+	return &model.MessagePin{
+		ID:             "pin-1",
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		CreatedBy:      userID,
+		CreatedAt:      time.Now(),
+	}, nil
+}
+
+func (r *fakeMsgRepo) UnpinMessage(ctx context.Context, conversationID, messageID string) error {
+	return nil
+}
+
+func (r *fakeMsgRepo) ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error) {
+	return r.pinnedMessages, nil
 }
 
 type fakeConvRepoForMsg struct {

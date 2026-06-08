@@ -183,6 +183,7 @@ Authorization: Bearer <token>
   "conversation_id": "uuid",
   "content": "消息内容",
   "role": "user",
+  "pinned": false,
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -211,6 +212,7 @@ Authorization: Bearer <token>
     "conversation_id": "uuid",
     "content": "消息内容",
     "role": "user | assistant | system",
+    "pinned": false,
     "created_at": "2024-01-01T00:00:00Z"
   }
 ]
@@ -218,6 +220,71 @@ Authorization: Bearer <token>
 
 **错误响应**
 - `404 Not Found` — 对话不存在或无权限
+
+---
+
+### POST /api/conversations/:id/messages/:messageId/pin
+
+将消息 Pin 到当前会话的共享上下文黑板，后续 Agent 调用会收到该内容。
+
+**成功响应** `200 OK`
+```json
+{
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "message_id": "uuid",
+  "created_by": "uuid",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**错误响应**
+- `403 Forbidden` — 无权操作此对话
+- `404 Not Found` — 对话或消息不存在
+
+---
+
+### DELETE /api/conversations/:id/messages/:messageId/pin
+
+取消消息 Pin。
+
+**成功响应** `200 OK`
+```json
+null
+```
+
+**错误响应**
+- `403 Forbidden` — 无权操作此对话
+- `404 Not Found` — 对话或消息不存在
+
+---
+
+### GET /api/conversations/:id/pinned-context
+
+获取当前会话共享上下文黑板中的用户 Pin 上下文。
+
+**成功响应** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "message_id": "uuid",
+    "role": "user",
+    "content": "关键上下文",
+    "sender_id": "uuid",
+    "username": "alice",
+    "message_created_at": "2024-01-01T00:00:00Z",
+    "pinned_by": "uuid",
+    "pinned_by_name": "alice",
+    "pinned_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+**错误响应**
+- `403 Forbidden` — 无权操作此对话
+- `404 Not Found` — 对话不存在
 
 ---
 

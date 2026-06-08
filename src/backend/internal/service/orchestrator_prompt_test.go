@@ -21,6 +21,7 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 			{Name: "Bob", Role: "worker", Status: "online", CLITool: "codex"},
 			{Name: "Charlie", Role: "worker", Status: "offline", CLITool: "opencode"},
 		},
+		"{群聊上下文黑板\n{用户 Pin 上下文\n- user: 这是长期约束\n}\n{群聊/任务状态摘要\n未启用\n}\n}\n\n",
 		"- Alice: 已完成设计\n- Bob: 开始编码",
 		"请分析这个需求并分派任务",
 	)
@@ -63,6 +64,12 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	if !strings.Contains(result, "{群聊最近动态") {
 		t.Error("prompt missing {群聊最近动态 section")
 	}
+	if !strings.Contains(result, "{群聊上下文黑板") {
+		t.Error("prompt missing {群聊上下文黑板 section")
+	}
+	if !strings.Contains(result, "这是长期约束") {
+		t.Error("prompt missing pinned blackboard context")
+	}
 	if !strings.Contains(result, "{用户消息") {
 		t.Error("prompt missing {用户消息 section")
 	}
@@ -94,6 +101,7 @@ func TestBuildOrchestratorPrompt_EmptyAgentList(t *testing.T) {
 	result := BuildOrchestratorPromptWithAgents(
 		"空群",
 		[]OrchestratorAgentDetail{},
+		"",
 		"some summary",
 		"some request",
 	)
@@ -117,6 +125,7 @@ func TestBuildOrchestratorPrompt_SpecialChars(t *testing.T) {
 			{Name: "Agent_2"},
 			{Name: "Agent.3"},
 		},
+		"",
 		"消息含<特殊>字符 & \"引号\"",
 		"用户消息含 `backtick` 和 $ 符号",
 	)
@@ -143,7 +152,7 @@ func TestBuildOrchestratorPrompt_LongInput(t *testing.T) {
 		agents[i] = OrchestratorAgentDetail{Name: "Agent" + strings.Repeat("名", 5)}
 	}
 
-	result := BuildOrchestratorPromptWithAgents(longTitle, agents, "summary", longMsg)
+	result := BuildOrchestratorPromptWithAgents(longTitle, agents, "", "summary", longMsg)
 
 	if !strings.Contains(result, longMsg) {
 		t.Error("prompt missing long user message")
@@ -157,6 +166,7 @@ func TestBuildOrchestratorPromptWithAgents_EmptyFieldsUseFallback(t *testing.T) 
 	result := BuildOrchestratorPromptWithAgents(
 		"测试群",
 		[]OrchestratorAgentDetail{{Name: "Codex"}},
+		"",
 		"",
 		"@员工2 分派任务",
 	)

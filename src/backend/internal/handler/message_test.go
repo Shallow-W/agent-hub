@@ -387,7 +387,9 @@ func (r *fakeMsgRepoForHandler) ListByConversation(_ context.Context, _ string, 
 	return r.messages, nil
 }
 
-func (r *fakeMsgRepoForHandler) MarkConversationRead(_ context.Context, _, _ string) error { return nil }
+func (r *fakeMsgRepoForHandler) MarkConversationRead(_ context.Context, _, _ string) error {
+	return nil
+}
 
 func (r *fakeMsgRepoForHandler) GetMessagesAfter(_ context.Context, _ string, _ interface{}, _ int) ([]model.Message, error) {
 	return r.messages, nil
@@ -409,6 +411,24 @@ func (r *fakeMsgRepoForHandler) SoftDelete(_ context.Context, _ string) error { 
 
 func (r *fakeMsgRepoForHandler) SaveArtifacts(_ context.Context, _ string, _ []model.Artifact) error {
 	return nil
+}
+
+func (r *fakeMsgRepoForHandler) PinMessage(_ context.Context, conversationID, messageID, userID string) (*model.MessagePin, error) {
+	return &model.MessagePin{
+		ID:             "pin-1",
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		CreatedBy:      userID,
+		CreatedAt:      time.Now(),
+	}, nil
+}
+
+func (r *fakeMsgRepoForHandler) UnpinMessage(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (r *fakeMsgRepoForHandler) ListPinnedMessages(_ context.Context, conversationID string, _ int) ([]model.PinnedMessage, error) {
+	return []model.PinnedMessage{}, nil
 }
 
 // fakeConvRepoForHandler satisfies service.ConvRepoForMsg

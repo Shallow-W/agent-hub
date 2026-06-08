@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -308,6 +309,10 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	if kbCtx == "" {
 		kbCtx = s.injectKBContext(ctx, content, "", userID)
 	}
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	if blackboardCtx != "" {
+		kbCtx = blackboardCtx + kbCtx
+	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
 	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
@@ -342,7 +347,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		convTitle = conv.Title
 	}
 
-	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, buildOrchestratorAgentDetails(convAgents), recentSummary, content)
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, buildOrchestratorAgentDetails(convAgents), blackboardCtx, recentSummary, content)
 
 	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
 	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
@@ -470,7 +476,12 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+
 	var sb strings.Builder
+	if blackboardCtx != "" {
+		sb.WriteString(blackboardCtx)
+	}
 	sb.WriteString("[群聊背景]\n")
 	for _, m := range msgs {
 		role := m.Role
@@ -504,7 +515,7 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
 
 	// 总长度保护：超过 4000 字符时从最早的消息开始截断
-	const maxContextLen = 4000
+	const maxContextLen = 6000
 	result := sb.String()
 	runes := []rune(result)
 	if len(runes) > maxContextLen {
@@ -513,8 +524,53 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
 			result = result[idx+1:]
 		}
+		if blackboardCtx != "" && !strings.Contains(result, "{群聊上下文黑板") {
+			result = blackboardCtx + result
+		}
 	}
 	return result, nil
+}
+
+const (
+	blackboardPinLimit        = 20
+	blackboardMaxEntryRunes   = 800
+	blackboardMaxContextRunes = 5000
+)
+
+// BuildConversationBlackboardContext builds the shared group context block
+// injected into orchestrator and worker prompts.
+func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
+	if s == nil || s.msgRepo == nil {
+		return ""
+	}
+	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, blackboardPinLimit)
+	if err != nil {
+		slog.Warn("build blackboard context failed", "conversation_id", convID, "error", err)
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("{群聊上下文黑板\n")
+	sb.WriteString("{用户 Pin 上下文\n")
+	if len(items) == 0 {
+		sb.WriteString("无\n")
+	} else {
+		for _, item := range items {
+			author := fallbackText(item.Username)
+			content := normalizePromptLine(truncateString(item.Content, blackboardMaxEntryRunes))
+			fmt.Fprintf(&sb, "- %s: %s\n", author, content)
+		}
+	}
+	sb.WriteString("}\n")
+	sb.WriteString("{群聊/任务状态摘要\n")
+	sb.WriteString("未启用\n")
+	sb.WriteString("}\n")
+	sb.WriteString("}\n\n")
+
+	result := sb.String()
+	if len([]rune(result)) > blackboardMaxContextRunes {
+		return truncateString(result, blackboardMaxContextRunes)
+	}
+	return result
 }
 
 // buildRecentSummary formats the last 10 messages in chronological order.
@@ -722,6 +778,12 @@ func truncateString(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+var promptWhitespaceRE = regexp.MustCompile(`\s+`)
+
+func normalizePromptLine(s string) string {
+	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
 }
 
 // agentMetadata serializes the agent identity fields into a JSON string

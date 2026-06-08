@@ -83,6 +83,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   const containerRef = useRef<HTMLDivElement>(null);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
+  const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
   const [showNewMsgBtn, setShowNewMsgBtn] = useState(false);
   const [unreadSinceScroll, setUnreadSinceScroll] = useState(0);
   const nearBottomRef = useRef(true);
@@ -203,6 +204,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   isOwn={isOwn}
                   onReply={onReply}
                   onForward={onForward}
+                  onTogglePin={(message) => toggleMessagePin(conversationId, message.id, !!message.pinned)}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                 />
               </React.Fragment>

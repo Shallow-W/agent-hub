@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,5 +238,34 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 	}
 	if msg.Content != taskResult {
 		t.Fatalf("expected %q, got %s", taskResult, msg.Content)
+	}
+}
+
+func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T) {
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{},
+		&fakeMsgRepo{
+			pinnedMessages: []model.PinnedMessage{
+				{
+					ConversationID: "c1",
+					MessageID:      "m1",
+					Role:           "user",
+					Content:        "第一行\n第二行",
+					Username:       "wjc",
+				},
+			},
+		},
+	)
+
+	result := svc.BuildConversationBlackboardContext(context.Background(), "c1")
+	if !strings.Contains(result, "{群聊上下文黑板") {
+		t.Fatal("expected blackboard section")
+	}
+	if !strings.Contains(result, "{用户 Pin 上下文") {
+		t.Fatal("expected user pin subsection")
+	}
+	if !strings.Contains(result, "- wjc: 第一行 第二行") {
+		t.Fatalf("expected normalized pinned message, got %q", result)
 	}
 }

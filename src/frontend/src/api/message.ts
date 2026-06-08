@@ -1,5 +1,5 @@
 import { get, post, del } from './client';
-import type { Message, SendMessageResult, MessageRole } from '@/types/message';
+import type { Message, PinnedMessage, SendMessageResult, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
 export async function sendMessage(
@@ -42,6 +42,25 @@ export async function recallMessage(
   return del<void>(`/api/conversations/${conversationId}/messages/${messageId}`);
 }
 
+export async function pinMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  return post<void>(`/api/conversations/${conversationId}/messages/${messageId}/pin`);
+}
+
+export async function unpinMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  return del<void>(`/api/conversations/${conversationId}/messages/${messageId}/pin`);
+}
+
+export async function getPinnedContext(
+  conversationId: string,
+): Promise<PinnedMessage[]> {
+  return get<PinnedMessage[]>(`/api/conversations/${conversationId}/pinned-context`);
+}
 
 export async function getUnreadMessages(
   conversationId: string,

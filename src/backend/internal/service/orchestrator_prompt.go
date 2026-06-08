@@ -66,15 +66,16 @@ func BuildOrchestratorPrompt(conversationTitle string, agentList []string, recen
 	for _, name := range agentList {
 		agents = append(agents, OrchestratorAgentDetail{Name: name})
 	}
-	return BuildOrchestratorPromptWithAgents(conversationTitle, agents, recentMessages, userMessage)
+	return BuildOrchestratorPromptWithAgents(conversationTitle, agents, "", recentMessages, userMessage)
 }
 
 // BuildOrchestratorPromptWithAgents builds the full prompt for an orchestrator dispatch.
 // conversationTitle: the group chat name
 // agents: backend-provided agent details available in this group chat
+// blackboardContext: shared long-term context visible to all agents in this group chat
 // recentMessages: compressed summary of recent group chat messages
 // userMessage: the user's current message
-func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []OrchestratorAgentDetail, recentMessages string, userMessage string) string {
+func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []OrchestratorAgentDetail, blackboardContext string, recentMessages string, userMessage string) string {
 	var sb strings.Builder
 
 	sb.WriteString("{当前群聊\n")
@@ -93,6 +94,18 @@ func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []Orches
 		}
 	}
 	sb.WriteString("}\n\n")
+
+	if strings.TrimSpace(blackboardContext) == "" {
+		sb.WriteString("{群聊上下文黑板\n")
+		sb.WriteString("{用户 Pin 上下文\n无\n}\n")
+		sb.WriteString("{群聊/任务状态摘要\n未启用\n}\n")
+		sb.WriteString("}\n\n")
+	} else {
+		sb.WriteString(blackboardContext)
+		if !strings.HasSuffix(blackboardContext, "\n") {
+			sb.WriteString("\n")
+		}
+	}
 
 	sb.WriteString("{群聊最近动态\n")
 	if strings.TrimSpace(recentMessages) == "" {

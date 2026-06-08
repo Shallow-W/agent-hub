@@ -150,6 +150,23 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
 ```
 
+### Group Context Blackboard
+
+**Scope / Trigger**: Applies when changing message pin APIs, group-chat prompt context, or Agent dispatch context construction.
+
+**Contracts**:
+- `message_pins` is the source of truth for user-pinned long-term group context. Prompt code must query persisted pins rather than reconstructing from frontend state.
+- Message history responses expose `pinned` so the chat UI can display and toggle pin state without a separate round-trip for each message.
+- Agent prompts must include a `{群聊上下文黑板}` block with `{用户 Pin 上下文}` for orchestrator dispatch, worker dispatch, and direct Agent dispatch.
+- The first phase leaves `{群聊/任务状态摘要}` present but not enabled; do not have prompt code invent an orchestrator summary.
+- Pin content must be length-limited and normalized before prompt insertion so a single pinned message cannot crowd out the current user request.
+- Cache invalidation is required after pin/unpin because message history may be served from Redis.
+
+**Tests Required**:
+- Assert orchestrator prompt construction includes the blackboard section.
+- Assert `BuildConversationBlackboardContext` includes persisted pinned messages and normalizes multi-line content.
+- Run backend service/handler/repository tests and frontend build after changing the pin API or message shape.
+
 ---
 
 ## Testing Requirements
