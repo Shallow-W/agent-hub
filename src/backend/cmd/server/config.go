@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -55,6 +56,10 @@ type Config struct {
 
 // loadConfig 从 YAML 文件加载配置
 func loadConfig(path string) (*Config, error) {
+	if envPath := os.Getenv("AGENTHUB_CONFIG"); envPath != "" {
+		path = envPath
+	}
+
 	k := koanf.New(".")
 	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
 		return nil, fmt.Errorf("load config file: %w", err)

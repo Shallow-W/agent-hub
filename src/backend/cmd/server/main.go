@@ -390,6 +390,8 @@ func main() {
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
 	}
 
+	registerSPARoutes(router, frontendDistDir())
+
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -438,4 +440,31 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+func frontendDistDir() string {
+	if dir := os.Getenv("AGENTHUB_FRONTEND_DIST"); dir != "" {
+		return dir
+	}
+	for _, dir := range frontendDistCandidates() {
+		if info, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !info.IsDir() {
+			return dir
+		}
+	}
+	return filepath.Clean("../../frontend/dist")
+}
+
+func frontendDistCandidates() []string {
+	candidates := []string{
+		filepath.Clean("src/frontend/dist"),
+		filepath.Clean("../../frontend/dist"),
+	}
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "..", "src", "frontend", "dist"),
+			filepath.Join(exeDir, "frontend-dist"),
+		)
+	}
+	return candidates
 }

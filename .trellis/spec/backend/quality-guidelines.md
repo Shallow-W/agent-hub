@@ -98,6 +98,45 @@ WHERE c.id = $1 AND m.user_id = $2
 WHERE c.id = $1 AND m.user_id = $2 AND c.cli_tool = $5
 ```
 
+### Desktop SPA Runtime
+
+**Scope / Trigger**: Applies when changing backend static serving, Electron desktop packaging, or production SPA routing.
+
+**Signatures**:
+- Environment: `AGENTHUB_CONFIG` overrides the backend config file path.
+- Environment: `AGENTHUB_FRONTEND_DIST` points the backend to a built Vite `dist` directory.
+- Backend helper: `registerSPARoutes(router, distDir)` registers a fallback only when `index.html` exists.
+
+**Contracts**:
+- `/api/*`, `/ws`, `/daemon/*`, and `/mcp/*` must not be served by the SPA fallback.
+- Browser-history routes such as `/settings` and `/tasks` must serve `index.html`.
+- Static assets must be served only when the resolved file exists inside the frontend dist directory.
+- Electron production mode should pass `AGENTHUB_CONFIG` and `AGENTHUB_FRONTEND_DIST` instead of relying on process cwd.
+
+**Validation & Error Matrix**:
+- Missing `dist/index.html` -> skip SPA fallback registration.
+- Missing API route -> normal 404, never `index.html`.
+- Suspicious/traversal asset path -> reject or fall back without serving files outside dist.
+- Missing database for packaged backend -> backend exits; Electron should log backend stdout/stderr for diagnosis.
+
+**Good/Base/Bad Cases**:
+- Good: `bin/server` started from repo root serves `/settings` from `src/frontend/dist/index.html`.
+- Base: `go run ./cmd/server` from `src/backend` serves the same dist via `../../frontend/dist`.
+- Bad: `/api/missing` returns the SPA HTML, hiding API routing errors.
+
+**Tests Required**:
+- `go test ./cmd/server` asserts asset serving, BrowserRouter fallback, API 404 isolation, env path loading, and dist candidate coverage.
+- Desktop smoke should verify packaged resources include `resources/bin/server.exe`, `resources/frontend-dist/index.html`, and `resources/config/config.yaml`.
+
+**Wrong vs Correct**:
+```go
+// Wrong: root static handler can swallow frontend history routes as 404.
+router.StaticFS("/", http.Dir(distDir))
+
+// Correct: NoRoute checks API exclusions, existing assets, then falls back to index.html.
+router.NoRoute(spaFallbackHandler(distDir, indexPath))
+```
+
 ---
 
 ## Testing Requirements
