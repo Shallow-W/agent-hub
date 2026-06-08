@@ -64,6 +64,7 @@ export interface CreateDaemonMachineRequest {
 
 export interface CreateDaemonMachineResponse {
   machine: DaemonMachine;
+  command: string;
   api_key: string;
   daemon_source_path: string;
   daemon_npm_path: string;

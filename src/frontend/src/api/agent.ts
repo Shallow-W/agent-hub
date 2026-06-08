@@ -39,7 +39,14 @@ export async function getDaemonMachines(): Promise<DaemonMachine[]> {
 export async function createDaemonMachine(
   body: CreateDaemonMachineRequest,
 ): Promise<CreateDaemonMachineResponse> {
-  return post<CreateDaemonMachineResponse>('/api/daemon/machines', body);
+  const created = await post<Omit<CreateDaemonMachineResponse, 'command'>>('/api/daemon/machines', body);
+  const connect = await getMachineConnectCommand(created.machine.id);
+  return {
+    ...created,
+    command: connect.command,
+    api_key: connect.api_key,
+    daemon_npm_path: connect.daemon_npm_path,
+  };
 }
 
 export async function deleteDaemonMachine(id: string): Promise<void> {

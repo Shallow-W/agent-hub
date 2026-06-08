@@ -37,12 +37,6 @@ function defaultComputerName(): string {
   return `computer-${timestamp.replace(':', '')}`;
 }
 
-function getServerURL(): string {
-  const port = window.location.port === '5173' ? '8080' : window.location.port;
-  const host = port ? `${window.location.hostname}:${port}` : window.location.host;
-  return `${window.location.protocol}//${host}`;
-}
-
 function getStatusTag(machine: DaemonMachine): React.ReactNode {
   if (machine.status === 'connected') {
     return <Tag color="success">Connected</Tag>;
@@ -54,12 +48,19 @@ function quoteArg(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
+function readCommandArg(command: string, name: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = command.match(new RegExp(`--${escaped}\\s+(?:"([^"]+)"|(\\S+))`));
+  return match?.[1] ?? match?.[2] ?? '';
+}
+
 function buildCommand(
-  serverURL: string,
-  apiKey: string,
+  backendCommand: string,
   daemonNPMPath: string,
   machineName: string,
 ): string {
+  const serverURL = readCommandArg(backendCommand, 'server-url');
+  const apiKey = readCommandArg(backendCommand, 'api-key');
   const packageSpec = daemonNPMPath
     ? `@agenthub/daemon@file:${daemonNPMPath}`
     : '@agenthub/daemon@latest';
@@ -97,8 +98,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
   const connectCommand = useMemo(() => {
     if (!created) return null;
     return buildCommand(
-      getServerURL(),
-      created.api_key,
+      created.command,
       created.daemon_npm_path,
       created.machine.name,
     );
