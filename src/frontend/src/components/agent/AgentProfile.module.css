@@ -257,6 +257,56 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+
+.toolControlRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toolsetSelect {
+  min-width: 180px;
+}
+
+.toolGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.toolItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+}
+
+.toolName {
+  display: block;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.toolMeta {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.toolJsonPreview {
+  font-family: Consolas, monospace;
+}
+
 .tagPreview,
 .actionPanel {
   display: flex;

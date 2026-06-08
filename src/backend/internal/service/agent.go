@@ -338,6 +338,10 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
+	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
 	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("create custom agent: %w", err)
@@ -358,6 +362,10 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	}
 	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
 		return nil, ErrAgentNotFound
+	}
+	toolsConfig, err = normalizeToolsConfig(toolsConfig)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
 	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {

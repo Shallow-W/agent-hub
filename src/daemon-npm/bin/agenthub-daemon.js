@@ -70,12 +70,13 @@ const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 // buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
 // 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
 // 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
-function buildPlatformMcpArgs(conversationId, userId) {
+function buildPlatformMcpArgs(conversationId, userId, agentId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
+  if (agentId) mcpServerArgs.push('--agent-id', agentId);
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
@@ -724,7 +725,7 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
-      ...buildPlatformMcpArgs(),
+      ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
     ];
     if (persistent) {
       args.push('--dangerously-skip-permissions');
@@ -1138,7 +1139,7 @@ function stopAgentProcess(agent_id) {
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId);
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -1856,6 +1857,79 @@ const MCP_TOOLS = [
   },
 ];
 
+const DEFAULT_AGENT_TOOLS = [
+  'list_group_agents',
+  'get_messages',
+  'list_tasks',
+  'create_task',
+  'update_task',
+  'move_task_status',
+];
+const NO_AGENT_TOOLS = [];
+
+const TOOLSET_TEMPLATES = {
+  none: [],
+  basic: ['list_group_agents', 'get_messages'],
+  tasks: DEFAULT_AGENT_TOOLS,
+  orchestrator: [
+    ...DEFAULT_AGENT_TOOLS,
+    'list_conversations',
+    'get_group_info',
+    'list_group_members',
+  ],
+  agent_builder: [
+    'list_agents',
+    'list_group_agents',
+    'list_agent_candidates',
+    'list_machines',
+  ],
+};
+
+function normalizeToolName(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function uniqueToolNames(values) {
+  return [...new Set(values.map(normalizeToolName).filter(Boolean))];
+}
+
+function parseToolsConfig(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function allowedToolsFromConfig(raw) {
+  const config = parseToolsConfig(raw);
+  if (!config) return DEFAULT_AGENT_TOOLS;
+  if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
+  if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
+  if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
+    return TOOLSET_TEMPLATES[config.toolset];
+  }
+  return DEFAULT_AGENT_TOOLS;
+}
+
+async function resolveAllowedTools(ctx) {
+  if (!ctx.agentId) return NO_AGENT_TOOLS;
+  if (ctx.allowedTools !== null) return ctx.allowedTools;
+  const res = await ctx.callApi('GET', '/api/agents');
+  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
+  return ctx.allowedTools;
+}
+
+async function isToolAllowed(ctx, toolName) {
+  const allowed = await resolveAllowedTools(ctx);
+  return allowed.includes(toolName);
+}
+
 function writeMcp(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -1889,19 +1963,30 @@ async function handleMcpMessage(line, toolMap, ctx) {
     return;
   }
   if (method === 'tools/list') {
+    const allowed = await resolveAllowedTools(ctx);
+    const tools = MCP_TOOLS
+      .filter((tool) => allowed.includes(tool.name))
+      .map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
     writeMcp({
       jsonrpc: '2.0',
       id,
-      result: {
-        tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
-      },
+      result: { tools },
     });
     return;
   }
   if (method === 'tools/call') {
-    const tool = toolMap.get(params && params.name);
+    const toolName = params && params.name;
+    const tool = toolMap.get(toolName);
     if (!tool) {
-      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${params && params.name}` } });
+      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${toolName}` } });
+      return;
+    }
+    if (!(await isToolAllowed(ctx, toolName))) {
+      writeMcp({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: `工具未授权: ${toolName}` }], isError: true },
+      });
       return;
     }
     try {
@@ -1931,6 +2016,8 @@ async function runMcpServer(serverURL, apiKey) {
   const ctx = {
     conversationId: readArg('--conversation-id') || null,
     userId: readArg('--user-id') || null,
+    agentId: readArg('--agent-id') || null,
+    allowedTools: null,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };

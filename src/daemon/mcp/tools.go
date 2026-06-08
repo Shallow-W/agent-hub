@@ -28,7 +28,7 @@ func ConversationTools() []Tool {
 			Name:        "list_conversations",
 			Description: "查询当前用户的会话列表（单聊/群聊）。任务看板以会话为基本单位，通常需要先获取会话列表再操作对应任务",
 			InputSchema: map[string]interface{}{
-				"type": "object",
+				"type":       "object",
 				"properties": map[string]interface{}{},
 			},
 		},
@@ -41,6 +41,38 @@ func ConversationTools() []Tool {
 					"conversation_id": map[string]interface{}{
 						"type":        "string",
 						"description": "会话ID（必填）",
+					},
+				},
+				"required": []string{"conversation_id"},
+			},
+		},
+		{
+			Name:        "list_group_agents",
+			Description: "查询指定群聊中参与的 Agent 列表，用于了解群聊中有哪些 Agent 可用",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"conversation_id": map[string]interface{}{
+						"type":        "string",
+						"description": "群聊会话ID（必填）",
+					},
+				},
+				"required": []string{"conversation_id"},
+			},
+		},
+		{
+			Name:        "get_messages",
+			Description: "读取指定会话的历史消息，用于获取上下文",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"conversation_id": map[string]interface{}{
+						"type":        "string",
+						"description": "会话ID（必填）",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "返回条数，默认 50",
 					},
 				},
 				"required": []string{"conversation_id"},

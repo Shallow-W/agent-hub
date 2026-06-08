@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Avatar, Button, Input, Popconfirm, Switch, Tag, message } from 'antd';
+import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Switch, Tag, message } from 'antd';
 import {
   MessageOutlined,
   RobotOutlined,
@@ -29,6 +29,40 @@ import {
 } from './agentPresentation';
 import type { Skill } from './agentPresentation';
 import styles from './AgentProfile.module.css';
+
+const toolCatalog = [
+  { name: 'list_conversations', label: '会话列表', category: 'read' },
+  { name: 'get_messages', label: '读取消息', category: 'read' },
+  { name: 'list_group_agents', label: '群 Agent', category: 'read' },
+  { name: 'list_tasks', label: '任务列表', category: 'task' },
+  { name: 'create_task', label: '创建任务', category: 'task' },
+  { name: 'update_task', label: '更新任务', category: 'task' },
+  { name: 'move_task_status', label: '移动任务状态', category: 'task' },
+  { name: 'get_group_info', label: '群信息', category: 'group' },
+  { name: 'list_group_members', label: '群成员', category: 'group' },
+  { name: 'list_agents', label: 'Agent 列表', category: 'agent' },
+  { name: 'list_agent_candidates', label: 'Agent 候选', category: 'agent' },
+  { name: 'list_machines', label: '电脑列表', category: 'machine' },
+];
+
+const toolsetTemplates: Record<string, string[]> = {
+  none: [],
+  basic: ['list_group_agents', 'get_messages'],
+  tasks: ['list_group_agents', 'get_messages', 'list_tasks', 'create_task', 'update_task', 'move_task_status'],
+  orchestrator: ['list_group_agents', 'get_messages', 'list_tasks', 'create_task', 'update_task', 'move_task_status', 'list_conversations', 'get_group_info', 'list_group_members'],
+  agent_builder: ['list_agents', 'list_group_agents', 'list_agent_candidates', 'list_machines'],
+};
+
+const toolsetOptions = [
+  { value: 'none', label: '无工具' },
+  { value: 'basic', label: '基础群聊' },
+  { value: 'tasks', label: '任务协作' },
+  { value: 'orchestrator', label: 'Orchestrator' },
+  { value: 'agent_builder', label: 'Agent 创建' },
+  { value: 'custom', label: '自定义' },
+];
+
+const getTemplateTools = (toolset: string): string[] => toolsetTemplates[toolset] ?? toolsetTemplates.tasks ?? [];
 
 interface AgentProfileProps {
   agent: Agent | null;
@@ -64,6 +98,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [savingSkills, setSavingSkills] = useState(false);
   const [systemPromptValue, setSystemPromptValue] = useState('');
   const [toolsConfigValue, setToolsConfigValue] = useState('');
+  const [selectedToolset, setSelectedToolset] = useState('tasks');
+  const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
   const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
@@ -99,6 +135,33 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     return skills.length > 0 ? JSON.stringify(skills.map((s) => ({ name: s.name, description: s.description }))) : '';
   };
 
+  const parseToolsConfig = (raw?: string): { toolset: string; allowedTools: string[] } => {
+    if (!raw) return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+    try {
+      const cfg = JSON.parse(raw);
+      if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) {
+        return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+      }
+      const toolset = typeof cfg.toolset === 'string' && cfg.toolset in toolsetTemplates ? cfg.toolset : 'custom';
+      const allowedTools = Array.isArray(cfg.allowed_tools)
+        ? cfg.allowed_tools.filter((name: unknown): name is string => (
+            typeof name === 'string' && toolCatalog.some((tool) => tool.name === name)
+          ))
+        : toolset !== 'custom' ? getTemplateTools(toolset) : getTemplateTools('tasks');
+      return { toolset, allowedTools };
+    } catch {
+      return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+    }
+  };
+
+  const toolsConfigToJSON = (toolset: string, allowedTools: string[]): string => {
+    const validTools = allowedTools.filter((name) => toolCatalog.some((tool) => tool.name === name));
+    return JSON.stringify({
+      toolset: toolset === 'custom' ? '' : toolset,
+      allowed_tools: validTools,
+    });
+  };
+
   useEffect(() => {
     if (!agent) return;
     setActiveTab(defaultTab);
@@ -111,7 +174,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setEditingSkillIdx(null);
     setEditingSkillName('');
     setSystemPromptValue(agent.system_prompt ?? '');
-    setToolsConfigValue(agent.tools_config ?? '');
+    const parsedTools = parseToolsConfig(agent.tools_config);
+    setSelectedToolset(parsedTools.toolset);
+    setSelectedTools(parsedTools.allowedTools);
+    setToolsConfigValue(toolsConfigToJSON(parsedTools.toolset, parsedTools.allowedTools));
     setEnableManagementTools(agent.enable_management_tools ?? false);
   }, [agent?.id]);
 
@@ -270,17 +336,32 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     }
   };
 
+  const handleToolsetChange = (value: string) => {
+    setSelectedToolset(value);
+    const nextTools = value in toolsetTemplates ? getTemplateTools(value) : selectedTools;
+    setSelectedTools(nextTools);
+    setToolsConfigValue(toolsConfigToJSON(value, nextTools));
+  };
+
+  const handleToolsChange = (values: string[]) => {
+    setSelectedToolset('custom');
+    setSelectedTools(values);
+    setToolsConfigValue(toolsConfigToJSON('custom', values));
+  };
+
   const handleSaveToolsConfig = async () => {
     setSaving(true);
     try {
+      const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
       await updateAgent(agent.id, {
         name: agent.name,
         cli_tool: agent.cli_tool,
         system_prompt: agent.system_prompt ?? '',
-        tools_config: toolsConfigValue.trim() || undefined,
+        tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
         enable_management_tools: enableManagementTools,
       });
+      setToolsConfigValue(nextToolsConfig);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
@@ -570,7 +651,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'tools_config' && (
           <section className={styles.section}>
             <div className={styles.sectionTitle}>工具配置 (Tools Config)</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <div className={styles.toolControlRow}>
               <Switch
                 checked={enableManagementTools}
                 onChange={setEnableManagementTools}
@@ -581,12 +662,33 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 启用后 Agent 可自动管理平台上的 Agent 和电脑资源
               </span>
             </div>
+            <div className={styles.toolControlRow}>
+              <span className={styles.label}>工具集模板</span>
+              <Select
+                className={styles.toolsetSelect}
+                value={selectedToolset}
+                options={toolsetOptions}
+                onChange={handleToolsetChange}
+              />
+            </div>
+            <Checkbox.Group value={selectedTools} onChange={(values) => handleToolsChange(values as string[])}>
+              <div className={styles.toolGrid}>
+                {toolCatalog.map((tool) => (
+                  <label className={styles.toolItem} key={tool.name}>
+                    <Checkbox value={tool.name} />
+                    <span>
+                      <span className={styles.toolName}>{tool.label}</span>
+                      <span className={styles.toolMeta}>{tool.name} · {tool.category}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Checkbox.Group>
             <Input.TextArea
-              autoSize={{ minRows: 8, maxRows: 24 }}
+              autoSize={{ minRows: 4, maxRows: 10 }}
               value={toolsConfigValue}
-              onChange={(e) => setToolsConfigValue(e.target.value)}
-              placeholder="以 Markdown 格式描述 Agent 可用的工具和调用方式。&#10;&#10;示例：&#10;## web_search&#10;- 描述：搜索互联网获取最新信息&#10;- 参数：query (string) - 搜索关键词&#10;&#10;## code_run&#10;- 描述：在沙箱中执行代码片段&#10;- 参数：language, code"
-              style={{ fontFamily: 'monospace' }}
+              readOnly
+              className={styles.toolJsonPreview}
             />
             <div className={styles.actionPanel}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>

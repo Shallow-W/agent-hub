@@ -122,6 +122,34 @@ detail.SystemPrompt = "擅长代码实现、调试、工程分析"
 detail.SystemPrompt = truncateString(ca.SystemPrompt, 300)
 ```
 
+### Agent MCP Toolsets
+
+**Scope / Trigger**: Applies when changing `agents.tools_config`, daemon MCP tool registration, or platform MCP endpoints.
+
+**Contracts**:
+- `agents.tools_config` is the per-Agent MCP tool authorization config. The supported JSON shape is `{"toolset": string, "allowed_tools": string[]}`.
+- `allowed_tools` must only contain known platform tool names. Unknown names are filtered before persistence.
+- Legacy non-JSON `tools_config` text may be preserved for display, but it must not grant extra MCP tools.
+- MCP `tools/list` must only return tools allowed for the current `agent_id`.
+- MCP `tools/call` must reject unauthorized tool names before executing the tool handler.
+- MCP sessions without a resolved `agent_id`, or with an unknown Agent, must fail closed and expose no tools.
+- Explicit JSON `allowed_tools: []` means no tools; it must not fall back to default tools.
+- Hiding tools in prompts or UI is not sufficient; runtime tool calls must enforce the same allowlist.
+
+**Tests Required**:
+- Backend service test for `tools_config` normalization and unknown tool filtering.
+- Daemon MCP test for filtered `tools/list` and unauthorized `tools/call`.
+- End-to-end daemon MCP test where one Agent's config allows tool A and denies tool B.
+
+**Wrong vs Correct**:
+```go
+// Wrong: all MCP tools are always exposed.
+server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
+
+// Correct: server list/call is constrained by the current Agent's tool config.
+server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
+```
+
 ---
 
 ## Testing Requirements

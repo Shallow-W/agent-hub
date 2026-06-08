@@ -78,17 +78,18 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":           a.ID,
-			"name":         a.Name,
-			"type":         a.Type,
-			"status":       a.Status,
-			"machine_id":   a.MachineID,
-			"machine_name": a.MachineName,
-			"version":      a.Version,
-			"cli_tool":     a.CLITool,
+			"id":            a.ID,
+			"name":          a.Name,
+			"type":          a.Type,
+			"status":        a.Status,
+			"machine_id":    a.MachineID,
+			"machine_name":  a.MachineName,
+			"version":       a.Version,
+			"cli_tool":      a.CLITool,
 			"system_prompt": a.SystemPrompt,
-			"tags":           a.Tags,
-			"custom_skills":  a.CustomSkills,
+			"tools_config":  a.ToolsConfig,
+			"tags":          a.Tags,
+			"custom_skills": a.CustomSkills,
 		}
 	}
 	middleware.SuccessResponse(c, slim)

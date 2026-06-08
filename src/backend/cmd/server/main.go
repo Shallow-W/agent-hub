@@ -401,6 +401,7 @@ func main() {
 	{
 		mcpGroup.GET("/conversations", convHandler.List)
 		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		mcpGroup.GET("/conversations/:id/messages", msgHandler.History)
 
 		mcpTaskRoutes := mcpGroup.Group("/tasks")
 		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
