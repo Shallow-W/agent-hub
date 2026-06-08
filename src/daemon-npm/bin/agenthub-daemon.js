@@ -31,6 +31,31 @@ function safeSend(ws, data) {
   } catch { /* connection already closed */ }
 }
 
+function onWebSocket(ws, eventName, handler) {
+  if (typeof ws.on === 'function') {
+    ws.on(eventName, handler);
+    return;
+  }
+  if (typeof ws.addEventListener !== 'function') {
+    throw new Error('unsupported WebSocket implementation');
+  }
+  ws.addEventListener(eventName, (event) => {
+    if (eventName === 'message') {
+      handler(event.data);
+      return;
+    }
+    if (eventName === 'close') {
+      handler(event.code, event.reason);
+      return;
+    }
+    if (eventName === 'error') {
+      handler(event.error || event);
+      return;
+    }
+    handler(event);
+  });
+}
+
 const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
@@ -1404,7 +1429,7 @@ async function connectWS(serverURL, apiKey) {
       }, INBOUND_WATCHDOG_MS);
     }
 
-    ws.on('open', () => {
+    onWebSocket(ws, 'open', () => {
       reconnectAttempts = 0;
       console.log('AgentHub daemon WS connected.');
       resetWatchdog();
@@ -1422,7 +1447,7 @@ async function connectWS(serverURL, apiKey) {
       }, WS_PING_INTERVAL_MS);
     });
 
-    ws.on('message', async (data) => {
+    onWebSocket(ws, 'message', async (data) => {
       resetWatchdog();
       let envelope;
       try {
@@ -1469,7 +1494,12 @@ async function connectWS(serverURL, apiKey) {
         console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
         try {
           let result;
-          if (task.cli_tool === 'claude' && task.agent_id && task.conversation_id) {
+          if (
+            task.cli_tool === 'claude' &&
+            task.agent_id &&
+            task.conversation_id &&
+            process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
+          ) {
             // Unified stream-json slot path with conversation isolation
             result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
           } else {
@@ -1498,7 +1528,7 @@ async function connectWS(serverURL, apiKey) {
       console.log(`AgentHub daemon unknown WS message: ${envelope.type}`);
     });
 
-    ws.on('close', (code, reason) => {
+    onWebSocket(ws, 'close', (code, reason) => {
       if (pingTimer) clearInterval(pingTimer);
       if (watchdogTimer) clearTimeout(watchdogTimer);
       // Clean up all running agent entries on disconnect
@@ -1512,7 +1542,7 @@ async function connectWS(serverURL, apiKey) {
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
 
-    ws.on('error', (error) => {
+    onWebSocket(ws, 'error', (error) => {
       console.error(`AgentHub daemon WS error: ${error.message}`);
       // close handler will trigger reconnect
     });
@@ -1931,7 +1961,13 @@ async function main() {
   await connectWS(serverURL, apiKey);
 }
 
-main().catch((error) => {
-  console.error(`AgentHub daemon failed: ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`AgentHub daemon failed: ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  onWebSocket,
+};
