@@ -167,9 +167,6 @@ func (dh *DaemonHub) handleRegister(msg daemonBusMsg) {
 		oldClient.closed.Store(true)
 		oldClient.closeOnce.Do(func() { close(oldClient.sendCh) })
 		oldClient.Conn.Close(websocket.StatusNormalClosure, "replaced by new connection")
-		if !dh.draining.Load() {
-			dh.wg.Done()
-		}
 		dh.logger.Info("replaced old daemon connection", "machine_id", client.MachineID)
 	}
 	dh.clients.Store(client.MachineID, client)
