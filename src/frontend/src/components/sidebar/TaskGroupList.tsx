@@ -32,20 +32,16 @@ export const TaskGroupList: React.FC = () => {
   useEffect(() => {
     convApi.getArchivedConversations()
       .then((list) => {
-        const groups = (list ?? []).filter((c) => c.type === 'group');
+        const items = list ?? [];
+        const groups = items.filter((c) => c.type === 'group');
         setArchivedCount(groups.length);
+        setArchivedConvs(groups);
       })
       .catch(() => {});
   }, []);
 
-  const handleOpenArchived = async () => {
-    try {
-      const list = await convApi.getArchivedConversations();
-      setArchivedConvs((list ?? []).filter((c) => c.type === 'group'));
-      setShowArchived(true);
-    } catch {
-      antMessage.error('获取归档群聊失败');
-    }
+  const handleOpenArchived = () => {
+    setShowArchived(true);
   };
 
   const handleUnarchive = async (convId: string) => {

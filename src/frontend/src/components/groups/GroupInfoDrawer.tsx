@@ -18,6 +18,7 @@ import {
 import { getGroupInfo, updateGroupInfo } from '@/api/group';
 import type { GroupInfo } from '@/api/group';
 import { resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
+import { useConversationStore } from '@/store/conversationStore';
 import { EditableProfileCard } from '@/components/common/EditableProfileCard';
 import { GroupAvatarPicker } from '@/components/groups/GroupAvatarPicker';
 import styles from './GroupInfoDrawer.module.css';
@@ -103,6 +104,7 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
     await updateGroupInfo(conversationId, { avatar: avatarKey });
     message.success('群头像已更新');
     await fetchInfo();
+    useConversationStore.getState().fetchConversations();
   }, [conversationId, fetchInfo]);
 
   // Tag handlers

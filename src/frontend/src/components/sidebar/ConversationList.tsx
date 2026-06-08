@@ -29,12 +29,20 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [archivedCount, setArchivedCount] = useState(0);
 
-  // Fetch archived count on mount
+  // Fetch archived on mount — cache list to avoid second request on click
   useEffect(() => {
     convApi.getArchivedConversations()
-      .then((list) => setArchivedCount(list?.length ?? 0))
+      .then((list) => {
+        const items = list ?? [];
+        setArchivedCount(items.length);
+        setArchivedConvs(items);
+      })
       .catch(() => {});
   }, []);
+
+  const handleOpenArchived = () => {
+    setShowArchived(true);
+  };
 
   if (loading && conversations.length === 0) {
     return (
@@ -81,16 +89,6 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
       </div>
     );
   }
-
-  const handleOpenArchived = async () => {
-    try {
-      const list = await convApi.getArchivedConversations();
-      setArchivedConvs(list ?? []);
-      setShowArchived(true);
-    } catch {
-      antMessage.error('获取归档对话失败');
-    }
-  };
 
   const handleUnarchive = async (convId: string) => {
     try {

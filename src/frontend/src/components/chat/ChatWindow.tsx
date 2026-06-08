@@ -31,7 +31,7 @@ import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
-import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { useAgentStore } from '@/store/agentStore';
 import styles from './ChatWindow.module.css';
 
@@ -382,8 +382,12 @@ export const ChatWindow: React.FC = () => {
                 icon={<RobotOutlined />}
               />
             ) : isGroup ? (
-              <Avatar className={styles.conversationAvatar} size={26}>
-                {avatarText}
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                src={activeConv.avatar ? (/^(https?:|data:|\/)/i.test(activeConv.avatar) ? activeConv.avatar : avatarUrl(activeConv.avatar)) : undefined}
+              >
+                {!activeConv.avatar ? avatarText : null}
               </Avatar>
             ) : (
               <Avatar

@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
-import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import styles from './ConversationItem.module.css';
 
 interface ConversationItemProps {
@@ -191,7 +191,8 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           <Avatar
             style={{ backgroundColor: '#722ed1', flexShrink: 0, borderRadius: 10 }}
             size={32}
-            icon={<TeamOutlined />}
+            src={conversation.avatar ? (/^(https?:|data:|\/)/i.test(conversation.avatar) ? conversation.avatar : avatarUrl(conversation.avatar)) : undefined}
+            icon={!conversation.avatar ? <TeamOutlined /> : undefined}
           />
         ) : (
           <Avatar

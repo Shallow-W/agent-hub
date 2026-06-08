@@ -5,7 +5,7 @@ import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlin
 import { useFriendStore } from '@/store/friendStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAgentStore } from '@/store/agentStore';
-import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
 import type { Agent } from '@/types/agent';
@@ -208,9 +208,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
                       >
                         <List.Item.Meta
                           avatar={
-                              <Avatar className={styles.friendAvatar} size={28}>
-                              <TeamOutlined />
-                            </Avatar>
+                              <Avatar className={styles.friendAvatar} size={28} src={conv.avatar ? (/^(https?:|data:|\/)/i.test(conv.avatar) ? conv.avatar : avatarUrl(conv.avatar)) : undefined} icon={!conv.avatar ? <TeamOutlined /> : undefined} />
                           }
                           title={<span className={styles.contactName}>{conv.title}</span>}
                           description={<span className={styles.contactMeta}>群聊</span>}
