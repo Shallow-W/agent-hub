@@ -89,19 +89,19 @@ type AgentRepoForMsg interface {
 }
 
 var (
-	ErrMsgConvNotFound = errors.New("对话不存在")
-	ErrMsgConvNoPerm   = errors.New("无权操作此对话")
-	ErrMsgTooLong      = errors.New("消息内容过长")
-	ErrMsgNotFound     = errors.New("消息不存在")
-	ErrMsgNotSender    = errors.New("只能撤回自己的消息")
-	ErrMsgRecallExpired = errors.New("消息已超过2分钟，无法撤回")
+	ErrMsgConvNotFound   = errors.New("对话不存在")
+	ErrMsgConvNoPerm     = errors.New("无权操作此对话")
+	ErrMsgTooLong        = errors.New("消息内容过长")
+	ErrMsgNotFound       = errors.New("消息不存在")
+	ErrMsgNotSender      = errors.New("只能撤回自己的消息")
+	ErrMsgRecallExpired  = errors.New("消息已超过2分钟，无法撤回")
 	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
-	ErrMsgEmptyContent  = errors.New("消息内容不能为空")
-	ErrMsgReplyNotFound = errors.New("回复的消息不存在")
+	ErrMsgEmptyContent   = errors.New("消息内容不能为空")
+	ErrMsgReplyNotFound  = errors.New("回复的消息不存在")
 	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
-	ErrMsgAgentNoPerm  = errors.New("无权使用此 Agent")
-	ErrMsgAgentOffline = errors.New("Agent 未连接电脑，无法执行真实 CLI")
-	ErrMsgAgentTimeout = errors.New("Agent 执行超时")
+	ErrMsgAgentNoPerm    = errors.New("无权使用此 Agent")
+	ErrMsgAgentOffline   = errors.New("Agent 未连接电脑，无法执行真实 CLI")
+	ErrMsgAgentTimeout   = errors.New("Agent 执行超时")
 )
 
 // MessageService 消息业务逻辑
@@ -111,9 +111,9 @@ type MessageService struct {
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
 	cacher    MessageCacher
-	orchSvc    *OrchestratorService
-	daemonHub  *ws.DaemonHub
-	deploySvc  *DeploymentService
+	orchSvc   *OrchestratorService
+	daemonHub *ws.DaemonHub
+	deploySvc *DeploymentService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -776,6 +776,7 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string, at
 	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments)
 	if err != nil {
 		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
@@ -809,27 +810,57 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 		}
 	}
 
-		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
-		if s.orchSvc != nil {
-			agent, err := s.agentRepo.GetByID(ctx, agentID)
-			if err == nil && agent != nil {
-				// KB 优先从消息内容中预解析
-				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-				if kbCtx != "" {
-					contextMessages = kbCtx + contextMessages
-				}
-				// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
-				// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
-				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+	// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
+	if s.orchSvc != nil {
+		agent, err := s.agentRepo.GetByID(ctx, agentID)
+		if err == nil && agent != nil {
+			// KB 优先从消息内容中预解析
+			kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
+			if kbCtx != "" {
+				contextMessages = kbCtx + contextMessages
 			}
+			// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
+			// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
+			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
 		}
+	}
 
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string) {
+	meta, _ := json.Marshal(map[string]string{"agent_name": "AgentHub"})
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, nil, nil, nil)
+	if err != nil {
+		slog.Warn("create agent failure message failed", "convID", convID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, msg)
+}
+
+func shortAgentError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	text := err.Error()
+	if strings.Contains(text, "You've hit your usage limit") {
+		return "Codex CLI 当前额度已用尽，请到 Codex 设置查看 usage，或等待额度恢复。"
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+		text = strings.TrimSpace(lines[0])
+	}
+	if len([]rune(text)) > 240 {
+		runes := []rune(text)
+		text = string(runes[:240]) + "..."
+	}
+	return text
 }
 
 func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {

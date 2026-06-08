@@ -47,6 +47,18 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	}
 }
 
+func TestOrchestratorSystemPrompt_AllowsPromptAgentListFallback(t *testing.T) {
+	if strings.Contains(OrchestratorSystemPrompt, "list_group_agents") {
+		t.Fatal("orchestrator prompt should not mention MCP agent listing")
+	}
+	if !strings.Contains(OrchestratorSystemPrompt, "prompt 中提供的 Agent 列表") {
+		t.Fatal("orchestrator prompt should allow using the provided agent list")
+	}
+	if !strings.Contains(OrchestratorSystemPrompt, "不要因为无法额外查询群聊成员") {
+		t.Fatal("orchestrator prompt should not refuse when extra lookup is unavailable")
+	}
+}
+
 func TestBuildOrchestratorPrompt_EmptySummary(t *testing.T) {
 	result := BuildOrchestratorPrompt(
 		"测试群",

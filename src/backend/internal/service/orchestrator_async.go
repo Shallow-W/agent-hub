@@ -274,7 +274,21 @@ func (s *OrchestratorService) evaluateOrchResponse(orchTaskID string, orchTask *
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	dispatch := ParseOrchestratorOutput(orchResponse)
+	// Resolve @mentions to agent IDs
+	convAgents, err := s.convRepo.ListAgents(ctx, orchTask.ConversationID, orchTask.UserID)
+	if err != nil {
+		slog.Error("list agents for re-dispatch failed", "orch_task", orchTaskID, "error", err)
+		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+		return
+	}
+	agentNameToID := make(map[string]string)
+	agentNames := make([]string, 0, len(convAgents))
+	for _, ca := range convAgents {
+		agentNameToID[ca.Name] = ca.AgentID
+		agentNames = append(agentNames, ca.Name)
+	}
+
+	dispatch := ParseOrchestratorOutputForAgents(orchResponse, agentNames)
 
 	// CAS guard: only proceed if status is still "evaluating"
 	if s.orchTaskRepo != nil {
@@ -306,18 +320,6 @@ func (s *OrchestratorService) evaluateOrchResponse(orchTaskID string, orchTask *
 		slog.Error("increment round failed", "orch_task", orchTaskID, "error", err)
 		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
 		return
-	}
-
-	// Resolve @mentions to agent IDs
-	convAgents, err := s.convRepo.ListAgents(ctx, orchTask.ConversationID, orchTask.UserID)
-	if err != nil {
-		slog.Error("list agents for re-dispatch failed", "orch_task", orchTaskID, "error", err)
-		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
-		return
-	}
-	agentNameToID := make(map[string]string)
-	for _, ca := range convAgents {
-		agentNameToID[ca.Name] = ca.AgentID
 	}
 
 	// Collect valid tasks for re-dispatch

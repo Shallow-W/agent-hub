@@ -92,7 +92,68 @@ function buildContentRootMap(codeArtifacts: Artifact[]): Map<string, string> {
   return map;
 }
 
+function codeLanguage(className?: string): string {
+  return className?.replace(/^language-/, '').toLowerCase() ?? '';
+}
+
+function looksLikeMarkdownDocument(text: string): boolean {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownText(children: ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(markdownText).join('');
+  if (React.isValidElement<{ children?: ReactNode }>(children)) {
+    return markdownText(children.props.children);
+  }
+  return '';
+}
+
 /** 基于本条消息的 code 产物构建 markdown 组件，使围栏代码块能接通版本能力。 */
+function unwrapMarkdownDocumentFence(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const first = lines.findIndex((line) => line.trim() !== '');
+  let last = lines.length - 1;
+  while (last >= 0 && (lines[last] ?? '').trim() === '') last -= 1;
+
+  if (first < 0 || last <= first) return content;
+  const firstLine = lines[first] ?? '';
+  const lastLine = lines[last] ?? '';
+  const opener = firstLine.match(/^ {0,3}`{3,}\s*(markdown|md)\s*$/i);
+  if (!opener || !/^ {0,3}`{3,}\s*$/.test(lastLine)) return content;
+  return lines.slice(first + 1, last).join('\n').replace(/\s+$/, '');
+}
+
+function markdownDocumentContent(content: string): string {
+  const unwrapped = unwrapMarkdownDocumentFence(content);
+  if (unwrapped !== content) return unwrapped;
+
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^ {0,3}`{3,}\s*(markdown|md)\s*$/i.test(lines[i] ?? '')) continue;
+    for (let j = lines.length - 1; j > i; j -= 1) {
+      if (!/^ {0,3}`{3,}\s*$/.test(lines[j] ?? '')) continue;
+      const candidate = lines.slice(i + 1, j).join('\n').replace(/\s+$/, '');
+      if (looksLikeMarkdownDocument(candidate)) return candidate;
+      break;
+    }
+  }
+  const headingStart = normalized.search(/^#{1,3}\s+\S.+$/m);
+  if (headingStart > 0) {
+    const candidate = normalized.slice(headingStart).replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(candidate)) return candidate;
+  }
+  return content;
+}
+
 function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
   // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
   const contentRootMap = buildContentRootMap(codeArtifacts);
@@ -101,6 +162,16 @@ function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
       const isBlock = className?.startsWith('language-');
       if (isBlock) {
         const ct = extractText(children);
+        const lang = codeLanguage(className);
+        if ((lang === 'markdown' || lang === 'md') && looksLikeMarkdownDocument(ct)) {
+          return (
+            <div className={styles.embeddedMarkdownDocument}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+                {markdownDocumentContent(ct.trim())}
+              </ReactMarkdown>
+            </div>
+          );
+        }
         const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
         return (
           <CodeBlock className={className} expandable artifactRootId={rootId}>
@@ -142,6 +213,24 @@ const sharedMarkdownComponents: Components = {
   },
   td({ children }) {
     return <td>{renderChildrenWithMentions(children)}</td>;
+  },
+};
+
+const embeddedDocumentComponents: Components = {
+  ...sharedMarkdownComponents,
+  code({ children }) {
+    return <span className={styles.documentCodeText}>{children}</span>;
+  },
+  pre({ children }) {
+    const text = markdownText(children);
+    if (looksLikeMarkdownDocument(text)) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+          {markdownDocumentContent(text)}
+        </ReactMarkdown>
+      );
+    }
+    return <div className={styles.documentPlainText}>{text}</div>;
   },
 };
 

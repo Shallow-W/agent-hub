@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ var (
 	ErrDeployNotFound         = errors.New("部署记录不存在")
 	ErrDeployEmpty            = errors.New("产物内容为空，无法部署")
 	ErrDeployNoArtifact       = errors.New("当前对话还没有可部署的产物")
+	ErrGitHubNotConfigured    = errors.New("未配置 GitHub 发布（需在 config.yaml 的 github 段或环境变量填入 token/owner/pages_repo）")
 )
 
 // DeployArtifactRepo 部署服务依赖的产物访问能力。
@@ -57,7 +59,8 @@ type DeploymentService struct {
 	convRepo      DeployConvRepo
 	baseDir       string
 	mu            sync.RWMutex
-	publicBaseURL string // 配置了内网穿透/公网入口时的基址（如 https://xxx.trycloudflare.com）
+	publicBaseURL string             // 配置了内网穿透/公网入口时的基址（如 https://xxx.trycloudflare.com）
+	pages         *ghpages.Publisher // 配置了 GitHub Pages 发布时非 nil
 }
 
 // NewDeploymentService 创建部署服务。baseDir 为站点落盘根目录（空则默认 ./data/sites）；
@@ -77,6 +80,20 @@ func NewDeploymentService(repo DeployRepo, artRepo DeployArtifactRepo, convRepo 
 
 // BaseDir 暴露站点根目录，供静态服务定位文件。
 func (s *DeploymentService) BaseDir() string { return s.baseDir }
+
+// SetGitHubPublisher 注入 GitHub Pages 发布器（nil 表示未配置，PublishGitHub 将返回 ErrGitHubNotConfigured）。
+func (s *DeploymentService) SetGitHubPublisher(p *ghpages.Publisher) {
+	s.mu.Lock()
+	s.pages = p
+	s.mu.Unlock()
+}
+
+// GitHubEnabled 返回是否已配置 GitHub Pages 发布（供前端决定是否展示该入口）。
+func (s *DeploymentService) GitHubEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pages != nil
+}
 
 // SetPublicBaseURL 在运行时设置公网基址（用于内网穿透隧道异步就绪后回填）。
 // 传入空串可清除（隧道断开时回落到相对路径）。线程安全。
@@ -114,7 +131,12 @@ func (s *DeploymentService) decorate(d *model.Deployment) *model.Deployment {
 	if rel == "" {
 		rel = "/api/sites/" + d.ID + "/index.html"
 	}
-	d.URL = s.publicURL(rel)
+	// GitHub Pages 等已是绝对公网地址，原样输出，不要再拼内网穿透基址。
+	if strings.HasPrefix(rel, "http://") || strings.HasPrefix(rel, "https://") {
+		d.URL = rel
+	} else {
+		d.URL = s.publicURL(rel)
+	}
 	// 下载地址末段带真实 .zip 文件名：即使浏览器忽略 Content-Disposition（跨域下载常见），
 	// 也会按 URL 末段命名，避免存成无扩展名的裸 UUID「假文件」。
 	d.DownloadURL = s.publicURL("/api/deployments/" + d.ID + "/download/deployment-" + d.ID + ".zip")
@@ -193,28 +215,101 @@ func (s *DeploymentService) Get(ctx context.Context, id string) (*model.Deployme
 	return s.decorate(d), nil
 }
 
-// writeSite 把产物写入 {baseDir}/{id}/：生成可预览 index.html + 非网页产物的原始源码文件。
-func (s *DeploymentService) writeSite(id string, art *model.Artifact) error {
-	dir := filepath.Join(s.baseDir, id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir site: %w", err)
+// renderSiteFiles 生成一次部署的站点文件集合（文件名 → 内容）：可预览 index.html +
+// 非网页产物的原始源码文件。本地落盘与 GitHub Pages 推送共用，保证两条发布路径一致。
+func renderSiteFiles(art *model.Artifact) map[string][]byte {
+	files := map[string][]byte{
+		"index.html": []byte(renderIndexHTML(art)),
 	}
-
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(renderIndexHTML(art)), 0o644); err != nil {
-		return fmt.Errorf("write index.html: %w", err)
-	}
-
 	// 非网页产物额外保留原始源码文件，文件名带正确扩展名，便于打包下载拿到真源码。
 	if art.Type != "webpage" && art.Content != "" {
 		name := artifactSourceName(art)
 		if strings.EqualFold(name, "index.html") {
 			name = "source-" + name // 避免覆盖预览首页
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(art.Content), 0o644); err != nil {
-			return fmt.Errorf("write source file: %w", err)
+		content := art.Content
+		if isMarkdownArtifact(art) {
+			content = markdownDocumentContent(content)
+		}
+		files[name] = []byte(content)
+	}
+	return files
+}
+
+// writeSite 把产物写入 {baseDir}/{id}/：生成可预览 index.html + 非网页产物的原始源码文件。
+func (s *DeploymentService) writeSite(id string, art *model.Artifact) error {
+	dir := filepath.Join(s.baseDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir site: %w", err)
+	}
+	for name, content := range renderSiteFiles(art) {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// PublishGitHub 把某血缘根的最新产物发布到 GitHub Pages（永久公网地址），同时在本地落盘
+// 一份用于「源码 zip 下载」。返回的部署记录 mode=github、url 为 Pages 公网地址。
+func (s *DeploymentService) PublishGitHub(ctx context.Context, rootID, userID string) (*model.Deployment, error) {
+	s.mu.RLock()
+	pub := s.pages
+	s.mu.RUnlock()
+	if pub == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+
+	convID, err := s.checkAccess(ctx, rootID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	art, err := s.artRepo.GetLatestByRoot(ctx, rootID)
+	if err != nil {
+		if errors.Is(err, repository.ErrArtifactRootNotFound) {
+			return nil, ErrDeployArtifactNotFound
+		}
+		return nil, fmt.Errorf("get latest artifact: %w", err)
+	}
+	if art.Content == "" && art.URL == "" {
+		return nil, ErrDeployEmpty
+	}
+
+	id := uuid.NewString()
+	if _, err := s.repo.Create(ctx, model.Deployment{
+		ID:             id,
+		ArtifactRootID: rootID,
+		ConversationID: convID,
+		Mode:           "github",
+		Status:         "pending",
+	}); err != nil {
+		return nil, err
+	}
+
+	fail := func(reason string) (*model.Deployment, error) {
+		updated, uerr := s.repo.UpdateStatus(ctx, id, "failed", "", reason)
+		if uerr != nil {
+			return nil, fmt.Errorf("%s; update status: %w", reason, uerr)
+		}
+		return s.decorate(updated), nil
+	}
+
+	// 本地落盘一份，供「源码 zip 下载」复用既有 /api/deployments/:id/download 端点。
+	if werr := s.writeSite(id, art); werr != nil {
+		return fail(werr.Error())
+	}
+
+	pagesURL, perr := pub.Publish(ctx, "deploy-"+id, renderSiteFiles(art))
+	if perr != nil {
+		return fail(perr.Error())
+	}
+
+	updated, err := s.repo.UpdateStatus(ctx, id, "success", pagesURL, "")
+	if err != nil {
+		return nil, err
+	}
+	return s.decorate(updated), nil
 }
 
 // renderIndexHTML 生成站点首页：
@@ -254,10 +349,141 @@ func renderIndexHTML(art *model.Artifact) string {
 // renderMarkdownToHTML 服务端渲染 markdown；失败则降级为转义纯文本。
 func renderMarkdownToHTML(src string) string {
 	var buf bytes.Buffer
+	src = markdownDocumentContent(src)
 	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
 		return `<pre class="plain">` + html.EscapeString(src) + `</pre>`
 	}
 	return buf.String()
+}
+
+func markdownDocumentContent(src string) string {
+	unwrapped := unwrapMarkdownDocumentFence(src)
+	if unwrapped != src {
+		return unwrapped
+	}
+
+	normalized := strings.ReplaceAll(src, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	for i, line := range lines {
+		if !isMarkdownFenceOpen(line) {
+			continue
+		}
+		for j := len(lines) - 1; j > i; j-- {
+			if !isFenceClose(lines[j]) {
+				continue
+			}
+			candidate := strings.TrimRight(strings.Join(lines[i+1:j], "\n"), " \t\r\n")
+			if looksLikeMarkdownDocument(candidate) {
+				return candidate
+			}
+			break
+		}
+	}
+
+	offset := 0
+	for _, line := range strings.SplitAfter(normalized, "\n") {
+		if isMarkdownHeading(strings.TrimRight(line, "\r\n")) && offset > 0 {
+			candidate := strings.TrimRight(normalized[offset:], " \t\r\n")
+			if looksLikeMarkdownDocument(candidate) {
+				return candidate
+			}
+		}
+		offset += len(line)
+	}
+	return src
+}
+
+func unwrapMarkdownDocumentFence(src string) string {
+	normalized := strings.ReplaceAll(src, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	first := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			first = i
+			break
+		}
+	}
+	last := len(lines) - 1
+	for last >= 0 && strings.TrimSpace(lines[last]) == "" {
+		last--
+	}
+	if first < 0 || last <= first {
+		return src
+	}
+	if !isMarkdownFenceOpen(lines[first]) {
+		return src
+	}
+	if !isFenceClose(lines[last]) {
+		return src
+	}
+	return strings.TrimRight(strings.Join(lines[first+1:last], "\n"), " \t\r\n")
+}
+
+func isMarkdownFenceOpen(line string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(line))
+	ticks := 0
+	for ticks < len(trimmed) && trimmed[ticks] == '`' {
+		ticks++
+	}
+	if ticks < 3 {
+		return false
+	}
+	lang := strings.TrimSpace(trimmed[ticks:])
+	return lang == "markdown" || lang == "md"
+}
+
+func isFenceClose(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 3 {
+		return false
+	}
+	for _, r := range trimmed {
+		if r != '`' {
+			return false
+		}
+	}
+	return true
+}
+
+func looksLikeMarkdownDocument(src string) bool {
+	trimmed := strings.TrimSpace(src)
+	if len(trimmed) < 40 {
+		return false
+	}
+	headingCount := 0
+	for _, line := range strings.Split(trimmed, "\n") {
+		if isMarkdownHeading(line) {
+			headingCount++
+		}
+	}
+	if headingCount == 0 {
+		return false
+	}
+	if headingCount >= 2 {
+		return true
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || strings.HasPrefix(t, "```") || strings.Contains(t, "|") {
+			return true
+		}
+	}
+	return false
+}
+
+func isMarkdownHeading(line string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return false
+	}
+	count := 0
+	for count < len(trimmed) && count < 3 && trimmed[count] == '#' {
+		count++
+	}
+	if count == 0 || len(trimmed) <= count || trimmed[count] != ' ' {
+		return false
+	}
+	return strings.TrimSpace(trimmed[count+1:]) != ""
 }
 
 // isMarkdownArtifact 判断是否按 markdown 渲染（document 类型默认按 markdown，goldmark 处理纯文本也安全）。
@@ -389,8 +615,8 @@ const docCSS = `body{margin:0;background:#f6f8fa;color:#1f2328;` +
 	`.doc p{margin:.6em 0}.doc ul,.doc ol{padding-left:1.6em}.doc li{margin:.2em 0}` +
 	`.doc input[type=checkbox]{margin-right:.4em}` +
 	`.doc code{background:#eff1f3;padding:.2em .4em;border-radius:6px;font:13px/1.4 ui-monospace,Consolas,monospace}` +
-	`.doc pre{background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:8px;overflow:auto}` +
-	`.doc pre code{background:none;color:inherit;padding:0}` +
+	`.doc pre{margin:.6em 0 1em;color:#1f2328;white-space:pre-wrap;font:inherit}` +
+	`.doc pre code{background:none;color:inherit;padding:0;font:inherit}` +
 	`.doc pre.plain{background:#fff;color:#1f2328;border:1px solid #d0d7de;white-space:pre-wrap;word-break:break-word;font:14px/1.6 ui-monospace,Consolas,monospace}` +
 	`.doc table{border-collapse:collapse}.doc th,.doc td{border:1px solid #d0d7de;padding:6px 12px}` +
 	`.doc a{color:#0969da}`

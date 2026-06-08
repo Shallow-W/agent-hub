@@ -67,15 +67,23 @@ const agentStartQueue = [];
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 
-// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
-// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
-// 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
-function buildPlatformMcpArgs(conversationId, userId) {
+// buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
+// AgentHub task. Passing conversation/user IDs here gives MCP tools a default
+// group context, matching Claude Code's per-task injection behavior.
+function buildPlatformMcpServerArgs(conversationId, userId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
+  return mcpServerArgs;
+}
+
+// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
+// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
+function buildPlatformMcpArgs(conversationId, userId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId);
+  if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
@@ -277,6 +285,32 @@ function isCodexAuthenticated(command) {
   return status !== null && /\blogged in\b/i.test(status);
 }
 
+function existingFile(value) {
+  return value && fs.existsSync(value) ? value : null;
+}
+
+function codexLocalInstallPaths() {
+  if (process.platform !== 'win32') return [];
+  const root = process.env.LOCALAPPDATA;
+  if (!root) return [];
+  const binRoot = path.join(root, 'OpenAI', 'Codex', 'bin');
+  try {
+    return fs.readdirSync(binRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(binRoot, entry.name, 'codex.exe'))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort((a, b) => {
+        try {
+          return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+        } catch {
+          return 0;
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
 function codexExtensionPath() {
   if (process.platform !== 'win32') return null;
   const root = process.env.USERPROFILE;
@@ -297,9 +331,22 @@ function codexExtensionPath() {
   return null;
 }
 
+function resolveCodexCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_CODEX_COMMAND),
+    ...codexLocalInstallPaths(),
+    codexExtensionPath(),
+    'codex',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'codex';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
-    return codexExtensionPath() || 'codex';
+    return resolveCodexCommand();
   }
   return cliTool;
 }
@@ -308,6 +355,9 @@ function scanAgents() {
   return CANDIDATES
     .map((candidate) => {
       const command = resolveCommand(candidate.cli_tool);
+      if (candidate.cli_tool === 'codex') {
+        console.log(`Codex command resolved: ${command}`);
+      }
       const version = commandVersion(command);
       if (version === null) return null;
       if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
@@ -691,27 +741,78 @@ function buildPromptParts(task) {
   return { systemPrompt, userPrompt: parts.join('\n') };
 }
 
+function ensureTaskWorkdir(task) {
+  const safeID = String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-');
+  const dir = path.join(os.tmpdir(), 'agenthub-cli-tasks', safeID);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function ensureAgentHubCodexHome() {
+  const configured = process.env.AGENTHUB_CODEX_HOME;
+  const dir = configured || path.join(os.homedir(), '.agenthub', 'codex');
+  fs.mkdirSync(dir, { recursive: true });
+  const configFile = path.join(dir, 'config.toml');
+  if (!fs.existsSync(configFile)) {
+    fs.writeFileSync(configFile, [
+      'model_provider = "OpenAI"',
+      'model = "gpt-5.5"',
+      'review_model = "gpt-5.5"',
+      'model_reasoning_effort = "xhigh"',
+      'disable_response_storage = true',
+      'network_access = "enabled"',
+      'windows_wsl_setup_acknowledged = true',
+      '',
+      '[model_providers.OpenAI]',
+      'name = "OpenAI"',
+      'base_url = "https://www.aitoken-api.com"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      '',
+      '[features]',
+      'goals = true',
+      '',
+    ].join('\n'), 'utf8');
+  }
+  return dir;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
+    const codexMcpFallback = [
+      '[Codex MCP 适配]',
+      '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
+      '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
+      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
+      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
+      '',
+    ].join('\n');
+    const effectivePrompt = systemPrompt
+      ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : `${codexMcpFallback}${userPrompt}`;
+    const globalArgs = [
+      '--ask-for-approval',
+      'never',
+    ];
+    const execArgs = [
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--color',
+      'never',
+      '--output-last-message',
+      outputFile,
+    ];
     return {
       command,
-      args: [
-        '--ask-for-approval',
-        'never',
-        'exec',
-        '--skip-git-repo-check',
-        '--sandbox',
-        'read-only',
-        '--color',
-        'never',
-        '--output-last-message',
-        outputFile,
-        userPrompt,
-      ],
+      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
       outputFile,
+      cwd: ensureTaskWorkdir(task),
+      env: { CODEX_HOME: ensureAgentHubCodexHome() },
     };
   }
   if (task.cli_tool === 'claude') {
@@ -724,7 +825,7 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
-      ...buildPlatformMcpArgs(),
+      ...buildPlatformMcpArgs(task.conversation_id, task.user_id),
     ];
     if (persistent) {
       args.push('--dangerously-skip-permissions');
@@ -786,6 +887,8 @@ async function executeTask(task) {
         ['--resume', spec.sessionId, ...spec.args],
         spec.stdin,
         spec.sessionId,
+        spec.cwd,
+        spec.env,
       ));
     } catch (_err) {
       killSessionProcess(spec.sessionId);
@@ -796,6 +899,8 @@ async function executeTask(task) {
           ['--session-id', spec.sessionId, ...spec.args],
           spec.stdin,
           spec.sessionId,
+          spec.cwd,
+          spec.env,
         ));
       } catch (_err2) {
         const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -804,11 +909,13 @@ async function executeTask(task) {
           ['--session-id', freshId, ...spec.args],
           spec.stdin,
           freshId,
+          spec.cwd,
+          spec.env,
         ));
       }
     }
   } else {
-    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin));
+    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin, undefined, spec.cwd, spec.env));
   }
 
   if (spec.outputFile && fs.existsSync(spec.outputFile)) {
@@ -944,18 +1051,134 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function lineEndIndex(text, start) {
+  const nl = text.indexOf('\n', start);
+  return nl === -1 ? text.length : nl + 1;
+}
+
+function lineText(text, start, end) {
+  const raw = text.slice(start, end);
+  return raw.endsWith('\n') ? raw.slice(0, -1).replace(/\r$/, '') : raw.replace(/\r$/, '');
+}
+
+function findFenceClose(text, start, preferLast) {
+  let pos = start;
+  let first = null;
+  let last = null;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    if (/^ {0,3}`{3,}\s*$/.test(line)) {
+      const found = { start: pos, end };
+      if (!first) first = found;
+      last = found;
+      if (!preferLast) return found;
+    }
+    pos = end;
+  }
+  return preferLast ? last : first;
+}
+
+function extractFencedBlocks(text) {
+  const blocks = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    const open = line.match(/^ {0,3}`{3,}([^`]*)$/);
+    if (!open) {
+      pos = end;
+      continue;
+    }
+
+    const language = (open[1] || '').trim().toLowerCase();
+    const preferLastClose = language === 'markdown' || language === 'md';
+    const close = findFenceClose(text, end, preferLastClose);
+    if (!close) break;
+
+    blocks.push({
+      language,
+      content: text.slice(end, close.start),
+      start: pos,
+      end: close.end,
+    });
+    pos = close.end;
+  }
+  return blocks;
+}
+
+function unwrapSingleMarkdownFence(text, fencedBlocks) {
+  if (fencedBlocks.length !== 1) return null;
+  const block = fencedBlocks[0];
+  if (block.language !== 'markdown' && block.language !== 'md') return null;
+  if (text.slice(0, block.start).trim() || text.slice(block.end).trim()) return null;
+  return block.content.replace(/\s+$/, '');
+}
+
+function extractMarkdownDocumentFence(fencedBlocks) {
+  for (const block of fencedBlocks) {
+    if (block.language !== 'markdown' && block.language !== 'md') continue;
+    const content = block.content.replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(content)) return content;
+  }
+  return null;
+}
+
+function looksLikeMarkdownDocument(text) {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownDocumentTitle(text) {
+  const match = text.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : 'Document Preview';
+}
+
 function parseArtifacts(text) {
   if (typeof text !== 'string' || !text.trim()) return [];
   const artifacts = [];
   const documentLanguages = new Set(['markdown', 'md', 'txt', 'text', 'json', 'csv']);
+  const fencedBlocks = extractFencedBlocks(text);
+  const wrappedMarkdown = unwrapSingleMarkdownFence(text, fencedBlocks);
+  if (wrappedMarkdown && looksLikeMarkdownDocument(wrappedMarkdown)) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(wrappedMarkdown),
+      content: wrappedMarkdown,
+    }];
+  }
+  const embeddedMarkdown = extractMarkdownDocumentFence(fencedBlocks);
+  if (embeddedMarkdown) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(embeddedMarkdown),
+      content: embeddedMarkdown,
+    }];
+  }
+  if (looksLikeMarkdownDocument(text)) {
+    const content = text.trim();
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(content),
+      content,
+    }];
+  }
 
   // 1) 提取围栏代码块 ```lang\n...\n```
   // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
-  const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let match;
-  while ((match = fenceRe.exec(text)) !== null) {
-    const language = (match[1] || '').trim().toLowerCase();
-    let content = match[2];
+  for (const block of fencedBlocks) {
+    const language = block.language;
+    let content = block.content;
     let filename = '';
     // 识别首行文件名注释：// file: xxx 、# file: xxx 、<!-- file: xxx -->
     const firstLine = content.split('\n', 1)[0] || '';
@@ -987,7 +1210,13 @@ function parseArtifacts(text) {
 
   // 2) 提取裸 http/https URL（在代码块外，简单去重）
   // 先剔除围栏代码块，避免把代码里的 import/注释 URL 误当作网页产物
-  const textOutsideFences = text.replace(/```[^\n`]*\n[\s\S]*?```/g, ' ');
+  let textOutsideFences = '';
+  let lastIndex = 0;
+  for (const block of fencedBlocks) {
+    textOutsideFences += text.slice(lastIndex, block.start) + ' ';
+    lastIndex = block.end;
+  }
+  textOutsideFences += text.slice(lastIndex);
   // 字符类排除空白、闭合括号/尖括号/引号，以及中文标点（。，、；）避免吞掉句末标点
   const urlRe = /\bhttps?:\/\/[^\s)\]<>"'，。、；：！？]+/g;
   const seen = new Set();
@@ -1002,11 +1231,13 @@ function parseArtifacts(text) {
   return artifacts;
 }
 
-function runProcess(command, args, stdin, sessionId) {
+function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
     const detached = process.platform !== 'win32';
     const child = spawn(spec.command, spec.args, {
+      cwd: cwd || undefined,
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,

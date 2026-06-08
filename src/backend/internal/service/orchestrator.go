@@ -425,7 +425,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		return nil, fmt.Errorf("orchestrator task failed: %s", orchTask.Error)
 	}
 
-	dispatch := ParseOrchestratorOutput(orchTask.Result)
+	dispatch := ParseOrchestratorOutputForAgents(orchTask.Result, agentNames)
 
 	// Orchestrator responded directly without dispatching
 	if dispatch == nil || len(dispatch.Tasks) == 0 {
