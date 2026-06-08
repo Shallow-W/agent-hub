@@ -17,6 +17,7 @@ import (
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
@@ -82,6 +83,15 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// isFalsy 判断环境变量是否表示「关闭」（false/0/no/off，忽略大小写与首尾空白）。
+func isFalsy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }
 
 func main() {
@@ -160,6 +170,8 @@ func main() {
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
+	// 服务端抽取消息附件文本时需要定位上传文件。
+	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
 
@@ -417,6 +429,16 @@ func main() {
 	go hub.Run(ctx)
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
+
+	// 零配置内网穿透：未显式配置 PUBLIC_BASE_URL 且未禁用（AUTO_TUNNEL=false）时，
+	// 自动拉起 cloudflared 快速隧道并把分配到的公网域名回填到部署服务——这样无论在哪台
+	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
+	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
+		cacheDir := filepath.Join("data", "bin")
+		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
+			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
+		}
+	}
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

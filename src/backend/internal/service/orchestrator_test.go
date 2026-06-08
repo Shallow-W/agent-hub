@@ -93,7 +93,7 @@ func TestRouteMention_EmptyContent_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRouteMention_NoMentions_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "hello world no mentions here")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "hello world no mentions here", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRouteMention_UnknownAgent_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "@UnknownAgent please help")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "@UnknownAgent please help", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRouteMention_ConversationNotFound_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.RouteMention(context.Background(), "missing", "u1", "@Agent hello")
+	_, err := svc.RouteMention(context.Background(), "missing", "u1", "@Agent hello", nil)
 	if err == nil {
 		t.Fatal("expected error for missing conversation, got nil")
 	}
@@ -160,7 +160,7 @@ func TestRouteMention_ListAgentsError_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.RouteMention(context.Background(), "c1", "u1", "@Agent hello")
+	_, err := svc.RouteMention(context.Background(), "c1", "u1", "@Agent hello", nil)
 	if err == nil {
 		t.Fatal("expected error when ListAgents fails, got nil")
 	}

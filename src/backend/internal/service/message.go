@@ -240,14 +240,14 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
 		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content)
+			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
 		if s.orchSvc != nil {
 			parsedMentions := ParseMentions(content)
 			if len(mentions) > 0 || len(parsedMentions) > 0 {
-				go s.asyncMentionDispatch(convID, userID, content)
+				go s.asyncMentionDispatch(convID, userID, content, msg.Attachments)
 			}
 		}
 	default:
@@ -757,7 +757,7 @@ func (s *MessageService) asyncDeploy(convID, userID string) {
 }
 
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
-func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncMentionDispatch recovered", "panic", r)
@@ -770,7 +770,7 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments)
 	if err != nil {
 		slog.Warn("mention routing failed", "convID", convID, "error", err)
 		return
@@ -784,7 +784,7 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
-func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
@@ -798,6 +798,13 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	defer cancel()
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
+
+	// 把本条消息的附件抽取为文本前置注入（与 @mention 编排路径一致）。
+	if s.orchSvc != nil {
+		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+			contextMessages = attachCtx + contextMessages
+		}
+	}
 
 		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
 		if s.orchSvc != nil {

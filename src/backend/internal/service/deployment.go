@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -55,6 +56,7 @@ type DeploymentService struct {
 	artRepo       DeployArtifactRepo
 	convRepo      DeployConvRepo
 	baseDir       string
+	mu            sync.RWMutex
 	publicBaseURL string // 配置了内网穿透/公网入口时的基址（如 https://xxx.trycloudflare.com）
 }
 
@@ -76,13 +78,31 @@ func NewDeploymentService(repo DeployRepo, artRepo DeployArtifactRepo, convRepo 
 // BaseDir 暴露站点根目录，供静态服务定位文件。
 func (s *DeploymentService) BaseDir() string { return s.baseDir }
 
+// SetPublicBaseURL 在运行时设置公网基址（用于内网穿透隧道异步就绪后回填）。
+// 传入空串可清除（隧道断开时回落到相对路径）。线程安全。
+func (s *DeploymentService) SetPublicBaseURL(url string) {
+	s.mu.Lock()
+	s.publicBaseURL = strings.TrimRight(url, "/")
+	s.mu.Unlock()
+}
+
+// PublicBaseURL 返回当前公网基址（可能为空）。线程安全。
+func (s *DeploymentService) PublicBaseURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.publicBaseURL
+}
+
 // publicURL 把站内相对路径按公网基址拼成绝对地址；未配置公网基址时原样返回相对路径
 // （前端会按 window.location.origin 兜底拼接）。
 func (s *DeploymentService) publicURL(rel string) string {
-	if s.publicBaseURL == "" {
+	s.mu.RLock()
+	base := s.publicBaseURL
+	s.mu.RUnlock()
+	if base == "" {
 		return rel
 	}
-	return s.publicBaseURL + rel
+	return base + rel
 }
 
 // decorate 为返回给调用方/前端的部署记录补全预览与下载地址（含公网基址装饰）。

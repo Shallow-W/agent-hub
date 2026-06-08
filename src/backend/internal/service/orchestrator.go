@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/agent-hub/backend/internal/docextract"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/golang-jwt/jwt/v5"
@@ -82,6 +84,7 @@ type OrchestratorService struct {
 
 	jwtSecret string
 	serverURL string
+	uploadDir string // 上传文件落盘根目录，用于服务端抽取附件文本
 
 	kbResolver   OrchKBResolver
 	daemonHub    *ws.DaemonHub
@@ -100,6 +103,38 @@ type OrchestratorService struct {
 // SetJWTSecret sets the JWT secret for generating management tool tokens.
 func (s *OrchestratorService) SetJWTSecret(secret string) {
 	s.jwtSecret = secret
+}
+
+// SetUploadDir 注入上传文件根目录，用于服务端抽取附件文本。
+func (s *OrchestratorService) SetUploadDir(dir string) {
+	s.uploadDir = dir
+}
+
+// attachmentTextMaxRunes 单个附件注入上下文的最大字符数。
+const attachmentTextMaxRunes = 6000
+
+// BuildAttachmentContext 为带附件的消息生成「消息附件」上下文段：在服务端把每个附件抽取
+// 为纯文本并直接内联，Agent 无需下载或解析二进制（避免超时）。无法解析的格式给出降级提示，
+// 保证 Agent 始终能据此回复。无附件时返回空串。
+func (s *OrchestratorService) BuildAttachmentContext(ctx context.Context, attachments []model.MessageAttachment, userID string) string {
+	if len(attachments) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("[消息附件]\n")
+	sb.WriteString("用户在本条消息中附带了以下文件，已由系统抽取为文本内联在下方，请据此回答：\n\n")
+	for _, a := range attachments {
+		header := fmt.Sprintf("=== 附件：%s (%s, %s) ===\n", a.FileName, a.MimeType, formatFileSize(a.FileSize))
+		sb.WriteString(header)
+		absPath := filepath.Join(s.uploadDir, filepath.FromSlash(strings.TrimLeft(a.FilePath, "/\\")))
+		if text, ok := docextract.Extract(ctx, absPath, a.FileName, attachmentTextMaxRunes); ok {
+			sb.WriteString(text)
+			sb.WriteString("\n\n")
+		} else {
+			sb.WriteString("（该格式无法在服务端自动解析，请提示用户转换为 pptx/docx/xlsx/pdf 或纯文本后重发）\n\n")
+		}
+	}
+	return sb.String()
 }
 
 // SetServerURL sets the server base URL for management tool API calls.
@@ -147,7 +182,7 @@ func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgR
 }
 
 // RouteMention is the main entry point called when a message contains @mentions.
-func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string) (*RouteResult, error) {
+func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment) (*RouteResult, error) {
 	conv, err := s.convRepo.GetByID(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("orch get conversation: %w", err)
@@ -174,6 +209,11 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 	// 在入口处预解析原始用户消息中的知识库引用，
 	// 避免 Orchestrator 改写任务描述后丢失 {{用户名/KB}} 语法
 	kbPreload := s.PreloadKBContext(ctx, content, userID)
+
+	// 把本条消息的附件抽取为文本前置注入，让被 @ 的 Agent 直接据此回答。
+	if attachCtx := s.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+		kbPreload = attachCtx + kbPreload
+	}
 
 	result := &RouteResult{}
 

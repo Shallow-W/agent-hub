@@ -198,11 +198,11 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		result1, err1 = svc.RouteMention(context.Background(), convID, userID, "@Orch 分析数据")
+		result1, err1 = svc.RouteMention(context.Background(), convID, userID, "@Orch 分析数据", nil)
 	}()
 	go func() {
 		defer wg.Done()
-		result2, err2 = svc.RouteMention(context.Background(), convID, userID, "@Orch 写报告")
+		result2, err2 = svc.RouteMention(context.Background(), convID, userID, "@Orch 写报告", nil)
 	}()
 	wg.Wait()
 
@@ -412,7 +412,7 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 		})
 	}()
 
-	result, err := svc.RouteMention(context.Background(), "c1", userID, "@Orch test")
+	result, err := svc.RouteMention(context.Background(), "c1", userID, "@Orch test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
