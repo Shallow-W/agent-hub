@@ -397,6 +397,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             />
           </Tooltip>
         )}
+        {!isSystem && onTogglePin && (
+          <Tooltip title={message.pinned ? '取消 Pin' : 'Pin 到上下文黑板'}>
+            <Button
+              type="text"
+              size="small"
+              icon={<PushpinOutlined />}
+              className={`${styles.replyBtn} ${styles.pinBtn} ${message.pinned ? styles.pinBtnActive : ''}`}
+              onClick={() => onTogglePin(message)}
+            />
+          </Tooltip>
+        )}
         {canRecall && (
           <Tooltip title="撤回">
             <Button

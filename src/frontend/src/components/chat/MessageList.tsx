@@ -12,6 +12,7 @@ interface MessageListProps {
   conversationId: string;
   onReply?: (message: Message) => void;
   onForward?: (message: Message) => void;
+  onPinChanged?: () => void;
 }
 
 /** Extract agent_name from artifacts_json, or null */
@@ -68,7 +69,12 @@ function formatDividerTime(dateStr: string): string {
   return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply, onForward }) => {
+export const MessageList: React.FC<MessageListProps> = ({
+  conversationId,
+  onReply,
+  onForward,
+  onPinChanged,
+}) => {
   const {
     messages,
     streamingContent,
@@ -204,7 +210,10 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   isOwn={isOwn}
                   onReply={onReply}
                   onForward={onForward}
-                  onTogglePin={(message) => toggleMessagePin(conversationId, message.id, !!message.pinned)}
+                  onTogglePin={(message) => {
+                    void toggleMessagePin(conversationId, message.id, !!message.pinned)
+                      .finally(() => onPinChanged?.());
+                  }}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                 />
               </React.Fragment>

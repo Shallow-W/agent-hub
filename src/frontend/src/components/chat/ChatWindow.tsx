@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, Input, Modal, message as antMessage } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography, message as antMessage } from 'antd';
 import {
   FolderOpenOutlined,
   LogoutOutlined,
@@ -21,7 +21,7 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { leaveGroup, dissolveGroup } from '@/api/group';
-import type { Message } from '@/types/message';
+import type { Message, PinnedMessage } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ChatSearchPanel } from './ChatSearchPanel';
@@ -30,7 +30,7 @@ import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
-import { getConversationBlackboard, updateConversationBlackboard } from '@/api/message';
+import { getConversationBlackboard, getPinnedContext, updateConversationBlackboard } from '@/api/message';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
@@ -42,6 +42,7 @@ const ACCEPTED_TYPES =
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 const BLACKBOARD_MAX_LEN = 8000;
+const { Text } = Typography;
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -53,6 +54,7 @@ export const ChatWindow: React.FC = () => {
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
+  const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
   const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
@@ -64,9 +66,11 @@ export const ChatWindow: React.FC = () => {
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   const [blackboardOpen, setBlackboardOpen] = useState(false);
   const [blackboardText, setBlackboardText] = useState('');
+  const [blackboardPinned, setBlackboardPinned] = useState<PinnedMessage[]>([]);
   const [blackboardLoading, setBlackboardLoading] = useState(false);
   const [blackboardSaving, setBlackboardSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
   const streamingContent = useMessageStore(
     (s) => (activeId ? s.streamingContent[activeId] : undefined),
@@ -75,17 +79,35 @@ export const ChatWindow: React.FC = () => {
 
   const { send: sendMessage } = useMessages(activeId ?? null);
 
+  useEffect(() => {
+    activeIdRef.current = activeId ?? null;
+  }, [activeId]);
+
+  const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
+    const pinned = await getPinnedContext(conversationId);
+    if (activeIdRef.current !== conversationId) return;
+    setBlackboardPinned(pinned ?? []);
+  }, []);
+
   const openBlackboard = useCallback(async () => {
     if (!activeId) return;
+    const conversationId = activeId;
     setBlackboardOpen(true);
     setBlackboardLoading(true);
     try {
-      const blackboard = await getConversationBlackboard(activeId);
+      const [blackboard, pinned] = await Promise.all([
+        getConversationBlackboard(conversationId),
+        getPinnedContext(conversationId),
+      ]);
+      if (activeIdRef.current !== conversationId) return;
       setBlackboardText(blackboard.manual_context ?? '');
+      setBlackboardPinned(pinned ?? []);
     } catch {
       antMessage.error('加载上下文黑板失败');
     } finally {
-      setBlackboardLoading(false);
+      if (activeIdRef.current === conversationId) {
+        setBlackboardLoading(false);
+      }
     }
   }, [activeId]);
 
@@ -95,9 +117,10 @@ export const ChatWindow: React.FC = () => {
       antMessage.error(`黑板内容不能超过 ${BLACKBOARD_MAX_LEN} 字`);
       return;
     }
+    const conversationId = activeId;
     setBlackboardSaving(true);
     try {
-      const blackboard = await updateConversationBlackboard(activeId, blackboardText);
+      const blackboard = await updateConversationBlackboard(conversationId, blackboardText);
       setBlackboardText(blackboard.manual_context ?? '');
       setBlackboardOpen(false);
       antMessage.success('上下文黑板已保存');
@@ -107,6 +130,19 @@ export const ChatWindow: React.FC = () => {
       setBlackboardSaving(false);
     }
   }, [activeId, blackboardText]);
+
+  const handlePinnedMessageChange = useCallback(() => {
+    if (!blackboardOpen || !activeId) return;
+    void refreshBlackboardPinned(activeId).catch(() => {
+      antMessage.error('刷新 Pin 消息失败');
+    });
+  }, [activeId, blackboardOpen, refreshBlackboardPinned]);
+
+  const handleUnpinFromBlackboard = useCallback(async (messageId: string) => {
+    if (!activeId) return;
+    await toggleMessagePin(activeId, messageId, true);
+    await refreshBlackboardPinned(activeId);
+  }, [activeId, refreshBlackboardPinned, toggleMessagePin]);
 
   // 拖拽上传：drop 区覆盖整个聊天窗口（消息区 + 输入区），文件交给 ChatInput 的 processFiles 处理。
   const [isDragging, setIsDragging] = useState(false);
@@ -506,7 +542,12 @@ export const ChatWindow: React.FC = () => {
           onSelectMessage={handleSelectSearchResult}
         />
       )}
-      <MessageList conversationId={activeConv.id} onReply={setReplyTo} onForward={setForwardMessage} />
+      <MessageList
+        conversationId={activeConv.id}
+        onReply={setReplyTo}
+        onForward={setForwardMessage}
+        onPinChanged={handlePinnedMessageChange}
+      />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
           <span className={styles.typingDots}>
@@ -560,15 +601,61 @@ export const ChatWindow: React.FC = () => {
         onCancel={() => setBlackboardOpen(false)}
       >
         <div className={styles.blackboardEditor}>
-          <Input.TextArea
-            value={blackboardText}
-            onChange={(e) => setBlackboardText(e.target.value)}
-            placeholder="写下需要长期带给 Agent 的背景、偏好、约束或任务上下文"
-            autoSize={{ minRows: 8, maxRows: 14 }}
-            maxLength={BLACKBOARD_MAX_LEN}
-            showCount
-            disabled={blackboardLoading}
-          />
+          <section className={styles.blackboardSection}>
+            <div className={styles.blackboardSectionHeader}>
+              <Text strong>Pin 的消息</Text>
+              <Text type="secondary">{blackboardPinned.length} 条</Text>
+            </div>
+            <div className={styles.pinnedList}>
+              {blackboardLoading ? (
+                <div className={styles.blackboardLoading}>加载中...</div>
+              ) : blackboardPinned.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="还没有 Pin 的消息"
+                />
+              ) : (
+                blackboardPinned.map((item) => (
+                  <div key={item.id} className={styles.pinnedItem}>
+                    <div className={styles.pinnedItemBody}>
+                      <div className={styles.pinnedItemMeta}>
+                        <Text strong>{item.username || item.pinned_by_name || (item.role === 'assistant' ? '助手' : '用户')}</Text>
+                        <Text type="secondary">
+                          {new Date(item.message_created_at).toLocaleString()}
+                        </Text>
+                      </div>
+                      <div className={styles.pinnedItemContent}>
+                        {item.content || '空消息'}
+                      </div>
+                    </div>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<PushpinOutlined />}
+                      onClick={() => handleUnpinFromBlackboard(item.message_id)}
+                    >
+                      取消 Pin
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+          <section className={styles.blackboardSection}>
+            <div className={styles.blackboardSectionHeader}>
+              <Text strong>自由上下文</Text>
+              <Text type="secondary">会随每次 Agent 对话注入</Text>
+            </div>
+            <Input.TextArea
+              value={blackboardText}
+              onChange={(e) => setBlackboardText(e.target.value)}
+              placeholder="写下需要长期带给 Agent 的背景、偏好、约束或任务上下文"
+              autoSize={{ minRows: 7, maxRows: 12 }}
+              maxLength={BLACKBOARD_MAX_LEN}
+              showCount
+              disabled={blackboardLoading}
+            />
+          </section>
         </div>
       </Modal>
     </div>
