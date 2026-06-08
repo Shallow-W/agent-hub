@@ -65,6 +65,13 @@ export interface PinnedMessage {
   pinned_at: string;
 }
 
+export interface ConversationBlackboard {
+  conversation_id: string;
+  manual_context: string;
+  updated_by?: string | null;
+  updated_at: string;
+}
+
 export type OptimisticStatus = 'sending' | 'failed';
 
 export interface OptimisticMessage extends Message {

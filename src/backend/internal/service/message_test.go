@@ -14,6 +14,7 @@ import (
 type fakeMsgRepo struct {
 	messages       []model.Message
 	pinnedMessages []model.PinnedMessage
+	blackboard     *model.ConversationBlackboard
 	savedArtifacts map[string][]model.Artifact
 }
 
@@ -91,6 +92,23 @@ func (r *fakeMsgRepo) UnpinMessage(ctx context.Context, conversationID, messageI
 
 func (r *fakeMsgRepo) ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error) {
 	return r.pinnedMessages, nil
+}
+
+func (r *fakeMsgRepo) GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error) {
+	if r.blackboard != nil {
+		return r.blackboard, nil
+	}
+	return &model.ConversationBlackboard{ConversationID: conversationID, ManualContext: ""}, nil
+}
+
+func (r *fakeMsgRepo) UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error) {
+	r.blackboard = &model.ConversationBlackboard{
+		ConversationID: conversationID,
+		ManualContext:  manualContext,
+		UpdatedBy:      &userID,
+		UpdatedAt:      time.Now(),
+	}
+	return r.blackboard, nil
 }
 
 type fakeConvRepoForMsg struct {

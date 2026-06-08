@@ -21,7 +21,7 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 			{Name: "Bob", Role: "worker", Status: "online", CLITool: "codex"},
 			{Name: "Charlie", Role: "worker", Status: "offline", CLITool: "opencode"},
 		},
-		"{群聊上下文黑板\n{用户 Pin 上下文\n- user: 这是长期约束\n}\n{群聊/任务状态摘要\n未启用\n}\n}\n\n",
+		"{会话上下文黑板\n{用户 Pin 上下文\n- user: 这是长期约束\n}\n{用户手写上下文\n这是用户手写的背景\n}\n}\n\n",
 		"- Alice: 已完成设计\n- Bob: 开始编码",
 		"请分析这个需求并分派任务",
 	)
@@ -64,11 +64,14 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	if !strings.Contains(result, "{群聊最近动态") {
 		t.Error("prompt missing {群聊最近动态 section")
 	}
-	if !strings.Contains(result, "{群聊上下文黑板") {
-		t.Error("prompt missing {群聊上下文黑板 section")
+	if !strings.Contains(result, "{会话上下文黑板") {
+		t.Error("prompt missing {会话上下文黑板 section")
 	}
 	if !strings.Contains(result, "这是长期约束") {
 		t.Error("prompt missing pinned blackboard context")
+	}
+	if !strings.Contains(result, "这是用户手写的背景") {
+		t.Error("prompt missing manual blackboard context")
 	}
 	if !strings.Contains(result, "{用户消息") {
 		t.Error("prompt missing {用户消息 section")

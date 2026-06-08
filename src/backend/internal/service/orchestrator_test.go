@@ -255,11 +255,15 @@ func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T)
 					Username:       "wjc",
 				},
 			},
+			blackboard: &model.ConversationBlackboard{
+				ConversationID: "c1",
+				ManualContext:  "请始终使用中文回答",
+			},
 		},
 	)
 
 	result := svc.BuildConversationBlackboardContext(context.Background(), "c1")
-	if !strings.Contains(result, "{群聊上下文黑板") {
+	if !strings.Contains(result, "{会话上下文黑板") {
 		t.Fatal("expected blackboard section")
 	}
 	if !strings.Contains(result, "{用户 Pin 上下文") {
@@ -267,5 +271,11 @@ func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T)
 	}
 	if !strings.Contains(result, "- wjc: 第一行 第二行") {
 		t.Fatalf("expected normalized pinned message, got %q", result)
+	}
+	if !strings.Contains(result, "{用户手写上下文") {
+		t.Fatalf("expected manual context section, got %q", result)
+	}
+	if !strings.Contains(result, "请始终使用中文回答") {
+		t.Fatalf("expected manual context content, got %q", result)
 	}
 }

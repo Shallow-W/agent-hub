@@ -524,7 +524,7 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
 			result = result[idx+1:]
 		}
-		if blackboardCtx != "" && !strings.Contains(result, "{群聊上下文黑板") {
+		if blackboardCtx != "" && !strings.Contains(result, "{会话上下文黑板") {
 			result = blackboardCtx + result
 		}
 	}
@@ -535,9 +535,10 @@ const (
 	blackboardPinLimit        = 20
 	blackboardMaxEntryRunes   = 800
 	blackboardMaxContextRunes = 5000
+	blackboardMaxManualRunes  = 3000
 )
 
-// BuildConversationBlackboardContext builds the shared group context block
+// BuildConversationBlackboardContext builds the shared conversation context block
 // injected into orchestrator and worker prompts.
 func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
 	if s == nil || s.msgRepo == nil {
@@ -548,8 +549,13 @@ func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Con
 		slog.Warn("build blackboard context failed", "conversation_id", convID, "error", err)
 		return ""
 	}
+	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
+	if err != nil {
+		slog.Warn("load manual blackboard context failed", "conversation_id", convID, "error", err)
+		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
+	}
 	var sb strings.Builder
-	sb.WriteString("{群聊上下文黑板\n")
+	sb.WriteString("{会话上下文黑板\n")
 	sb.WriteString("{用户 Pin 上下文\n")
 	if len(items) == 0 {
 		sb.WriteString("无\n")
@@ -561,8 +567,20 @@ func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Con
 		}
 	}
 	sb.WriteString("}\n")
-	sb.WriteString("{群聊/任务状态摘要\n")
-	sb.WriteString("未启用\n")
+	sb.WriteString("{用户手写上下文\n")
+	manualContext := ""
+	if blackboard != nil {
+		manualContext = strings.TrimSpace(blackboard.ManualContext)
+	}
+	if manualContext == "" {
+		sb.WriteString("无\n")
+	} else {
+		truncatedManual := truncateString(manualContext, blackboardMaxManualRunes)
+		sb.WriteString(truncatedManual)
+		if !strings.HasSuffix(truncatedManual, "\n") {
+			sb.WriteString("\n")
+		}
+	}
 	sb.WriteString("}\n")
 	sb.WriteString("}\n\n")
 

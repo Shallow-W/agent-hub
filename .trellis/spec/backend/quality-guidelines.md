@@ -150,21 +150,22 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
 ```
 
-### Group Context Blackboard
+### Conversation Context Blackboard
 
 **Scope / Trigger**: Applies when changing message pin APIs, group-chat prompt context, or Agent dispatch context construction.
 
 **Contracts**:
-- `message_pins` is the source of truth for user-pinned long-term group context. Prompt code must query persisted pins rather than reconstructing from frontend state.
+- `message_pins` is the source of truth for user-pinned long-term conversation context. Prompt code must query persisted pins rather than reconstructing from frontend state.
+- `conversation_blackboards.manual_context` is the source of truth for user-authored long-term context. Agents must not write it until an explicit product phase adds that ability.
 - Message history responses expose `pinned` so the chat UI can display and toggle pin state without a separate round-trip for each message.
-- Agent prompts must include a `{群聊上下文黑板}` block with `{用户 Pin 上下文}` for orchestrator dispatch, worker dispatch, and direct Agent dispatch.
-- The first phase leaves `{群聊/任务状态摘要}` present but not enabled; do not have prompt code invent an orchestrator summary.
+- Agent prompts must include a `{会话上下文黑板}` block with `{用户 Pin 上下文}` and `{用户手写上下文}` for orchestrator dispatch, worker dispatch, direct Agent dispatch, and Agent one-on-one chats.
 - Pin content must be length-limited and normalized before prompt insertion so a single pinned message cannot crowd out the current user request.
+- Manual context must be length-limited before persistence and before prompt insertion so it cannot crowd out the current user request.
 - Cache invalidation is required after pin/unpin because message history may be served from Redis.
 
 **Tests Required**:
 - Assert orchestrator prompt construction includes the blackboard section.
-- Assert `BuildConversationBlackboardContext` includes persisted pinned messages and normalizes multi-line content.
+- Assert `BuildConversationBlackboardContext` includes persisted pinned messages, user-authored context, and normalizes multi-line pin content.
 - Run backend service/handler/repository tests and frontend build after changing the pin API or message shape.
 
 ---

@@ -14,6 +14,7 @@ import (
 )
 
 const maxMessageLen = 10000 // 10KB
+const maxBlackboardManualContextLen = 8000
 
 const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 
@@ -49,6 +50,8 @@ type MsgRepo interface {
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
+	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
+	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -92,19 +95,20 @@ type AgentRepoForMsg interface {
 }
 
 var (
-	ErrMsgConvNotFound   = errors.New("对话不存在")
-	ErrMsgConvNoPerm     = errors.New("无权操作此对话")
-	ErrMsgTooLong        = errors.New("消息内容过长")
-	ErrMsgNotFound       = errors.New("消息不存在")
-	ErrMsgNotSender      = errors.New("只能撤回自己的消息")
-	ErrMsgRecallExpired  = errors.New("消息已超过2分钟，无法撤回")
-	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
-	ErrMsgEmptyContent   = errors.New("消息内容不能为空")
-	ErrMsgReplyNotFound  = errors.New("回复的消息不存在")
-	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
-	ErrMsgAgentNoPerm    = errors.New("无权使用此 Agent")
-	ErrMsgAgentOffline   = errors.New("Agent 未连接电脑，无法执行真实 CLI")
-	ErrMsgAgentTimeout   = errors.New("Agent 执行超时")
+	ErrMsgConvNotFound      = errors.New("对话不存在")
+	ErrMsgConvNoPerm        = errors.New("无权操作此对话")
+	ErrMsgTooLong           = errors.New("消息内容过长")
+	ErrMsgNotFound          = errors.New("消息不存在")
+	ErrMsgNotSender         = errors.New("只能撤回自己的消息")
+	ErrMsgRecallExpired     = errors.New("消息已超过2分钟，无法撤回")
+	ErrMsgAlreadyDeleted    = errors.New("消息已被撤回")
+	ErrMsgEmptyContent      = errors.New("消息内容不能为空")
+	ErrMsgReplyNotFound     = errors.New("回复的消息不存在")
+	ErrMsgReplyWrongConv    = errors.New("回复的消息不属于当前对话")
+	ErrMsgAgentNoPerm       = errors.New("无权使用此 Agent")
+	ErrMsgAgentOffline      = errors.New("Agent 未连接电脑，无法执行真实 CLI")
+	ErrMsgAgentTimeout      = errors.New("Agent 执行超时")
+	ErrMsgBlackboardTooLong = errors.New("黑板内容过长")
 )
 
 // MessageService 消息业务逻辑
@@ -474,6 +478,47 @@ func (s *MessageService) ListPinnedContext(ctx context.Context, convID, userID s
 		items = []model.PinnedMessage{}
 	}
 	return items, nil
+}
+
+// GetConversationBlackboard returns the user-authored long-term context for a conversation.
+func (s *MessageService) GetConversationBlackboard(ctx context.Context, convID, userID string) (*model.ConversationBlackboard, error) {
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation blackboard: %w", err)
+	}
+	if blackboard == nil {
+		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
+	}
+	return blackboard, nil
+}
+
+// UpdateConversationBlackboard saves user-authored long-term context for a conversation.
+func (s *MessageService) UpdateConversationBlackboard(ctx context.Context, convID, userID, manualContext string) (*model.ConversationBlackboard, error) {
+	if len([]rune(manualContext)) > maxBlackboardManualContextLen {
+		return nil, ErrMsgBlackboardTooLong
+	}
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.UpsertConversationBlackboard(ctx, convID, manualContext, userID)
+	if err != nil {
+		return nil, fmt.Errorf("update conversation blackboard: %w", err)
+	}
+	return blackboard, nil
+}
+
+func (s *MessageService) ensureConversationAccess(ctx context.Context, convID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	return s.checkMembership(ctx, conv, userID)
 }
 
 func (s *MessageService) ensureMessageContextAccess(ctx context.Context, convID, messageID, userID string) error {

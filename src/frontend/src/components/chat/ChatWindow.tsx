@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, message as antMessage } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown, Input, Modal, message as antMessage } from 'antd';
 import {
   FolderOpenOutlined,
   LogoutOutlined,
@@ -12,6 +12,7 @@ import {
   InfoCircleOutlined,
   DeleteOutlined,
   LinkOutlined,
+  PushpinOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -29,6 +30,7 @@ import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
+import { getConversationBlackboard, updateConversationBlackboard } from '@/api/message';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
@@ -39,6 +41,7 @@ const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
+const BLACKBOARD_MAX_LEN = 8000;
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -59,6 +62,10 @@ export const ChatWindow: React.FC = () => {
   const [hasSearched, setHasSearched] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [blackboardOpen, setBlackboardOpen] = useState(false);
+  const [blackboardText, setBlackboardText] = useState('');
+  const [blackboardLoading, setBlackboardLoading] = useState(false);
+  const [blackboardSaving, setBlackboardSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wsClient = useWsStore((s) => s.wsClient);
   const streamingContent = useMessageStore(
@@ -67,6 +74,39 @@ export const ChatWindow: React.FC = () => {
   const isStreaming = (streamingContent ?? '').length > 0;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
+
+  const openBlackboard = useCallback(async () => {
+    if (!activeId) return;
+    setBlackboardOpen(true);
+    setBlackboardLoading(true);
+    try {
+      const blackboard = await getConversationBlackboard(activeId);
+      setBlackboardText(blackboard.manual_context ?? '');
+    } catch {
+      antMessage.error('加载上下文黑板失败');
+    } finally {
+      setBlackboardLoading(false);
+    }
+  }, [activeId]);
+
+  const saveBlackboard = useCallback(async () => {
+    if (!activeId) return;
+    if (blackboardText.length > BLACKBOARD_MAX_LEN) {
+      antMessage.error(`黑板内容不能超过 ${BLACKBOARD_MAX_LEN} 字`);
+      return;
+    }
+    setBlackboardSaving(true);
+    try {
+      const blackboard = await updateConversationBlackboard(activeId, blackboardText);
+      setBlackboardText(blackboard.manual_context ?? '');
+      setBlackboardOpen(false);
+      antMessage.success('上下文黑板已保存');
+    } catch {
+      antMessage.error('保存上下文黑板失败');
+    } finally {
+      setBlackboardSaving(false);
+    }
+  }, [activeId, blackboardText]);
 
   // 拖拽上传：drop 区覆盖整个聊天窗口（消息区 + 输入区），文件交给 ChatInput 的 processFiles 处理。
   const [isDragging, setIsDragging] = useState(false);
@@ -430,6 +470,9 @@ export const ChatWindow: React.FC = () => {
           <Tooltip title="搜索消息">
             <Button type="text" icon={<SearchOutlined />} size="small" onClick={toggleSearch} />
           </Tooltip>
+          <Tooltip title="上下文黑板">
+            <Button type="text" icon={<PushpinOutlined />} size="small" onClick={openBlackboard} />
+          </Tooltip>
           <Tooltip title="停止任务">
             <Button type="text" icon={<StopOutlined />} size="small" disabled={!isStreaming} onClick={handleStopTask} />
           </Tooltip>
@@ -507,6 +550,27 @@ export const ChatWindow: React.FC = () => {
         message={forwardMessage}
         currentConversationId={activeId ?? undefined}
       />
+      <Modal
+        title="上下文黑板"
+        open={blackboardOpen}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={blackboardSaving}
+        onOk={saveBlackboard}
+        onCancel={() => setBlackboardOpen(false)}
+      >
+        <div className={styles.blackboardEditor}>
+          <Input.TextArea
+            value={blackboardText}
+            onChange={(e) => setBlackboardText(e.target.value)}
+            placeholder="写下需要长期带给 Agent 的背景、偏好、约束或任务上下文"
+            autoSize={{ minRows: 8, maxRows: 14 }}
+            maxLength={BLACKBOARD_MAX_LEN}
+            showCount
+            disabled={blackboardLoading}
+          />
+        </div>
+      </Modal>
     </div>
   );
 };

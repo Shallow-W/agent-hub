@@ -431,6 +431,19 @@ func (r *fakeMsgRepoForHandler) ListPinnedMessages(_ context.Context, conversati
 	return []model.PinnedMessage{}, nil
 }
 
+func (r *fakeMsgRepoForHandler) GetConversationBlackboard(_ context.Context, conversationID string) (*model.ConversationBlackboard, error) {
+	return &model.ConversationBlackboard{ConversationID: conversationID, ManualContext: ""}, nil
+}
+
+func (r *fakeMsgRepoForHandler) UpsertConversationBlackboard(_ context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error) {
+	return &model.ConversationBlackboard{
+		ConversationID: conversationID,
+		ManualContext:  manualContext,
+		UpdatedBy:      &userID,
+		UpdatedAt:      time.Now(),
+	}, nil
+}
+
 // fakeConvRepoForHandler satisfies service.ConvRepoForMsg
 type fakeConvRepoForHandler struct {
 	conv    *model.Conversation

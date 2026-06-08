@@ -96,9 +96,9 @@ func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []Orches
 	sb.WriteString("}\n\n")
 
 	if strings.TrimSpace(blackboardContext) == "" {
-		sb.WriteString("{群聊上下文黑板\n")
+		sb.WriteString("{会话上下文黑板\n")
 		sb.WriteString("{用户 Pin 上下文\n无\n}\n")
-		sb.WriteString("{群聊/任务状态摘要\n未启用\n}\n")
+		sb.WriteString("{用户手写上下文\n无\n}\n")
 		sb.WriteString("}\n\n")
 	} else {
 		sb.WriteString(blackboardContext)

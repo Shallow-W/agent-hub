@@ -204,6 +204,10 @@
   border-radius: 10px;
 }
 
+.blackboardEditor {
+  padding-top: 4px;
+}
+
 .highlightFlash {
   animation: highlightFade 2s ease-out forwards;
 }

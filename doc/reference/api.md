@@ -288,6 +288,54 @@ null
 
 ---
 
+### GET /api/conversations/:id/blackboard
+
+获取当前会话上下文黑板中的用户手写上下文。适用于群聊、普通单聊和 Agent 单聊。
+
+**成功响应** `200 OK`
+```json
+{
+  "conversation_id": "uuid",
+  "manual_context": "用户手写的长期上下文",
+  "updated_by": "uuid",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**错误响应**
+- `403 Forbidden` — 无权操作此对话
+- `404 Not Found` — 对话不存在
+
+---
+
+### PUT /api/conversations/:id/blackboard
+
+保存当前会话上下文黑板中的用户手写上下文。该内容会在后续 Agent 调用中随 `{会话上下文黑板}` 注入。
+
+**请求体**
+```json
+{
+  "manual_context": "用户手写的长期上下文"
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "conversation_id": "uuid",
+  "manual_context": "用户手写的长期上下文",
+  "updated_by": "uuid",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**错误响应**
+- `403 Forbidden` — 无权操作此对话
+- `404 Not Found` — 对话不存在
+- `413 Request Entity Too Large` — 手写上下文超过长度限制
+
+---
+
 ## WebSocket
 
 ### WS /ws?token=jwt

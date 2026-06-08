@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -341,6 +343,41 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 		return nil, fmt.Errorf("list pinned messages: %w", err)
 	}
 	return list, nil
+}
+
+// GetConversationBlackboard returns the user-authored blackboard for a conversation.
+func (r *MessageRepo) GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error) {
+	var blackboard model.ConversationBlackboard
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT conversation_id, manual_context, updated_by, updated_at
+		 FROM conversation_blackboards
+		 WHERE conversation_id = $1`,
+		conversationID,
+	).StructScan(&blackboard)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &model.ConversationBlackboard{ConversationID: conversationID, ManualContext: ""}, nil
+		}
+		return nil, fmt.Errorf("get conversation blackboard: %w", err)
+	}
+	return &blackboard, nil
+}
+
+// UpsertConversationBlackboard saves the user-authored blackboard for a conversation.
+func (r *MessageRepo) UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error) {
+	var blackboard model.ConversationBlackboard
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO conversation_blackboards (conversation_id, manual_context, updated_by)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (conversation_id)
+		 DO UPDATE SET manual_context = EXCLUDED.manual_context, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+		 RETURNING conversation_id, manual_context, updated_by, updated_at`,
+		conversationID, manualContext, userID,
+	).StructScan(&blackboard)
+	if err != nil {
+		return nil, fmt.Errorf("upsert conversation blackboard: %w", err)
+	}
+	return &blackboard, nil
 }
 
 // fillAttachmentsAndReply 批量填充消息的附件字段和回复引用

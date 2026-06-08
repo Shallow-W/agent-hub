@@ -53,3 +53,11 @@ type PinnedMessage struct {
 	PinnedByName     string    `json:"pinned_by_name" db:"pinned_by_name"`
 	PinnedAt         time.Time `json:"pinned_at" db:"pinned_at"`
 }
+
+// ConversationBlackboard stores user-authored long-term context for a conversation.
+type ConversationBlackboard struct {
+	ConversationID string    `json:"conversation_id" db:"conversation_id"`
+	ManualContext  string    `json:"manual_context" db:"manual_context"`
+	UpdatedBy      *string   `json:"updated_by,omitempty" db:"updated_by"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
+}

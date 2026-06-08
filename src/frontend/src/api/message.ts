@@ -1,5 +1,5 @@
-import { get, post, del } from './client';
-import type { Message, PinnedMessage, SendMessageResult, MessageRole } from '@/types/message';
+import { get, post, put, del } from './client';
+import type { ConversationBlackboard, Message, PinnedMessage, SendMessageResult, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
 export async function sendMessage(
@@ -60,6 +60,21 @@ export async function getPinnedContext(
   conversationId: string,
 ): Promise<PinnedMessage[]> {
   return get<PinnedMessage[]>(`/api/conversations/${conversationId}/pinned-context`);
+}
+
+export async function getConversationBlackboard(
+  conversationId: string,
+): Promise<ConversationBlackboard> {
+  return get<ConversationBlackboard>(`/api/conversations/${conversationId}/blackboard`);
+}
+
+export async function updateConversationBlackboard(
+  conversationId: string,
+  manualContext: string,
+): Promise<ConversationBlackboard> {
+  return put<ConversationBlackboard>(`/api/conversations/${conversationId}/blackboard`, {
+    manual_context: manualContext,
+  });
 }
 
 export async function getUnreadMessages(
