@@ -268,6 +268,8 @@ export const AgentList: React.FC<AgentListProps> = ({
                               )}
                             </div>
                               {(() => {
+                            const isBuiltinSystem = agent.type === 'system' && !agent.user_id;
+                            if (isBuiltinSystem) return null;
                             const tags = (() => {
                               if (!agent.tags || agent.tags === '[]') return [];
                               try {
