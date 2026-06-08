@@ -59,6 +59,13 @@ func TestAllowedToolsFromConfig_EmptyAllowedToolsMeansNoTools(t *testing.T) {
 	}
 }
 
+func TestAllowedToolsFromConfig_EmptyConfigMeansNoTools(t *testing.T) {
+	allowed := allowedToolsFromConfig("")
+	if len(allowed) != 0 {
+		t.Fatalf("expected no allowed tools for empty config, got %#v", allowed)
+	}
+}
+
 func TestAllowedToolsFromConfig_LegacyTextMeansNoTools(t *testing.T) {
 	allowed := allowedToolsFromConfig("## legacy docs")
 	if len(allowed) != 0 {

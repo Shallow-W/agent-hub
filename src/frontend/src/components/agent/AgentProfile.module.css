@@ -35,6 +35,10 @@
   box-shadow: 0 10px 18px rgba(47, 143, 107, 0.22);
 }
 
+.clickableAvatar {
+  cursor: pointer;
+}
+
 .titleBlock {
   min-width: 0;
 }
@@ -245,6 +249,13 @@
   line-height: 1.6;
 }
 
+.descriptionText {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .infoGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -394,6 +405,11 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.skillActions {
+  display: flex;
+  gap: 8px;
 }
 
 .skillsHeader .sectionTitle {

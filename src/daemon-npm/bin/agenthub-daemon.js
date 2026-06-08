@@ -1924,7 +1924,7 @@ function uniqueToolNames(values) {
 }
 
 function parseToolsConfig(raw) {
-  if (!raw || typeof raw !== 'string') return { ok: true, config: null };
+  if (!raw || typeof raw !== 'string') return { ok: false, config: null };
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -1940,7 +1940,7 @@ function allowedToolsFromConfig(raw) {
   const parsed = parseToolsConfig(raw);
   if (!parsed.ok) return NO_AGENT_TOOLS;
   const config = parsed.config;
-  if (!config) return DEFAULT_AGENT_TOOLS;
+  if (!config) return NO_AGENT_TOOLS;
   if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
   if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
   if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {

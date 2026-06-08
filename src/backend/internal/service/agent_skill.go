@@ -54,3 +54,35 @@ func parseDiscoveredSkills(capabilitiesJSON string) []DiscoveredSkill {
 	}
 	return skills
 }
+
+func normalizeCustomSkills(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	var incoming []DiscoveredSkill
+	if err := json.Unmarshal([]byte(raw), &incoming); err != nil {
+		return "", err
+	}
+	seen := map[string]bool{}
+	out := make([]DiscoveredSkill, 0, len(incoming))
+	for _, skill := range incoming {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, DiscoveredSkill{
+			Name:        truncateString(name, 80),
+			Description: truncateString(strings.TrimSpace(skill.Description), 200),
+		})
+	}
+	if len(out) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}

@@ -445,6 +445,7 @@ null
 
 - `allowed_tools` 保存前会过滤未知工具名。
 - `{"toolset":"none","allowed_tools":[]}` 表示该 Agent 不授予平台 MCP 工具。
+- 省略或传空 `tools_config` 会保存为无工具配置，不会回退默认工具。
 - 无法解析的旧文本配置仅保留展示，不授予 MCP 工具。
 
 **成功响应** `201 Created`
@@ -467,6 +468,7 @@ null
 ### PUT /api/agents/:id/custom-skills
 
 更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力标签，不会被 daemon 底座扫描覆盖。
+仅允许更新当前用户拥有的自建 Agent；保存前会校验为 JSON 数组并只保留 `name`、`description` 字段。
 
 **请求体**
 ```json

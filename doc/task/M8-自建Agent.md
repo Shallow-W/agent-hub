@@ -20,7 +20,8 @@
 - 与系统 Agent 共用同一个 Agent 列表接口
 - 调度时：用自建 Agent 的 system_prompt 替换默认值，通过对应 CLI 工具的适配器执行
 - `agents.tools_config` 使用 `{"toolset": string, "allowed_tools": string[]}` 作为 per-Agent MCP 工具授权配置；后端保存前过滤未知工具名。
-- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖。
+- 省略或传空 `tools_config` 保存为无工具配置，runtime 不授予默认工具。
+- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖；后端仅允许当前用户更新自建 Agent 的平台 Skills。
 
 ### M8-3 自建 Agent 对话验证
 

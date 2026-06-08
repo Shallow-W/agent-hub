@@ -10,18 +10,20 @@ import (
 )
 
 type fakeAgentRepo struct {
-	updateResult *model.Agent
-	currentAgent *model.Agent
-	daemonTask   *model.DaemonTask
-	deleted      bool
-	registered   []string
-	machines     []model.DaemonMachine
-	machineAgent []string
-	candidates   []string
-	addedPrompt  string
-	addedCLITool string
-	addedTools   string
-	addedSkills  string
+	updateResult  *model.Agent
+	currentAgent  *model.Agent
+	daemonTask    *model.DaemonTask
+	deleted       bool
+	registered    []string
+	machines      []model.DaemonMachine
+	machineAgent  []string
+	candidates    []string
+	addedPrompt   string
+	addedCLITool  string
+	addedTools    string
+	addedSkills   string
+	updatedUser   string
+	updatedSkills string
 }
 
 func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
@@ -150,8 +152,10 @@ func (r *fakeAgentRepo) UpdateTags(ctx context.Context, id, tags string) (*model
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
-	return nil, nil
+func (r *fakeAgentRepo) UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error) {
+	r.updatedUser = userID
+	r.updatedSkills = customSkills
+	return &model.Agent{ID: id, Name: "Agent", Type: "custom", CustomSkills: customSkills}, nil
 }
 
 func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
@@ -332,6 +336,57 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	}
 	if repo.addedSkills != `[{"name":"审查"}]` {
 		t.Fatalf("expected custom skills passed through, got %q", repo.addedSkills)
+	}
+}
+
+func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
+	repo := &fakeAgentRepo{}
+	svc := NewAgentService(repo, nil)
+	_, err := svc.AddCandidateAgent(
+		context.Background(),
+		"user-1",
+		"candidate-1",
+		"My Agent",
+		"codex",
+		"",
+		`{"toolset":"tasks"}`,
+		`not json`,
+	)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
+	}
+}
+
+func TestNormalizeCustomSkillsFiltersUnsafeFields(t *testing.T) {
+	got, err := normalizeCustomSkills(`[{"name":" review ","description":" check ","detail":"NO","source_path":"/tmp/a"},{"name":"review"},{"name":""}]`)
+	if err != nil {
+		t.Fatalf("normalize custom skills: %v", err)
+	}
+	if got != `[{"name":"review","description":"check"}]` {
+		t.Fatalf("unexpected normalized skills: %s", got)
+	}
+}
+
+func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
+	repo := &fakeAgentRepo{}
+	svc := NewAgentService(repo, nil)
+	_, err := svc.UpdateCustomSkills(context.Background(), "agent-1", "user-1", `[{"name":" review ","description":" check ","source_path":"/tmp/a"}]`)
+	if err != nil {
+		t.Fatalf("update custom skills failed: %v", err)
+	}
+	if repo.updatedUser != "user-1" {
+		t.Fatalf("expected user id passed to repo, got %q", repo.updatedUser)
+	}
+	if repo.updatedSkills != `[{"name":"review","description":"check"}]` {
+		t.Fatalf("unexpected normalized skills: %s", repo.updatedSkills)
+	}
+}
+
+func TestUpdateCustomSkillsRejectsInvalidJSON(t *testing.T) {
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.UpdateCustomSkills(context.Background(), "agent-1", "user-1", `not json`)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
 }
 

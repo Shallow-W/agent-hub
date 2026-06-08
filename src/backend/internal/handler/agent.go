@@ -297,7 +297,8 @@ func (h *AgentHandler) UpdateCustomSkills(c *gin.Context) {
 		return
 	}
 
-	agent, err := h.svc.UpdateCustomSkills(c.Request.Context(), agentID, req.CustomSkills)
+	userID := middleware.GetUserID(c)
+	agent, err := h.svc.UpdateCustomSkills(c.Request.Context(), agentID, userID, req.CustomSkills)
 	if err != nil {
 		middleware.HandleServiceError(c, err, "更新自定义技能失败")
 		return

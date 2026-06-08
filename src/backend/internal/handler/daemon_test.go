@@ -107,7 +107,7 @@ func (r *fakeDaemonAgentRepo) UpdateAgentStatus(_ context.Context, id, status st
 func (r *fakeDaemonAgentRepo) UpdateTags(_ context.Context, _, _ string) (*model.Agent, error) {
 	return nil, nil
 }
-func (r *fakeDaemonAgentRepo) UpdateCustomSkills(_ context.Context, _, _ string) (*model.Agent, error) {
+func (r *fakeDaemonAgentRepo) UpdateCustomSkills(_ context.Context, _, _, _ string) (*model.Agent, error) {
 	return nil, nil
 }
 func (r *fakeDaemonAgentRepo) ClearAgentMachine(_ context.Context, _ string) error { return nil }

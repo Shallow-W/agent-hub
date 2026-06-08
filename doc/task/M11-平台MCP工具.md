@@ -50,7 +50,7 @@
 - 后端保存 Agent 配置时过滤未知工具名，避免 UI 或旧配置授予不存在的工具。
 - daemon MCP server 启动时按当前 `agent_id` 查询后端 Agent 配置。
 - `tools/list` 只返回该 Agent 被授权的工具；`tools/call` 在执行 handler 前拒绝未授权工具。
-- 显式 `allowed_tools: []` 或 `toolset: "none"` 表示无工具；无法解析的旧文本配置不授予工具。
+- 显式 `allowed_tools: []`、`toolset: "none"`、空配置或无法解析的旧文本配置均不授予工具。
 
 ### M11-4 自动注入（已完成，全 CLI 覆盖）
 

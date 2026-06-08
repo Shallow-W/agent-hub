@@ -39,7 +39,7 @@ type agentToolsConfig struct {
 func normalizeToolsConfig(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", nil
+		return `{"toolset":"none","allowed_tools":[]}`, nil
 	}
 
 	var cfg agentToolsConfig

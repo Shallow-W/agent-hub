@@ -56,11 +56,11 @@ export function getTemplateTools(toolset: string): string[] {
 }
 
 export function parseToolsConfig(raw?: string): { toolset: string; allowedTools: string[] } {
-  if (!raw) return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+  if (!raw) return { toolset: 'none', allowedTools: [] };
   try {
     const cfg: unknown = JSON.parse(raw);
     if (typeof cfg !== 'object' || cfg === null || Array.isArray(cfg)) {
-      return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+      return { toolset: 'none', allowedTools: [] };
     }
     const record = cfg as Record<string, unknown>;
     const toolset = typeof record.toolset === 'string' && record.toolset in toolsetTemplates
@@ -70,10 +70,10 @@ export function parseToolsConfig(raw?: string): { toolset: string; allowedTools:
       ? record.allowed_tools.filter((name: unknown): name is string => (
           typeof name === 'string' && toolCatalog.some((tool) => tool.name === name)
         ))
-      : toolset !== 'custom' ? getTemplateTools(toolset) : getTemplateTools('tasks');
+        : toolset !== 'custom' ? getTemplateTools(toolset) : [];
     return { toolset, allowedTools };
   } catch {
-    return { toolset: 'tasks', allowedTools: getTemplateTools('tasks') };
+    return { toolset: 'none', allowedTools: [] };
   }
 }
 

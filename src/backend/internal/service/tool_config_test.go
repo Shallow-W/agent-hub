@@ -34,6 +34,16 @@ func TestNormalizeToolsConfig_PreservesLegacyText(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolsConfig_EmptyMeansNoTools(t *testing.T) {
+	got, err := normalizeToolsConfig("")
+	if err != nil {
+		t.Fatalf("normalizeToolsConfig error: %v", err)
+	}
+	if got != `{"toolset":"none","allowed_tools":[]}` {
+		t.Fatalf("expected no-tools config, got %q", got)
+	}
+}
+
 func TestNormalizeToolsConfig_PreservesNoneAndEmptyAllowedTools(t *testing.T) {
 	got, err := normalizeToolsConfig(`{"toolset":"none","allowed_tools":[]}`)
 	if err != nil {

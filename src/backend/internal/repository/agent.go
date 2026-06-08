@@ -386,15 +386,16 @@ func (r *AgentRepo) UpdateTags(ctx context.Context, id, tags string) (*model.Age
 	return &a, nil
 }
 
-// UpdateCustomSkills updates the custom_skills field for any agent by ID.
-func (r *AgentRepo) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
+// UpdateCustomSkills updates the custom_skills field for the current user's custom Agent.
+func (r *AgentRepo) UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
-		`UPDATE agents SET custom_skills = $2, updated_at = NOW() WHERE id = $1
+		`UPDATE agents SET custom_skills = $3, updated_at = NOW()
+		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		           last_seen_at, created_at, updated_at`,
-		id, customSkills,
+		id, userID, customSkills,
 	).StructScan(&a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

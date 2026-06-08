@@ -322,10 +322,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       <div className={styles.header}>
         <div className={styles.identity}>
           <Avatar
+            className={styles.clickableAvatar}
             size={40}
             src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
             icon={<RobotOutlined />}
-            style={{ cursor: 'pointer' }}
             onClick={() => setAvatarPickerOpen(true)}
           />
           <div className={styles.titleBlock}>
@@ -357,10 +357,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           <>
             <div className={styles.profileTop}>
               <Avatar
+                className={styles.clickableAvatar}
                 size={74}
                 src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
                 icon={<RobotOutlined />}
-                style={{ cursor: 'pointer' }}
                 onClick={() => setAvatarPickerOpen(true)}
               />
               <div className={styles.profileSummary}>
@@ -380,7 +380,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           </div>
           <div className={styles.field}>
             <span className={styles.label}>DESCRIPTION</span>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            <div className={styles.descriptionText}>
               {description}
             </div>
           </div>
@@ -499,7 +499,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               {customSkillsExpanded && (
                 <>
                   <div className={styles.skillsHeader}>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className={styles.skillActions}>
                       <Button
                         size="small"
                         icon={<StarOutlined />}

@@ -46,7 +46,7 @@ func allowedToolsFromConfig(raw string) map[string]bool {
 		}
 		return noAgentToolSet()
 	}
-	return toolSet(defaultAgentTools)
+	return noAgentToolSet()
 }
 
 func noAgentToolSet() map[string]bool {

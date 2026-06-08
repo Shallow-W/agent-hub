@@ -40,7 +40,7 @@ type AgentRepo interface {
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
-	UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error)
+	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
@@ -318,11 +318,14 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 	displayName = strings.TrimSpace(displayName)
 	expectedCLITool = strings.TrimSpace(expectedCLITool)
 	systemPrompt = strings.TrimSpace(systemPrompt)
-	customSkills = strings.TrimSpace(customSkills)
 	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
 	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	customSkills, err = normalizeCustomSkills(customSkills)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -428,11 +431,15 @@ func (s *AgentService) UpdateTags(ctx context.Context, id, tags string) (*model.
 }
 
 // UpdateCustomSkills 更新 Agent 的 custom_skills 字段（用户可编辑，daemon 注册不会覆盖）。
-func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
-	if id == "" {
+func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error) {
+	if id == "" || userID == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.UpdateCustomSkills(ctx, id, customSkills)
+	customSkills, err := normalizeCustomSkills(customSkills)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateCustomSkills(ctx, id, userID, customSkills)
 	if err != nil {
 		return nil, fmt.Errorf("update agent custom_skills: %w", err)
 	}
