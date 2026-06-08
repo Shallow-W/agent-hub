@@ -24,7 +24,6 @@ import {
   getAgentDescription,
   getModelLabel,
   getRuntimeLabel,
-  parseCapabilities,
   parseSkills,
   autoGenerateSkills,
   resolveAgentAvatar,
@@ -53,6 +52,7 @@ function getStatusText(agent: Agent): string {
 
 export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile' }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
+  const updateAgentTags = useAgentStore((s) => s.updateAgentTags);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [name, setName] = useState('');
@@ -70,13 +70,27 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [reconnecting, setReconnecting] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
+  const parseTagsFromJSON = (raw: string): string => {
+    if (!raw || raw === '[]') return '';
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((t: unknown): t is string => typeof t === 'string').join(', ') : '';
+    } catch {
+      return raw;
+    }
+  };
+
+  const tagsToJSON = (csv: string): string => {
+    const items = csv.split(',').map((s) => s.trim()).filter(Boolean);
+    return items.length > 0 ? JSON.stringify(items) : '';
+  };
+
   useEffect(() => {
     if (!agent) return;
-    const capabilities = parseCapabilities(agent.capabilities_json);
     setActiveTab(defaultTab);
     setName(agent.name);
     setAvatar(agent.avatar ?? '');
-    setTagsValue(capabilities.join(', '));
+    setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
     setSkills(parseSkills(agent.capabilities_json));
     setNewSkillName('');
     setEditingSkillIdx(null);
@@ -107,20 +121,20 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       message.warning('Agent 名称不能为空');
       return;
     }
-    const tagList = tagsValue.split(',').map((t) => t.trim()).filter(Boolean);
-    const skillsByName = new Map(skills.map((s) => [s.name, s]));
-    const merged = tagList.map((tag) => skillsByName.get(tag) || { name: tag });
     setSaving(true);
     try {
-      await updateAgent(agent.id, {
-        name: nextName,
-        cli_tool: agent.cli_tool,
-        avatar: avatar.trim() || undefined,
-        system_prompt: agent.system_prompt ?? '',
-        tools_config: agent.tools_config ?? '',
-        capabilities_json: JSON.stringify(merged),
-        enable_management_tools: enableManagementTools,
-      });
+      await updateAgentTags(agent.id, tagsToJSON(tagsValue));
+      if (agent.type === 'custom') {
+        await updateAgent(agent.id, {
+          name: nextName,
+          cli_tool: agent.cli_tool,
+          avatar: avatar.trim() || undefined,
+          system_prompt: agent.system_prompt ?? '',
+          tools_config: agent.tools_config ?? '',
+          capabilities_json: agent.capabilities_json ?? '',
+          enable_management_tools: enableManagementTools,
+        });
+      }
       message.success('Agent Profile 已保存');
     } catch {
       message.error('保存 Agent 失败');
