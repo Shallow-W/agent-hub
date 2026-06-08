@@ -83,6 +83,8 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 			"machine_name": a.MachineName,
 			"version":      a.Version,
 			"cli_tool":     a.CLITool,
+			"system_prompt": a.SystemPrompt,
+			"tags":          a.Tags,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -250,6 +252,28 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, nil)
+}
+
+// UpdateTagsRequest 更新标签请求体
+type UpdateTagsRequest struct {
+	Tags string `json:"tags"`
+}
+
+// UpdateTags 更新 Agent 标签（任意类型的 Agent 均可更新）
+func (h *AgentHandler) UpdateTags(c *gin.Context) {
+	agentID := c.Param("id")
+	var req UpdateTagsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40033, "参数错误: "+err.Error())
+		return
+	}
+
+	agent, err := h.svc.UpdateTags(c.Request.Context(), agentID, req.Tags)
+	if err != nil {
+		middleware.HandleServiceError(c, err, "更新标签失败")
+		return
+	}
+	middleware.SuccessResponse(c, agent)
 }
 
 // AgentTokenResponse Agent Token 响应体
