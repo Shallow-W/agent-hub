@@ -385,6 +385,7 @@ export const ChatWindow: React.FC = () => {
               <Avatar
                 className={styles.conversationAvatar}
                 size={26}
+                style={activeConv.avatar ? { background: 'transparent', borderRadius: '50%' } : undefined}
                 src={activeConv.avatar ? (/^(https?:|data:|\/)/i.test(activeConv.avatar) ? activeConv.avatar : avatarUrl(activeConv.avatar)) : undefined}
               >
                 {!activeConv.avatar ? avatarText : null}

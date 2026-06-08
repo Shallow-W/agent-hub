@@ -208,7 +208,13 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
                       >
                         <List.Item.Meta
                           avatar={
-                              <Avatar className={styles.friendAvatar} size={28} src={conv.avatar ? (/^(https?:|data:|\/)/i.test(conv.avatar) ? conv.avatar : avatarUrl(conv.avatar)) : undefined} icon={!conv.avatar ? <TeamOutlined /> : undefined} />
+                              <Avatar
+                                className={styles.friendAvatar}
+                                size={28}
+                                style={conv.avatar ? { background: 'transparent', borderRadius: '50%' } : undefined}
+                                src={conv.avatar ? (/^(https?:|data:|\/)/i.test(conv.avatar) ? conv.avatar : avatarUrl(conv.avatar)) : undefined}
+                                icon={!conv.avatar ? <TeamOutlined /> : undefined}
+                              />
                           }
                           title={<span className={styles.contactName}>{conv.title}</span>}
                           description={<span className={styles.contactMeta}>群聊</span>}

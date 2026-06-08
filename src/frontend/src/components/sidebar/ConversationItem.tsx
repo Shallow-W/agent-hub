@@ -189,7 +189,11 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           />
         ) : isGroup ? (
           <Avatar
-            style={{ backgroundColor: '#722ed1', flexShrink: 0, borderRadius: 10 }}
+            style={{
+              backgroundColor: conversation.avatar ? 'transparent' : '#722ed1',
+              flexShrink: 0,
+              borderRadius: conversation.avatar ? '50%' : 10,
+            }}
             size={32}
             src={conversation.avatar ? (/^(https?:|data:|\/)/i.test(conversation.avatar) ? conversation.avatar : avatarUrl(conversation.avatar)) : undefined}
             icon={!conversation.avatar ? <TeamOutlined /> : undefined}
