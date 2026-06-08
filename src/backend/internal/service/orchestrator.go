@@ -75,9 +75,9 @@ type OrchMessageCacher interface {
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
-	convRepo    OrchConvRepo
-	agentRepo   OrchAgentRepo
-	msgRepo     MsgRepo
+	convRepo     OrchConvRepo
+	agentRepo    OrchAgentRepo
+	msgRepo      MsgRepo
 	orchTaskRepo OrchTaskStore
 
 	tokenIssuer *TokenIssuer
@@ -195,15 +195,15 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		}
 
 		// Check conversation agent role (set per group chat, not agent type)
-			var isOrchestrator bool
-			for _, ca := range convAgents {
-				if ca.AgentID == agentID && ca.Role == "orchestrator" {
-					isOrchestrator = true
-					break
-				}
+		var isOrchestrator bool
+		for _, ca := range convAgents {
+			if ca.AgentID == agentID && ca.Role == "orchestrator" {
+				isOrchestrator = true
+				break
 			}
+		}
 
-			if isOrchestrator {
+		if isOrchestrator {
 			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
 
 			if err != nil {
@@ -276,7 +276,7 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
-		s.persistArtifacts(ctx, msg, task.Artifacts)
+	s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -330,7 +330,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		orchAgent.Name = "Orchestrator"
 	}
 
-	recentSummary, agentNames, err := s.buildRecentSummary(ctx, convID, convAgents)
+	recentSummary, err := s.buildRecentSummary(ctx, convID)
 	if err != nil {
 		slog.Warn("build recent summary failed", "conv_id", convID, "error", err)
 		recentSummary = ""
@@ -342,7 +342,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		convTitle = conv.Title
 	}
 
-	fullPrompt := BuildOrchestratorPrompt(convTitle, agentNames, recentSummary, content)
+	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, buildOrchestratorAgentDetails(convAgents), recentSummary, content)
 
 	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
 	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
@@ -394,7 +394,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
-			s.persistArtifacts(ctx, msg, orchTask.Artifacts)
+		s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
@@ -406,7 +406,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
-				s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
+			s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
 			messages = append(messages, dispatchMsg)
 		}
 	}
@@ -517,11 +517,11 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	return result, nil
 }
 
-// buildRecentSummary formats the last 10 messages and returns agent names in the conversation.
-func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string, convAgents []model.ConversationAgent) (string, []string, error) {
+// buildRecentSummary formats the last 10 messages in chronological order.
+func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string) (string, error) {
 	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, 10)
 	if err != nil {
-		return "", nil, fmt.Errorf("list messages: %w", err)
+		return "", fmt.Errorf("list messages: %w", err)
 	}
 
 	// Reverse to chronological order
@@ -540,12 +540,23 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
 	}
 
-	agentNames := make([]string, 0, len(convAgents))
-	for _, ca := range convAgents {
-		agentNames = append(agentNames, ca.Name)
-	}
+	return sb.String(), nil
+}
 
-	return sb.String(), agentNames, nil
+func buildOrchestratorAgentDetails(convAgents []model.ConversationAgent) []OrchestratorAgentDetail {
+	details := make([]OrchestratorAgentDetail, 0, len(convAgents))
+	for _, ca := range convAgents {
+		details = append(details, OrchestratorAgentDetail{
+			Name:             ca.Name,
+			Role:             ca.Role,
+			Status:           ca.Status,
+			CLITool:          ca.CLITool,
+			SystemPrompt:     truncateString(ca.SystemPrompt, 300),
+			CapabilitiesJSON: truncateString(ca.CapabilitiesJSON, 500),
+			Tags:             ca.Tags,
+		})
+	}
+	return details
 }
 
 // waitDaemonTask waits for a daemon task to complete via channel-based

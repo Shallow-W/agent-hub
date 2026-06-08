@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend checks for changed service/model/repository code"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "quality gate expectations for backend changes"}

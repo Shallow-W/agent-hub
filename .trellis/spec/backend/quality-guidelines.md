@@ -98,6 +98,30 @@ WHERE c.id = $1 AND m.user_id = $2
 WHERE c.id = $1 AND m.user_id = $2 AND c.cli_tool = $5
 ```
 
+### Orchestrator Prompt Agent Details
+
+**Scope / Trigger**: Applies when changing group-chat orchestrator prompt construction or the conversation-agent query feeding it.
+
+**Contracts**:
+- `ConversationRepo.ListAgents` is the source of truth for the current group chat's available Agent list in an orchestrator prompt; it must not be replaced by a global Agent list.
+- Prompt construction may display backend-provided fields such as `name`, `role`, `status`, `cli_tool`, `system_prompt`, `capabilities_json`, and `tags`.
+- Prompt construction must not invent descriptions, tags, or capabilities. Missing fields should render as an explicit fallback such as `未配置`.
+- Long free-form fields should be truncated before insertion so one Agent config cannot crowd out the user message or recent chat context.
+
+**Tests Required**:
+- Assert the prompt includes real Agent details from the backend query.
+- Assert empty description/tag/capability fields use fallback text rather than generated prose.
+- Assert the prompt tells the orchestrator to only dispatch to Agent names listed in the current group chat.
+
+**Wrong vs Correct**:
+```go
+// Wrong: prompt layer invents a capability description.
+detail.SystemPrompt = "擅长代码实现、调试、工程分析"
+
+// Correct: prompt layer only renders fields returned by the backend.
+detail.SystemPrompt = truncateString(ca.SystemPrompt, 300)
+```
+
 ---
 
 ## Testing Requirements
