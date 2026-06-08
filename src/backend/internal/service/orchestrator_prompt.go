@@ -41,20 +41,18 @@ const OrchestratorSystemPrompt = `你是群聊中的任务协调者（Orchestrat
 ## 关键规则
 - 只能分派给“当前群聊 Agent 详情”中列出的 Agent，@mention 中的名称必须完全匹配。
 - “当前群聊 Agent 详情”只代表本群聊已加入的 Agent，不代表系统里的全局 Agent 池。
-- 不要编造 Agent 的简介、标签或能力；只依据上下文中提供的真实字段判断。
+- 不要编造 Agent 的简介或标签；只依据上下文中提供的真实字段判断。
 - 不要亲自执行被分派的具体任务。用户要求分派时，你只输出分派结果。
 - 分派结果要简洁，不解释你的推理过程。
 - 如果用户的指令不完整，先提出一个最小澄清问题。`
 
 // OrchestratorAgentDetail describes an agent available in the current group chat.
 type OrchestratorAgentDetail struct {
-	Name             string
-	Role             string
-	Status           string
-	CLITool          string
-	SystemPrompt     string
-	CapabilitiesJSON string
-	Tags             string
+	Name        string
+	Role        string
+	Status      string
+	Description string
+	Tags        string
 }
 
 // BuildOrchestratorPrompt builds the full prompt for an orchestrator dispatch.
@@ -127,7 +125,7 @@ func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []Orches
 	sb.WriteString("如果用户明确指定了 Agent，优先分派给用户指定的 Agent。\n")
 	sb.WriteString("如果只需要单个 Agent 处理，直接 @该Agent 并给出任务。\n")
 	sb.WriteString("如果需要多 Agent 协作，按 @mention 分派格式拆解为清晰、互不重复的小任务。\n")
-	sb.WriteString("只能使用“当前群聊 Agent 详情”里真实存在的 Agent 名称；不要编造 Agent 能力、标签、群外 Agent 或不存在的成员。\n")
+	sb.WriteString("只能使用“当前群聊 Agent 详情”里真实存在的 Agent 名称；不要编造 Agent 简介、标签、群外 Agent 或不存在的成员。\n")
 	sb.WriteString("当用户要求你分派任务时，不要亲自完成这些任务，只输出分派结果。\n")
 	sb.WriteString("}\n")
 
@@ -146,9 +144,7 @@ func writeAgentDetail(sb *strings.Builder, agent OrchestratorAgentDetail) {
 	fmt.Fprintf(sb, "- 名称：%s\n", fallbackText(agent.Name))
 	fmt.Fprintf(sb, "  角色：%s\n", fallbackText(agent.Role))
 	fmt.Fprintf(sb, "  状态：%s\n", fallbackText(agent.Status))
-	fmt.Fprintf(sb, "  CLI工具：%s\n", fallbackText(agent.CLITool))
-	fmt.Fprintf(sb, "  简介：%s\n", fallbackText(agent.SystemPrompt))
-	fmt.Fprintf(sb, "  能力：%s\n", fallbackText(agent.CapabilitiesJSON))
+	fmt.Fprintf(sb, "  简介：%s\n", fallbackText(agent.Description))
 	fmt.Fprintf(sb, "  标签：%s\n", fallbackText(agent.Tags))
 }
 

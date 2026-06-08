@@ -621,13 +621,11 @@ func buildOrchestratorAgentDetails(convAgents []model.ConversationAgent) []Orche
 	details := make([]OrchestratorAgentDetail, 0, len(convAgents))
 	for _, ca := range convAgents {
 		details = append(details, OrchestratorAgentDetail{
-			Name:             ca.Name,
-			Role:             ca.Role,
-			Status:           ca.Status,
-			CLITool:          ca.CLITool,
-			SystemPrompt:     truncateString(ca.SystemPrompt, 300),
-			CapabilitiesJSON: truncateString(ca.CapabilitiesJSON, 500),
-			Tags:             ca.Tags,
+			Name:        ca.Name,
+			Role:        ca.Role,
+			Status:      ca.Status,
+			Description: "",
+			Tags:        ca.Tags,
 		})
 	}
 	return details

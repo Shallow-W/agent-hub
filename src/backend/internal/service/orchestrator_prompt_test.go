@@ -10,16 +10,14 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 		"项目讨论组",
 		[]OrchestratorAgentDetail{
 			{
-				Name:             "Alice",
-				Role:             "orchestrator",
-				Status:           "online",
-				CLITool:          "claude",
-				SystemPrompt:     "负责需求拆解",
-				CapabilitiesJSON: `{"tools":["read"]}`,
-				Tags:             `["planning"]`,
+				Name:        "Alice",
+				Role:        "orchestrator",
+				Status:      "online",
+				Description: "负责需求拆解",
+				Tags:        `["planning"]`,
 			},
-			{Name: "Bob", Role: "worker", Status: "online", CLITool: "codex"},
-			{Name: "Charlie", Role: "worker", Status: "offline", CLITool: "opencode"},
+			{Name: "Bob", Role: "worker", Status: "online"},
+			{Name: "Charlie", Role: "worker", Status: "offline"},
 		},
 		"{会话上下文黑板\n{用户 Pin 上下文\n- user: 这是长期约束\n}\n{用户手写上下文\n这是用户手写的背景\n}\n}\n\n",
 		"- Alice: 已完成设计\n- Bob: 开始编码",
@@ -61,6 +59,12 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	if !strings.Contains(result, `标签：["planning"]`) {
 		t.Error("prompt missing backend-provided tags")
 	}
+	if strings.Contains(result, "CLI工具：") {
+		t.Error("prompt should not include CLI tool field")
+	}
+	if strings.Contains(result, "能力：") || strings.Contains(result, `"tools":["read"]`) {
+		t.Error("prompt should not include raw capabilities")
+	}
 	if !strings.Contains(result, "{群聊最近动态") {
 		t.Error("prompt missing {群聊最近动态 section")
 	}
@@ -78,6 +82,42 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	}
 	if !strings.Contains(result, "{Orchestrator 指令") {
 		t.Error("prompt missing {Orchestrator 指令 section")
+	}
+}
+
+func TestBuildOrchestratorPromptWithAgents_DoesNotLeakToolPrompts(t *testing.T) {
+	result := BuildOrchestratorPromptWithAgents(
+		"测试群",
+		[]OrchestratorAgentDetail{
+			{
+				Name:        "员工1",
+				Role:        "worker",
+				Status:      "online",
+				Description: "",
+				Tags:        `["coding"]`,
+			},
+		},
+		"",
+		"",
+		"@员工2 分派任务",
+	)
+
+	for _, forbidden := range []string{
+		"CLI工具：",
+		"能力：",
+		"ablation-planner",
+		"你可以通过平台提供的管理工具执行以下操作",
+		"查看平台上的所有 Agent 列表",
+	} {
+		if strings.Contains(result, forbidden) {
+			t.Fatalf("prompt leaked forbidden text %q", forbidden)
+		}
+	}
+	if !strings.Contains(result, "简介：未配置") {
+		t.Error("prompt should show missing description as unconfigured")
+	}
+	if !strings.Contains(result, `标签：["coding"]`) {
+		t.Error("prompt should keep backend-provided tags")
 	}
 }
 
