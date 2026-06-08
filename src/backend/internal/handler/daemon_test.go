@@ -104,6 +104,12 @@ func (r *fakeDaemonAgentRepo) UpdateAgentStatus(_ context.Context, id, status st
 	r.statusCalls = append(r.statusCalls, agentStatusCall{AgentID: id, Status: status})
 	return nil
 }
+func (r *fakeDaemonAgentRepo) UpdateTags(_ context.Context, _, _ string) (*model.Agent, error) {
+	return nil, nil
+}
+func (r *fakeDaemonAgentRepo) UpdateCustomSkills(_ context.Context, _, _ string) (*model.Agent, error) {
+	return nil, nil
+}
 func (r *fakeDaemonAgentRepo) ClearAgentMachine(_ context.Context, _ string) error { return nil }
 func (r *fakeDaemonAgentRepo) MarkMachineAgentsStopped(_ context.Context, machineID string) error {
 	r.mu.Lock()

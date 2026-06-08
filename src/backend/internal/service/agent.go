@@ -39,6 +39,8 @@ type AgentRepo interface {
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
+	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
+	UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
@@ -164,9 +166,9 @@ func (s *AgentService) MarkMachineOffline(machineID string) {
 	if s.tracker != nil {
 		s.tracker.MarkOffline(machineID)
 	}
-	// 将该机器下所有 online 的 Agent 状态设为 stopped，
-	// 因为 daemon 断开后无法再发送 agent.stopped 事件。
-	if machineID != "" {
+	// 如果机器已有新的 WS 连接（重连场景），跳过批量 stopped。
+	// 否则旧连接的 defer 会在新连接注册完成后误将 agent 标为 stopped。
+	if machineID != "" && (s.daemonHub == nil || !s.daemonHub.IsConnected(machineID)) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := s.repo.MarkMachineAgentsStopped(ctx, machineID); err != nil {
@@ -395,6 +397,36 @@ func (s *AgentService) DeleteOwned(ctx context.Context, id, userID string) error
 		return ErrAgentNotFound
 	}
 	return nil
+}
+
+// UpdateTags 更新 Agent 的 tags 字段（用户可编辑，daemon 注册不会覆盖）。
+func (s *AgentService) UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error) {
+	if id == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateTags(ctx, id, tags)
+	if err != nil {
+		return nil, fmt.Errorf("update agent tags: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateCustomSkills 更新 Agent 的 custom_skills 字段（用户可编辑，daemon 注册不会覆盖）。
+func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
+	if id == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateCustomSkills(ctx, id, customSkills)
+	if err != nil {
+		return nil, fmt.Errorf("update agent custom_skills: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
 }
 
 // GenerateAgentToken 生成 Agent 专用 JWT，带 agent_management scope，有效期 5 分钟。

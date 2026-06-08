@@ -36,6 +36,13 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		return
 	}
 
+	if agent.Status == "stopped" {
+		slog.Warn("orch worker: agent stopped by user", "agent", task.AgentName)
+		s.markWorkerFailed(orchTaskID, task.AgentName, task.Task, "agent stopped")
+		return
+	}
+
+
 	// 权限校验
 	if agent.UserID != nil && *agent.UserID != userID {
 		s.markWorkerFailed(orchTaskID, task.AgentName, task.Task, "permission denied")

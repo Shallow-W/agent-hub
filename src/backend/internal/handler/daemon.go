@@ -98,13 +98,15 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	h.daemonHub.Unregister(client)
 	if machine != nil {
 		h.agentSvc.MarkMachineOffline(machine.ID)
-		// Push offline status for all agents on this machine
-		ctxOff, cancelOff := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancelOff()
-		agents, err := h.agentSvc.GetAgentsByMachine(ctxOff, machine.ID)
-		if err == nil {
-			for _, a := range agents {
-				h.pushAgentStatus(a.ID, "offline")
+		// 仅当机器未重连时才推送 offline；否则新连接已接管，无需通知
+		if !h.daemonHub.IsConnected(machine.ID) {
+			ctxOff, cancelOff := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancelOff()
+			agents, err := h.agentSvc.GetAgentsByMachine(ctxOff, machine.ID)
+			if err == nil {
+				for _, a := range agents {
+					h.pushAgentStatus(a.ID, "offline")
+				}
 			}
 		}
 	}
@@ -399,18 +401,24 @@ func (h *DaemonHandler) handleAgentStopped(data json.RawMessage) {
 }
 
 // pushAgentStatus pushes a real-time agent status update to the agent owner via WS.
+// For system agents (no owner), broadcasts to all connected users.
 func (h *DaemonHandler) pushAgentStatus(agentID, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	agent, err := h.agentSvc.GetAgentByID(ctx, agentID)
-	if err != nil || agent == nil || agent.UserID == nil {
+	if err != nil || agent == nil {
 		return
 	}
-	h.userHub.SendToUser(*agent.UserID, ws.WSMessage{
+	msg := ws.WSMessage{
 		Type: "agent.status",
 		Data: map[string]string{
 			"agent_id":     agentID,
 			"agent_status": status,
 		},
-	})
+	}
+	if agent.UserID != nil {
+		h.userHub.SendToUser(*agent.UserID, msg)
+	} else {
+		h.userHub.Broadcast(msg)
+	}
 }

@@ -96,7 +96,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
 
   const handleRefresh = async () => {
     try {
-      await Promise.all([refreshMachines(), refreshCandidates(), refreshAgents()]);
+      await Promise.all([refreshMachines(true), refreshCandidates(true), refreshAgents(true)]);
     } catch {
       message.error('刷新电脑信息失败');
     }

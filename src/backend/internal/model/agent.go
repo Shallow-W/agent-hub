@@ -13,6 +13,8 @@ type Agent struct {
 	ToolsConfig             string     `json:"tools_config,omitempty" db:"tools_config"`
 	Avatar                  string     `json:"avatar,omitempty" db:"avatar"`
 	CapabilitiesJSON        string     `json:"capabilities_json,omitempty" db:"capabilities_json"`
+	CustomSkills            string     `json:"custom_skills,omitempty" db:"custom_skills"`
+	Tags                    string     `json:"tags,omitempty" db:"tags"`
 	Source                  string     `json:"source" db:"source"`
 	Status                  string     `json:"status" db:"status"`
 	Version                 string     `json:"version,omitempty" db:"version"`

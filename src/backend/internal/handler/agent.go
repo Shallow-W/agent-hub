@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,17 +10,19 @@ import (
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
 )
 
 // AgentHandler Agent 管理接口处理器
 type AgentHandler struct {
-	svc *service.AgentService
+	svc     *service.AgentService
+	userHub *ws.Hub
 }
 
 // NewAgentHandler 创建 Agent 处理器
-func NewAgentHandler(svc *service.AgentService) *AgentHandler {
-	return &AgentHandler{svc: svc}
+func NewAgentHandler(svc *service.AgentService, userHub *ws.Hub) *AgentHandler {
+	return &AgentHandler{svc: svc, userHub: userHub}
 }
 
 // AgentRequest 自建 Agent 请求体
@@ -84,7 +87,8 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 			"version":      a.Version,
 			"cli_tool":     a.CLITool,
 			"system_prompt": a.SystemPrompt,
-			"tags":          a.Tags,
+			"tags":           a.Tags,
+			"custom_skills":  a.CustomSkills,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -276,6 +280,28 @@ func (h *AgentHandler) UpdateTags(c *gin.Context) {
 	middleware.SuccessResponse(c, agent)
 }
 
+// UpdateCustomSkillsRequest 更新自定义技能请求体
+type UpdateCustomSkillsRequest struct {
+	CustomSkills string `json:"custom_skills"`
+}
+
+// UpdateCustomSkills 更新 Agent 自定义技能
+func (h *AgentHandler) UpdateCustomSkills(c *gin.Context) {
+	agentID := c.Param("id")
+	var req UpdateCustomSkillsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40034, "参数错误: "+err.Error())
+		return
+	}
+
+	agent, err := h.svc.UpdateCustomSkills(c.Request.Context(), agentID, req.CustomSkills)
+	if err != nil {
+		middleware.HandleServiceError(c, err, "更新自定义技能失败")
+		return
+	}
+	middleware.SuccessResponse(c, agent)
+}
+
 // AgentTokenResponse Agent Token 响应体
 type AgentTokenResponse struct {
 	Token     string `json:"token"`
@@ -305,6 +331,7 @@ func (h *AgentHandler) StartAgent(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "启动 Agent 失败")
 		return
 	}
+	h.pushAgentStatus(agentID, "online")
 	middleware.SuccessResponse(c, map[string]string{"message": "agent started"})
 }
 
@@ -317,6 +344,7 @@ func (h *AgentHandler) RestartAgent(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "重启 Agent 失败")
 		return
 	}
+	h.pushAgentStatus(agentID, "online")
 	middleware.SuccessResponse(c, map[string]string{"message": "restart task created"})
 }
 
@@ -329,6 +357,7 @@ func (h *AgentHandler) StopAgent(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "停止 Agent 失败")
 		return
 	}
+	h.pushAgentStatus(agentID, "offline")
 	middleware.SuccessResponse(c, map[string]string{"message": "agent stopped"})
 }
 
@@ -397,4 +426,30 @@ func resolveDaemonNPMPath() string {
 	}
 
 	return "./src/daemon-npm"
+}
+
+// pushAgentStatus pushes a real-time agent status update to the agent owner via WS.
+// For system agents (no owner), broadcasts to all connected users.
+func (h *AgentHandler) pushAgentStatus(agentID, status string) {
+	if h.userHub == nil {
+		return
+	}
+	msg := ws.WSMessage{
+		Type: "agent.status",
+		Data: map[string]string{
+			"agent_id":     agentID,
+			"agent_status": status,
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	agent, err := h.svc.GetAgentByID(ctx, agentID)
+	if err != nil || agent == nil {
+		return
+	}
+	if agent.UserID != nil {
+		h.userHub.SendToUser(*agent.UserID, msg)
+	} else {
+		h.userHub.Broadcast(msg)
+	}
 }

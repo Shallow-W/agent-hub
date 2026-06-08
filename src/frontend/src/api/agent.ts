@@ -87,3 +87,11 @@ export async function stopAgent(id: string): Promise<void> {
 export async function restartAgent(id: string): Promise<void> {
   return post<void>(`/api/agents/${id}/restart`);
 }
+
+export async function updateAgentTags(id: string, tags: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/tags`, { tags });
+}
+
+export async function updateCustomSkills(id: string, customSkills: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/custom-skills`, { custom_skills: customSkills });
+}

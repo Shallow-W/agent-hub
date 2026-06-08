@@ -105,7 +105,7 @@ export const AgentList: React.FC<AgentListProps> = ({
 
   const handleRefreshAll = async () => {
     try {
-      await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
+      await Promise.all([refresh(true), refreshMachines(true), refreshCandidates(true)]);
     } catch {
       return;
     }
@@ -310,7 +310,7 @@ export const AgentList: React.FC<AgentListProps> = ({
         onCreate={createDaemonMachine}
         onDeleteMachine={deleteDaemonMachine}
         onRefresh={async () => {
-          await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
+          await Promise.all([refresh(true), refreshMachines(true), refreshCandidates(true)]);
         }}
       />
       <AvatarPickerModal

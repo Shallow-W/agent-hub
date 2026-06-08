@@ -28,7 +28,7 @@ export const GroupAvatarPicker: React.FC<GroupAvatarPickerProps> = ({
       await onSelect(key);
       onClose();
     } catch {
-      // Let the caller handle the error message
+      // error message already handled by caller (GroupInfoDrawer.handleAvatarChange)
     } finally {
       setSaving(false);
     }

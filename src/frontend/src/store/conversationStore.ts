@@ -11,7 +11,6 @@ interface ConversationState {
   memberPanelOpen: boolean;
   loading: boolean;
   _fetching: boolean;
-  archivedCount: number;
   fetchConversations: () => Promise<void>;
   createConversation: (type: ConversationType, title: string) => Promise<Conversation>;
   archiveConversationLocal: (id: string) => void;
@@ -22,8 +21,6 @@ interface ConversationState {
   bindDirectAgentChat: (conversationId: string, agentId: string) => void;
   unbindDirectAgentChat: (conversationId: string) => void;
   setMemberPanelOpen: (open: boolean) => void;
-  fetchArchivedCount: () => Promise<void>;
-  setArchivedCount: (count: number) => void;
 }
 
 function loadDirectAgentChats(): Record<string, string> {
@@ -54,7 +51,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   memberPanelOpen: false,
   loading: false,
   _fetching: false,
-  archivedCount: 0,
 
   fetchConversations: async () => {
     if (get()._fetching) return;
@@ -89,7 +85,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         state.activeConversationId === id
           ? (next[0]?.id ?? null)
           : state.activeConversationId;
-      return { conversations: next, activeConversationId: activeId, archivedCount: state.archivedCount + 1 };
+      return { conversations: next, activeConversationId: activeId };
     });
   },
 
@@ -180,19 +176,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   setMemberPanelOpen: (open) => {
     set({ memberPanelOpen: open });
   },
-
-  fetchArchivedCount: async () => {
-    try {
-      const list = await convApi.getArchivedConversations();
-      set({ archivedCount: list?.length ?? 0 });
-    } catch {
-      // ignore
-    }
-  },
-
-  setArchivedCount: (count) => {
-    set({ archivedCount: count });
-  },
 }));
 
 export function resetConversationStore() {
@@ -203,7 +186,6 @@ export function resetConversationStore() {
     memberPanelOpen: false,
     loading: false,
     _fetching: false,
-    archivedCount: 0,
   });
   localStorage.removeItem('agenthub_active_conv');
   localStorage.removeItem(DIRECT_AGENT_CHATS_KEY);

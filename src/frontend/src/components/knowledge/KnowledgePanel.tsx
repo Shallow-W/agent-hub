@@ -163,7 +163,7 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
         <div className={styles.header}>
           <span className={styles.headerTitle}>知识库</span>
           <div className={styles.headerTools}>
-            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchKnowledgeBases()} />
+            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchKnowledgeBases(true)} />
             <Button type="text" icon={<PlusOutlined />} aria-label="新建" onClick={openCreateModal} />
           </div>
         </div>
@@ -187,7 +187,7 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
       <div className={styles.header}>
         <span className={styles.headerTitle}>知识库</span>
         <div className={styles.headerTools}>
-          <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchKnowledgeBases()} />
+          <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={() => fetchKnowledgeBases(true)} />
           <Button type="text" icon={<PlusOutlined />} aria-label="新建" onClick={openCreateModal} />
         </div>
       </div>

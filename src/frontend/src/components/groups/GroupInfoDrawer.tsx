@@ -101,10 +101,15 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
   }, [conversationId, fetchInfo]);
 
   const handleAvatarChange = useCallback(async (avatarKey: string) => {
-    await updateGroupInfo(conversationId, { avatar: avatarKey });
-    message.success('群头像已更新');
-    await fetchInfo();
-    useConversationStore.getState().fetchConversations();
+    try {
+      await updateGroupInfo(conversationId, { avatar: avatarKey });
+      message.success('群头像已更新');
+      await fetchInfo();
+      useConversationStore.getState().fetchConversations();
+    } catch {
+      message.error('更新群头像失败');
+      throw new Error(); // re-throw so GroupAvatarPicker knows not to close
+    }
   }, [conversationId, fetchInfo]);
 
   // Tag handlers

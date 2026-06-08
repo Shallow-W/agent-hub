@@ -11,11 +11,13 @@ interface FriendState {
   error: string | null;
   searchResults: User[];
   isSearching: boolean;
+  friendsLoaded: boolean;
+  pendingLoaded: boolean;
   /** Tracks which request ID is currently being accepted/rejected */
   actionLoading: string | null;
 
-  fetchFriends: () => Promise<void>;
-  fetchPending: () => Promise<void>;
+  fetchFriends: (force?: boolean) => Promise<void>;
+  fetchPending: (force?: boolean) => Promise<void>;
   sendRequest: (username: string) => Promise<void>;
   acceptRequest: (id: string) => Promise<void>;
   rejectRequest: (id: string) => Promise<void>;
@@ -32,13 +34,17 @@ export const useFriendStore = create<FriendState>((set) => ({
   error: null,
   searchResults: [],
   isSearching: false,
+  friendsLoaded: false,
+  pendingLoaded: false,
   actionLoading: null,
 
-  fetchFriends: async () => {
+  fetchFriends: async (force) => {
+    const state = useFriendStore.getState();
+    if (!force && state.friendsLoaded) return;
     set({ loading: true, error: null });
     try {
       const list = await friendApi.listFriends();
-      set({ friends: list ?? [] });
+      set({ friends: list ?? [], friendsLoaded: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '获取好友列表失败';
       set({ error: msg });
@@ -47,10 +53,12 @@ export const useFriendStore = create<FriendState>((set) => ({
     }
   },
 
-  fetchPending: async () => {
+  fetchPending: async (force) => {
+    const state = useFriendStore.getState();
+    if (!force && state.pendingLoaded) return;
     try {
       const list = await friendApi.listPendingRequests();
-      set({ pendingRequests: list ?? [] });
+      set({ pendingRequests: list ?? [], pendingLoaded: true });
     } catch {
       // 静默失败，不影响主流程
     }
@@ -64,7 +72,7 @@ export const useFriendStore = create<FriendState>((set) => ({
         friendApi.listFriends(),
         friendApi.listPendingRequests(),
       ]).then(([friends, pending]) => {
-        set({ friends: friends ?? [], pendingRequests: pending ?? [] });
+        set({ friends: friends ?? [], pendingRequests: pending ?? [], friendsLoaded: true, pendingLoaded: true });
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '发送请求失败';
@@ -84,7 +92,7 @@ export const useFriendStore = create<FriendState>((set) => ({
         friendApi.listFriends(),
         friendApi.listPendingRequests(),
       ]);
-      set({ friends: friends ?? [], pendingRequests: pending ?? [], error: null });
+      set({ friends: friends ?? [], pendingRequests: pending ?? [], friendsLoaded: true, pendingLoaded: true, error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
@@ -98,7 +106,7 @@ export const useFriendStore = create<FriendState>((set) => ({
     try {
       await friendApi.rejectFriendRequest(id);
       const pending = await friendApi.listPendingRequests();
-      set({ pendingRequests: pending ?? [], error: null });
+      set({ pendingRequests: pending ?? [], pendingLoaded: true, error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败';
       set({ error: msg });
