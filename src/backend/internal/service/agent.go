@@ -15,7 +15,6 @@ import (
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // AgentRepo Agent 服务所需仓库接口
@@ -26,18 +25,22 @@ type AgentRepo interface {
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 	ClaimDaemonTask(ctx context.Context, machineID string) (*model.DaemonTask, error)
 	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
-	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON string) error
+	UpsertSystemAgent(ctx context.Context, name, cliTool, version, capabilitiesJSON, machineID string) error
 	CreateDaemonMachine(ctx context.Context, userID, name, apiKeyHash string) (*model.DaemonMachine, error)
 	ListDaemonMachines(ctx context.Context, userID string) ([]model.DaemonMachine, error)
 	DeleteDaemonMachine(ctx context.Context, id, userID string) (bool, error)
 	GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash string) (*model.DaemonMachine, error)
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
+	GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
-	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error)
+	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
+	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
+	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
+	UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
@@ -82,11 +85,11 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo      AgentRepo
-	tracker   *MachineTracker
-	jwtSecret string
-	serverURL string
-	daemonHub *ws.DaemonHub
+	repo        AgentRepo
+	tracker     *MachineTracker
+	tokenIssuer *TokenIssuer
+	serverURL   string
+	daemonHub   *ws.DaemonHub
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -107,9 +110,9 @@ func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
 }
 
-// SetJWTSecret 设置 JWT 密钥（用于生成 Agent Token）
-func (s *AgentService) SetJWTSecret(secret string) {
-	s.jwtSecret = secret
+// SetTokenIssuer 注入 TokenIssuer（用于生成 Agent Token）
+func (s *AgentService) SetTokenIssuer(ti *TokenIssuer) {
+	s.tokenIssuer = ti
 }
 
 // SetServerURL 设置服务端 URL（用于生成 daemon 连接命令）
@@ -122,6 +125,24 @@ func (s *AgentService) ListAvailable(ctx context.Context, userID string) ([]mode
 	list, err := s.repo.ListAvailable(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	return list, nil
+}
+
+// GetAgentByID 按 ID 查询 Agent
+func (s *AgentService) GetAgentByID(ctx context.Context, id string) (*model.Agent, error) {
+	agent, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get agent: %w", err)
+	}
+	return agent, nil
+}
+
+// GetAgentsByMachine 查询指定 machine_id 下的所有 Agent
+func (s *AgentService) GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error) {
+	list, err := s.repo.GetAgentsByMachine(ctx, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("get agents by machine: %w", err)
 	}
 	return list, nil
 }
@@ -145,9 +166,9 @@ func (s *AgentService) MarkMachineOffline(machineID string) {
 	if s.tracker != nil {
 		s.tracker.MarkOffline(machineID)
 	}
-	// 将该机器下所有 online 的 Agent 状态设为 stopped，
-	// 因为 daemon 断开后无法再发送 agent.stopped 事件。
-	if machineID != "" {
+	// 如果机器已有新的 WS 连接（重连场景），跳过批量 stopped。
+	// 否则旧连接的 defer 会在新连接注册完成后误将 agent 标为 stopped。
+	if machineID != "" && (s.daemonHub == nil || !s.daemonHub.IsConnected(machineID)) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := s.repo.MarkMachineAgentsStopped(ctx, machineID); err != nil {
@@ -169,8 +190,8 @@ func (s *AgentService) IsMachineOnline(machineID string) bool {
 	return false
 }
 
-// RegisterSystemAgents 保存 daemon 上报的系统 Agent
-func (s *AgentService) RegisterSystemAgents(ctx context.Context, agents []DiscoveredAgent) error {
+// RegisterSystemAgents 保存 daemon 上报的系统 Agent。machineID 非空时绑定到指定电脑。
+func (s *AgentService) RegisterSystemAgents(ctx context.Context, machineID string, agents []DiscoveredAgent) error {
 	for _, agent := range agents {
 		name := strings.TrimSpace(agent.Name)
 		cliTool := strings.TrimSpace(agent.CLITool)
@@ -181,7 +202,7 @@ func (s *AgentService) RegisterSystemAgents(ctx context.Context, agents []Discov
 		if err != nil {
 			return fmt.Errorf("marshal capabilities: %w", err)
 		}
-		if err := s.repo.UpsertSystemAgent(ctx, name, cliTool, agent.Version, string(capabilities)); err != nil {
+		if err := s.repo.UpsertSystemAgent(ctx, name, cliTool, agent.Version, string(capabilities), machineID); err != nil {
 			return fmt.Errorf("upsert system agent: %w", err)
 		}
 	}
@@ -293,13 +314,14 @@ func (s *AgentService) ListAgentCandidates(ctx context.Context, userID string) (
 }
 
 // AddCandidateAgent 将候选 Agent 添加成可用 Agent。
-func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, systemPrompt string) (*model.Agent, error) {
+func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
 	displayName = strings.TrimSpace(displayName)
+	expectedCLITool = strings.TrimSpace(expectedCLITool)
 	systemPrompt = strings.TrimSpace(systemPrompt)
-	if userID == "" || candidateID == "" || displayName == "" {
+	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, systemPrompt)
+	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, expectedCLITool, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("add candidate agent: %w", err)
 	}
@@ -315,9 +337,6 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	cliTool = strings.TrimSpace(cliTool)
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
-	}
-	if err := syncSkillFiles(capabilitiesJSON); err != nil {
-		return nil, err
 	}
 	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
@@ -340,21 +359,24 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
 		return nil, ErrAgentNotFound
 	}
-	if current.Source == "daemon" && current.MachineID != nil && *current.MachineID != "" {
-		if err := validateDaemonSkillFiles(current.CapabilitiesJSON, capabilitiesJSON); err != nil {
-			return nil, err
-		}
-		if err := s.syncDaemonSkillFiles(ctx, current, userID, capabilitiesJSON); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := syncSkillFiles(capabilitiesJSON); err != nil {
-			return nil, err
-		}
-	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateAvatar 仅更新 Agent 头像，校验归属权后写入。
+func (s *AgentService) UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error) {
+	if id == "" || userID == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateAvatar(ctx, id, userID, avatar)
+	if err != nil {
+		return nil, fmt.Errorf("update agent avatar: %w", err)
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound
@@ -377,25 +399,45 @@ func (s *AgentService) DeleteOwned(ctx context.Context, id, userID string) error
 	return nil
 }
 
+// UpdateTags 更新 Agent 的 tags 字段（用户可编辑，daemon 注册不会覆盖）。
+func (s *AgentService) UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error) {
+	if id == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateTags(ctx, id, tags)
+	if err != nil {
+		return nil, fmt.Errorf("update agent tags: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateCustomSkills 更新 Agent 的 custom_skills 字段（用户可编辑，daemon 注册不会覆盖）。
+func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
+	if id == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateCustomSkills(ctx, id, customSkills)
+	if err != nil {
+		return nil, fmt.Errorf("update agent custom_skills: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
 // GenerateAgentToken 生成 Agent 专用 JWT，带 agent_management scope，有效期 5 分钟。
 func (s *AgentService) GenerateAgentToken(ctx context.Context, userID string) (string, time.Time, error) {
 	if userID == "" {
 		return "", time.Time{}, ErrAgentInvalidInput
 	}
-	now := time.Now()
-	expiresAt := now.Add(5 * time.Minute)
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"scope":   "agent_management",
-		"iat":     now.Unix(),
-		"exp":     expiresAt.Unix(),
+	if s.tokenIssuer == nil {
+		return "", time.Time{}, fmt.Errorf("token issuer not configured")
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString([]byte(s.jwtSecret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign agent token: %w", err)
-	}
-	return tokenStr, expiresAt, nil
+	return s.tokenIssuer.IssueAgentToken(userID)
 }
 
 // StartAgent 启动 Agent 进程：通过 WS 通知远端 daemon 启动对应 CLI 进程。
@@ -531,10 +573,10 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	// 更新 machine 对象以反映新 key（但 APIKeyHash 不返回给前端）
 	machine.APIKeyHash = ""
 	serverURL := s.serverURL
-		if serverURL == "" {
-			serverURL = "http://localhost:8080" // fallback when not configured
-		}
-		command := fmt.Sprintf("npx @agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
+	if serverURL == "" {
+		serverURL = "http://localhost:8080" // fallback when not configured
+	}
+	command := fmt.Sprintf("npx @agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
 	return command, machine, apiKey, nil
 }
 

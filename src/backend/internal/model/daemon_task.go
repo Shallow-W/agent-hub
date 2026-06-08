@@ -15,6 +15,8 @@ type DaemonTask struct {
 	// 直接 dispatch 时为 agentHandoff 的 JSON 数组（最多 5 条）。
 	// 空字符串表示无历史上下文（首条消息）。
 	ContextMessages string     `json:"context_messages" db:"context_messages"`
+	OrchTaskID      string     `json:"orch_task_id,omitempty" db:"orch_task_id"`
+	WorkerName      string     `json:"worker_name,omitempty" db:"worker_name"`
 	Status          string     `json:"status" db:"status"`
 	Result          string     `json:"result" db:"result"`
 	Error           string     `json:"error" db:"error"`
@@ -22,6 +24,9 @@ type DaemonTask struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
+	// Artifacts 是 daemon 解析出的结构化产物，仅内存传递（不落 daemon_tasks 表），
+	// 由 waitDaemonTask 从 WS 结果填充，供创建 assistant 消息时落 artifacts 表。
+	Artifacts       []Artifact `json:"-" db:"-"`
 }
 
 // ContextMessage 是传给 Agent 的单条对话上下文消息。

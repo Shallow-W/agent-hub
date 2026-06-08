@@ -19,6 +19,10 @@ export interface GroupInfo {
     id: string;
     title: string;
     type: string;
+    avatar?: string;
+    description?: string;
+    announcement?: string;
+    tags?: string;
     created_at: string;
     updated_at: string;
     member_count?: number;
@@ -28,6 +32,14 @@ export interface GroupInfo {
 
 export const getGroupInfo = (groupId: string) =>
   get<GroupInfo>(`/api/groups/${groupId}`);
+
+export const updateGroupInfo = (groupId: string, data: {
+  title?: string;
+  avatar?: string;
+  description?: string;
+  announcement?: string;
+  tags?: string;
+}) => put<GroupInfo['conversation']>(`/api/groups/${groupId}`, data);
 
 export const leaveGroup = (groupId: string) =>
   post<void>(`/api/groups/${groupId}/leave`);

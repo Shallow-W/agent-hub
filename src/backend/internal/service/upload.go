@@ -32,6 +32,20 @@ var allowedMIMETypes = map[string]bool{
 	"image/gif":       true,
 	"image/webp":      true,
 	"application/pdf": true,
+	// Office / 文本类文件的官方 mime
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true, // pptx
+	"application/vnd.ms-powerpoint":                                             true, // ppt
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true, // docx
+	"application/msword": true, // doc
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true, // xlsx
+	"application/vnd.ms-excel": true, // xls
+	"text/plain":               true, // txt / md
+	"text/markdown":            true,
+	"text/csv":                 true,
+	// http.DetectContentType 对 pptx/docx/xlsx（zip 容器）与 doc/xls（OLE）
+	// 往往返回下列通用类型，需放行，否则内容校验会二次拒绝
+	"application/zip":          true,
+	"application/octet-stream": true,
 }
 
 var allowedExtensions = map[string]bool{
@@ -41,6 +55,15 @@ var allowedExtensions = map[string]bool{
 	".gif":  true,
 	".webp": true,
 	".pdf":  true,
+	".pptx": true,
+	".ppt":  true,
+	".docx": true,
+	".doc":  true,
+	".xlsx": true,
+	".xls":  true,
+	".txt":  true,
+	".md":   true,
+	".csv":  true,
 }
 
 var (
@@ -156,7 +179,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 			thumbName := hashHex + ".jpg"
 			existingThumb := filepath.Join(thumbDir, thumbName)
 			if _, err := os.Stat(existingThumb); err == nil {
-					result.ThumbnailPath = path.Join("uploads", "thumbnails", thumbName)
+				result.ThumbnailPath = path.Join("uploads", "thumbnails", thumbName)
 				// 从已有图片读取宽高
 				if img, err := imaging.Open(existingPath); err == nil {
 					bounds := img.Bounds()
@@ -182,12 +205,16 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		return nil, fmt.Errorf("save file: %w", err)
 	}
 
-	// 用实际文件内容检测 MIME 类型（不信任客户端）
+	// 用实际文件内容检测 MIME 类型（不信任客户端）。
+	// http.DetectContentType 对文本类文件返回 "text/plain; charset=utf-8"，
+	// 需剥离 charset 参数后再比对白名单，否则 txt/md/csv 会被二次校验误拒。
 	mimeType, err := detectMIME(existingPath)
-	if err != nil || !allowedMIMETypes[mimeType] {
+	baseMIME := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
+	if err != nil || !allowedMIMETypes[baseMIME] {
 		os.Remove(existingPath)
 		return nil, ErrUploadTypeInvalid
 	}
+	mimeType = baseMIME
 
 	fi, err := os.Stat(existingPath)
 	if err != nil {

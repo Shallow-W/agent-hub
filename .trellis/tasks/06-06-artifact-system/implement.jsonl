@@ -1,0 +1,13 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "A3 必须复用已有 CodeBlock 而非重造代码卡；本任务核心约束就是不重复造轮子"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "产物数据流横跨 daemon(JS)→backend(Go)→DB→frontend，需保证跨层契约一致"}
+{"file": ".trellis/spec/guides/core-principles.md", "reason": "通用实现原则"}
+{"file": ".trellis/spec/guides/general-conventions.md", "reason": "通用编码约定"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "A1 新建 artifacts 表 + migration，需遵循建表/迁移规范"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "model/repository/service/handler 分层放置 artifact 相关代码"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "产物解析/持久化的错误处理规范"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec 索引"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "A3/A4 新增 Artifact 卡片与全屏工作区组件规范"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Artifact/Message 类型契约，避免 any，前后端字段对齐"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "产物随消息进 messageStore，需遵循状态管理约定"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "前端组件/类型文件放置位置"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend spec 索引"}

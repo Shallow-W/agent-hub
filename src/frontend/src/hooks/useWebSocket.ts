@@ -1,9 +1,10 @@
 import { useEffect, useCallback } from 'react';
-import { useWsStore } from '@/store/wsStore';
+import { useWsStore, notifyTaskChanged } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
+import { useAgentStore } from '@/store/agentStore';
 import type { StreamMessage } from '@/types/message';
 
 let audioCtx: AudioContext | null = null;
@@ -87,6 +88,7 @@ export function useWebSocket() {
               artifacts_json: msg.data.artifacts_json ?? null,
               created_at: msg.data.created_at ?? new Date().toISOString(),
               attachments: msg.data.attachments,
+              artifacts: msg.data.artifacts,
               sender_id: msg.data.sender_id,
               username: msg.data.username,
               reply_to: msg.data.reply_to ?? null,
@@ -129,6 +131,14 @@ export function useWebSocket() {
           }
           break;
         }
+        case 'agent.status': {
+          const agentId = msg.data.agent_id;
+          const agentStatus = msg.data.agent_status;
+          if (agentId && agentStatus) {
+            useAgentStore.getState().updateAgentStatus(agentId, agentStatus as import('@/types/agent').AgentStatus);
+          }
+          break;
+        }
         case 'agent.typing_start': {
           useWsStore.getState().setAgentTyping(convId, true);
           break;
@@ -142,6 +152,13 @@ export function useWebSocket() {
           const recallMsgId = msg.data.message_id ?? msg.data.messageId;
           if (recallConvId && recallMsgId) {
             useMessageStore.getState().handleRecallPush(recallConvId, recallMsgId);
+          }
+          break;
+        }
+        case 'task.changed': {
+          const taskConvId = msg.data.conversation_id ?? msg.data.conversationId;
+          if (taskConvId) {
+            notifyTaskChanged(taskConvId);
           }
           break;
         }

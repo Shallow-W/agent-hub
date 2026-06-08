@@ -23,6 +23,10 @@ export async function updateAgent(id: string, body: AgentRequest): Promise<Agent
   return put<Agent>(`/api/agents/${id}`, body);
 }
 
+export async function updateAgentAvatar(id: string, avatar: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/avatar`, { avatar });
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   return del<void>(`/api/agents/${id}`);
 }
@@ -82,4 +86,12 @@ export async function stopAgent(id: string): Promise<void> {
 
 export async function restartAgent(id: string): Promise<void> {
   return post<void>(`/api/agents/${id}/restart`);
+}
+
+export async function updateAgentTags(id: string, tags: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/tags`, { tags });
+}
+
+export async function updateCustomSkills(id: string, customSkills: string): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/custom-skills`, { custom_skills: customSkills });
 }

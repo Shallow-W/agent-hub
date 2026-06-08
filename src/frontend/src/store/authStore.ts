@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { User } from '@/types/auth';
 import * as authApi from '@/api/auth';
+import * as userApi from '@/api/user';
 import { setToken, clearToken } from '@/api/client';
 import { resetConversationStore } from '@/store/conversationStore';
 import { resetMessageStore } from '@/store/messageStore';
@@ -14,6 +15,8 @@ interface AuthState {
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
+  updateAvatar: (avatar: string) => Promise<void>;
+  updateUsername: (username: string) => Promise<void>;
   logout: () => void;
   loadFromStorage: () => void;
 }
@@ -21,7 +24,7 @@ interface AuthState {
 const TOKEN_KEY = 'agenthub_token';
 const USER_KEY = 'agenthub_user';
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isAuthenticated: false,
@@ -62,6 +65,23 @@ export const useAuthStore = create<AuthState>((set) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  updateAvatar: async (avatar: string) => {
+    const updated = await userApi.updateUserAvatar(avatar);
+    const current = get().user;
+    // 合并：以服务端返回为准，兜底保留本地已有字段。
+    const next: User = { ...(current ?? {} as User), ...updated };
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    set({ user: next });
+  },
+
+  updateUsername: async (username: string) => {
+    const updated = await userApi.updateUsername(username);
+    const current = get().user;
+    const next: User = { ...(current ?? {} as User), ...updated };
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    set({ user: next });
   },
 
   logout: () => {

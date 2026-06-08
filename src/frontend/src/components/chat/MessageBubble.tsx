@@ -2,7 +2,6 @@ import React, { useState, useMemo, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown, message as antMessage } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  CheckOutlined,
   CloseOutlined,
   CopyOutlined,
   DownOutlined,
@@ -15,89 +14,21 @@ import {
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import hljs from 'highlight.js/lib/core';
-import javascript from 'highlight.js/lib/languages/javascript';
-import typescript from 'highlight.js/lib/languages/typescript';
-import go from 'highlight.js/lib/languages/go';
-import python from 'highlight.js/lib/languages/python';
-import rust from 'highlight.js/lib/languages/rust';
-import bash from 'highlight.js/lib/languages/bash';
-import json from 'highlight.js/lib/languages/json';
-import yaml from 'highlight.js/lib/languages/yaml';
-import markdown from 'highlight.js/lib/languages/markdown';
-import xml from 'highlight.js/lib/languages/xml';
-import cssLang from 'highlight.js/lib/languages/css';
-import sql from 'highlight.js/lib/languages/sql';
 import { useAuthStore } from '@/store/authStore';
-import type { Message, OptimisticStatus } from '@/types/message';
+import { useAgentStore } from '@/store/agentStore';
+import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
+import { CodeBlock, extractText } from './CodeBlock';
+import { ArtifactCard } from './ArtifactCard';
+import { DeployStatusCard } from './DeployStatusCard';
+import { escapeHtml } from './highlight';
+import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
-
-// Register only the languages we need — keeps bundle small
-hljs.registerLanguage('javascript', javascript);
-hljs.registerLanguage('js', javascript);
-hljs.registerLanguage('typescript', typescript);
-hljs.registerLanguage('ts', typescript);
-hljs.registerLanguage('go', go);
-hljs.registerLanguage('golang', go);
-hljs.registerLanguage('python', python);
-hljs.registerLanguage('py', python);
-hljs.registerLanguage('rust', rust);
-hljs.registerLanguage('bash', bash);
-hljs.registerLanguage('sh', bash);
-hljs.registerLanguage('shell', bash);
-hljs.registerLanguage('zsh', bash);
-hljs.registerLanguage('json', json);
-hljs.registerLanguage('yaml', yaml);
-hljs.registerLanguage('yml', yaml);
-hljs.registerLanguage('markdown', markdown);
-hljs.registerLanguage('md', markdown);
-hljs.registerLanguage('html', xml);
-hljs.registerLanguage('xml', xml);
-hljs.registerLanguage('css', cssLang);
-hljs.registerLanguage('sql', sql);
-
-// Friendly display names for language tags
-const LANG_DISPLAY: Record<string, string> = {
-  js: 'JavaScript', ts: 'TypeScript', golang: 'Go', py: 'Python',
-  sh: 'Shell', shell: 'Shell', zsh: 'Shell', yml: 'YAML', md: 'Markdown',
-};
 
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/** Highlight code string, returning highlighted HTML. Falls back to plain text. */
-function highlightCode(code: string, lang?: string): string {
-  const trimmed = code.replace(/\n$/, '');
-  try {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(trimmed, { language: lang }).value;
-    }
-    return hljs.highlightAuto(trimmed).value;
-  } catch {
-    return escapeHtml(trimmed);
-  }
-}
-
-/** Recursively extract plain text from ReactNode (handles react-markdown v10 element children). */
-function extractText(node: ReactNode): string {
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join('');
-  if (node && typeof node === 'object' && 'props' in node) return extractText((node as React.ReactElement).props.children);
-  return '';
-}
 
 // ── ReactMarkdown custom components ──
 
@@ -146,64 +77,52 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   return children;
 }
 
-/** Fenced code block with language header and copy button. */
-const CodeBlock: React.FC<{ className?: string; children?: ReactNode }> = ({
-  className,
-  children,
-}) => {
-  const lang = className?.replace('language-', '') || '';
-  const codeStr = extractText(children).replace(/\n$/, '');
-  const [copied, setCopied] = useState(false);
+/**
+ * 从 code 产物列表构建「内容 → root_id」纯查找表。
+ * 尾部换行符剥离后作为 key，重复内容首个产物胜出（极少见，可接受）。
+ * 纯函数，零渲染副作用，React StrictMode 双调用安全。
+ */
+function buildContentRootMap(codeArtifacts: Artifact[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const art of codeArtifacts) {
+    if (!art.root_id || art.content == null) continue;
+    const key = art.content.replace(/\n$/, '');
+    if (!map.has(key)) map.set(key, art.root_id); // 重复内容首个胜出
+  }
+  return map;
+}
 
-  const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
-  const highlighted = highlightCode(codeStr, lang || undefined);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(codeStr).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable */ });
+/** 基于本条消息的 code 产物构建 markdown 组件，使围栏代码块能接通版本能力。 */
+function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
+  // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
+  const contentRootMap = buildContentRootMap(codeArtifacts);
+  return {
+    code({ className, children, node, ...rest }) {
+      const isBlock = className?.startsWith('language-');
+      if (isBlock) {
+        const ct = extractText(children);
+        const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
+        return (
+          <CodeBlock className={className} expandable artifactRootId={rootId}>
+            {children}
+          </CodeBlock>
+        );
+      }
+      return (
+        <code className={styles.inlineCode} {...rest}>
+          {children}
+        </code>
+      );
+    },
+    pre({ children }) {
+      // Let the code component handle the wrapper; strip the extra <pre>
+      return <>{children}</>;
+    },
+    ...sharedMarkdownComponents,
   };
+}
 
-  return (
-    <div className={styles.codeBlockWrapper}>
-      <div className={styles.codeHeader}>
-        <span>{displayLang}</span>
-        <button
-          className={`${styles.codeCopyBtn} ${copied ? styles.codeCopyBtnCopied : ''}`}
-          type="button"
-          title="复制代码"
-          onClick={handleCopy}
-        >
-          <span className={styles.codeCopyIcon}>
-            {copied ? <CheckOutlined /> : <CopyOutlined />}
-          </span>
-          <span className={styles.codeCopyText}>{copied ? '已复制' : '复制'}</span>
-        </button>
-      </div>
-      <pre className={styles.codeBlock}>
-        <code dangerouslySetInnerHTML={{ __html: highlighted }} />
-      </pre>
-    </div>
-  );
-};
-
-const markdownComponents: Components = {
-  code({ className, children, node, ...rest }) {
-    const isBlock = className?.startsWith('language-');
-    if (isBlock) {
-      return <CodeBlock className={className}>{children}</CodeBlock>;
-    }
-    return (
-      <code className={styles.inlineCode} {...rest}>
-        {children}
-      </code>
-    );
-  },
-  pre({ children }) {
-    // Let the code component handle the wrapper; strip the extra <pre>
-    return <>{children}</>;
-  },
+const sharedMarkdownComponents: Components = {
   a({ href, children, node, ...rest }) {
     const safeHref =
       href && (/^https?:\/\//i.test(href) || /^mailto:/i.test(href))
@@ -227,9 +146,14 @@ const markdownComponents: Components = {
 };
 
 /** Renders markdown content with full GFM support. */
-const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
+  content,
+  codeArtifacts,
+}) => {
+  // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
+  const components = buildMarkdownComponents(codeArtifacts);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {content}
     </ReactMarkdown>
   );
@@ -265,6 +189,15 @@ function formatTimestamp(dateStr: string): string {
   return `${month}-${day} ${hh}:${mm}`;
 }
 
+function fallbackAttachmentName(value: unknown, filePath: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof filePath === 'string' && filePath.trim()) {
+    const normalized = filePath.replace(/\\/g, '/');
+    return decodeURIComponent(normalized.split('/').pop() || '未命名文件');
+  }
+  return '未命名文件';
+}
+
 const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
@@ -282,17 +215,61 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
-  const agentName = (() => {
-    if (message.role !== 'assistant' || !message.artifacts_json) return null;
-    try { return (JSON.parse(message.artifacts_json) as { agent_name?: string }).agent_name ?? null; } catch { return null; }
-  })();
+
+  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool, deployment?}）。
+  const agentMeta = useMemo((): MessageArtifacts => {
+    if (message.role !== 'assistant' || !message.artifacts_json) return {};
+    try { return JSON.parse(message.artifacts_json) as MessageArtifacts; } catch { return {}; }
+  }, [message.role, message.artifacts_json]);
+  const agentName = agentMeta.agent_name ?? null;
+  const deployment = agentMeta.deployment ?? null;
+
+  // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
+  // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
+  const agents = useAgentStore((s) => s.agents);
+  const storeAgent = useMemo(
+    () => (agentMeta.agent_id ? agents.find((a) => a.id === agentMeta.agent_id) : undefined),
+    [agents, agentMeta.agent_id],
+  );
+
   const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+
+  // 头像来源优先级：
+  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)（honors agent.avatar）
+  //   2. assistant + 未找到（历史消息/列表未加载）→ resolveAgentAvatar({id: agent_id, name: agent_name}) 哈希兜底
+  //   3. 自己（当前登录用户，含 avatar）
+  //   4. 其他用户（按 sender_id/username 稳定哈希默认）
+  const avatarSrc = useMemo((): string | undefined => {
+    if (message.role === 'assistant' && agentName) {
+      if (storeAgent) return resolveAgentAvatar(storeAgent);
+      return resolveAgentAvatar({ id: agentMeta.agent_id ?? agentName, name: agentName });
+    }
+    if (message.role === 'assistant') return undefined;
+    if (isOwn) {
+      const me = useAuthStore.getState().user;
+      return me ? resolveUserAvatar(me) : undefined;
+    }
+    return resolveUserAvatar({ id: message.sender_id, username: message.username });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.role, message.sender_id, message.username, agentName, agentMeta.agent_id, storeAgent, isOwn]);
+
   const avatarLetter = agentName
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
-  const contentLength = message.content?.length ?? 0;
-  const lineCount = message.content?.split('\n').length ?? 0;
+  // 代码块回到正文原位（散文↔代码交错），仅 webpage 产物走底部卡片
+  const displayContent = message.content ?? '';
+  const cardArtifacts = useMemo(
+    () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
+    [message.artifacts],
+  );
+  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）。
+  const codeArtifacts = useMemo(
+    () => message.artifacts?.filter((a) => a.type === 'code') ?? [],
+    [message.artifacts],
+  );
+  const contentLength = displayContent.length;
+  const lineCount = displayContent.split('\n').length;
   const shouldCollapse = contentLength > COLLAPSE_CHAR_LIMIT || lineCount > COLLAPSE_LINE_LIMIT;
   const collapsed = shouldCollapse && !expanded;
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
@@ -358,7 +335,10 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     return pending.map((p, i) => ({
       id: `pending_${i}`,
       message_id: '',
-      file_name: (p as Record<string, unknown>).file_name as string,
+      file_name: fallbackAttachmentName(
+        (p as Record<string, unknown>).file_name,
+        (p as Record<string, unknown>).file_path,
+      ),
       mime_type: (p as Record<string, unknown>).mime_type as string,
       file_size: (p as Record<string, unknown>).file_size as number,
       file_path: (p as Record<string, unknown>).file_path as string,
@@ -387,8 +367,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       >
         {showAvatar && (
           <Avatar
-            size={24}
+            size={36}
             className={styles.chatAvatar}
+            src={avatarSrc}
           >
             {avatarLetter}
           </Avatar>
@@ -466,9 +447,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {displayAttachments.length > 0 && (
               <MessageAttachmentView attachments={displayAttachments} />
             )}
-            {message.content && (
+            {displayContent && (
               <div className={styles.markdownBody}>
-                <MarkdownRenderer content={message.content ?? ''} />
+                <MarkdownRenderer content={displayContent} codeArtifacts={codeArtifacts} />
+              </div>
+            )}
+            {cardArtifacts.length > 0 && (
+              <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
+            )}
+            {deployment && (
+              <div className={styles.deployCard}>
+                <DeployStatusCard deployment={deployment} />
               </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}

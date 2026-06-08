@@ -1,0 +1,41 @@
+/* 网页产物 sandbox iframe：loading / error 兜底 */
+.frameWrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: var(--color-surface-strong);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.errorText {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.openLink {
+  color: var(--color-primary);
+  font-size: 13px;
+  word-break: break-all;
+}

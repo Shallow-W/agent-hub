@@ -143,7 +143,6 @@ function killSessionProcess(sessionId) {
 
 const OPEN_PATH_TIMEOUT_MS = 5000;
 const MIN_DESCRIPTION_CHARS = 6;
-const SKILL_SYNC_TOOL = '__agenthub_skill_sync__';
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
 const CANDIDATES = [
@@ -769,9 +768,6 @@ function commandForTask(task) {
 }
 
 async function executeTask(task) {
-  if (task.cli_tool === SKILL_SYNC_TOOL) {
-    return syncSkillFiles(task.prompt);
-  }
   if (task.cli_tool === OPEN_PATH_TOOL) {
     return openSkillLocation(task.prompt);
   }
@@ -824,39 +820,6 @@ async function executeTask(task) {
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   return text || '(Agent CLI 没有返回内容)';
-}
-
-function syncSkillFiles(prompt) {
-  let payload = null;
-  try {
-    payload = JSON.parse(prompt);
-  } catch {
-    throw new Error('Invalid skill sync payload');
-  }
-  let skills = [];
-  try {
-    skills = JSON.parse(String(payload.capabilities_json || '[]'));
-  } catch {
-    throw new Error('Invalid skills JSON');
-  }
-  let count = 0;
-  for (const skill of skills) {
-    if (!skill || typeof skill !== 'object') continue;
-    const sourcePath = String(skill.source_path || '').trim();
-    if (!sourcePath) continue;
-    if (path.basename(sourcePath) !== 'SKILL.md') {
-      throw new Error(`Refuse to write non-skill file: ${sourcePath}`);
-    }
-    if (agentHubWorkspaceForPath(sourcePath)) {
-      throw new Error('Refuse to write stale AgentHub workspace skill source. Reconnect this computer to refresh skills.');
-    }
-    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
-      throw new Error(`Skill file not found: ${sourcePath}`);
-    }
-    fs.writeFileSync(sourcePath, String(skill.detail || ''), 'utf8');
-    count += 1;
-  }
-  return `Synced ${count} skill file(s).`;
 }
 
 function openSkillLocation(prompt) {
@@ -975,6 +938,67 @@ function parseOpenClawOutput(stdout) {
     return text;
   }
   return text;
+}
+
+// parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
+// 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
+//   { type, language, filename, title, url, content }
+function parseArtifacts(text) {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  const artifacts = [];
+  const documentLanguages = new Set(['markdown', 'md', 'txt', 'text', 'json', 'csv']);
+
+  // 1) 提取围栏代码块 ```lang\n...\n```
+  // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
+  const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let match;
+  while ((match = fenceRe.exec(text)) !== null) {
+    const language = (match[1] || '').trim().toLowerCase();
+    let content = match[2];
+    let filename = '';
+    // 识别首行文件名注释：// file: xxx 、# file: xxx 、<!-- file: xxx -->
+    const firstLine = content.split('\n', 1)[0] || '';
+    const fileHint = firstLine.match(/^\s*(?:\/\/|#|<!--)\s*file:\s*(.+?)\s*(?:-->)?\s*$/i);
+    if (fileHint) {
+      filename = fileHint[1].trim();
+      const nl = content.indexOf('\n');
+      // 只在确有换行时剥离首行提示，否则整块就是提示行本身（无正文）
+      content = nl === -1 ? '' : content.slice(nl + 1);
+    }
+    content = content.replace(/\s+$/, '');
+    if (!content) continue;
+
+    // language 为 html 时归类为 webpage（完整 HTML 文档），否则为 code
+    if (language === 'html' && /<\s*(?:html|!doctype|body|head|div)\b/i.test(content)) {
+      artifacts.push({ type: 'webpage', title: filename || 'HTML Preview', content });
+    } else if (documentLanguages.has(language)) {
+      artifacts.push({
+        type: 'document',
+        language: language || 'text',
+        filename,
+        title: filename || (language === 'json' ? 'JSON Document' : 'Document Preview'),
+        content,
+      });
+    } else {
+      artifacts.push({ type: 'code', language, filename, content });
+    }
+  }
+
+  // 2) 提取裸 http/https URL（在代码块外，简单去重）
+  // 先剔除围栏代码块，避免把代码里的 import/注释 URL 误当作网页产物
+  const textOutsideFences = text.replace(/```[^\n`]*\n[\s\S]*?```/g, ' ');
+  // 字符类排除空白、闭合括号/尖括号/引号，以及中文标点（。，、；）避免吞掉句末标点
+  const urlRe = /\bhttps?:\/\/[^\s)\]<>"'，。、；：！？]+/g;
+  const seen = new Set();
+  let urlMatch;
+  while ((urlMatch = urlRe.exec(textOutsideFences)) !== null) {
+    const url = urlMatch[0].replace(/[.,;:!?]+$/, ''); // 去掉句末 ASCII 标点
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    artifacts.push({ type: 'webpage', url, title: '' });
+  }
+
+  return artifacts;
 }
 
 function runProcess(command, args, stdin, sessionId) {
@@ -1282,7 +1306,7 @@ function processStartQueue() {
   }
 }
 
-function handleAgentStart(ws, payload) {
+async function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
@@ -1294,123 +1318,29 @@ function handleAgentStart(ws, payload) {
     return;
   }
 
-  const sessionId = crypto.randomUUID();
-  const command = resolveCommand(cli_tool);
-  const mcpArgs = buildPlatformMcpArgs();
-
-  const args = [
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--input-format', 'stream-json',
-    '--verbose',
-    ...mcpArgs,
-    '--session-id', sessionId,
-  ];
-  if (system_prompt) {
-    args.push('--system-prompt', system_prompt);
-  }
-
   try {
-    const spec = processSpec(command, args);
-    const child = spawn(spec.command, spec.args, {
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
+    const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false);
+    const { child, sessionId, sendPrompt } = result;
+
+    // Wait briefly to detect immediate startup failure (same pattern as dispatchToClaudeSlot)
+    await sleep(2000);
+    if (child.exitCode !== null) {
+      throw new Error(`Agent process exited immediately (code=${child.exitCode})`);
+    }
+
+    child.on('error', (err) => {
+      console.error(`Agent ${agent_id} process error: ${err.message}`);
     });
 
-    // Stdout line buffer for stream-json parsing
-    let stdoutBuf = '';
-    let resultResolver = null;
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdoutBuf += chunk;
-      const lines = stdoutBuf.split('\n');
-      stdoutBuf = lines.pop(); // keep incomplete last line
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'assistant') {
-            agentTurnStates.set(agent_id, 'active');
-          }
-          if (event.type === 'result') {
-            agentTurnStates.set(agent_id, 'idle');
-            // Turn complete — resolve pending promise
-            const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
-            if (event.is_error || event.subtype === 'error_during_execution') {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ error: text || 'Agent execution failed' });
-              }
-            } else {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ result: text || '' });
-              }
-            }
-          }
-        } catch { /* ignore non-JSON lines */ }
-      }
-    });
-
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      console.error(`[agent:${agent_id}:err] ${chunk.trim()}`);
-    });
-
+    // Handle process exit — cleanup and notify backend
     child.on('close', (code) => {
-      if (code === 0) {
-        console.log(`Agent ${agent_id} process exited normally (code=0), keeping idle config`);
-      } else {
-        console.log(`Agent ${agent_id} process exited with code ${code}, keeping idle config for auto-restart`);
-      }
-      // Reject any pending result promise
-      if (resultResolver) {
-        const r = resultResolver;
-        resultResolver = null;
-        r({ error: `Agent process exited (code=${code})` });
-      }
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
       agentTurnStates.delete(agent_id);
+      console.log(`Agent ${agent_id} process exited (code=${code})`);
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
-
-    // sendPrompt: write user message to stdin, return promise that resolves on result event
-    const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
-      const state = agentTurnStates.get(agent_id) || 'unknown';
-      console.log(`Agent ${agent_id} sending prompt (current state: ${state})`);
-      if (child.exitCode !== null) {
-        reject(new Error('Agent process not running'));
-        return;
-      }
-      resultResolver = resolve;
-      const msg = JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text: prompt }] },
-      });
-      child.stdin.write(msg + '\n');
-      // Timeout after 120s
-      setTimeout(() => {
-        if (resultResolver === resolve) {
-          resultResolver = null;
-          reject(new Error('Agent task timed out (120s)'));
-        }
-      }, 120000);
-    });
-
-    // Queue to serialize concurrent sendPrompt calls for the same agent.
-    // Each call chains onto the previous promise so only one is active at a time.
-    let queueTail = Promise.resolve();
-    const sendPrompt = (prompt) => {
-      const run = () => sendPromptRaw(prompt);
-      queueTail = queueTail.then(run, run);
-      return queueTail;
-    };
 
     runningAgents.set(agent_id, {
       process: child,
@@ -1546,11 +1476,12 @@ async function connectWS(serverURL, apiKey) {
             // Non-claude or missing info — use legacy per-task spawn
             result = await executeTask(task);
           }
+          const artifacts = parseArtifacts(result);
           safeSend(ws, JSON.stringify({
             type: 'task.complete',
-            data: { task_id: task.id, result },
+            data: { task_id: task.id, result, artifacts },
           }));
-          console.log(`AgentHub daemon task ${task.id} completed.`);
+          console.log(`AgentHub daemon task ${task.id} completed (${artifacts.length} artifact(s)).`);
         } catch (error) {
           safeSend(ws, JSON.stringify({
             type: 'task.complete',
@@ -1713,6 +1644,31 @@ const MCP_TOOLS = [
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+  },
+  {
+    name: 'list_group_agents',
+    description: '列出指定群聊中的智能体，包括名称(name)、角色(role: orchestrator/worker/robot)、状态(status: online/offline)、CLI工具(cli_tool)、能力描述(system_prompt)等信息。用于 orchestrator 了解群内 agent 的能力并合理分派任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '群聊会话 ID（默认为当前会话）' },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const convId = args.conversation_id || ctx.conversationId || '';
+      const res = await ctx.callApi('GET', `/api/conversations/${encodeURIComponent(convId)}/agents`);
+      if (!res || !Array.isArray(res.data)) return res;
+      // 只返回 orch 需要的关键字段
+      res.data = res.data.map(a => ({
+        name: a.name,
+        role: a.role,
+        status: a.status,
+        cli_tool: a.cli_tool,
+        description: a.system_prompt || '',
+      }));
+      return res;
+    },
   },
   // ── 任务管理（通过 /mcp/ 端点，daemon token 鉴权） ──
   {

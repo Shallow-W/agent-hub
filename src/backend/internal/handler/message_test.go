@@ -407,6 +407,10 @@ func (r *fakeMsgRepoForHandler) SearchByContent(_ context.Context, _, _ string, 
 
 func (r *fakeMsgRepoForHandler) SoftDelete(_ context.Context, _ string) error { return nil }
 
+func (r *fakeMsgRepoForHandler) SaveArtifacts(_ context.Context, _ string, _ []model.Artifact) error {
+	return nil
+}
+
 // fakeConvRepoForHandler satisfies service.ConvRepoForMsg
 type fakeConvRepoForHandler struct {
 	conv    *model.Conversation

@@ -60,9 +60,31 @@
 }
 
 .profileGlow {
+  position: relative;
   padding: 3px;
   border-radius: 18px;
   background: linear-gradient(135deg, rgba(22, 163, 101, 0.22), rgba(80, 152, 203, 0.18));
+  cursor: pointer;
+}
+
+.avatarOverlay {
+  position: absolute;
+  inset: 3px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0);
+  color: #fff;
+  font-size: 18px;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  pointer-events: none;
+}
+
+.profileGlow:hover .avatarOverlay {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .avatar {
@@ -273,6 +295,31 @@
   width: calc(100% - 36px);
   border-radius: 8px;
   font-weight: 600;
+}
+
+.usernameDisplayRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editBtn {
+  color: var(--color-text-tertiary) !important;
+  font-size: 13px !important;
+}
+
+.editBtn:hover {
+  color: var(--color-primary) !important;
+}
+
+.usernameEditRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.usernameInput {
+  max-width: 160px;
 }
 
 @media (max-width: 760px) {

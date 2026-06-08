@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "后端新增 deployment 的 model/repository/service/handler 分层，需遵循目录与命名约定"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "新增 deployments 表迁移 027，需遵循迁移与建表规范"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "deploy handler 错误码与统一响应需对齐 artifact handler 的错误处理范式"}
+{"file": ".trellis/spec/frontend/artifact-preview.md", "reason": "部署状态卡片与产物预览同属 artifact 体系，复用既有预览/卡片约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新增 DeployStatusCard 组件需遵循组件规范"}

@@ -11,7 +11,10 @@ import {
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import { useAuthStore } from '@/store/authStore';
+import { resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './SettingsPanel.module.css';
 
 type WsStatus = 'connected' | 'connecting' | 'disconnected';
@@ -57,6 +60,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   collapsed,
 }) => {
   const initial = username ? username.charAt(0).toUpperCase() : '?';
+  const user = useAuthStore((s) => s.user);
+  const avatarSrc = user ? resolveUserAvatar(user) : undefined;
 
   const handleNavClick = (key: string) => {
     onNavChange(key);
@@ -113,8 +118,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </Tooltip>
           <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>
         </div>
-        <Tooltip title={username || '个人头像'} placement="right">
-          <Avatar className={styles.footerAvatar} size={24}>{initial}</Avatar>
+        <Tooltip title="个人信息" placement="right">
+          <button
+            type="button"
+            className={styles.footerAvatarBtn}
+            onClick={() => handleNavClick('settings')}
+            aria-label="个人信息"
+          >
+            <Avatar
+              className={styles.footerAvatar}
+              size={24}
+              src={avatarSrc}
+              icon={<UserOutlined />}
+            >
+              {initial}
+            </Avatar>
+          </button>
         </Tooltip>
         <Tooltip title="调色板" placement="right">
           <button className={styles.footerIconBtn} type="button" aria-label="调色板">

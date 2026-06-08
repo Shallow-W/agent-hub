@@ -59,7 +59,7 @@ func (r *fakeDaemonAgentRepo) ClaimDaemonTask(_ context.Context, _ string) (*mod
 func (r *fakeDaemonAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
 	return true, nil
 }
-func (r *fakeDaemonAgentRepo) UpsertSystemAgent(_ context.Context, _, _, _, _ string) error {
+func (r *fakeDaemonAgentRepo) UpsertSystemAgent(_ context.Context, _, _, _, _, _ string) error {
 	return nil
 }
 func (r *fakeDaemonAgentRepo) CreateDaemonMachine(_ context.Context, _, _, _ string) (*model.DaemonMachine, error) {
@@ -86,7 +86,7 @@ func (r *fakeDaemonAgentRepo) UpsertMachineAgentCandidate(_ context.Context, _, 
 func (r *fakeDaemonAgentRepo) ListAgentCandidates(_ context.Context, _ string) ([]model.AgentCandidate, error) {
 	return nil, nil
 }
-func (r *fakeDaemonAgentRepo) AddCandidateAgent(_ context.Context, _, _, _, _ string) (*model.Agent, error) {
+func (r *fakeDaemonAgentRepo) AddCandidateAgent(_ context.Context, _, _, _, _, _ string) (*model.Agent, error) {
 	return nil, nil
 }
 func (r *fakeDaemonAgentRepo) CreateCustom(_ context.Context, _, _, _, _, _, _, _ string, _ bool) (*model.Agent, error) {
@@ -95,11 +95,20 @@ func (r *fakeDaemonAgentRepo) CreateCustom(_ context.Context, _, _, _, _, _, _, 
 func (r *fakeDaemonAgentRepo) UpdateCustom(_ context.Context, _, _, _, _, _, _, _, _ string, _ bool) (*model.Agent, error) {
 	return nil, nil
 }
+func (r *fakeDaemonAgentRepo) UpdateAvatar(_ context.Context, _, _, _ string) (*model.Agent, error) {
+	return nil, nil
+}
 func (r *fakeDaemonAgentRepo) UpdateAgentStatus(_ context.Context, id, status string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.statusCalls = append(r.statusCalls, agentStatusCall{AgentID: id, Status: status})
 	return nil
+}
+func (r *fakeDaemonAgentRepo) UpdateTags(_ context.Context, _, _ string) (*model.Agent, error) {
+	return nil, nil
+}
+func (r *fakeDaemonAgentRepo) UpdateCustomSkills(_ context.Context, _, _ string) (*model.Agent, error) {
+	return nil, nil
 }
 func (r *fakeDaemonAgentRepo) ClearAgentMachine(_ context.Context, _ string) error { return nil }
 func (r *fakeDaemonAgentRepo) MarkMachineAgentsStopped(_ context.Context, machineID string) error {
@@ -113,6 +122,9 @@ func (r *fakeDaemonAgentRepo) UpdateMachineAPIKey(_ context.Context, _, _ string
 }
 func (r *fakeDaemonAgentRepo) DeleteOwned(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
+}
+func (r *fakeDaemonAgentRepo) GetAgentsByMachine(_ context.Context, _ string) ([]model.Agent, error) {
+	return nil, nil
 }
 
 // helpers to read recorded calls
@@ -144,7 +156,7 @@ func newTestDaemonHandler(t *testing.T) (*DaemonHandler, *ws.DaemonHub, *fakeDae
 
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil) // nil tracker: not needed for these tests
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -153,7 +165,7 @@ func newTestDaemonHandler(t *testing.T) (*DaemonHandler, *ws.DaemonHub, *fakeDae
 
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 	return handler, daemonHub, fakeRepo
 }
 
@@ -355,7 +367,7 @@ func TestDaemonWS_TaskDispatch_DaemonReceivesAndResolves(t *testing.T) {
 func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -363,7 +375,7 @@ func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 
 	machineID := "machine-status-1"
 
@@ -467,7 +479,7 @@ func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -475,7 +487,7 @@ func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	_ = NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	_ = NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 
 	// Simulate a machine disconnect by calling MarkMachineOffline directly
 	// (this is what the handler does in its defer after readLoop returns)
@@ -501,7 +513,7 @@ func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -509,7 +521,7 @@ func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 
 	machineID := "machine-err-1"
 
@@ -582,7 +594,7 @@ func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -590,7 +602,7 @@ func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 
 	machineID := "machine-empty-1"
 
@@ -654,7 +666,7 @@ func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 func TestDaemonWS_Ping_RespondsPong(t *testing.T) {
 	fakeRepo := &fakeDaemonAgentRepo{}
 	agentSvc := service.NewAgentService(fakeRepo, nil)
-	agentSvc.SetJWTSecret("test-secret")
+	agentSvc.SetTokenIssuer(service.NewTokenIssuer("test-secret"))
 
 	daemonHub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
@@ -662,7 +674,7 @@ func TestDaemonWS_Ping_RespondsPong(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil)
 
 	machineID := "machine-ping-1"
 

@@ -34,6 +34,8 @@ type fakeOrchConvRepo struct {
 	convAgents []model.ConversationAgent
 	convErr    error
 	agentsErr  error
+	member     *model.ConversationMember
+	memberErr  error
 }
 
 func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversation, error) {
@@ -42,6 +44,14 @@ func (f *fakeOrchConvRepo) GetByID(_ context.Context, _ string) (*model.Conversa
 
 func (f *fakeOrchConvRepo) ListAgents(_ context.Context, _, _ string) ([]model.ConversationAgent, error) {
 	return f.convAgents, f.agentsErr
+}
+
+func (f *fakeOrchConvRepo) GetMember(_ context.Context, _, _ string) (*model.ConversationMember, error) {
+	return f.member, f.memberErr
+}
+
+func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string, error) {
+	return []string{}, nil
 }
 
 type fakeOrchAgentRepo struct {
@@ -66,6 +76,12 @@ func (f *fakeOrchAgentRepo) GetDaemonTask(_ context.Context, _ string) (*model.D
 
 func (f *fakeOrchAgentRepo) IsAgentInConversation(_ context.Context, _, _, _ string) (bool, error) {
 	return f.inConv, nil
+}
+
+func (f *fakeOrchAgentRepo) SetDaemonTaskOrch(_ context.Context, _, _, _ string) {}
+
+func (f *fakeOrchAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
+	return true, nil
 }
 
 // --- RouteMention tests ---

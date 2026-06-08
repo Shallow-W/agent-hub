@@ -96,11 +96,13 @@ func TestDaemonTask_ClaimEmptyAndGuards(t *testing.T) {
 	if c, _ := r.ClaimDaemonTask(ctx, "none"); c != nil {
 		t.Fatalf("claim empty should be nil")
 	}
-	created, _ := r.CreateDaemonTask(ctx, "u", "", "a", "m1", "claude", "x", "")
-	// 未领取(pending)时 complete 应失败
-	if ok, _ := r.CompleteDaemonTask(ctx, created.ID, "m1", "r", ""); ok {
-		t.Fatalf("complete on pending should fail")
+	// WS-dispatched tasks can complete directly from pending status
+	wsTask, _ := r.CreateDaemonTask(ctx, "u", "", "a", "m1", "claude", "x", "")
+	if ok, _ := r.CompleteDaemonTask(ctx, wsTask.ID, "m1", "r", ""); !ok {
+		t.Fatalf("complete on pending should succeed for WS-dispatched tasks")
 	}
+	// Polling path: claim then complete
+	created, _ := r.CreateDaemonTask(ctx, "u", "", "a", "m1", "claude", "x", "")
 	_, _ = r.ClaimDaemonTask(ctx, "m1")
 	// 机器不匹配应失败
 	if ok, _ := r.CompleteDaemonTask(ctx, created.ID, "wrong", "r", ""); ok {

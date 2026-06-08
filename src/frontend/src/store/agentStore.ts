@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentCandidate,
   AgentRequest,
+  AgentStatus,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
@@ -15,19 +16,26 @@ interface AgentState {
   loading: boolean;
   machineLoading: boolean;
   error: string | null;
-  fetchAgents: () => Promise<void>;
-  fetchDaemonMachines: () => Promise<void>;
+  agentsLoaded: boolean;
+  machinesLoaded: boolean;
+  candidatesLoaded: boolean;
+  fetchAgents: (force?: boolean) => Promise<void>;
+  fetchDaemonMachines: (force?: boolean) => Promise<void>;
   deleteDaemonMachine: (id: string) => Promise<void>;
-  fetchAgentCandidates: () => Promise<void>;
+  fetchAgentCandidates: (force?: boolean) => Promise<void>;
   createDaemonMachine: (name: string) => Promise<CreateDaemonMachineResponse>;
-  addAgentCandidate: (id: string, name: string, systemPrompt?: string) => Promise<Agent>;
+  addAgentCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
+  updateAgentAvatar: (id: string, avatar: string) => Promise<Agent>;
   openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
   startAgent: (id: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   restartAgent: (id: string) => Promise<void>;
+  updateAgentTags: (id: string, tags: string) => Promise<void>;
+  updateCustomSkills: (id: string, customSkills: string) => Promise<void>;
+  updateAgentStatus: (agentId: string, status: AgentStatus) => void;
 }
 
 function sortAgents(list: Agent[]): Agent[] {
@@ -45,12 +53,17 @@ export const useAgentStore = create<AgentState>((set) => ({
   loading: false,
   machineLoading: false,
   error: null,
+  agentsLoaded: false,
+  machinesLoaded: false,
+  candidatesLoaded: false,
 
-  fetchAgents: async () => {
+  fetchAgents: async (force) => {
+    const state = useAgentStore.getState();
+    if (!force && state.agentsLoaded) return;
     set({ loading: true, error: null });
     try {
       const agents = await agentApi.getAgents();
-      set({ agents: sortAgents(agents) });
+      set({ agents: sortAgents(agents), agentsLoaded: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : '查询 Agent 失败';
       set({ error: message });
@@ -60,11 +73,13 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   },
 
-  fetchDaemonMachines: async () => {
+  fetchDaemonMachines: async (force) => {
+    const state = useAgentStore.getState();
+    if (!force && state.machinesLoaded) return;
     set({ machineLoading: true, error: null });
     try {
       const machines = await agentApi.getDaemonMachines();
-      set({ machines });
+      set({ machines, machinesLoaded: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : '查询电脑连接失败';
       set({ error: message });
@@ -89,11 +104,13 @@ export const useAgentStore = create<AgentState>((set) => ({
     }));
   },
 
-  fetchAgentCandidates: async () => {
+  fetchAgentCandidates: async (force) => {
+    const state = useAgentStore.getState();
+    if (!force && state.candidatesLoaded) return;
     set({ machineLoading: true, error: null });
     try {
       const candidates = await agentApi.getAgentCandidates();
-      set({ candidates });
+      set({ candidates, candidatesLoaded: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : '查询候选 Agent 失败';
       set({ error: message });
@@ -103,8 +120,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   },
 
-  addAgentCandidate: async (id, name, systemPrompt) => {
-    const payload = systemPrompt ? { name, system_prompt: systemPrompt } : { name };
+  addAgentCandidate: async (id, name, cliTool, systemPrompt) => {
+    const payload = systemPrompt ? { name, cli_tool: cliTool, system_prompt: systemPrompt } : { name, cli_tool: cliTool };
     const agent = await agentApi.addAgentCandidate(id, payload);
     set((state) => ({
       agents: sortAgents([...state.agents.filter((item) => item.id !== agent.id), agent]),
@@ -120,6 +137,16 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   updateAgent: async (id, body) => {
     const agent = await agentApi.updateAgent(id, body);
+    set((state) => ({
+      agents: sortAgents(state.agents.map((item) => (
+        item.id === id ? agent : item
+      ))),
+    }));
+    return agent;
+  },
+
+  updateAgentAvatar: async (id, avatar) => {
+    const agent = await agentApi.updateAgentAvatar(id, avatar);
     set((state) => ({
       agents: sortAgents(state.agents.map((item) => (
         item.id === id ? agent : item
@@ -155,5 +182,31 @@ export const useAgentStore = create<AgentState>((set) => ({
     await agentApi.restartAgent(id);
     const agents = await agentApi.getAgents();
     set({ agents: sortAgents(agents) });
+  },
+
+  updateAgentStatus: (agentId, status) => {
+    set((state) => ({
+      agents: sortAgents(
+        state.agents.map((a): Agent => (a.id === agentId ? { ...a, status } : a)),
+      ),
+    }));
+  },
+
+  updateAgentTags: async (id, tags) => {
+    const agent = await agentApi.updateAgentTags(id, tags);
+    set((state) => ({
+      agents: sortAgents(state.agents.map((item) => (
+        item.id === id ? agent : item
+      ))),
+    }));
+  },
+
+  updateCustomSkills: async (id, customSkills) => {
+    const agent = await agentApi.updateCustomSkills(id, customSkills);
+    set((state) => ({
+      agents: sortAgents(state.agents.map((item) => (
+        item.id === id ? agent : item
+      ))),
+    }));
   },
 }));

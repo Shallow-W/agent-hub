@@ -3,6 +3,18 @@ import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
 const agentTypingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+type TaskChangedListener = (conversationId: string) => void;
+const taskChangedListeners = new Set<TaskChangedListener>();
+
+export function onTaskChanged(fn: TaskChangedListener): () => void {
+  taskChangedListeners.add(fn);
+  return () => { taskChangedListeners.delete(fn); };
+}
+
+export function notifyTaskChanged(conversationId: string): void {
+  taskChangedListeners.forEach((fn) => fn(conversationId));
+}
+
 export interface TypingUser {
   userId: string;
   username?: string;

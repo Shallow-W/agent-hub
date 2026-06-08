@@ -16,11 +16,8 @@ func TestBuildOrchestratorPrompt_Normal(t *testing.T) {
 	if result == "" {
 		t.Fatal("expected non-empty prompt")
 	}
-	// 包含系统角色定义
-	if !strings.Contains(result, "任务协调者") {
-		t.Error("prompt missing orchestrator role definition")
-	}
-	// 包含群聊名称
+	// OrchestratorSystemPrompt is now injected via context_messages as system prompt,
+	// not included in the user prompt. Only check group context is present.
 	if !strings.Contains(result, "项目讨论组") {
 		t.Error("prompt missing conversation title")
 	}

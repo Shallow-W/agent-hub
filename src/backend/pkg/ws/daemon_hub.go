@@ -16,9 +16,21 @@ const daemonSendBuf = 64
 
 // TaskResult daemon 任务执行结果
 type TaskResult struct {
-	TaskID string `json:"task_id"`
-	Result string `json:"result"`
-	Error  string `json:"error"`
+	TaskID    string           `json:"task_id"`
+	Result    string           `json:"result"`
+	Error     string           `json:"error"`
+	Artifacts []ArtifactResult `json:"artifacts,omitempty"`
+}
+
+// ArtifactResult daemon 解析出的结构化产物（随 task.complete 上行）。
+// 字段名必须与 backend model.Artifact 的 json tag 及前端 TS 类型对齐。
+type ArtifactResult struct {
+	Type     string `json:"type"` // code | webpage
+	Language string `json:"language,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Title    string `json:"title,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Content  string `json:"content,omitempty"`
 }
 
 // DaemonClient 封装单个 daemon WebSocket 连接
@@ -280,9 +292,9 @@ func (dh *DaemonHub) AwaitTaskResult(taskID string) chan *TaskResult {
 	return val.(chan *TaskResult)
 }
 
-// ResolveTask 发送结果到 promise channel 并清理
+// ResolveTask 发送结果到 promise channel；清理由等待方 RemoveTaskPromise 完成。
 func (dh *DaemonHub) ResolveTask(taskID string, result *TaskResult) {
-	val, ok := dh.resultChans.LoadAndDelete(taskID)
+	val, ok := dh.resultChans.Load(taskID)
 	if !ok {
 		return
 	}
@@ -303,6 +315,19 @@ func (dh *DaemonHub) RemoveTaskPromise(taskID string) {
 // For use in tests only — bypasses the bus and avoids needing a real WebSocket.
 func (dh *DaemonHub) RegisterTestClient(machineID string, client *DaemonClient) {
 	dh.clients.Store(machineID, client)
+}
+
+// UpdateMachineID 更新 daemon 客户端的 machineID 标识（全局 token 连接时，收到
+// daemon.register 后才知道真实 machineID，需要更新 DaemonHub 注册）。
+func (dh *DaemonHub) UpdateMachineID(client *DaemonClient, newMachineID string) {
+	oldID := client.MachineID
+	if oldID == newMachineID {
+		return
+	}
+	dh.clients.Delete(oldID)
+	client.MachineID = newMachineID
+	dh.clients.Store(newMachineID, client)
+	dh.logger.Info("daemon machine_id updated", "old", oldID, "new", newMachineID)
 }
 
 // Shutdown 外部调用关闭 DaemonHub（委托给内部 shutdown，sync.Once 保证幂等）

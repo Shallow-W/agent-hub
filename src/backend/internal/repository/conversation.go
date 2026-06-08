@@ -40,7 +40,7 @@ func (r *ConversationRepo) Create(ctx context.Context, userID, convType, title s
 func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.avatar, c.pinned, c.archived_at, c.created_at, c.updated_at,
 			        COALESCE(peer_cm.user_id::text, agent_a.id::text, '') AS peer_id,
 				        COALESCE(agent_a.name, peer_u.username, creator_u.username, '') AS peer_name,
 			        COALESCE(latest_msg.content, '') AS last_message,
@@ -59,11 +59,12 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE c.archived_at IS NULL
-			   AND (c.user_id = $1
-			        OR EXISTS (SELECT 1 FROM conversation_members cm
-			                   WHERE cm.conversation_id = c.id AND cm.user_id = $1))
-			 ORDER BY c.updated_at DESC LIMIT $2 OFFSET $3`,
+			 WHERE (c.type = 'agent' AND c.archived_at IS NULL)
+			    OR (c.type != 'agent' AND c.archived_at IS NULL
+			        AND EXISTS (SELECT 1 FROM conversation_members cm
+			                    WHERE cm.conversation_id = c.id AND cm.user_id = $1
+			                      AND cm.archived_at IS NULL))
+			 ORDER BY c.pinned DESC, c.updated_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
 	if err != nil {
@@ -102,7 +103,7 @@ func (r *ConversationRepo) Delete(ctx context.Context, id string) error {
 // UpdatePinned 更新对话置顶状态
 func (r *ConversationRepo) UpdatePinned(ctx context.Context, id string, pinned bool) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE conversations SET pinned = $1 WHERE id = $2`,
+		`UPDATE conversations SET pinned = $1, updated_at = NOW() WHERE id = $2`,
 		pinned, id,
 	)
 	if err != nil {
@@ -135,10 +136,10 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, id, title string) er
 	return nil
 }
 
-// Archive 设置 archived_at 为当前时间（软删除）
+// Archive 设置 archived_at 为当前时间并清除 pinned（软删除）
 func (r *ConversationRepo) Archive(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE conversations SET archived_at = NOW() WHERE id = $1`,
+		`UPDATE conversations SET archived_at = NOW(), pinned = false WHERE id = $1`,
 		id,
 	)
 	if err != nil {
@@ -159,11 +160,35 @@ func (r *ConversationRepo) Unarchive(ctx context.Context, id string) error {
 	return nil
 }
 
+// ArchiveForMember 按成员归档：在 conversation_members 上设置 archived_at
+func (r *ConversationRepo) ArchiveForMember(ctx context.Context, conversationID, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_members SET archived_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+		conversationID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("archive member conversation: %w", err)
+	}
+	return nil
+}
+
+// UnarchiveForMember 按成员取消归档
+func (r *ConversationRepo) UnarchiveForMember(ctx context.Context, conversationID, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_members SET archived_at = NULL WHERE conversation_id = $1 AND user_id = $2`,
+		conversationID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("unarchive member conversation: %w", err)
+	}
+	return nil
+}
+
 // ListArchivedByUserID 分页查询用户已归档的对话列表，按 archived_at 降序
 func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID string, limit, offset int) ([]model.Conversation, error) {
 	var list []model.Conversation
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.avatar, c.pinned, c.archived_at, c.created_at, c.updated_at,
 			        COALESCE(peer_cm.user_id::text, agent_a.id::text, '') AS peer_id,
 			        COALESCE(agent_a.name, peer_u.username, creator_u.username, '') AS peer_name,
 			        COALESCE(latest_msg.content, '') AS last_message,
@@ -182,10 +207,11 @@ func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID stri
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE c.archived_at IS NOT NULL
-			   AND (c.user_id = $1
-			        OR EXISTS (SELECT 1 FROM conversation_members cm
-			                   WHERE cm.conversation_id = c.id AND cm.user_id = $1))
+			 WHERE (c.type = 'agent' AND c.archived_at IS NOT NULL AND c.user_id = $1)
+			    OR (c.type != 'agent' AND
+			        EXISTS (SELECT 1 FROM conversation_members cm
+			                WHERE cm.conversation_id = c.id AND cm.user_id = $1
+			                  AND cm.archived_at IS NOT NULL))
 			 ORDER BY c.archived_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
@@ -201,7 +227,7 @@ func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userI
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
 			        a.name, a.type, a.cli_tool, a.avatar, a.source, a.status, a.version,
-			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json
+			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json, a.system_prompt
 			 FROM conversation_agents ca
 			 JOIN conversations c ON c.id = ca.conversation_id
 			 JOIN agents a ON a.id = ca.agent_id
@@ -282,7 +308,7 @@ func (r *ConversationRepo) AddMember(ctx context.Context, conversationID, userID
 func (r *ConversationRepo) FindPrivateChat(ctx context.Context, userID, friendID string) (*model.Conversation, error) {
 	var c model.Conversation
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+		`SELECT c.id, c.user_id, c.type, COALESCE(c.title, '') AS title, c.avatar, c.pinned, c.archived_at, c.created_at, c.updated_at,
 			 ''::text AS peer_name, ''::text AS last_message
 			 FROM conversations c
 			 INNER JOIN conversation_members cm ON cm.conversation_id = c.id
