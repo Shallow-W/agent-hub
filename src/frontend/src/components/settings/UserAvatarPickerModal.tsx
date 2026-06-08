@@ -12,9 +12,11 @@ import styles from '@/components/agent/AvatarPickerModal.module.css';
 interface UserAvatarPickerModalProps {
   open: boolean;
   onClose: () => void;
+  /** Custom save handler. When provided, the modal calls this instead of useAuthStore.updateAvatar. */
+  onSelect?: (key: string) => Promise<void>;
 }
 
-export const UserAvatarPickerModal: React.FC<UserAvatarPickerModalProps> = ({ open, onClose }) => {
+export const UserAvatarPickerModal: React.FC<UserAvatarPickerModalProps> = ({ open, onClose, onSelect }) => {
   const user = useAuthStore((s) => s.user);
   const updateAvatar = useAuthStore((s) => s.updateAvatar);
   const [saving, setSaving] = useState(false);
@@ -25,8 +27,13 @@ export const UserAvatarPickerModal: React.FC<UserAvatarPickerModalProps> = ({ op
     if (saving) return;
     setSaving(true);
     try {
-      await updateAvatar(key);
-      message.success('头像已更新');
+      if (onSelect) {
+        await onSelect(key);
+        message.success('头像已更新');
+      } else {
+        await updateAvatar(key);
+        message.success('头像已更新');
+      }
       onClose();
     } catch {
       message.error('更新头像失败');

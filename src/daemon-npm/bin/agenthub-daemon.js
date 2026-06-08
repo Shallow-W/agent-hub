@@ -1349,7 +1349,7 @@ function processStartQueue() {
   }
 }
 
-function handleAgentStart(ws, payload) {
+async function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
@@ -1361,123 +1361,29 @@ function handleAgentStart(ws, payload) {
     return;
   }
 
-  const sessionId = crypto.randomUUID();
-  const command = resolveCommand(cli_tool);
-  const mcpArgs = buildPlatformMcpArgs();
-
-  const args = [
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--input-format', 'stream-json',
-    '--verbose',
-    ...mcpArgs,
-    '--session-id', sessionId,
-  ];
-  if (system_prompt) {
-    args.push('--system-prompt', system_prompt);
-  }
-
   try {
-    const spec = processSpec(command, args);
-    const child = spawn(spec.command, spec.args, {
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
+    const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false);
+    const { child, sessionId, sendPrompt } = result;
+
+    // Wait briefly to detect immediate startup failure (same pattern as dispatchToClaudeSlot)
+    await sleep(2000);
+    if (child.exitCode !== null) {
+      throw new Error(`Agent process exited immediately (code=${child.exitCode})`);
+    }
+
+    child.on('error', (err) => {
+      console.error(`Agent ${agent_id} process error: ${err.message}`);
     });
 
-    // Stdout line buffer for stream-json parsing
-    let stdoutBuf = '';
-    let resultResolver = null;
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdoutBuf += chunk;
-      const lines = stdoutBuf.split('\n');
-      stdoutBuf = lines.pop(); // keep incomplete last line
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'assistant') {
-            agentTurnStates.set(agent_id, 'active');
-          }
-          if (event.type === 'result') {
-            agentTurnStates.set(agent_id, 'idle');
-            // Turn complete — resolve pending promise
-            const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
-            if (event.is_error || event.subtype === 'error_during_execution') {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ error: text || 'Agent execution failed' });
-              }
-            } else {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ result: text || '' });
-              }
-            }
-          }
-        } catch { /* ignore non-JSON lines */ }
-      }
-    });
-
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      console.error(`[agent:${agent_id}:err] ${chunk.trim()}`);
-    });
-
+    // Handle process exit — cleanup and notify backend
     child.on('close', (code) => {
-      if (code === 0) {
-        console.log(`Agent ${agent_id} process exited normally (code=0), keeping idle config`);
-      } else {
-        console.log(`Agent ${agent_id} process exited with code ${code}, keeping idle config for auto-restart`);
-      }
-      // Reject any pending result promise
-      if (resultResolver) {
-        const r = resultResolver;
-        resultResolver = null;
-        r({ error: `Agent process exited (code=${code})` });
-      }
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
       agentTurnStates.delete(agent_id);
+      console.log(`Agent ${agent_id} process exited (code=${code})`);
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
-
-    // sendPrompt: write user message to stdin, return promise that resolves on result event
-    const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
-      const state = agentTurnStates.get(agent_id) || 'unknown';
-      console.log(`Agent ${agent_id} sending prompt (current state: ${state})`);
-      if (child.exitCode !== null) {
-        reject(new Error('Agent process not running'));
-        return;
-      }
-      resultResolver = resolve;
-      const msg = JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text: prompt }] },
-      });
-      child.stdin.write(msg + '\n');
-      // Timeout after 120s
-      setTimeout(() => {
-        if (resultResolver === resolve) {
-          resultResolver = null;
-          reject(new Error('Agent task timed out (120s)'));
-        }
-      }, 120000);
-    });
-
-    // Queue to serialize concurrent sendPrompt calls for the same agent.
-    // Each call chains onto the previous promise so only one is active at a time.
-    let queueTail = Promise.resolve();
-    const sendPrompt = (prompt) => {
-      const run = () => sendPromptRaw(prompt);
-      queueTail = queueTail.then(run, run);
-      return queueTail;
-    };
 
     runningAgents.set(agent_id, {
       process: child,

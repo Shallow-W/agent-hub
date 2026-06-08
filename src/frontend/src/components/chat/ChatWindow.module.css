@@ -56,7 +56,7 @@
 
 .conversationAvatar {
   flex-shrink: 0;
-  background: var(--gradient-agent) !important;
+  background: var(--gradient-agent);
   color: var(--color-bg-white);
   font-size: 12px;
   font-weight: 700;

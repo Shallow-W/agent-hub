@@ -16,6 +16,7 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
   updateAvatar: (avatar: string) => Promise<void>;
+  updateUsername: (username: string) => Promise<void>;
   logout: () => void;
   loadFromStorage: () => void;
 }
@@ -70,6 +71,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = await userApi.updateUserAvatar(avatar);
     const current = get().user;
     // 合并：以服务端返回为准，兜底保留本地已有字段。
+    const next: User = { ...(current ?? {} as User), ...updated };
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    set({ user: next });
+  },
+
+  updateUsername: async (username: string) => {
+    const updated = await userApi.updateUsername(username);
+    const current = get().user;
     const next: User = { ...(current ?? {} as User), ...updated };
     localStorage.setItem(USER_KEY, JSON.stringify(next));
     set({ user: next });

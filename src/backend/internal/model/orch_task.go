@@ -8,8 +8,11 @@ const (
 	OrchTaskDispatching   = "dispatching"
 	OrchTaskWorkersRunning = "workers_running"
 	OrchTaskSummarizing   = "summarizing"
+	OrchTaskEvaluating    = "evaluating"
 	OrchTaskCompleted     = "completed"
 	OrchTaskFailed        = "failed"
+
+	MaxOrchRounds = 5
 )
 
 // OrchTask 表示一次编排任务的完整生命周期。
@@ -25,6 +28,8 @@ type OrchTask struct {
 	Summary         string     `json:"summary,omitempty" db:"summary"`
 	OriginalMessage string     `json:"original_message,omitempty" db:"original_message"`
 	KBPreload       string     `json:"kb_preload,omitempty" db:"kb_preload"`
+	Round           int        `json:"round" db:"round"`
+	RoundHistory    string     `json:"round_history,omitempty" db:"round_history"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }

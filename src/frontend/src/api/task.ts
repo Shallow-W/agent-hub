@@ -1,6 +1,7 @@
 import { del, get, post, put } from './client';
 import type {
   CreateTaskPayload,
+  OrchTaskCard,
   TaskQuery,
   TaskStatus,
   UpdateTaskPayload,
@@ -22,6 +23,11 @@ function buildTaskQuery(query?: TaskQuery): string {
 export async function getTasks(query?: TaskQuery): Promise<WorkspaceTask[]> {
   const tasks = await get<WorkspaceTask[] | null>(`/api/tasks${buildTaskQuery(query)}`);
   return tasks ?? [];
+}
+
+export async function getOrchTaskCards(conversationId: string): Promise<OrchTaskCard[]> {
+  const cards = await get<OrchTaskCard[] | null>(`/api/tasks/orch-cards?conversation_id=${encodeURIComponent(conversationId)}`);
+  return cards ?? [];
 }
 
 export async function createTask(payload: CreateTaskPayload): Promise<WorkspaceTask> {

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAgentStore } from '@/store/agentStore';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import type { Conversation } from '@/types/conversation';
 import type { Friend } from '@/types/friend';
 import type { Agent } from '@/types/agent';
@@ -123,7 +124,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
         <List.Item.Meta
           avatar={
             <Badge dot color="green">
-              <Avatar className={styles.friendAvatar} size={28} icon={<UserOutlined />}>
+              <Avatar className={styles.friendAvatar} size={28} src={resolveUserAvatar({ id: friend.friend_id, username: friendName })}>
                 {friendName.charAt(0).toUpperCase()}
               </Avatar>
             </Badge>
@@ -138,26 +139,28 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.searchBar}>
-        <Input.Search
+        <Input
           prefix={<SearchOutlined />}
           placeholder="搜索好友或群聊..."
           allowClear
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          className={styles.searchInput}
         />
       </div>
 
-      <div className={styles.section}>
-        <div className={styles.managerCard}>
-          <div className={styles.managerCopy}>
-            <span className={styles.managerTitle}>好友申请</span>
-            <span className={styles.managerHint}>{friends.length} 位好友 · {groupConvs.length} 个群聊</span>
+      <div className={styles.scrollContent}>
+        <div className={styles.section}>
+          <div className={styles.managerCard}>
+            <div className={styles.managerCopy}>
+              <span className={styles.managerTitle}>好友申请</span>
+              <span className={styles.managerHint}>{friends.length} 位好友 · {groupConvs.length} 个群聊</span>
+            </div>
+            <FriendRequest />
           </div>
-          <FriendRequest />
         </div>
-      </div>
 
-      <Tabs
+        <Tabs
         className={styles.tabs}
         size="small"
         items={[
@@ -205,9 +208,13 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
                       >
                         <List.Item.Meta
                           avatar={
-                              <Avatar className={styles.friendAvatar} size={28}>
-                              <TeamOutlined />
-                            </Avatar>
+                              <Avatar
+                                className={styles.friendAvatar}
+                                size={28}
+                                style={conv.avatar ? { background: 'transparent', borderRadius: '50%' } : undefined}
+                                src={conv.avatar ? (/^(https?:|data:|\/)/i.test(conv.avatar) ? conv.avatar : avatarUrl(conv.avatar)) : undefined}
+                                icon={!conv.avatar ? <TeamOutlined /> : undefined}
+                              />
                           }
                           title={<span className={styles.contactName}>{conv.title}</span>}
                           description={<span className={styles.contactMeta}>群聊</span>}
@@ -234,9 +241,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
                       <List.Item className={styles.contactItem} onClick={() => onStartAgentChat(agent)}>
                         <List.Item.Meta
                           avatar={
-                            <Avatar className={styles.agentAvatar} size={28}>
-                              <RobotOutlined />
-                            </Avatar>
+                            <Avatar className={styles.agentAvatar} size={28} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} />
                           }
                           title={<span className={styles.contactName}>{agent.name}</span>}
                           description={<span className={styles.contactMeta}>{agent.cli_tool}</span>}
@@ -250,6 +255,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
           },
         ]}
       />
+      </div>
     </div>
   );
 };

@@ -11,6 +11,8 @@ export interface Agent {
   tools_config?: string;
   avatar?: string;
   capabilities_json?: string;
+  custom_skills?: string;
+  tags?: string;
   source: string;
   status: AgentStatus;
   version?: string;

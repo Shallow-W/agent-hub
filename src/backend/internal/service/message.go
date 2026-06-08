@@ -622,6 +622,9 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if agent.MachineID == nil || *agent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
+	if agent.Status == "stopped" {
+		return nil, fmt.Errorf("agent %q 已被用户停止", agent.Name)
+	}
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {

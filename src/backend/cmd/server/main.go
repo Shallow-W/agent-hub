@@ -134,7 +134,9 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
+	orchCardRepo := repository.NewOrchTaskCardRepo(db)
 	taskSvc := service.NewTaskService(taskRepo)
+	taskSvc.SetOrchCardRepo(orchCardRepo)
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
 	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
@@ -161,15 +163,17 @@ func main() {
 		logger.Info("redis connected")
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
+	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
-	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
-	orchSvc.SetJWTSecret(cfg.JWT.Secret)
+	orchSvc.SetTokenIssuer(tokenIssuer)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
+	orchSvc.SetTaskSvc(taskSvc)
 	// 服务端抽取消息附件文本时需要定位上传文件。
 	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
@@ -198,9 +202,9 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
-	agentHandler := handler.NewAgentHandler(agentSvc)
+	agentHandler := handler.NewAgentHandler(agentSvc, hub)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
 	deploymentHandler := handler.NewDeploymentHandler(deploymentSvc)
@@ -315,6 +319,8 @@ func main() {
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
+		apiGroup.PUT("/agents/:id/tags", agentHandler.UpdateTags)
+		apiGroup.PUT("/agents/:id/custom-skills", agentHandler.UpdateCustomSkills)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
@@ -335,6 +341,7 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+			taskRoutes.GET("/orch-cards", taskHandler.ListOrchCards)
 		}
 
 		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
@@ -376,6 +383,7 @@ func main() {
 	{
 		groupRoutes.POST("", groupHandler.CreateGroup)
 		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)
+		groupRoutes.PUT("/:id", groupHandler.UpdateGroupInfo)
 		groupRoutes.POST("/:id/members", groupHandler.AddMember)
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
@@ -393,11 +401,11 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
-	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
-	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
-	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+	router.POST("/daemon/register", daemonHandler.WithMachine(daemonHandler.RegisterHTTP))
+	router.GET("/daemon/agent-token", daemonHandler.WithMachine(daemonHandler.IssueAgentToken))
+	router.GET("/daemon/tasks", daemonHandler.WithMachine(daemonHandler.ClaimTask))
+	router.POST("/daemon/tasks/:id/complete", daemonHandler.WithMachine(daemonHandler.CompleteTask))
+	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.WithMachine(daemonHandler.Heartbeat))
 
 	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
 	mcpGroup := router.Group("/mcp")

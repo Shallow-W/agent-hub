@@ -4,6 +4,7 @@ import {
   FolderOpenOutlined,
   LogoutOutlined,
   MoreOutlined,
+  RobotOutlined,
   SearchOutlined,
   SettingOutlined,
   StopOutlined,
@@ -30,6 +31,8 @@ import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
+import { useAgentStore } from '@/store/agentStore';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
@@ -40,6 +43,7 @@ const EMPTY_TYPING: { userId: string; username?: string }[] = [];
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
   const user = useAuthStore((s) => s.user);
+  const agents = useAgentStore((s) => s.agents);
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const activeConv = conversations.find((c) => c.id === activeId);
   const memberPanelOpen = useConversationStore((s) => s.memberPanelOpen);
@@ -250,6 +254,7 @@ export const ChatWindow: React.FC = () => {
   if (!activeConv) return null;
 
   const isGroup = activeConv.type === 'group';
+  const isAgent = activeConv.type === 'agent';
   const displayName = isGroup
     ? activeConv.title
     : (activeConv.peer_name || activeConv.title);
@@ -366,9 +371,34 @@ export const ChatWindow: React.FC = () => {
               }
             }}
           >
-            <Avatar className={styles.conversationAvatar} size={26}>
-              {avatarText}
-            </Avatar>
+            {isAgent ? (
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                src={resolveAgentAvatar(
+                  agents.find((a) => a.id === activeConv.peer_id)
+                    || { id: activeConv.peer_id || '', name: displayName },
+                )}
+                icon={<RobotOutlined />}
+              />
+            ) : isGroup ? (
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                style={activeConv.avatar ? { background: 'transparent', borderRadius: '50%' } : undefined}
+                src={activeConv.avatar ? (/^(https?:|data:|\/)/i.test(activeConv.avatar) ? activeConv.avatar : avatarUrl(activeConv.avatar)) : undefined}
+              >
+                {!activeConv.avatar ? avatarText : null}
+              </Avatar>
+            ) : (
+              <Avatar
+                className={styles.conversationAvatar}
+                size={26}
+                src={resolveUserAvatar({ id: activeConv.peer_id, username: displayName })}
+              >
+                {avatarText}
+              </Avatar>
+            )}
             <h1 className={styles.title}>
               {displayName}
             </h1>
@@ -468,6 +498,7 @@ export const ChatWindow: React.FC = () => {
           open={groupInfoOpen}
           onClose={() => setGroupInfoOpen(false)}
           conversationId={activeId}
+          currentUserId={user?.id ?? ''}
         />
       )}
       <ForwardModal

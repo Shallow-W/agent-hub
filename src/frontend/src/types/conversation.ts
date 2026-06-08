@@ -12,6 +12,7 @@ export interface Conversation {
   peer_name?: string;
   last_message?: string;
   member_count?: number;
+  avatar?: string;
   archived_at?: string | null;
 }
 

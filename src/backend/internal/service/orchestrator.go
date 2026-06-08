@@ -13,7 +13,6 @@ import (
 	"github.com/agent-hub/backend/internal/docextract"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // OrchConvRepo queries conversation agents for @mention resolution.
@@ -41,7 +40,8 @@ type OrchTaskStore interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
 	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
-	SetSummary(ctx context.Context, id, summary string) error
+	SetSummaryAndEvaluate(ctx context.Context, id, summary string) error
+	IncrementRound(ctx context.Context, id string) error
 }
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
@@ -82,27 +82,24 @@ type OrchestratorService struct {
 	msgRepo     MsgRepo
 	orchTaskRepo OrchTaskStore
 
-	jwtSecret string
-	serverURL string
-	uploadDir string // 上传文件落盘根目录，用于服务端抽取附件文本
+	tokenIssuer *TokenIssuer
+	serverURL   string
+	uploadDir   string // 上传文件落盘根目录，用于服务端抽取附件文本
 
 	kbResolver   OrchKBResolver
 	daemonHub    *ws.DaemonHub
 	artifactRepo OrchArtifactRepo
 	notifier     MessageNotifier
 	cacher       OrchMessageCacher
-
-	// 编排并发保护：同一对话同时只允许一个编排流程
-	mu          sync.Mutex
-	activeOrchs map[string]struct{} // convID →活跃编排
+	taskSvc      TaskBoardSync
 
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
 	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }
 
-// SetJWTSecret sets the JWT secret for generating management tool tokens.
-func (s *OrchestratorService) SetJWTSecret(secret string) {
-	s.jwtSecret = secret
+// SetTokenIssuer sets the token issuer for generating management tool tokens.
+func (s *OrchestratorService) SetTokenIssuer(ti *TokenIssuer) {
+	s.tokenIssuer = ti
 }
 
 // SetUploadDir 注入上传文件根目录，用于服务端抽取附件文本。
@@ -170,6 +167,11 @@ func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
 // SetCacher injects the message cacher for persisting async messages to Redis.
 func (s *OrchestratorService) SetCacher(c OrchMessageCacher) {
 	s.cacher = c
+}
+
+// SetTaskSvc injects the task board sync service.
+func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
+	s.taskSvc = svc
 }
 
 // NewOrchestratorService creates a new orchestrator service.
@@ -309,12 +311,8 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 
-	artifacts, _ := json.Marshal(map[string]string{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-		"cli_tool":   agent.CLITool,
-	})
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, string(artifacts), nil, nil, nil, nil)
+	artifacts := agentMetadata(agent)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
@@ -391,7 +389,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// agent.Type 可能是 "system" 或 "custom"。
 	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
 	orchCtx += kbPreload
-	orchCtx += s.InjectAgentConfig(orchAgent, orchCtx, userID)
+	agentConfig := s.InjectAgentConfig(orchAgent, "", userID)
+	orchCtx = agentConfig + orchCtx
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
@@ -430,12 +429,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 
 	// Orchestrator responded directly without dispatching
 	if dispatch == nil || len(dispatch.Tasks) == 0 {
-		artifacts, _ := json.Marshal(map[string]string{
-			"agent_id":   orchAgent.ID,
-			"agent_name": orchAgent.Name,
-			"cli_tool":   orchAgent.CLITool,
-		})
-		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, string(artifacts), nil, nil, nil, nil)
+		artifacts := agentMetadata(orchAgent)
+		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
@@ -446,12 +441,8 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// Post orchestrator's full dispatch message (including @mentions) to group chat
 	var messages []*model.Message
 	{
-		artifacts, _ := json.Marshal(map[string]string{
-			"agent_id":   orchAgent.ID,
-			"agent_name": orchAgent.Name,
-			"cli_tool":   orchAgent.CLITool,
-		})
-		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, string(artifacts), nil, nil, nil, nil)
+		artifacts := agentMetadata(orchAgent)
+		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
@@ -477,6 +468,9 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		DispatchPlan:    orchTask.Result,
 		OriginalMessage: content,
 		KBPreload:       kbPreload,
+		WorkerStatus:    "{}",
+		WorkerResults:   "{}",
+		RoundHistory:    "[]",
 	}
 	if s.orchTaskRepo != nil {
 		if err := s.orchTaskRepo.Create(ctx, orchTaskRecord); err != nil {
@@ -486,15 +480,9 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskRecord.ID, model.OrchTaskWorkersRunning)
 	}
 
-	// 所有 worker 并行派发：每个 goroutine 用统一路径 dispatchAndWait 同步等待结果
-	for _, t := range dispatch.Tasks {
-		agentID, ok := agentNameToID[t.AgentName]
-		if !ok {
-			slog.Warn("worker agent not found in conversation", "agent", t.AgentName)
-			continue
-		}
-		go s.dispatchOrchWorker(convID, userID, t, agentID, orchAgent.Name, kbPreload, orchTaskRecord.ID)
-	}
+	// 所有 worker 并行派发：startWorkersAndWait 内部用 WaitGroup 等待全部完成后触发 summary
+	orchSender := OrchSender{ID: orchAgent.ID, Name: orchAgent.Name, Avatar: orchAgent.Avatar}
+	go s.startWorkersAndWait(ctx, convID, userID, dispatch.Tasks, agentNameToID, orchAgent.Name, kbPreload, orchTaskRecord.ID, orchSender)
 
 	return messages, nil
 }
@@ -527,15 +515,8 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	for _, m := range msgs {
 		role := m.Role
 		if m.Role == "assistant" {
-			// Extract agent name from artifacts if available
-			var a struct {
-				AgentName string `json:"agent_name"`
-			}
-			if m.ArtifactsJSON != "" {
-				_ = json.Unmarshal([]byte(m.ArtifactsJSON), &a)
-			}
-			if a.AgentName != "" {
-				role = a.AgentName
+			if name := extractAgentName(m.ArtifactsJSON); name != "" {
+				role = name
 			}
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
@@ -592,14 +573,8 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 	for _, m := range msgs {
 		role := m.Role
 		if m.Role == "assistant" {
-			var a struct {
-				AgentName string `json:"agent_name"`
-			}
-			if m.ArtifactsJSON != "" {
-				_ = json.Unmarshal([]byte(m.ArtifactsJSON), &a)
-			}
-			if a.AgentName != "" {
-				role = a.AgentName
+			if name := extractAgentName(m.ArtifactsJSON); name != "" {
+				role = name
 			}
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
@@ -731,8 +706,8 @@ func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content stri
 	sb.WriteString(kbSection.String())
 
 	// 如果有需要工具读取的文件，注入知识库读取工具
-	if needTool && s.jwtSecret != "" && s.serverURL != "" {
-		token, _, err := s.generateMgmtToken(userID)
+	if needTool && s.tokenIssuer != nil && s.serverURL != "" {
+		token, _, err := s.tokenIssuer.IssueAgentToken(userID)
 		if err != nil {
 			slog.Warn("generate kb tool token failed", "error", err)
 		} else {
@@ -769,26 +744,6 @@ func formatFileSize(size int64) string {
 	}
 }
 
-// generateMgmtToken generates a scoped JWT token for management tool usage.
-// Token has a short 5-minute lifetime and "agent_management" scope to distinguish
-// from regular user tokens.
-func (s *OrchestratorService) generateMgmtToken(userID string) (string, time.Time, error) {
-	now := time.Now()
-	expiresAt := now.Add(5 * time.Minute)
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"scope":   "agent_management",
-		"iat":     now.Unix(),
-		"exp":     expiresAt.Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString([]byte(s.jwtSecret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign management token: %w", err)
-	}
-	return tokenStr, expiresAt, nil
-}
-
 // truncateString truncates s to maxRunes runes, appending "..." if truncated.
 func truncateString(s string, maxRunes int) string {
 	runes := []rune(s)
@@ -796,4 +751,35 @@ func truncateString(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+// agentMetadata serializes the agent identity fields into a JSON string
+// for storing in the ArtifactsJSON column of a message.
+func agentMetadata(agent *model.Agent) string {
+	b, _ := json.Marshal(map[string]string{
+		"agent_id":   agent.ID,
+		"agent_name": agent.Name,
+		"cli_tool":   agent.CLITool,
+	})
+	return string(b)
+}
+
+// resolveMemberIDs returns the member IDs for a conversation, falling back to
+// a single-element slice containing fallbackUserID if the query fails or returns empty.
+func (s *OrchestratorService) resolveMemberIDs(ctx context.Context, convID, fallbackUserID string) []string {
+	ids, err := s.convRepo.ListMemberIDs(ctx, convID)
+	if err != nil || len(ids) == 0 {
+		return []string{fallbackUserID}
+	}
+	return ids
+}
+
+// extractAgentName parses the agent_name field from an ArtifactsJSON string.
+// Returns empty string on parse failure or missing field.
+func extractAgentName(artifactsJSON string) string {
+	var m map[string]string
+	if err := json.Unmarshal([]byte(artifactsJSON), &m); err == nil {
+		return m["agent_name"]
+	}
+	return ""
 }

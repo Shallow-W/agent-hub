@@ -142,6 +142,14 @@ func (r *fakeAgentRepo) UpdateAvatar(_ context.Context, _, _, _ string) (*model.
 	return nil, nil
 }
 
+func (r *fakeAgentRepo) UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error) {
+	return nil, nil
+}
+
+func (r *fakeAgentRepo) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
+	return nil, nil
+}
+
 func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
 	return nil
 }

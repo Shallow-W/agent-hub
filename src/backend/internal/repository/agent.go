@@ -37,7 +37,7 @@ func NewAgentRepo(db *sqlx.DB) *AgentRepo {
 func (r *AgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
 	list := make([]model.Agent, 0)
 	query := `SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		        last_seen_at, created_at, updated_at
 		 FROM agents`
 	var args []interface{}
@@ -104,7 +104,7 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		        last_seen_at, created_at, updated_at
 		 FROM agents WHERE id = $1`,
 		id,
@@ -245,7 +245,7 @@ func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, sys
 		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, enable_management_tools, source, status)
 		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, $7, $8, 'manual', 'offline')
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		           last_seen_at, created_at, updated_at`,
 		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
 	).StructScan(&a)
@@ -264,7 +264,7 @@ func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool,
 		     capabilities_json = $8, enable_management_tools = $9, updated_at = NOW()
 		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		           last_seen_at, created_at, updated_at`,
 		id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
 	).StructScan(&a)
@@ -297,7 +297,7 @@ func (r *AgentRepo) UpdateAvatar(ctx context.Context, id, userID, avatar string)
 		 SET avatar = $3, updated_at = NOW()
 		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		           last_seen_at, created_at, updated_at`,
 		id, userID, avatar,
 	).StructScan(&a)
@@ -340,7 +340,7 @@ func (r *AgentRepo) GetAgentsByMachine(ctx context.Context, machineID string) ([
 	var list []model.Agent
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
-		        capabilities_json, source, status, version, machine_id, machine_name, enable_management_tools,
+		        capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		        last_seen_at, created_at, updated_at
 		 FROM agents WHERE machine_id = $1`,
 		machineID,
@@ -365,4 +365,42 @@ func (r *AgentRepo) DeleteOwned(ctx context.Context, id, userID string) (bool, e
 		return false, fmt.Errorf("rows affected: %w", err)
 	}
 	return count > 0, nil
+}
+
+// UpdateTags updates the tags field for any agent by ID.
+func (r *AgentRepo) UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error) {
+	var a model.Agent
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE agents SET tags = $2, updated_at = NOW() WHERE id = $1
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		id, tags,
+	).StructScan(&a)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update agent tags: %w", err)
+	}
+	return &a, nil
+}
+
+// UpdateCustomSkills updates the custom_skills field for any agent by ID.
+func (r *AgentRepo) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
+	var a model.Agent
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE agents SET custom_skills = $2, updated_at = NOW() WHERE id = $1
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		id, customSkills,
+	).StructScan(&a)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update agent custom_skills: %w", err)
+	}
+	return &a, nil
 }

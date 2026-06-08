@@ -25,23 +25,20 @@ func selectTaskSQL(from string) string {
 	return `SELECT t.id, t.user_id, t.conversation_id, t.assignee_id, t.agent_id,
 		t.title, t.description, t.status, t.priority, t.created_at, t.updated_at,
 		COALESCE(u.username, '') AS assignee_name,
-		COALESCE(a.name, '') AS agent_name
+		COALESCE(a.name, '') AS agent_name,
+		t.orch_task_id, t.worker_name, t.task_hash,
+		t.worker_result, t.completed_at
 		FROM ` + from + `
 		LEFT JOIN users u ON u.id = t.assignee_id
 		LEFT JOIN agents a ON a.id = t.agent_id`
 }
 
-// List 按当前用户和筛选条件列出任务。userID 为空时跳过 user_id 过滤。
+// List 按筛选条件列出任务。conversation_id 必填，按会话查询共享任务。
 func (r *TaskRepo) List(ctx context.Context, userID string, filter model.TaskFilter) ([]*model.WorkspaceTask, error) {
 	var args []interface{}
 	conditions := []string{}
 	argIdx := 0
 
-	if userID != "" {
-		argIdx++
-		args = append(args, userID)
-		conditions = append(conditions, fmt.Sprintf("t.user_id = $%d", argIdx))
-	}
 	if filter.ConversationID != "" {
 		argIdx++
 		args = append(args, filter.ConversationID)
@@ -73,12 +70,13 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 	var task model.WorkspaceTask
 	err := r.db.QueryRowxContext(ctx,
 		`INSERT INTO workspace_tasks
-		 (user_id, conversation_id, assignee_id, agent_id, title, description, status, priority)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 (user_id, conversation_id, assignee_id, agent_id, title, description, status, priority, orch_task_id, worker_name, task_hash)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING id, user_id, conversation_id, assignee_id, agent_id, title, description,
-		 status, priority, created_at, updated_at, '' AS assignee_name, '' AS agent_name`,
+		 status, priority, created_at, updated_at, '' AS assignee_name, '' AS agent_name,
+		 orch_task_id, worker_name, task_hash, worker_result, completed_at`,
 		nilIfEmpty(userID), input.ConversationID, input.AssigneeID, input.AgentID, input.Title,
-		input.Description, input.Status, input.Priority,
+		input.Description, input.Status, input.Priority, input.OrchTaskID, input.WorkerName, input.TaskHash,
 	).StructScan(&task)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
@@ -86,24 +84,44 @@ func (r *TaskRepo) Create(ctx context.Context, userID string, input model.TaskCr
 	return &task, nil
 }
 
-// GetByID 查询任务。userID 为空时仅按 ID 查询。
+// GetByID 按 ID 查询任务（会话内共享，不按 user_id 过滤）。
 func (r *TaskRepo) GetByID(ctx context.Context, userID, id string) (*model.WorkspaceTask, error) {
-	query := selectTaskSQL("workspace_tasks t")
-	var args []interface{}
-	if userID != "" {
-		query += " WHERE t.user_id = $1 AND t.id = $2"
-		args = append(args, userID, id)
-	} else {
-		query += " WHERE t.id = $1"
-		args = append(args, id)
-	}
+	query := selectTaskSQL("workspace_tasks t") + " WHERE t.id = $1"
 	var task model.WorkspaceTask
-	err := r.db.QueryRowxContext(ctx, query, args...).StructScan(&task)
+	err := r.db.QueryRowxContext(ctx, query, id).StructScan(&task)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get task: %w", err)
+	}
+	return &task, nil
+}
+
+// GetByOrchTaskAndWorker 按 orch_task_id + worker_name 查找任务。
+func (r *TaskRepo) GetByOrchTaskAndWorker(ctx context.Context, orchTaskID, workerName string) (*model.WorkspaceTask, error) {
+	query := selectTaskSQL("workspace_tasks t") + " WHERE t.orch_task_id = $1 AND t.worker_name = $2"
+	var task model.WorkspaceTask
+	err := r.db.QueryRowxContext(ctx, query, orchTaskID, workerName).StructScan(&task)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get task by orch: %w", err)
+	}
+	return &task, nil
+}
+
+// GetByTaskHash 按 task_hash 查找任务。
+func (r *TaskRepo) GetByTaskHash(ctx context.Context, taskHash string) (*model.WorkspaceTask, error) {
+	query := selectTaskSQL("workspace_tasks t") + " WHERE t.task_hash = $1"
+	var task model.WorkspaceTask
+	err := r.db.QueryRowxContext(ctx, query, taskHash).StructScan(&task)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get task by hash: %w", err)
 	}
 	return &task, nil
 }
@@ -134,7 +152,7 @@ func (r *TaskRepo) Update(ctx context.Context, userID, id string, input model.Ta
 		addSet("agent_id", *input.AgentID)
 	}
 	if len(sets) == 0 {
-		return r.GetByID(ctx, userID, id)
+		return r.GetByID(ctx, "", id)
 	}
 
 	args = append(args, id)
@@ -155,7 +173,7 @@ func (r *TaskRepo) Update(ctx context.Context, userID, id string, input model.Ta
 		}
 		return nil, fmt.Errorf("update task: %w", err)
 	}
-	return r.GetByID(ctx, userID, updatedID)
+	return r.GetByID(ctx, "", updatedID)
 }
 
 // MoveStatus 更新任务状态。userID 为空时仅按 ID 匹配。
@@ -176,7 +194,19 @@ func (r *TaskRepo) MoveStatus(ctx context.Context, userID, id, status string) (*
 		}
 		return nil, fmt.Errorf("move task status: %w", err)
 	}
-	return r.GetByID(ctx, userID, updatedID)
+	return r.GetByID(ctx, "", updatedID)
+}
+
+// UpdateWorkerResult 更新 worker_result 并设置 completed_at = NOW()。
+func (r *TaskRepo) UpdateWorkerResult(ctx context.Context, id, result string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_tasks SET worker_result = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2`,
+		result, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update worker result: %w", err)
+	}
+	return nil
 }
 
 // Delete 删除任务。userID 为空时仅按 ID 匹配。
@@ -193,6 +223,19 @@ func (r *TaskRepo) Delete(ctx context.Context, userID, id string) (bool, error) 
 	}
 	rows, _ := res.RowsAffected()
 	return rows > 0, nil
+}
+
+// FailAllByOrchTask 将指定 orch_task_id 下所有非终态的 WorkspaceTask 状态设为 blocked。
+func (r *TaskRepo) FailAllByOrchTask(ctx context.Context, orchTaskID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE workspace_tasks SET status = 'blocked', updated_at = NOW()
+		 WHERE orch_task_id = $1 AND status NOT IN ('done', 'blocked', 'cancelled')`,
+		orchTaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("fail all tasks by orch task: %w", err)
+	}
+	return nil
 }
 
 // nilIfEmpty 空字符串转为 nil *string（用于 NULLable 列）。
