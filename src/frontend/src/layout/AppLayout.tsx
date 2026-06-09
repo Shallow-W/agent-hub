@@ -57,6 +57,9 @@ const AppLayout: React.FC = () => {
   const fetchFriends = useFriendStore((s) => s.fetchFriends);
   const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
+  // 用 ref 跟踪 activeNav，避免路由同步 effect 因 activeNav 依赖产生循环覆盖
+  const activeNavRef = useRef(activeNav);
+  activeNavRef.current = activeNav;
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
@@ -86,6 +89,7 @@ const AppLayout: React.FC = () => {
     }
   }, [navigate, location.pathname]);
 
+  // 仅在路由变化时同步 activeNav（不依赖 activeNav 本身，避免循环覆盖用户点击）
   useEffect(() => {
     if (location.pathname.startsWith('/tasks')) {
       setActiveNav('workspace');
@@ -95,10 +99,10 @@ const AppLayout: React.FC = () => {
       setActiveNav('settings');
       return;
     }
-    if (activeNav === 'workspace' || activeNav === 'settings') {
+    if (activeNavRef.current === 'workspace' || activeNavRef.current === 'settings') {
       setActiveNav('chat');
     }
-  }, [activeNav, location.pathname]);
+  }, [location.pathname]);
 
   // 切换到联系人页时自动拉取数据
   useEffect(() => {
