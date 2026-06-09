@@ -30,6 +30,7 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const sendMessage = useMessageStore((s) => s.sendMessage);
 
@@ -101,11 +102,17 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
       {originalMessage && (
         <>
           <ThreadBubble message={originalMessage} isOriginal />
-          <div className={styles.divider}>
+          <button
+            className={styles.divider}
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+          >
             <span>{replies.length} 条回复</span>
-          </div>
+            <span className={styles.dividerToggle}>{collapsed ? '展开' : '收起'}</span>
+          </button>
         </>
       )}
+      {!collapsed && (
       <div className={styles.replyList} ref={listRef}>
         {loading ? (
           <div className={styles.loadingArea}>
@@ -117,6 +124,7 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
           replies.map((msg) => <ThreadBubble key={msg.id} message={msg} />)
         )}
       </div>
+      )}
       <div className={styles.inputArea}>
         <Input.TextArea
           value={inputValue}
