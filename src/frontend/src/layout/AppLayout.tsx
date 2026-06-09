@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
+import { useKnowledgeStore } from '@/store/knowledgeStore';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
@@ -32,6 +33,7 @@ import { AgentProfile } from '@/components/agent/AgentProfile';
 import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import KnowledgeFilePreview from '@/components/knowledge/KnowledgeFilePreview';
+import { syncSelectedKnowledgeFile } from '@/components/knowledge/knowledgePreviewState.mjs';
 import TitleBar from '@/components/common/TitleBar';
 import type { Agent } from '@/types/agent';
 import type { KnowledgeFile } from '@/types/knowledge';
@@ -64,6 +66,7 @@ const AppLayout: React.FC = () => {
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
   const [selectedKnowledgeFile, setSelectedKnowledgeFile] = useState<KnowledgeFile | null>(null);
   const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
+  const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
   const creatingAgentChatRef = useRef<string | null>(null);
 
   const handleNavChange = useCallback((key: string) => {
@@ -236,6 +239,21 @@ const AppLayout: React.FC = () => {
     setSelectedKnowledgeFile(file);
     setSelectedKbId(kbId);
   }, []);
+
+  useEffect(() => {
+    if (!selectedKnowledgeFile || !selectedKbId) return;
+    const synced = syncSelectedKnowledgeFile({
+      selectedFile: selectedKnowledgeFile,
+      selectedKbId,
+      knowledgeBases,
+    });
+    if (synced.selectedFile?.id !== selectedKnowledgeFile.id || synced.selectedFile !== selectedKnowledgeFile) {
+      setSelectedKnowledgeFile(synced.selectedFile);
+    }
+    if (synced.selectedKbId !== selectedKbId) {
+      setSelectedKbId(synced.selectedKbId);
+    }
+  }, [knowledgeBases, selectedKnowledgeFile, selectedKbId]);
 
   return (
     <div className={styles.container}>

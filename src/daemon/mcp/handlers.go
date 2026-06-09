@@ -159,33 +159,33 @@ func HandleAllTools(api *APIClient, agentID string) ToolHandlerFunc {
 				return nil, fmt.Errorf("group_id is required")
 			}
 			return api.doGet("/mcp/groups/"+groupID+"/members", nil)
-tt// Agent 管理
-ttcase "get_agent_detail":
-tttreturn handleGetAgentDetail(api, args)
-ttcase "update_agent_prompt":
-tttreturn handleUpdateAgentPrompt(api, args)
-ttcase "start_agent":
-tttreturn handleStartAgent(api, args)
-ttcase "stop_agent":
-tttreturn handleStopAgent(api, args)
-tt// 知识库
-ttcase "list_knowledge_bases":
-tttreturn api.doGet("/mcp/knowledge-bases", nil)
-ttcase "list_knowledge_files":
-tttreturn handleListKnowledgeFiles(api, args)
-ttcase "search_knowledge":
-tttreturn handleSearchKnowledge(api, args)
-ttcase "read_knowledge_file":
-tttreturn handleReadKnowledgeFile(api, args)
-tt// Agent 自建
-ttcase "create_agent":
-tttreturn handleCreateAgent(api, args)
-ttcase "update_agent":
-tttreturn handleUpdateAgent(api, args)
-ttcase "delete_agent":
-tttreturn handleDeleteAgent(api, args)
-ttcase "list_toolsets":
-tttreturn handleListToolsets()
+		// Agent 管理
+		case "get_agent_detail":
+			return handleGetAgentDetail(api, args)
+		case "update_agent_prompt":
+			return handleUpdateAgentPrompt(api, args)
+		case "start_agent":
+			return handleStartAgent(api, args)
+		case "stop_agent":
+			return handleStopAgent(api, args)
+		// 知识库
+		case "list_knowledge_bases":
+			return api.doGet("/mcp/knowledge-bases", nil)
+		case "list_knowledge_files":
+			return handleListKnowledgeFiles(api, args)
+		case "search_knowledge":
+			return handleSearchKnowledge(api, args)
+		case "read_knowledge_file":
+			return handleReadKnowledgeFile(api, args)
+		// Agent 自建
+		case "create_agent":
+			return handleCreateAgent(api, args)
+		case "update_agent":
+			return handleUpdateAgent(api, args)
+		case "delete_agent":
+			return handleDeleteAgent(api, args)
+		case "list_toolsets":
+			return handleListToolsets()
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
@@ -472,10 +472,10 @@ var agentCreationToolsets = map[string][]string{
 	"none":          {},
 	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
 	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
-	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines"},
+	"orchestrator":  {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversation_agents", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
+	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
 	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
-	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge"},
+	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
 }
 
 func toolsConfigJSON(toolset string, allowedTools []string) string {
@@ -514,10 +514,10 @@ func handleCreateAgent(api *APIClient, args map[string]interface{}) (interface{}
 	}
 
 	body := map[string]interface{}{
-		"name":         name,
-		"cli_tool":     cliTool,
+		"name":          name,
+		"cli_tool":      cliTool,
 		"system_prompt": systemPrompt,
-		"tools_config": toolsConfigJSON(toolset, allowedTools),
+		"tools_config":  toolsConfigJSON(toolset, allowedTools),
 	}
 	if tags, ok := args["tags"].(string); ok && tags != "" {
 		body["tags"] = tags

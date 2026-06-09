@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/agent-hub/backend/internal/service"
@@ -36,5 +38,22 @@ func TestSafeJoinUploadPathRejectsAbsolutePath(t *testing.T) {
 
 	if _, err := service.SafeJoinUploadPath(uploadDir, absPath); err == nil {
 		t.Fatal("expected absolute path to be rejected")
+	}
+}
+
+func TestContentDispositionHeaderEscapesUploadedFilename(t *testing.T) {
+	got := contentDispositionHeader("attachment", "evil\"\r\nX-Injected: yes;知识库.pdf")
+	if strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("header contains newline: %q", got)
+	}
+	mediaType, params, err := mime.ParseMediaType(got)
+	if err != nil {
+		t.Fatalf("parse content disposition: %v", err)
+	}
+	if mediaType != "attachment" {
+		t.Fatalf("media type = %q, want attachment", mediaType)
+	}
+	if filename := params["filename"]; strings.ContainsAny(filename, "\r\n") {
+		t.Fatalf("decoded filename contains newline: %q", filename)
 	}
 }

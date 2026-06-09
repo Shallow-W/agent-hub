@@ -25,6 +25,28 @@ func TestPptPreview_PathTraversalForbidden(t *testing.T) {
 	}
 }
 
+func TestPptPreview_WindowsRootedPathForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewPptPreviewHandler(t.TempDir())
+	for _, input := range []string{
+		"/C:/Windows/deck.pptx",
+		`/C:\Windows\deck.pptx`,
+		"//server/share/deck.pptx",
+		`/\\server\share\deck.pptx`,
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Params = gin.Params{{Key: "filepath", Value: input}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/ppt-preview/"+input, nil)
+
+		h.Preview(c)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for %q, got %d", input, w.Code)
+		}
+	}
+}
+
 func TestPptPreview_RejectsNonPowerPointFile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()

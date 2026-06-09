@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -65,7 +66,16 @@ func (h *PptPreviewHandler) Preview(c *gin.Context) {
 }
 
 func (h *PptPreviewHandler) safeUploadPath(filePath string) (string, error) {
-	cleaned := filepath.Clean(strings.TrimPrefix(filePath, "/"))
+	slashed := strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/")
+	if slashed == "" || strings.HasPrefix(slashed, "//") {
+		return "", fmt.Errorf("invalid path")
+	}
+	slashed = strings.TrimPrefix(slashed, "/")
+	if strings.Contains(slashed, ":") || hasDotDotPathSegment(slashed) {
+		return "", fmt.Errorf("invalid path")
+	}
+	cleaned := filepath.FromSlash(path.Clean("/" + slashed))
+	cleaned = strings.TrimPrefix(cleaned, string(os.PathSeparator))
 	if cleaned == "." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) || cleaned == ".." {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -81,6 +91,15 @@ func (h *PptPreviewHandler) safeUploadPath(filePath string) (string, error) {
 		return "", fmt.Errorf("path escapes upload dir")
 	}
 	return absPath, nil
+}
+
+func hasDotDotPathSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *PptPreviewHandler) ensurePDFPreview(ctx context.Context, sourcePath string) (string, error) {
