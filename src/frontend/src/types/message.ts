@@ -57,6 +57,7 @@ export interface PinnedMessage {
   message_id: string;
   role: MessageRole;
   content: string;
+  artifacts_json?: string | null;
   sender_id?: string;
   username?: string;
   message_created_at: string;

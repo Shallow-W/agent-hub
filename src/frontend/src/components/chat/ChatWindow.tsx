@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import {
@@ -51,6 +53,14 @@ const { Text } = Typography;
 function getPinnedMessageAuthor(item: PinnedMessage): string {
   const username = item.username?.trim();
   if (username) return username;
+  if (item.role === 'assistant' && item.artifacts_json) {
+    try {
+      const meta = JSON.parse(item.artifacts_json) as { agent_name?: string };
+      if (meta.agent_name?.trim()) return meta.agent_name.trim();
+    } catch {
+      // ignore invalid legacy metadata
+    }
+  }
   if (item.role === 'assistant') return '助手';
   if (item.role === 'system') return '系统';
   return '用户';
@@ -650,25 +660,33 @@ export const ChatWindow: React.FC = () => {
               ) : (
                 blackboardPinned.map((item) => (
                   <div key={item.id} className={styles.pinnedItem}>
-                    <div className={styles.pinnedItemBody}>
+                    <div className={styles.pinnedItemHeader}>
                       <div className={styles.pinnedItemMeta}>
                         <Text strong>{getPinnedMessageAuthor(item)}</Text>
                         <Text type="secondary">
                           {new Date(item.message_created_at).toLocaleString()}
                         </Text>
                       </div>
-                      <div className={styles.pinnedItemContent}>
-                        {item.content || '空消息'}
-                      </div>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PushpinOutlined />}
+                        onClick={() => handleUnpinFromBlackboard(item.message_id)}
+                      >
+                        取消 Pin
+                      </Button>
                     </div>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<PushpinOutlined />}
-                      onClick={() => handleUnpinFromBlackboard(item.message_id)}
-                    >
-                      取消 Pin
-                    </Button>
+                    <div className={styles.pinnedItemBubble}>
+                      {item.content ? (
+                        <div className={styles.pinnedMarkdown}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {item.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <Text type="secondary">空消息</Text>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

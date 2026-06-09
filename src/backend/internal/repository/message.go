@@ -324,6 +324,7 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 			mp.message_id,
 			m.role,
 			m.content,
+			COALESCE(m.artifacts_json, '') AS artifacts_json,
 			m.sender_id,
 			COALESCE(sender.username, '') AS username,
 			m.created_at AS message_created_at,
