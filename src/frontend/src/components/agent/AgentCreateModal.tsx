@@ -274,18 +274,15 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
             <span className={styles.label}>工具集</span>
             <span className={styles.countLabel}>已选 {selectedToolCount}/{toolCatalog.length}</span>
           </div>
-          <div className={styles.controlRow}>
-            <span className={styles.subLabel}>模板</span>
+          <div className={styles.toolbar}>
             <Select
-              className={styles.toolsetSelect}
+              className={styles.toolbarSelect}
               value={toolset}
               options={toolsetOptions}
               onChange={handleToolsetChange}
             />
             <Button
-              className={styles.manageBtn}
               icon={<SettingOutlined />}
-              size="small"
               onClick={() => setToolManageOpen(true)}
             >
               管理
@@ -350,18 +347,15 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
           </div>
           {librarySkills.length > 0 && (
             <>
-              <div className={styles.controlRow}>
-                <span className={styles.subLabel}>模板</span>
+              <div className={styles.toolbar}>
                 <Select
-                  className={styles.toolsetSelect}
+                  className={styles.toolbarSelect}
                   value={skillTemplate}
                   options={skillTemplateOptions}
                   onChange={handleSkillTemplateChange}
                 />
                 <Button
-                  className={styles.manageBtn}
                   icon={<SettingOutlined />}
-                  size="small"
                   onClick={() => setSkillManageOpen(true)}
                 >
                   管理

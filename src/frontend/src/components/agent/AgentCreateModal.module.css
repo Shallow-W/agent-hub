@@ -28,13 +28,6 @@
   color: var(--color-text-tertiary);
 }
 
-.subLabel {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-}
-
 .helper {
   font-size: 11px;
   color: var(--color-text-tertiary);
@@ -75,21 +68,17 @@
   background: rgba(47, 143, 107, 0.04);
 }
 
-/* ── Control row ── */
+/* ── Toolbar (matches prompt template style) ── */
 
-.controlRow {
-  display: flex;
-  align-items: center;
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: center;
 }
 
-.toolsetSelect {
+.toolbarSelect {
   min-width: 140px;
-}
-
-.manageBtn {
-  margin-left: auto;
-  flex-shrink: 0;
 }
 
 /* ── Filter bar ── */

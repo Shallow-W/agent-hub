@@ -11,8 +11,9 @@ import {
   ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
-import type { Agent } from '@/types/agent';
+import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
+import { getPlatformSkills } from '@/api/platformSkill';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import {
@@ -23,6 +24,7 @@ import {
   resolveAgentAvatar,
 } from './agentPresentation';
 import { AgentPromptTemplateField } from './AgentPromptTemplateField';
+import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import {
   categoryMeta,
   categoryOrder,
@@ -66,6 +68,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [toolFilter, setToolFilter] = useState<string>('all');
+  const [toolManageOpen, setToolManageOpen] = useState(false);
+  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
 
   const filteredTools = useMemo(() => {
     if (toolFilter === 'all') return toolCatalog;
@@ -99,6 +103,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSelectedToolset(parsedTools.toolset);
     setSelectedTools(parsedTools.allowedTools);
   }, [agent?.id]);
+
+  useEffect(() => {
+    getPlatformSkills().then(setLibrarySkills).catch(() => {});
+  }, []);
 
   if (!agent) {
     return (
@@ -224,6 +232,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const handleToolsChange = (values: string[]) => {
     setSelectedToolset('custom');
     setSelectedTools(values);
+  };
+
+  const handleToolManageApply = (tools: string[], _skillIds: string[]) => {
+    setSelectedTools(tools);
+    setSelectedToolset('custom');
+    setToolManageOpen(false);
   };
 
   const handleSaveToolsConfig = async () => {
@@ -467,6 +481,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 options={toolsetOptions}
                 onChange={handleToolsetChange}
               />
+              <Button icon={<SettingOutlined />} onClick={() => setToolManageOpen(true)}>管理</Button>
               <span className={styles.toolCountLabel}>
                 已选 {selectedToolCount}/{toolCatalog.length}
               </span>
@@ -536,6 +551,15 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         agent={agent}
         open={avatarPickerOpen}
         onClose={() => setAvatarPickerOpen(false)}
+      />
+      <CreateTemplateManagerModal
+        open={toolManageOpen}
+        mode="tools"
+        currentTools={selectedTools}
+        currentSkillIds={new Set()}
+        librarySkills={librarySkills}
+        onApply={handleToolManageApply}
+        onClose={() => setToolManageOpen(false)}
       />
     </div>
   );
