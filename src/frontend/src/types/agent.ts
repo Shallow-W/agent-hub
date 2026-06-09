@@ -24,6 +24,24 @@ export interface Agent {
   updated_at: string;
 }
 
+export interface PlatformSkill {
+  id: string;
+  user_id: string;
+  name: string;
+  description?: string;
+  trigger?: string;
+  detail?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformSkillRequest {
+  name: string;
+  description?: string;
+  trigger?: string;
+  detail?: string;
+}
+
 export interface AgentRequest {
   name: string;
   cli_tool: string;

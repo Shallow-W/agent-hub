@@ -396,6 +396,32 @@ null
 
 ## Agent 管理
 
+### GET /api/platform-skills
+
+获取当前用户的平台 Skill 库。平台 Skill 库是用户自己维护的可编辑 Skills；底座上报的 machine Skills 仍在 Agent `capabilities_json` 中只读展示。
+
+### POST /api/platform-skills
+
+创建平台 Skill。
+
+**请求体**
+```json
+{
+  "name": "代码审查",
+  "description": "检查 bug 和测试缺口",
+  "trigger": "review, bug",
+  "detail": "按清单检查权限、边界和测试。"
+}
+```
+
+### PUT /api/platform-skills/:id
+
+更新平台 Skill。更新库内容不会自动改写已分配给 Agent 的快照；需要在 Agent 技能页重新分配或保存对应 Agent 配置。
+
+### DELETE /api/platform-skills/:id
+
+删除平台 Skill 库条目。删除库条目不会自动移除已经分配给 Agent 的 Skill 快照。
+
 ### GET /api/agents
 
 获取当前用户可用的 Agent 列表。

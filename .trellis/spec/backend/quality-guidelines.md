@@ -157,6 +157,7 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).Wi
 **Scope / Trigger**: Applies when changing `agents.custom_skills`, Agent dispatch context construction, daemon prompt splitting, or the Agent Skills UI.
 
 **Signatures**:
+- API: `GET/POST/PUT/DELETE /api/platform-skills`
 - API: `PUT /api/agents/:id/custom-skills`
 - Request: `{"custom_skills": string}` where the string is a JSON array.
 - Skill item fields: `name`, `description`, `trigger`, `detail`.
@@ -164,7 +165,8 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).Wi
 
 **Contracts**:
 - `agents.capabilities_json` stores daemon-scanned native skills and may include local `source_path`; it is read-only user-facing discovery data.
-- `agents.custom_skills` stores user-assigned platform Skills. It must not be overwritten by daemon scans.
+- `platform_skills` stores the user's editable platform Skill library. It is independent from daemon-scanned native Skills.
+- `agents.custom_skills` stores the platform Skills assigned to one Agent as dispatch/runtime snapshots. It must not be overwritten by daemon scans.
 - Custom Skill persistence must keep only platform-safe fields: `name`, `description`, `trigger`, and `detail`. It must drop `source_path`, `auto`, and other local scan metadata.
 - `name` is required; duplicate names collapse to the first valid item.
 - `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.

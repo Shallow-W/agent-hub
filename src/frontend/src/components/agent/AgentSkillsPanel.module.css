@@ -80,10 +80,30 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   height: calc(100% - 28px);
+}
+
+.leftPane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sectionToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-align: left;
 }
 
 .skillList {
@@ -93,6 +113,7 @@
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+  max-height: 260px;
 }
 
 .skillCard {
@@ -172,6 +193,12 @@
 .skillCard:hover .skillActions,
 .skillCardSelected .skillActions {
   opacity: 1;
+}
+
+.skillActionsAlways {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .iconBtn {
@@ -265,9 +292,16 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
+.detailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .baseSkills {
   flex-shrink: 0;
-  max-height: 180px;
+  max-height: 220px;
   overflow-y: auto;
   padding-top: 10px;
   border-top: 1px solid var(--color-border-light);
