@@ -10,6 +10,14 @@ import {
 import type { KnowledgeFile } from '@/types/knowledge';
 import { getKnowledgeFileText, getKnowledgeFileUrl } from '@/api/knowledge';
 import { getAuthHeaders } from '@/api/client';
+import {
+  buildKnowledgePreviewModel,
+  isImageMime,
+  isPDFMime,
+  isTextMime,
+  shouldTryServerTextPreview,
+  shouldUseTextPreview,
+} from './knowledgePreviewState.mjs';
 import styles from './KnowledgeFilePreview.module.css';
 
 interface KnowledgeFilePreviewProps {
@@ -18,32 +26,6 @@ interface KnowledgeFilePreviewProps {
 }
 
 type PreviewState = 'loading' | 'loaded' | 'error';
-
-function isImageMime(mime: string): boolean {
-  return mime.startsWith('image/');
-}
-
-function isPDFMime(mime: string): boolean {
-  return mime === 'application/pdf';
-}
-
-function isTextMime(mime: string): boolean {
-  return (
-    mime === 'text/plain' ||
-    mime === 'text/markdown' ||
-    mime === 'text/csv' ||
-    mime === 'text/html' ||
-    mime === 'application/json'
-  );
-}
-
-function shouldUseTextPreview(file: KnowledgeFile): boolean {
-  return file.preview_type === 'text' && !isImageMime(file.mime_type) && !isPDFMime(file.mime_type);
-}
-
-function shouldTryServerTextPreview(file: KnowledgeFile): boolean {
-  return !isImageMime(file.mime_type) && !isPDFMime(file.mime_type) && file.preview_type !== 'too_large';
-}
 
 /** 通过认证 fetch 获取文件 blob，创建带 token 的 blob URL */
 async function fetchFileBlob(kbId: string, file: KnowledgeFile): Promise<{ url: string; blob: Blob } | null> {
@@ -162,31 +144,33 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
       );
     }
 
-    if (isImageMime(file.mime_type) && blobUrl) {
+    const preview = buildKnowledgePreviewModel({ file, blobUrl, textContent });
+
+    if (preview.kind === 'image') {
       return (
         <div className={styles.imageWrap}>
-          <img src={blobUrl} alt={file.filename} className={styles.previewImage} />
+          <img src={preview.url} alt={file.filename} className={styles.previewImage} />
         </div>
       );
     }
 
-    if (isPDFMime(file.mime_type) && blobUrl) {
+    if (preview.kind === 'pdf') {
       return (
         <div className={styles.pdfWrap}>
-          <iframe src={blobUrl} className={styles.pdfFrame} title={file.filename} />
+          <iframe src={preview.url} className={styles.pdfFrame} title={file.filename} />
         </div>
       );
     }
 
-    if ((shouldUseTextPreview(file) || isTextMime(file.mime_type)) && textContent !== null) {
+    if (preview.kind === 'text') {
       return (
         <div className={styles.textWrap}>
-          <pre className={styles.textContent}>{textContent}</pre>
+          <pre className={styles.textContent}>{preview.text}</pre>
         </div>
       );
     }
 
-    if (file.preview_type === 'too_large') {
+    if (preview.kind === 'too_large') {
       return (
         <div className={styles.centerWrap}>
           <FileOutlined className={styles.unsupportedIcon} />
