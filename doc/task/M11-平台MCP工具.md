@@ -54,14 +54,14 @@
 
 ### M11-4 自动注入（已完成，全 CLI 覆盖）
 
-按各 CLI 的能力分两条路径，凭证统一复用轮询 daemon 自身的 machine key：
+按各 CLI 的能力分两条路径，凭证统一复用常驻 daemon 自身的 machine key：
 
 - **Claude Code（按次注入）**：`commandForTask` 的 claude 分支自动追加
   `--mcp-config <inline JSON>` + `--allowedTools mcp__agenthub-platform`，每个聊天任务挂载本 daemon 的 `--mcp` server。
-- **OpenClaw / Codex（启动时全局注入）**：`agent`/`exec` 无按次 flag，故 daemon 启动（轮询模式）时 `ensureGlobalMcpConfigs` 幂等写入各自全局 MCP 配置：
+- **OpenClaw / Codex（启动时全局注入）**：`agent`/`exec` 无按次 flag，故 daemon 启动（WebSocket 模式）时 `ensureGlobalMcpConfigs` 幂等写入各自全局 MCP 配置：
   - OpenClaw：`openclaw mcp set agenthub-platform <json>`
   - Codex：`codex mcp remove`（忽略错误）+ `codex mcp add agenthub-platform -- node <daemon> ... --mcp`
-  - 仅对本机已安装的 CLI 执行，失败仅告警、不阻断轮询。
+  - 仅对本机已安装的 CLI 执行，失败仅告警、不阻断 daemon 连接。
 - **MCP server 命令统一用 `node`（PATH 解析）而非 `process.execPath`**，规避 `C:\Program Files\nodejs` 空格在子进程参数转义中被拆断的问题。
 
 ## 验收标准

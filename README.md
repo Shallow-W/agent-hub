@@ -41,6 +41,25 @@ npm run dev
 
 访问 http://localhost:5173
 
+### 4. Electron 桌面端
+
+开发模式复用现有后端，并在 Electron 窗口里打开同一套 React UI：
+
+```bash
+bash scripts/desktop-dev.sh
+```
+
+生产目录包会构建 Go 后端、Vite 前端和 Electron 壳：
+
+```bash
+bash scripts/desktop-build.sh
+```
+
+桌面端通过本地 HTTP origin 保持与 Web 端一致。生产模式可由 Electron
+启动打包内的 Go 后端，并通过 `AGENTHUB_CONFIG` 与
+`AGENTHUB_FRONTEND_DIST` 指定配置和静态资源路径。自动拉起后端时仍沿用
+现有 PostgreSQL/Redis 依赖，启动桌面包前请确保 PostgreSQL 可访问。
+
 ### Docker 部署
 
 ```bash

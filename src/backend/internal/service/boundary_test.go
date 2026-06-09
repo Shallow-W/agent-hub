@@ -180,15 +180,31 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
 	svc.SetDaemonHub(hub)
 
-	// Resolve both tasks in background
+	// Resolve both tasks after their result channels are registered. A fixed
+	// sleep can race ahead of task creation and drop fake daemon results.
+	resolveErr := make(chan error, 1)
 	go func() {
-		time.Sleep(10 * time.Millisecond)
 		for i := 1; i <= 2; i++ {
-			hub.ResolveTask(fmt.Sprintf("task-%d", i), &ws.TaskResult{
-				TaskID: fmt.Sprintf("task-%d", i),
-				Result: "I'll handle this.",
-			})
+			taskID := fmt.Sprintf("task-%d", i)
+			deadline := time.Now().Add(5 * time.Second)
+			resolved := false
+			for time.Now().Before(deadline) {
+				if hub.AwaitTaskResult(taskID) != nil {
+					hub.ResolveTask(taskID, &ws.TaskResult{
+						TaskID: taskID,
+						Result: "I'll handle this.",
+					})
+					resolved = true
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if !resolved {
+				resolveErr <- fmt.Errorf("task promise not registered: %s", taskID)
+				return
+			}
 		}
+		resolveErr <- nil
 	}()
 
 	var wg sync.WaitGroup
@@ -205,6 +221,9 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 		result2, err2 = svc.RouteMention(context.Background(), convID, userID, "@Orch 写报告", nil, nil)
 	}()
 	wg.Wait()
+	if err := <-resolveErr; err != nil {
+		t.Error(err)
+	}
 
 	if err1 != nil {
 		t.Errorf("goroutine 1 error: %v", err1)

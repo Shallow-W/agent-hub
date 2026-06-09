@@ -66,9 +66,9 @@
    d. 递增未读计数
 6. 所有已连接的客户端收到 WebSocket message.complete 推送
 7. 用户上线时拉取离线消息 GET /api/conversations/:id/messages/unread
-8. Daemon 监听到用户消息 → 分派给对应 Agent CLI
-9. Agent 逐 token 输出 → Daemon 通过 WebSocket 推送 message.streaming
-10. 前端实时渲染流式内容
+8. Backend 创建 daemon task 后通过 /daemon/ws 主动下发 task.execute
+9. Daemon 执行对应 Agent CLI，通过 task.done/task.error 回传结果
+10. Backend 持久化 assistant 消息并通过 WebSocket 推送给前端
 ```
 
 ## 组件说明

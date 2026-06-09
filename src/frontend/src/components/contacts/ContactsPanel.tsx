@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
+import { Avatar, Badge, Dropdown, Empty, Input, Tabs } from 'antd';
+import { message } from '@/utils/message';
+import { modal as appModal } from '@/utils/modal';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
@@ -12,6 +14,7 @@ import type { Agent } from '@/types/agent';
 import FriendRequest from '../friends/FriendRequest';
 import layoutStyles from '@/layout/AppLayout.module.css';
 import styles from './ContactsPanel.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface ContactsPanelProps {
   conversations: Conversation[];
@@ -68,7 +71,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
   const hasFriends = filteredFriends.length > 0;
 
   const handleDeleteFriend = (friendId: string, friendName: string) => {
-    Modal.confirm({
+    appModal.confirm({
       title: '确认删除好友',
       content: `确定要删除好友「${friendName}」吗？`,
       okText: '删除',

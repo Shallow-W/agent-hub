@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Avatar, Modal, message } from 'antd';
+import { Avatar, Modal } from 'antd';
+import { message } from '@/utils/message';
 import { RobotOutlined } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -41,7 +42,7 @@ export const AvatarPickerModal: React.FC<AvatarPickerModalProps> = ({ agent, ope
       onCancel={onClose}
       footer={null}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.grid}>
         {ALL_AVATAR_KEYS.map((key) => {

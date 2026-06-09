@@ -1,0 +1,71 @@
+.list {
+  width: 100%;
+}
+
+.header,
+.footer {
+  padding: 8px 0;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.empty {
+  padding: 24px 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.split .item + .item {
+  border-top: 1px solid var(--color-border);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.content {
+  min-width: 0;
+  flex: 1;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.avatar {
+  flex: 0 0 auto;
+}
+
+.metaBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  min-width: 0;
+}
+
+.description {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+}

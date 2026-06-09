@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { message } from '@/utils/message';
 import type { Conversation, ConversationType } from '@/types/conversation';
 import * as convApi from '@/api/conversation';
 
@@ -72,7 +73,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       }));
       return conv;
     } catch {
-      const { message } = await import('antd');
       message.error('创建对话失败');
       throw new Error('创建对话失败');
     }
@@ -100,7 +100,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         // Conversation inaccessible (removed from group, already deleted, etc.) — remove from local list
         removeLocally = true;
       } else {
-        const { message } = await import('antd');
         message.error('删除对话失败');
       }
     }
@@ -127,7 +126,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         ),
       }));
     } catch {
-      const { message } = await import('antd');
       message.error('置顶操作失败');
     }
   },
@@ -145,7 +143,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       await convApi.renameConversation(id, title);
     } catch {
       set({ conversations: prev });
-      const { message } = await import('antd');
       message.error('重命名失败');
     }
   },

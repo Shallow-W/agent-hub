@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Avatar, Button, Input, message } from 'antd';
+import { Avatar, Button, Input } from 'antd';
+import { message } from '@/utils/message';
 import { UserOutlined, CameraOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { UserAvatarPickerModal } from '@/components/settings/UserAvatarPickerModal';
 import styles from './EditableProfileCard.module.css';

@@ -1,9 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { ConfigProvider } from 'antd';
+import { App as AntdApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import theme from './theme/antd';
+import { bindMessage } from './utils/message';
+import { bindModal } from './utils/modal';
 import './styles/globals.css';
 
 class ErrorBoundary extends React.Component<
@@ -39,10 +41,29 @@ if (!rootEl) {
   throw new Error('Root element not found');
 }
 
+function MessageBridge({ children }: { children: React.ReactNode }) {
+  const { message, modal } = AntdApp.useApp();
+
+  React.useEffect(() => {
+    bindMessage(message);
+    bindModal(modal);
+    return () => {
+      bindMessage(null);
+      bindModal(null);
+    };
+  }, [message, modal]);
+
+  return <>{children}</>;
+}
+
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <ConfigProvider theme={theme} locale={zhCN}>
-      <ErrorBoundary><App /></ErrorBoundary>
+      <AntdApp>
+        <MessageBridge>
+          <ErrorBoundary><App /></ErrorBoundary>
+        </MessageBridge>
+      </AntdApp>
     </ConfigProvider>
   </React.StrictMode>,
 );

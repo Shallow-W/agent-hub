@@ -167,9 +167,6 @@ func (dh *DaemonHub) handleRegister(msg daemonBusMsg) {
 		oldClient.closed.Store(true)
 		oldClient.closeOnce.Do(func() { close(oldClient.sendCh) })
 		oldClient.Conn.Close(websocket.StatusNormalClosure, "replaced by new connection")
-		if !dh.draining.Load() {
-			dh.wg.Done()
-		}
 		dh.logger.Info("replaced old daemon connection", "machine_id", client.MachineID)
 	}
 	dh.clients.Store(client.MachineID, client)
@@ -292,9 +289,9 @@ func (dh *DaemonHub) AwaitTaskResult(taskID string) chan *TaskResult {
 	return val.(chan *TaskResult)
 }
 
-// ResolveTask 发送结果到 promise channel 并清理
+// ResolveTask 发送结果到 promise channel；清理由等待方 RemoveTaskPromise 完成。
 func (dh *DaemonHub) ResolveTask(taskID string, result *TaskResult) {
-	val, ok := dh.resultChans.LoadAndDelete(taskID)
+	val, ok := dh.resultChans.Load(taskID)
 	if !ok {
 		return
 	}

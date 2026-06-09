@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -258,7 +257,6 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		if isOrchestrator {
 			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name)
 			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload, sourceMessageID)
-
 			if err != nil {
 				slog.Warn(orchFlowLog, "stage", "route.orchestrator_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
@@ -910,35 +908,6 @@ func formatFileSize(size int64) string {
 	default:
 		return fmt.Sprintf("%dB", size)
 	}
-}
-
-// truncateString truncates s to maxRunes runes, appending "..." if truncated.
-func truncateString(s string, maxRunes int) string {
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes]) + "..."
-}
-
-var promptWhitespaceRE = regexp.MustCompile(`\s+`)
-
-func normalizePromptLine(s string) string {
-	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
-}
-
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
-func optionalStringPtr(value string) *string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return &value
 }
 
 // agentMetadata serializes the agent identity fields into a JSON string

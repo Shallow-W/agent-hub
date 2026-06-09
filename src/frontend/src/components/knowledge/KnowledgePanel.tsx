@@ -5,8 +5,8 @@ import {
   Switch,
   Spin,
   Popconfirm,
-  message as antMessage,
 } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   PlusOutlined,
   ReloadOutlined,

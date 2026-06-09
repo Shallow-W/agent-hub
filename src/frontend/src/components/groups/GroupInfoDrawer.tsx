@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Drawer,
-  List,
   Avatar,
   Tag,
   Empty,
   Spin,
-  message,
   Input,
 } from 'antd';
+import { message } from '@/utils/message';
+import { SimpleList as List } from '@/components/common/SimpleList';
 import {
   TeamOutlined,
   TagsOutlined,
@@ -174,7 +174,7 @@ const GroupInfoDrawer: React.FC<GroupInfoDrawerProps> = ({
       title="群聊信息"
       open={open}
       onClose={onClose}
-      width={340}
+      size={340}
     >
       <Spin spinning={loading}>
         {info ? (

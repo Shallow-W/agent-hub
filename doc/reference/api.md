@@ -467,6 +467,49 @@ null
 
 ---
 
+### WS /daemon/ws?token=machine_key
+
+本机 daemon 连接后端的长连接通道。daemon 首次连接后发送 `daemon.register` 上报本机 Agent；后端创建 daemon task 后通过该连接主动下发 `task.execute`，daemon 执行 CLI 后回传 `task.done` 或 `task.error`。`daemon_tasks` 仅作为进程内任务队列和完成等待状态，不作为轮询消息队列。
+
+**daemon -> server**
+```json
+{
+  "type": "daemon.register",
+  "data": {
+    "machine_id": "HOSTNAME",
+    "agents": []
+  }
+}
+```
+
+```json
+{
+  "type": "task.done",
+  "data": {
+    "task_id": "uuid",
+    "result": "Agent final response"
+  }
+}
+```
+
+**server -> daemon**
+```json
+{
+  "type": "task.execute",
+  "data": {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "agent_id": "uuid",
+    "machine_id": "uuid",
+    "cli_tool": "claude",
+    "prompt": "user message",
+    "context_messages": "serialized context"
+  }
+}
+```
+
+---
+
 ## Agent 管理
 
 ### GET /api/platform-skills

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Input, Popconfirm, message } from 'antd';
+import { Avatar, Button, Input, Popconfirm } from 'antd';
+import { message } from '@/utils/message';
 import {
   RobotOutlined,
   SaveOutlined,

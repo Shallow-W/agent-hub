@@ -22,6 +22,9 @@ type AgentRepo struct {
 	taskMu    sync.Mutex
 	tasks     map[string]*model.DaemonTask
 	taskQueue map[string][]string // machineID -> 待领取 taskID FIFO
+
+	dispatchMu sync.RWMutex
+	dispatcher func(*model.DaemonTask)
 }
 
 // NewAgentRepo 创建 Agent 仓库
@@ -31,6 +34,13 @@ func NewAgentRepo(db *sqlx.DB) *AgentRepo {
 		tasks:     make(map[string]*model.DaemonTask),
 		taskQueue: make(map[string][]string),
 	}
+}
+
+// SetDaemonTaskDispatcher 注册实时任务投递器，避免 daemon 端轮询后端。
+func (r *AgentRepo) SetDaemonTaskDispatcher(dispatcher func(*model.DaemonTask)) {
+	r.dispatchMu.Lock()
+	defer r.dispatchMu.Unlock()
+	r.dispatcher = dispatcher
 }
 
 // ListAvailable 查询系统 Agent 和当前用户自建 Agent。userID 为空时返回所有 Agent。
@@ -143,6 +153,13 @@ func (r *AgentRepo) CreateDaemonTask(_ context.Context, userID, conversationID, 
 	r.tasks[task.ID] = task
 	r.taskQueue[machineID] = append(r.taskQueue[machineID], task.ID)
 	r.taskMu.Unlock()
+
+	r.dispatchMu.RLock()
+	dispatcher := r.dispatcher
+	r.dispatchMu.RUnlock()
+	if dispatcher != nil {
+		dispatcher(cloneDaemonTask(task))
+	}
 	return cloneDaemonTask(task), nil
 }
 

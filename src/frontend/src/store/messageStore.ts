@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { message as antdMessage } from 'antd';
+import { message as antdMessage } from '@/utils/message';
 import type { Message, OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
@@ -60,8 +60,28 @@ function generateTempId(): string {
   return `__temp_${Date.now()}_${++tempIdCounter}`;
 }
 
-const recentlyRecalled = new Set<string>();
+const recentlyRecalled = new Map<string, number>();
 const RECALL_DEDUP_TTL = 30_000;
+
+function isRecentlyRecalled(messageId: string): boolean {
+  const ts = recentlyRecalled.get(messageId);
+  if (!ts) return false;
+  if (Date.now() - ts > RECALL_DEDUP_TTL) {
+    recentlyRecalled.delete(messageId);
+    return false;
+  }
+  return true;
+}
+
+// Periodic cleanup of expired recall dedup entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, ts] of recentlyRecalled) {
+    if (now - ts > RECALL_DEDUP_TTL) {
+      recentlyRecalled.delete(id);
+    }
+  }
+}, 60_000);
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
@@ -190,8 +210,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   recall: async (conversationId, messageId) => {
     try {
-      recentlyRecalled.add(messageId);
-      setTimeout(() => recentlyRecalled.delete(messageId), RECALL_DEDUP_TTL);
+      recentlyRecalled.set(messageId, Date.now());
       await msgApi.recallMessage(conversationId, messageId);
       set((state) => {
         const list = (state.messages[conversationId] ?? []).map((m) =>
@@ -403,7 +422,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   handleRecallPush: (conversationId, messageId) => {
-    if (recentlyRecalled.has(messageId)) return;
+    if (isRecentlyRecalled(messageId)) return;
     set((state) => {
       const list = (state.messages[conversationId] ?? []).map((m) =>
         m.id === messageId

@@ -7,7 +7,6 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
-const POLL_INTERVAL_MS = 1500;
 const EXEC_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
@@ -101,6 +100,31 @@ function flushPendingTaskCompletions() {
   }
 }
 
+function onWebSocket(ws, eventName, handler) {
+  if (typeof ws.on === 'function') {
+    ws.on(eventName, handler);
+    return;
+  }
+  if (typeof ws.addEventListener !== 'function') {
+    throw new Error('unsupported WebSocket implementation');
+  }
+  ws.addEventListener(eventName, (event) => {
+    if (eventName === 'message') {
+      handler(event.data);
+      return;
+    }
+    if (eventName === 'close') {
+      handler(event.code, event.reason);
+      return;
+    }
+    if (eventName === 'error') {
+      handler(event.error || event);
+      return;
+    }
+    handler(event);
+  });
+}
+
 const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
@@ -168,7 +192,7 @@ function buildPlatformMcpArgs(conversationId, userId, agentId) {
 
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
-// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
@@ -1525,7 +1549,6 @@ async function pollTasks(serverURL, apiKey) {
     }
   }
 }
-
 function stopAgentProcess(agent_id) {
   const entry = runningAgents.get(agent_id);
   if (!entry) return;
@@ -1962,7 +1985,7 @@ async function connectWS(serverURL, apiKey) {
       }, INBOUND_WATCHDOG_MS);
     }
 
-    ws.on('open', () => {
+    onWebSocket(ws, 'open', () => {
       currentDaemonWs = ws;
       reconnectAttempts = 0;
       logFlow('info', 'ws.connected', { machine_id: os.hostname(), server: `${protocol}//${url.host}${wsPath}` });
@@ -1987,7 +2010,7 @@ async function connectWS(serverURL, apiKey) {
       }, WS_PING_INTERVAL_MS);
     });
 
-    ws.on('message', async (data) => {
+    onWebSocket(ws, 'message', async (data) => {
       resetWatchdog();
       let envelope;
       try {
@@ -2062,7 +2085,12 @@ async function connectWS(serverURL, apiKey) {
         });
         try {
           let result;
-          if (task.cli_tool === 'claude' && task.agent_id && task.conversation_id) {
+          if (
+            task.cli_tool === 'claude' &&
+            task.agent_id &&
+            task.conversation_id &&
+            process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
+          ) {
             // Unified stream-json slot path with conversation isolation
             logFlow('info', 'task.execution_start', {
               task_id: task.id,
@@ -2112,7 +2140,7 @@ async function connectWS(serverURL, apiKey) {
       logFlow('warn', 'ws.unknown_message', { type: envelope.type });
     });
 
-    ws.on('close', (code, reason) => {
+    onWebSocket(ws, 'close', (code, reason) => {
       if (currentDaemonWs === ws) currentDaemonWs = null;
       if (pingTimer) clearInterval(pingTimer);
       if (watchdogTimer) clearTimeout(watchdogTimer);
@@ -2130,7 +2158,7 @@ async function connectWS(serverURL, apiKey) {
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
 
-    ws.on('error', (error) => {
+    onWebSocket(ws, 'error', (error) => {
       logFlow('error', 'ws.error', { error: errorMessage(error), reconnect_attempt: reconnectAttempts });
       // close handler will trigger reconnect
     });
@@ -2719,7 +2747,13 @@ async function main() {
   await connectWS(serverURL, apiKey);
 }
 
-main().catch((error) => {
-  logFlow('error', 'daemon.failed', { error: errorMessage(error) });
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    logFlow('error', 'daemon.failed', { error: errorMessage(error) });
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  onWebSocket,
+};

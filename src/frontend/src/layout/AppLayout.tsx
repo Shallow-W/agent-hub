@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Alert, message as antMessage } from 'antd';
+import {
+  Outlet,
+  useNavigate,
+  useLocation } from 'react-router-dom';
+import { Alert,
+} from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   LeftOutlined,
   RightOutlined,

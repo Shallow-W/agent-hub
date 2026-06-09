@@ -41,7 +41,7 @@ export const GroupAvatarPicker: React.FC<GroupAvatarPickerProps> = ({
       onCancel={onClose}
       footer={null}
       width={360}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.grid}>
         {GROUP_AVATAR_KEYS.map((key) => {

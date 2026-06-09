@@ -89,8 +89,14 @@ src/frontend/screenshot.mjs
 /package.json
 /package-lock.json
 
-# === Trellis 本地状态 ===
-.trellis/state/
+# === Trellis ===
+.trellis/
+
+# === OpenCode ===
+.opencode/
+
+# === CodeGraph ===
+.codegraph/
 
 # === Claude Code 会话数据 ===
 .claude/sessions/

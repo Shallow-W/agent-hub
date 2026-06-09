@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Input, message as antMessage } from 'antd';
+import { Input } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import { FolderOutlined, LeftOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';

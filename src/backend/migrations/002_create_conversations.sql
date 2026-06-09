@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_conversations_user_updated ON conversations (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);
 
 ---- DOWN
 DROP TABLE IF EXISTS conversations;

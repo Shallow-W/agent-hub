@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS agents (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_agents_user_type ON agents (user_id, type);
-CREATE UNIQUE INDEX idx_agents_system_cli ON agents (cli_tool) WHERE user_id IS NULL;
-CREATE UNIQUE INDEX idx_agents_user_name ON agents (user_id, name) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_user_type ON agents (user_id, type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_system_cli ON agents (cli_tool) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_user_name ON agents (user_id, name) WHERE user_id IS NOT NULL;
 
 ---- DOWN
 DROP TABLE IF EXISTS agents;

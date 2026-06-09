@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Badge, Button, Empty, Input, List, Modal, Tabs, message } from 'antd';
+import { Avatar, Badge, Button, Empty, Input, Modal, Tabs } from 'antd';
+import { message } from '@/utils/message';
 import { CheckOutlined, CloseOutlined, SendOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import styles from './FriendRequest.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 const FriendRequest: React.FC = () => {
   const { pendingRequests, sendRequest, acceptRequest, rejectRequest, actionLoading } =

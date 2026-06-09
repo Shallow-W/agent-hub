@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography, message as antMessage } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   FolderOpenOutlined,
   LogoutOutlined,
@@ -35,6 +36,7 @@ import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { useAgentStore } from '@/store/agentStore';
+import { modal as appModal } from '@/utils/modal';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
@@ -374,8 +376,7 @@ export const ChatWindow: React.FC = () => {
                 label: '解散群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '解散群聊',
                       content: '解散后所有成员将被移除，聊天记录将清除，此操作不可撤销。',
                       okText: '确认解散',
@@ -391,7 +392,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('解散失败');
                         }
                       },
-                    });
                   });
                 },
               }]
@@ -401,8 +401,7 @@ export const ChatWindow: React.FC = () => {
                 label: '退出群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '退出群聊',
                       content: '退出后将不再接收此群聊消息。',
                       okText: '确认退出',
@@ -418,7 +417,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('退出失败');
                         }
                       },
-                    });
                   });
                 },
               }]),

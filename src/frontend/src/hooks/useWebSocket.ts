@@ -5,6 +5,7 @@ import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
+import { message } from '@/utils/message';
 import type { StreamMessage } from '@/types/message';
 
 let audioCtx: AudioContext | null = null;
@@ -165,7 +166,7 @@ export function useWebSocket() {
         case 'error': {
           const errMsg = msg.data.message || '连接发生错误';
           console.error('WebSocket error:', errMsg);
-          import('antd').then(({ message }) => message.error(errMsg));
+          message.error(errMsg);
           break;
         }
       }

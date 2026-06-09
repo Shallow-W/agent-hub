@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Input, Modal, Select, Tag, message } from 'antd';
+import { Button, Checkbox, Input, Modal, Select, Tag } from 'antd';
+import { message } from '@/utils/message';
 import type { AgentCandidate } from '@/types/agent';
 import { getDefaultAgentName, parseSkills } from './agentPresentation';
 import {

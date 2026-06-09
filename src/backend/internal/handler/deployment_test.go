@@ -114,6 +114,40 @@ func TestServeSite_MissingFile404(t *testing.T) {
 	}
 }
 
+func TestServeSite_RejectsTraversalIntoAnotherDeployment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir := t.TempDir()
+	id := uuid.NewString()
+	otherID := uuid.NewString()
+	for _, siteID := range []string{id, otherID} {
+		if err := os.MkdirAll(filepath.Join(dir, siteID), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, otherID, "secret.html"), []byte("other deployment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dRepo := &fakeDeployRepo{dep: &model.Deployment{ID: id, Status: "success", URL: "/api/sites/" + id + "/index.html"}}
+	svc := service.NewDeploymentService(dRepo, fakeDeployArtRepo{}, fakeDeployConvRepo{}, dir, "")
+	h := NewDeploymentHandler(svc)
+
+	r := gin.New()
+	r.GET("/api/sites/:id/*filepath", middleware.ValidateUUIDParam("id"), h.ServeSite)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sites/"+id+"/%2e%2e/"+otherID+"/secret.html", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403; body=%s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("other deployment")) {
+		t.Fatal("traversal served another deployment's file")
+	}
+}
+
 func TestDownload_ReturnsZipWithFiles(t *testing.T) {
 	r, id := setup(t)
 	w := httptest.NewRecorder()

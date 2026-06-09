@@ -9,8 +9,8 @@ import {
   Select,
   Space,
   Tag,
-  message as antMessage,
 } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,

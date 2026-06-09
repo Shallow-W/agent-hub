@@ -23,6 +23,7 @@ export interface TypingUser {
 interface WsState {
   status: WsStatus;
   wsClient: WebSocketClient | null;
+  currentToken: string | null;
   /** conversationId → typing users */
   typingUsers: Record<string, TypingUser[]>;
   /** conversationId → whether an agent is currently processing */
@@ -37,12 +38,17 @@ interface WsState {
 export const useWsStore = create<WsState>((set, get) => ({
   status: 'disconnected',
   wsClient: null,
+  currentToken: null,
   typingUsers: {},
   agentTyping: {},
 
   connect: (token: string) => {
     // 避免重复连接
     const existing = get().wsClient;
+    // React StrictMode 会重复执行 effect，同 token 连接直接复用，避免关闭尚未握手完成的 WebSocket。
+    if (existing && get().currentToken === token && get().status !== 'disconnected') {
+      return existing;
+    }
     if (existing) {
       existing.disconnect();
     }
@@ -60,7 +66,7 @@ export const useWsStore = create<WsState>((set, get) => ({
       }
     });
     client.connect(token);
-    set({ wsClient: client, status: 'connecting' });
+    set({ wsClient: client, currentToken: token, status: 'connecting' });
     return client;
   },
 
@@ -71,7 +77,7 @@ export const useWsStore = create<WsState>((set, get) => ({
     }
     agentTypingTimers.forEach((t) => clearTimeout(t));
     agentTypingTimers.clear();
-    set({ wsClient: null, status: 'disconnected', typingUsers: {}, agentTyping: {} });
+    set({ wsClient: null, currentToken: null, status: 'disconnected', typingUsers: {}, agentTyping: {} });
   },
 
   addTypingUser: (conversationId, userId, username) => {
