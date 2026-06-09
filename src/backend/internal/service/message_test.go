@@ -304,6 +304,87 @@ func TestArtifactsFromTaskResult(t *testing.T) {
 	}
 }
 
+func TestArtifactsFromMarkdown_CodeFence(t *testing.T) {
+	got := artifactsFromMarkdown("here\n```python\n# file: demo.py\nprint('hi')\n```\n")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(got))
+	}
+	if got[0].Type != "code" || got[0].Language != "python" || got[0].Filename != "demo.py" || got[0].Content != "print('hi')" {
+		t.Fatalf("artifact mismatch: %+v", got[0])
+	}
+}
+
+func TestGetHistoryBackfillsMarkdownArtifacts(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{
+		messages: []model.Message{
+			{
+				ID:             "msg-1",
+				ConversationID: "conv-1",
+				Role:           "assistant",
+				Content:        "code:\n```python\nprint('hi')\n```",
+				CreatedAt:      time.Now(),
+			},
+		},
+	}
+	convRepo := &fakeConvRepoForMsg{
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "group"},
+	}
+	svc := NewMessageService(msgRepo, convRepo, &fakeAgentRepoForMsg{})
+
+	messages, err := svc.GetHistory(context.Background(), "conv-1", userID, nil, 20)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+	if len(messages) != 1 || len(messages[0].Artifacts) != 1 {
+		t.Fatalf("expected returned artifact, got %+v", messages)
+	}
+	if messages[0].Artifacts[0].Type != "code" || messages[0].Artifacts[0].Content != "print('hi')" {
+		t.Fatalf("returned artifact mismatch: %+v", messages[0].Artifacts[0])
+	}
+	saved := msgRepo.savedArtifacts["msg-1"]
+	if len(saved) != 1 || saved[0].Language != "python" {
+		t.Fatalf("expected saved artifact, got %+v", saved)
+	}
+}
+
+func TestGetHistoryBackfillsCodeWhenDocumentArtifactExists(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{
+		messages: []model.Message{
+			{
+				ID:             "msg-1",
+				ConversationID: "conv-1",
+				Role:           "assistant",
+				Content:        "code:\n```python\nprint('hi')\n```",
+				CreatedAt:      time.Now(),
+				Artifacts: []model.Artifact{
+					{ID: "doc-1", Type: "document", Language: "markdown", Content: "# doc"},
+				},
+			},
+		},
+	}
+	convRepo := &fakeConvRepoForMsg{
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "group"},
+	}
+	svc := NewMessageService(msgRepo, convRepo, &fakeAgentRepoForMsg{})
+
+	messages, err := svc.GetHistory(context.Background(), "conv-1", userID, nil, 20)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+	if len(messages) != 1 || len(messages[0].Artifacts) != 2 {
+		t.Fatalf("expected document plus code artifact, got %+v", messages)
+	}
+	if !hasCodeArtifact(messages[0].Artifacts) {
+		t.Fatalf("expected code artifact, got %+v", messages[0].Artifacts)
+	}
+	saved := msgRepo.savedArtifacts["msg-1"]
+	if len(saved) != 1 || saved[0].Type != "code" {
+		t.Fatalf("expected saved code artifact only, got %+v", saved)
+	}
+}
+
 func TestCreateAgentReplyPersistsArtifacts(t *testing.T) {
 	userID := "user-1"
 	msgRepo := &fakeMsgRepo{}
