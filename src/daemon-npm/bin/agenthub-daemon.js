@@ -2508,6 +2508,127 @@ const MCP_TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/machines'),
   },
+  // ── Agent 管理 ──
+  {
+    name: 'get_agent_detail',
+    description: '查询单个 Agent 的完整详情，包括名称、类型、CLI 工具、系统提示词、工具配置、状态、版本、机器名称等。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('GET', `/api/agents/${encodeURIComponent(args.agent_id)}`),
+  },
+  {
+    name: 'update_agent_prompt',
+    description: '更新 Agent 的系统提示词。会先获取当前完整信息，再只修改 system_prompt 字段。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+        system_prompt: { type: 'string', description: '新的系统提示词' },
+      },
+      required: ['agent_id', 'system_prompt'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const agentId = args.agent_id;
+      if (!agentId) throw new Error('agent_id is required');
+      const systemPrompt = args.system_prompt;
+      if (!systemPrompt) throw new Error('system_prompt is required');
+      // 先获取当前完整信息
+      const res = await ctx.callApi('GET', `/api/agents`);
+      const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      const agent = agents.find((a) => a && a.id === agentId);
+      if (!agent) throw new Error(`agent not found: ${agentId}`);
+      // 只改 system_prompt，其他字段原样传回
+      return ctx.callApi('PUT', `/api/agents/${encodeURIComponent(agentId)}`, {
+        body: {
+          name: agent.name,
+          cli_tool: agent.cli_tool,
+          system_prompt: systemPrompt,
+          tools_config: agent.tools_config,
+          capabilities_json: agent.capabilities_json,
+          enable_management_tools: agent.enable_management_tools,
+        },
+      });
+    },
+  },
+  {
+    name: 'start_agent',
+    description: '启动指定的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('POST', `/api/agents/${encodeURIComponent(args.agent_id)}/start`),
+  },
+  {
+    name: 'stop_agent',
+    description: '停止指定的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('POST', `/api/agents/${encodeURIComponent(args.agent_id)}/stop`),
+  },
+  // ── 知识库 ──
+  {
+    name: 'list_knowledge_bases',
+    description: '列出当前用户的知识库，包含 ID、名称、描述、可见性、文件数量等信息。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callApi('GET', '/api/knowledge-bases'),
+  },
+  {
+    name: 'list_knowledge_files',
+    description: '列出指定知识库中的文件，包含文件名、大小、类型、预览文本等信息。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: '知识库 ID' },
+      },
+      required: ['knowledge_base_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('GET', `/api/knowledge-bases/${encodeURIComponent(args.knowledge_base_id)}/files`),
+  },
+  {
+    name: 'search_knowledge',
+    description: '在指定知识库中按关键词搜索文件，基于文件的 preview_text 字段进行匹配过滤。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: '知识库 ID' },
+        keyword: { type: 'string', description: '搜索关键词' },
+      },
+      required: ['knowledge_base_id', 'keyword'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const kbId = args.knowledge_base_id;
+      const keyword = args.keyword;
+      if (!kbId) throw new Error('knowledge_base_id is required');
+      if (!keyword) throw new Error('keyword is required');
+      const res = await ctx.callApi('GET', `/api/knowledge-bases/${encodeURIComponent(kbId)}/files`);
+      const files = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      const keywordLower = keyword.toLowerCase();
+      return files.filter((f) => {
+        const preview = typeof f.preview_text === 'string' ? f.preview_text : '';
+        return preview.toLowerCase().includes(keywordLower);
+      });
+    },
+  },
 ];
 
 const DEFAULT_AGENT_TOOLS = [
@@ -2531,6 +2652,8 @@ const TOOLSET_TEMPLATES = {
     'list_conversations',
     'get_group_info',
     'list_group_members',
+    'list_knowledge_bases',
+    'search_knowledge',
   ],
   agent_builder: [
     'list_agents',
@@ -2538,7 +2661,10 @@ const TOOLSET_TEMPLATES = {
     'get_agent_skill',
     'list_agent_candidates',
     'list_machines',
+    'get_agent_detail',
   ],
+  agent_manager: ['list_agents', 'get_agent_detail', 'update_agent_prompt', 'start_agent', 'stop_agent', 'get_agent_skill'],
+  knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge'],
 };
 
 function normalizeToolName(value) {

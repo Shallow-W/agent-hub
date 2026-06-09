@@ -73,7 +73,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [addingUser, setAddingUser] = useState<string | null>(null);
   const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { friends } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
   const agents = useAgentStore((s) => s.agents);
   const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
   const [addingAgent, setAddingAgent] = useState<string | null>(null);

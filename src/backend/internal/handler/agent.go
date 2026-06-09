@@ -97,6 +97,25 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	middleware.SuccessResponse(c, slim)
 }
 
+// MCPGetAgentDetail MCP 端点：查询单个 Agent 完整详情
+func (h *AgentHandler) MCPGetAgentDetail(c *gin.Context) {
+	agentID := c.Param("id")
+	if agentID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40035, "缺少 Agent ID")
+		return
+	}
+	agent, err := h.svc.GetAgentByID(c.Request.Context(), agentID)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50037, "查询 Agent 详情失败")
+		return
+	}
+	if agent == nil {
+		middleware.ErrorResponse(c, http.StatusNotFound, 40430, "Agent 不存在")
+		return
+	}
+	middleware.SuccessResponse(c, agent)
+}
+
 // ListDaemonMachines 查询当前用户创建的电脑连接位。
 func (h *AgentHandler) ListDaemonMachines(c *gin.Context) {
 	userID := middleware.GetUserID(c)

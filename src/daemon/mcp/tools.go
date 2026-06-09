@@ -18,6 +18,8 @@ func AllTools() []Tool {
 	tools = append(tools, AgentTools()...)
 	tools = append(tools, MachineTools()...)
 	tools = append(tools, GroupTools()...)
+	tools = append(tools, AgentManagementTools()...)
+	tools = append(tools, KnowledgeTools()...)
 	return tools
 }
 
@@ -277,6 +279,118 @@ func MachineTools() []Tool {
 			InputSchema: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
+			},
+		},
+	}
+}
+
+// AgentManagementTools Agent 管理工具——查询详情、更新提示词、启停控制
+func AgentManagementTools() []Tool {
+	return []Tool{
+		{
+			Name:        "get_agent_detail",
+			Description: "查询单个 Agent 的完整详情，包括名称、类型、CLI 工具、系统提示词、工具配置、状态、版本、机器名称、能力、技能、标签等",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "update_agent_prompt",
+			Description: "更新 Agent 的系统提示词。会先获取当前完整信息，再只修改 system_prompt 字段",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "新的系统提示词（必填）",
+					},
+				},
+				"required": []string{"agent_id", "system_prompt"},
+			},
+		},
+		{
+			Name:        "start_agent",
+			Description: "启动指定的 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "stop_agent",
+			Description: "停止指定的 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+	}
+}
+
+// KnowledgeTools 知识库工具——查询知识库列表、文件列表、关键词搜索
+func KnowledgeTools() []Tool {
+	return []Tool{
+		{
+			Name:        "list_knowledge_bases",
+			Description: "列出当前用户的知识库，包含 ID、名称、描述、可见性、文件数量、创建时间等信息",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "list_knowledge_files",
+			Description: "列出指定知识库中的文件，包含文件名、大小、类型、预览文本等信息",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+				},
+				"required": []string{"knowledge_base_id"},
+			},
+		},
+		{
+			Name:        "search_knowledge",
+			Description: "在指定知识库中按关键词搜索文件，基于文件的 preview_text 字段进行匹配过滤",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+					"keyword": map[string]interface{}{
+						"type":        "string",
+						"description": "搜索关键词（必填）",
+					},
+				},
+				"required": []string{"knowledge_base_id", "keyword"},
 			},
 		},
 	}

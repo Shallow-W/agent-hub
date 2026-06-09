@@ -31,11 +31,9 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({
   onStartAgentChat,
   onSwitchChat,
 }) => {
-  const {
-    friends,
-    loading,
-    deleteFriend,
-  } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
+  const loading = useFriendStore((s) => s.loading);
+  const deleteFriend = useFriendStore((s) => s.deleteFriend);
   const setActive = useConversationStore((s) => s.setActive);
   const agents = useAgentStore((s) => s.agents);
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
