@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
+import type { ConversationAgent } from '@/types/conversation';
 import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
@@ -243,6 +244,7 @@ const embeddedDocumentComponents: Components = {
 };
 
 /** Renders markdown content with full GFM support. */
+const REMARK_PLUGINS = [remarkGfm];
 const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
   content,
   codeArtifacts,
@@ -250,7 +252,7 @@ const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }>
   // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
   const components = buildMarkdownComponents(codeArtifacts);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
       {content}
     </ReactMarkdown>
   );
@@ -269,6 +271,9 @@ interface MessageBubbleProps {
   onRecall?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
+  conversationAgents?: ConversationAgent[];
+  replyCount?: number;
+  onOpenThread?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -309,6 +314,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onRecall,
   onForward,
   onTogglePin,
+  conversationAgents = [],
+  replyCount = 0,
+  onOpenThread,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -322,6 +330,15 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   }, [message.role, message.artifacts_json]);
   const agentName = agentMeta.agent_name ?? null;
   const deployment = agentMeta.deployment ?? null;
+  const conversationAgentRole = useMemo(() => {
+    if (!agentMeta.agent_id) return null;
+    return conversationAgents.find((agent) => agent.agent_id === agentMeta.agent_id)?.role ?? null;
+  }, [agentMeta.agent_id, conversationAgents]);
+  const agentBadgeLabel = conversationAgentRole === 'orchestrator'
+    ? 'Orchestrator agent'
+    : conversationAgentRole === 'worker'
+      ? 'Worker agent'
+      : 'Agent';
 
   // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
   // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
@@ -531,7 +548,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             <div className={styles.meta}>
               <Text className={styles.agentLabel}>{displayName}</Text>
               {agentName && (
-                <span className={styles.agentBadge}>Agent</span>
+                <span className={styles.agentBadge}>{agentBadgeLabel}</span>
               )}
               {message.pinned && (
                 <Tooltip title="已 Pin 到上下文黑板">
@@ -569,7 +586,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <span className={styles.replyQuoteSender}>
-                  {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
+                  {escapeHtml(message.reply_to_message.username || (message.reply_to_message.sender_id ? '用户' : '助手'))}
                 </span>
                 {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
@@ -596,6 +613,19 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <Spin size="small" className={styles.sendingSpin} />
             )}
           </div>
+          {replyCount > 0 && onOpenThread && (
+            <button
+              className={styles.threadBtn}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenThread(message);
+              }}
+            >
+              <MessageOutlined />
+              {replyCount} 条回复
+            </button>
+          )}
           {shouldCollapse && (
             <button
               className={styles.expandToggle}

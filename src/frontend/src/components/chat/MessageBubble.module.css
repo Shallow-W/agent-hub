@@ -362,12 +362,10 @@
 .bubbleUser .recallBtn { order: 4; }
 
 .pinBtn {
-  opacity: 0.42;
-  pointer-events: auto;
+  color: var(--color-text-secondary);
 }
 
 .pinBtnActive {
-  opacity: 1;
   color: var(--color-primary);
 }
 
@@ -376,7 +374,8 @@
   color: var(--color-primary-active);
 }
 
-.bubble:hover .replyBtn {
+.bubble:hover .replyBtn,
+.bubble:focus-within .replyBtn {
   opacity: 1;
   pointer-events: auto;
 }
@@ -504,4 +503,21 @@
 .deployCard {
   margin-top: 8px;
   max-width: 460px;
+}
+
+.threadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 8px;
+  margin-top: 2px;
+  margin-left: 4px;
+}
+.threadBtn:hover {
+  text-decoration: underline;
 }

@@ -42,16 +42,14 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
   selectedFileId,
   selectedKbId,
 }) => {
-  const {
-    knowledgeBases,
-    loading,
-    fetchKnowledgeBases,
-    createKnowledgeBase,
-    deleteKnowledgeBase,
-    updateVisibility,
-    addFile,
-    removeFile,
-  } = useKnowledgeStore();
+  const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
+  const loading = useKnowledgeStore((s) => s.loading);
+  const fetchKnowledgeBases = useKnowledgeStore((s) => s.fetchKnowledgeBases);
+  const createKnowledgeBase = useKnowledgeStore((s) => s.createKnowledgeBase);
+  const deleteKnowledgeBase = useKnowledgeStore((s) => s.deleteKnowledgeBase);
+  const updateVisibility = useKnowledgeStore((s) => s.updateVisibility);
+  const addFile = useKnowledgeStore((s) => s.addFile);
+  const removeFile = useKnowledgeStore((s) => s.removeFile);
 
   useEffect(() => {
     fetchKnowledgeBases().catch(() => {});

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Avatar, Input, Badge, Tabs, Skeleton, Spin, Empty, Dropdown } from 'antd';
 import { message } from '@/utils/message';
 import { modal as appModal } from '@/utils/modal';
@@ -14,17 +14,15 @@ interface FriendListProps {
 }
 
 const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
-  const {
-    friends,
-    loading,
-    pendingRequests,
-    searchResults,
-    isSearching,
-    searchUsers,
-    clearSearch,
-    sendRequest,
-    deleteFriend,
-  } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
+  const loading = useFriendStore((s) => s.loading);
+  const pendingRequests = useFriendStore((s) => s.pendingRequests);
+  const searchResults = useFriendStore((s) => s.searchResults);
+  const isSearching = useFriendStore((s) => s.isSearching);
+  const searchUsers = useFriendStore((s) => s.searchUsers);
+  const clearSearch = useFriendStore((s) => s.clearSearch);
+  const sendRequest = useFriendStore((s) => s.sendRequest);
+  const deleteFriend = useFriendStore((s) => s.deleteFriend);
 
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('friends');
@@ -84,11 +82,14 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
     });
   };
 
-  const filteredFriends = search
-    ? friends.filter((f) =>
-        (f.friend_name ?? '').toLowerCase().includes(search.toLowerCase()),
-      )
-    : friends;
+  const filteredFriends = useMemo(
+    () => search
+      ? friends.filter((f) =>
+          (f.friend_name ?? '').toLowerCase().includes(search.toLowerCase()),
+        )
+      : friends,
+    [friends, search],
+  );
 
   const showSearchResults = search.trim().length > 0 && searchResults.length > 0;
 

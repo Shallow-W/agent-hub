@@ -444,6 +444,10 @@ func (r *fakeMsgRepoForHandler) UpsertConversationBlackboard(_ context.Context, 
 	}, nil
 }
 
+func (r *fakeMsgRepoForHandler) ListReplies(_ context.Context, _ string) ([]model.Message, error) {
+	return r.messages, nil
+}
+
 // fakeConvRepoForHandler satisfies service.ConvRepoForMsg
 type fakeConvRepoForHandler struct {
 	conv    *model.Conversation
