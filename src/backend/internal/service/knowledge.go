@@ -31,10 +31,11 @@ type KnowledgeService struct {
 	kbRepo    *repository.KnowledgeRepo
 	userRepo  *repository.UserRepo
 	uploadDir string
+	fileURLs  *FileURLBuilder
 }
 
 // NewKnowledgeService 创建知识库服务
-func NewKnowledgeService(kbRepo *repository.KnowledgeRepo, userRepo *repository.UserRepo, uploadDir string) *KnowledgeService {
+func NewKnowledgeService(kbRepo *repository.KnowledgeRepo, userRepo *repository.UserRepo, uploadDir, publicBaseURL string) *KnowledgeService {
 	if uploadDir == "" {
 		uploadDir = "./uploads"
 	}
@@ -42,6 +43,7 @@ func NewKnowledgeService(kbRepo *repository.KnowledgeRepo, userRepo *repository.
 		kbRepo:    kbRepo,
 		userRepo:  userRepo,
 		uploadDir: uploadDir,
+		fileURLs:  NewFileURLBuilder(publicBaseURL),
 	}
 }
 
@@ -69,6 +71,7 @@ func (s *KnowledgeService) List(ctx context.Context, userID string) ([]model.Kno
 		if err != nil {
 			return nil, err
 		}
+		s.enrichKnowledgeFiles(files)
 		kbs[i].Files = files
 	}
 	return kbs, nil
@@ -110,7 +113,9 @@ func (s *KnowledgeService) Delete(ctx context.Context, userID, kbID string) erro
 		return err
 	}
 	for _, f := range files {
-		_ = os.Remove(filepath.Join(s.uploadDir, filepath.Clean(f.FilePath)))
+		if absPath, err := SafeJoinUploadPath(s.uploadDir, f.FilePath); err == nil {
+			_ = os.Remove(absPath)
+		}
 	}
 	return s.kbRepo.Delete(ctx, kbID)
 }
@@ -200,6 +205,7 @@ func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID str
 	if f == nil {
 		return nil, ErrKBFileNotFound
 	}
+	s.enrichKnowledgeFile(f)
 	return f, nil
 }
 
@@ -215,7 +221,12 @@ func (s *KnowledgeService) ListFiles(ctx context.Context, userID, kbID string) (
 	if kb.UserID != userID && kb.Visibility != "public" {
 		return nil, ErrKBNoPermission
 	}
-	return s.kbRepo.ListFiles(ctx, kbID)
+	files, err := s.kbRepo.ListFiles(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichKnowledgeFiles(files)
+	return files, nil
 }
 
 // DeleteFile 删除知识库文件
@@ -239,7 +250,9 @@ func (s *KnowledgeService) DeleteFile(ctx context.Context, userID, kbID, fileID 
 		return ErrKBFileNotFound
 	}
 	// 删除物理文件
-	_ = os.Remove(filepath.Join(s.uploadDir, filepath.Clean(filePath)))
+	if absPath, err := SafeJoinUploadPath(s.uploadDir, filePath); err == nil {
+		_ = os.Remove(absPath)
+	}
 	return nil
 }
 
@@ -308,6 +321,7 @@ func (s *KnowledgeService) ResolveKnowledgeRef(ctx context.Context, currentUserI
 		if err != nil {
 			return nil, nil, err
 		}
+		s.enrichKnowledgeFiles(files)
 		return kb, files, nil
 	}
 
@@ -323,7 +337,21 @@ func (s *KnowledgeService) ResolveKnowledgeRef(ctx context.Context, currentUserI
 	if err != nil {
 		return nil, nil, err
 	}
+	s.enrichKnowledgeFiles(files)
 	return kb, files, nil
+}
+
+func (s *KnowledgeService) enrichKnowledgeFiles(files []model.KnowledgeFile) {
+	for i := range files {
+		s.enrichKnowledgeFile(&files[i])
+	}
+}
+
+func (s *KnowledgeService) enrichKnowledgeFile(file *model.KnowledgeFile) {
+	if file == nil || s.fileURLs == nil {
+		return
+	}
+	file.URL = s.fileURLs.KnowledgeFileURL(file.KnowledgeBaseID, file.ID)
 }
 
 // detectFileMIME 根据文件扩展名和内容检测MIME类型

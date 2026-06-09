@@ -299,6 +299,15 @@
   gap: 12px;
 }
 
+.skillsEmptyPanel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 32px;
+  gap: 8px;
+}
+
 .emptyRightIcon {
   font-size: 56px;
   opacity: 0.6;

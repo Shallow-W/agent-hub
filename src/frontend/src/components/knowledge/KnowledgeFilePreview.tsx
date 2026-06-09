@@ -38,8 +38,8 @@ function isTextMime(mime: string): boolean {
 }
 
 /** 通过认证 fetch 获取文件 blob，创建带 token 的 blob URL */
-async function fetchFileBlob(kbId: string, fileId: string): Promise<{ url: string; blob: Blob } | null> {
-  const url = getKnowledgeFileUrl(kbId, fileId);
+async function fetchFileBlob(kbId: string, file: KnowledgeFile): Promise<{ url: string; blob: Blob } | null> {
+  const url = getKnowledgeFileUrl(kbId, file);
   const res = await fetch(url, {
     headers: getAuthHeaders(),
   });
@@ -81,7 +81,7 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
       try {
         if (isTextMime(file.mime_type)) {
           // 文本类：fetch 为文本
-          const url = getKnowledgeFileUrl(kbId, file.id);
+          const url = getKnowledgeFileUrl(kbId, file);
           const res = await fetch(url, { headers: getAuthHeaders() });
           if (!res.ok) throw new Error(`获取文件失败 (${res.status})`);
           const text = await res.text();
@@ -91,7 +91,7 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
           }
         } else if (isImageMime(file.mime_type) || isPDFMime(file.mime_type)) {
           // 图片/PDF：fetch 为 blob
-          const result = await fetchFileBlob(kbId, file.id);
+          const result = await fetchFileBlob(kbId, file);
           if (!cancelled && result) {
             blobUrlRef.current = result.url;
             setBlobUrl(result.url);
@@ -116,7 +116,7 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
 
   const handleDownload = async () => {
     try {
-      const url = getKnowledgeFileUrl(kbId, file.id);
+      const url = getKnowledgeFileUrl(kbId, file);
       const res = await fetch(url, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error(`下载失败 (${res.status})`);
       const blob = await res.blob();

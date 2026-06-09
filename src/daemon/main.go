@@ -53,9 +53,10 @@ func runMCP(agentID string) {
 	}
 
 	api := mcp.NewAPIClient(serverURL, token)
-	handler := mcp.HandleAllTools(api)
 
-	allowed := api.AllowedToolsForAgent(firstNonEmpty(agentID, mcp.AgentIDFromEnv()))
+	currentAgentID := firstNonEmpty(agentID, mcp.AgentIDFromEnv())
+	handler := mcp.HandleAllTools(api, currentAgentID)
+	allowed := api.AllowedToolsForAgent(currentAgentID)
 	server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
 
 	ctx := context.Background()

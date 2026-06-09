@@ -12,7 +12,7 @@
 - System Prompt 提供示例模板（如"你是一个前端专家，擅长 React 和 TypeScript..."）
 - 保存后出现在 Agent 列表中
 - 已支持从已连接电脑的候选底座创建 Agent 时选择工具集模板、勾选具体平台 MCP 工具，并填写初始平台 Skills。
-- 已支持在 Agent 详情页继续编辑工具集和平台 Skills。
+- 已支持在 Agent 详情页和独立技能页按 Agent 继续编辑工具集和平台 Skills；底座扫描 Skills 只读展示，可复制为平台 Skills。
 
 ### M8-2 自建 Agent 后端（部分完成）
 
@@ -21,7 +21,7 @@
 - 调度时：用自建 Agent 的 system_prompt 替换默认值，通过对应 CLI 工具的适配器执行
 - `agents.tools_config` 使用 `{"toolset": string, "allowed_tools": string[]}` 作为 per-Agent MCP 工具授权配置；后端保存前过滤未知工具名。
 - 省略或传空 `tools_config` 保存为无工具配置，runtime 不授予默认工具。
-- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖；后端仅允许当前用户更新自建 Agent 的平台 Skills，并保留 `name`、`description`、`trigger`、`detail` 用于渐进式提示词加载。
+- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖；后端仅允许当前用户更新自建 Agent 的平台 Skills，并保留 `name`、`description`、`trigger`、`detail`。对话 prompt 只注入 Skill 索引，完整 detail 通过 `get_agent_skill` MCP 工具按需读取。
 
 ### M8-3 自建 Agent 对话验证
 
@@ -38,6 +38,7 @@
 - [ ] 可修改和删除自建 Agent
 - [x] 创建和编辑时可分配工具集与平台 Skills
 - [x] 工具集配置持久化到后端并被 daemon MCP runtime 按 Agent 限制
+- [x] Skill detail 保存在服务端，通过 `get_agent_skill` 按当前 Agent 授权渐进加载
 
 ## 验证记录
 

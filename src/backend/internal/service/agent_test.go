@@ -382,7 +382,7 @@ func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
+func TestBuildAgentSkillContextUsesIndexAndLookupTool(t *testing.T) {
 	raw := `[{"name":"代码审查","description":"检查 bug 和测试缺口","trigger":"review, bug","detail":"逐项检查边界、权限和测试。"},{"name":"文档撰写","description":"写说明","detail":"不要命中"}]`
 	got := BuildAgentSkillContext(raw, "请 review 这个工具权限 bug")
 	if !strings.Contains(got, "[平台 Skills]") {
@@ -391,11 +391,14 @@ func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
 	if !strings.Contains(got, "代码审查：检查 bug 和测试缺口") {
 		t.Fatalf("expected skill index, got %s", got)
 	}
-	if !strings.Contains(got, "逐项检查边界、权限和测试。") {
-		t.Fatalf("expected matched detail, got %s", got)
+	if !strings.Contains(got, "get_agent_skill") {
+		t.Fatalf("expected skill lookup tool instruction, got %s", got)
+	}
+	if strings.Contains(got, "逐项检查边界、权限和测试。") {
+		t.Fatalf("expected detail to remain outside prompt, got %s", got)
 	}
 	if strings.Contains(got, "不要命中") {
-		t.Fatalf("unexpected unmatched detail: %s", got)
+		t.Fatalf("expected no skill detail in prompt: %s", got)
 	}
 }
 

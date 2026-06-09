@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -102,7 +103,7 @@ func (c *APIClient) doRequest(method, reqURL string, body interface{}) (interfac
 }
 
 // HandleAllTools 处理所有 tool 调用
-func HandleAllTools(api *APIClient) ToolHandlerFunc {
+func HandleAllTools(api *APIClient, agentID string) ToolHandlerFunc {
 	return func(toolName string, args map[string]interface{}) (interface{}, error) {
 		switch toolName {
 		// 会话
@@ -138,6 +139,8 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 		// 智能体
 		case "list_agents":
 			return api.doGet("/mcp/agents", nil)
+		case "get_agent_skill":
+			return handleGetAgentSkill(api, agentID, args)
 		case "list_agent_candidates":
 			return api.doGet("/mcp/daemon/agent-candidates", nil)
 		// 机器
@@ -160,6 +163,64 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
 	}
+}
+
+type platformSkill struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Trigger     string `json:"trigger,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+func handleGetAgentSkill(api *APIClient, agentID string, args map[string]interface{}) (interface{}, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	name, _ := args["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	skill, ok, err := api.AgentSkill(agentID, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("skill not found for current agent: %s", name)
+	}
+	return skill, nil
+}
+
+func (c *APIClient) AgentSkill(agentID, skillName string) (platformSkill, bool, error) {
+	data, err := c.doGet("/mcp/agents", nil)
+	if err != nil {
+		return platformSkill{}, false, err
+	}
+	agents, ok := data.([]interface{})
+	if !ok {
+		return platformSkill{}, false, nil
+	}
+	for _, item := range agents {
+		agent, ok := item.(map[string]interface{})
+		if !ok || agent["id"] != agentID {
+			continue
+		}
+		raw, _ := agent["custom_skills"].(string)
+		if strings.TrimSpace(raw) == "" {
+			return platformSkill{}, false, nil
+		}
+		var skills []platformSkill
+		if err := json.Unmarshal([]byte(raw), &skills); err != nil {
+			return platformSkill{}, false, fmt.Errorf("parse custom skills: %w", err)
+		}
+		for _, skill := range skills {
+			if strings.EqualFold(strings.TrimSpace(skill.Name), strings.TrimSpace(skillName)) {
+				return skill, true, nil
+			}
+		}
+		return platformSkill{}, false, nil
+	}
+	return platformSkill{}, false, nil
 }
 
 func handleCreateGroup(api *APIClient, args map[string]interface{}) (interface{}, error) {

@@ -39,6 +39,7 @@ type OrchTaskStore interface {
 	Create(ctx context.Context, task *model.OrchTask) error
 	GetByID(ctx context.Context, id string) (*model.OrchTask, error)
 	UpdateStatus(ctx context.Context, id, status string) error
+	UpdateDispatchMessageID(ctx context.Context, id, messageID string) error
 	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
 	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
 	SetSummaryAndEvaluate(ctx context.Context, id, summary string) error
@@ -71,9 +72,11 @@ type OrchArtifactRepo interface {
 	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
 }
 
-// OrchMessageCacher 缓存异步消息到 Redis，避免刷新后丢失。
-type OrchMessageCacher interface {
-	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
+// OrchDeliveryState stores transient delivery state for async orchestrator messages.
+// Message rows are already persisted; Redis is only used for offline delivery and unread counts.
+type OrchDeliveryState interface {
+	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
+	IncrementUnread(ctx context.Context, userID, conversationID string) error
 }
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
@@ -91,7 +94,7 @@ type OrchestratorService struct {
 	daemonHub    *ws.DaemonHub
 	artifactRepo OrchArtifactRepo
 	notifier     MessageNotifier
-	cacher       OrchMessageCacher
+	delivery     OrchDeliveryState
 	taskSvc      TaskBoardSync
 
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
@@ -165,9 +168,14 @@ func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
 	s.notifier = n
 }
 
-// SetCacher injects the message cacher for persisting async messages to Redis.
-func (s *OrchestratorService) SetCacher(c OrchMessageCacher) {
-	s.cacher = c
+// SetDeliveryState injects transient delivery state storage.
+func (s *OrchestratorService) SetDeliveryState(c OrchDeliveryState) {
+	s.delivery = c
+}
+
+// SetCacher is kept for compatibility with older wiring code.
+func (s *OrchestratorService) SetCacher(c OrchDeliveryState) {
+	s.SetDeliveryState(c)
 }
 
 // SetTaskSvc injects the task board sync service.
@@ -185,7 +193,8 @@ func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgR
 }
 
 // RouteMention is the main entry point called when a message contains @mentions.
-func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment) (*RouteResult, error) {
+func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment, sourceMessageID *string) (*RouteResult, error) {
+	slog.Info(orchFlowLog, "stage", "route.start", "conversation_id", convID, "user_id", userID, "source_message_id", stringValue(sourceMessageID), "content_len", len(content))
 	conv, err := s.convRepo.GetByID(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("orch get conversation: %w", err)
@@ -200,11 +209,13 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 	}
 
 	mentions := ParseMentions(content)
+	slog.Info(orchFlowLog, "stage", "route.mentions_parsed", "conversation_id", convID, "mention_count", len(mentions), "mentions", mentionLogNames(mentions), "agent_count", len(convAgents), "agents", convAgentLogNames(convAgents))
 	if len(mentions) == 0 {
 		return nil, nil
 	}
 
 	mentionMap := FindMentionedAgentID(mentions, convAgents)
+	slog.Info(orchFlowLog, "stage", "route.mentions_resolved", "conversation_id", convID, "resolved_count", len(mentionMap), "resolved", mentionMap)
 	if len(mentionMap) == 0 {
 		return nil, nil
 	}
@@ -245,12 +256,14 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		}
 
 		if isOrchestrator {
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
+			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name)
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload, sourceMessageID)
 
 			if err != nil {
-				slog.Warn("orchestrated dispatch failed", "agent_id", agentID, "error", err)
+				slog.Warn(orchFlowLog, "stage", "route.orchestrator_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
 			}
+			slog.Info(orchFlowLog, "stage", "route.orchestrator_returned", "conversation_id", convID, "agent_id", agentID, "message_count", len(msgs))
 			result.AgentMessages = append(result.AgentMessages, msgs...)
 			result.Dispatches = append(result.Dispatches, DispatchInfo{
 				AgentID:   agentID,
@@ -258,9 +271,10 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 				Task:      content,
 			})
 		} else {
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload)
+			slog.Info(orchFlowLog, "stage", "route.to_worker_direct", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name, "reply_to", stringValue(sourceMessageID))
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload, sourceMessageID)
 			if err != nil {
-				slog.Warn("direct dispatch failed", "agent_id", agentID, "error", err)
+				slog.Warn(orchFlowLog, "stage", "route.worker_direct_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
 			}
 			result.AgentMessages = append(result.AgentMessages, msg)
@@ -279,13 +293,15 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 // dispatchAndWait creates a daemon task, sends it via WS, waits for the result
 // via channel-based notification, creates a message, and returns it.
 // This is the unified dispatch path shared by both user @mention and orch worker dispatch.
-func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string) (*model.Message, error) {
+func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string, replyTo *string) (*model.Message, error) {
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
 	if err != nil {
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
+	slog.Info(orchFlowLog, "stage", "agent.dispatch_task_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID, "cli_tool", agent.CLITool, "prompt_len", len(prompt), "context_len", len(contextMessages), "reply_to", stringValue(replyTo), "prompt_preview", orchPreview(prompt))
 
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
 		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(task.ID)
@@ -303,26 +319,30 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
+	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
 
 	task, err = s.waitDaemonTask(ctx, task.ID)
 	if err != nil {
+		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
 		return nil, err
 	}
+	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
 	if task.Status == "failed" {
 		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 
 	artifacts := agentMetadata(agent)
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, replyTo, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
+	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "message_id", msg.ID, "reply_to", stringValue(replyTo), "content_len", len(msg.Content))
 	s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
-func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string, kbPreload string) (*model.Message, error) {
+func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, userID string, agent *model.Agent, content string, kbPreload string, replyTo *string) (*model.Message, error) {
 	if agent.UserID != nil && *agent.UserID != userID {
 		return nil, ErrMsgAgentNoPerm
 	}
@@ -357,7 +377,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	// 注入 Agent 系统提示词和工具配置到 context
 	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID, content)
 
-	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
+	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +386,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 
 // handleOrchestratedDispatch runs the full orchestrator flow: dispatch to orchestrator, parse output, fan out to workers.
 // kbPreload 是从原始用户消息预解析的知识库上下文，确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
-func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent, kbPreload string) ([]*model.Message, error) {
+func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent, kbPreload string, sourceMessageID *string) ([]*model.Message, error) {
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
@@ -374,6 +394,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	if orchAgent.Name == "" {
 		orchAgent.Name = "Orchestrator"
 	}
+	slog.Info(orchFlowLog, "stage", "orch.dispatch.start", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "orch_agent_name", orchAgent.Name, "machine_id", *orchAgent.MachineID, "source_message_id", stringValue(sourceMessageID), "content_len", len(content))
 
 	recentSummary, err := s.buildRecentSummary(ctx, convID)
 	if err != nil {
@@ -399,14 +420,17 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	orchCtx += kbPreload
 	agentConfig := s.InjectAgentConfig(orchAgent, "", userID, content)
 	orchCtx = agentConfig + orchCtx
+	slog.Info(orchFlowLog, "stage", "orch.prompt_prepared", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "prompt_len", len(fullPrompt), "context_len", len(orchCtx), "agent_count", len(convAgents))
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator task: %w", err)
 	}
+	slog.Info(orchFlowLog, "stage", "orch.daemon_task_created", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "machine_id", *orchAgent.MachineID, "cli_tool", orchAgent.CLITool)
 
 	// Orchestrator daemon must be connected via WS to dispatch
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*orchAgent.MachineID) {
+		slog.Warn(orchFlowLog, "stage", "orch.daemon_not_connected", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "machine_id", *orchAgent.MachineID)
 		return nil, fmt.Errorf("orchestrator agent %q 的 daemon 未通过 WS 连接", orchAgent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(orchTask.ID)
@@ -424,75 +448,111 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to orchestrator daemon: %w", err)
 	}
+	slog.Info(orchFlowLog, "stage", "orch.dispatch_sent", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID)
 
 	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
 	if err != nil {
+		slog.Warn(orchFlowLog, "stage", "orch.dispatch_wait_failed", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "error", err)
 		return nil, err
 	}
+	slog.Info(orchFlowLog, "stage", "orch.dispatch_completed", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "status", orchTask.Status, "result_len", len(orchTask.Result), "artifact_count", len(orchTask.Artifacts), "result_preview", orchPreview(orchTask.Result))
 	if orchTask.Status == "failed" {
 		return nil, fmt.Errorf("orchestrator task failed: %s", orchTask.Error)
 	}
 
 	dispatch := ParseOrchestratorOutputForAgents(orchTask.Result, availableAgentNames)
+	if dispatch == nil {
+		slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", 0, "has_dispatch", false)
+	} else {
+		slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", len(dispatch.Tasks), "has_dispatch", len(dispatch.Tasks) > 0, "agents", dispatchTaskLogNames(dispatch.Tasks))
+	}
 
 	// Orchestrator responded directly without dispatching
 	if dispatch == nil || len(dispatch.Tasks) == 0 {
 		artifacts := agentMetadata(orchAgent)
-		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
+		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
+		slog.Info(orchFlowLog, "stage", "orch.direct_message_created", "conversation_id", convID, "message_id", msg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(msg.Content))
 		s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
 	// Post orchestrator's full dispatch message (including @mentions) to group chat
 	var messages []*model.Message
+	workerReplyTo := sourceMessageID
 	{
 		artifacts := agentMetadata(orchAgent)
-		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, nil, nil, nil)
+		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
 		if err != nil {
-			slog.Warn("create orchestrator dispatch message failed", "error", err)
+			slog.Warn(orchFlowLog, "stage", "orch.dispatch_message_create_failed", "conversation_id", convID, "reply_to", stringValue(sourceMessageID), "error", err)
 		} else {
 			s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
 			messages = append(messages, dispatchMsg)
+			workerReplyTo = &dispatchMsg.ID
+			slog.Info(orchFlowLog, "stage", "orch.dispatch_message_created", "conversation_id", convID, "message_id", dispatchMsg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(dispatchMsg.Content))
 		}
 	}
 
-	// Build agent name -> ID map
-	agentNameToID := make(map[string]string)
-	for _, ca := range convAgents {
-		agentNameToID[ca.Name] = ca.AgentID
+	plan := BuildWorkerDispatchPlan(dispatch.Tasks, convAgents)
+	slog.Info(orchFlowLog, "stage", "orch.worker_plan_built", "conversation_id", convID, "parsed_count", len(dispatch.Tasks), "worker_count", len(plan.Tasks), "unknown_count", len(plan.UnknownTasks), "workers", resolvedDispatchLogNames(plan.Tasks), "unknown_agents", dispatchTaskLogNames(plan.UnknownTasks))
+	for _, unknown := range plan.UnknownTasks {
+		slog.Warn(orchFlowLog, "stage", "orch.worker_plan_unknown_agent", "conversation_id", convID, "agent", unknown.AgentName)
+	}
+	if !plan.HasWorkers() {
+		slog.Warn(orchFlowLog, "stage", "orch.worker_plan_empty", "conversation_id", convID, "task_count", len(dispatch.Tasks))
+		return messages, nil
 	}
 
-	// --- 事件驱动：创建 OrchTask，异步派发 worker，不阻塞等待 ---
-
-	// 创建 OrchTask 记录
-	orchTaskRecord := &model.OrchTask{
-		ConversationID:  convID,
-		UserID:          userID,
-		OrchAgentID:     orchAgent.ID,
-		Status:          model.OrchTaskDispatching,
-		DispatchPlan:    orchTask.Result,
-		OriginalMessage: content,
-		KBPreload:       kbPreload,
-		WorkerStatus:    "{}",
-		WorkerResults:   "{}",
-		RoundHistory:    "[]",
-	}
-	if s.orchTaskRepo != nil {
-		if err := s.orchTaskRepo.Create(ctx, orchTaskRecord); err != nil {
-			slog.Warn("create orch task record failed", "error", err)
-		}
-		// 先更新状态为 workers_running，再启动 goroutine，避免竞态
-		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskRecord.ID, model.OrchTaskWorkersRunning)
+	orchTaskID := ""
+	orchTaskRecord, ok := s.createOrchLifecycle(ctx, convID, userID, orchAgent.ID, orchTask.Result, content, kbPreload, sourceMessageID, workerReplyTo)
+	if ok && orchTaskRecord != nil {
+		orchTaskID = orchTaskRecord.ID
+	} else {
+		// 生命周期记录失败时不能吞掉 worker 派发；否则用户只能看到 Orch 的 @消息，
+		// 后续 worker 完全不会收到任务。此降级路径不做自动汇总，日志会明确暴露原因。
+		slog.Warn(orchFlowLog, "stage", "orch.lifecycle_degraded_no_record", "conversation_id", convID, "worker_count", len(plan.Tasks), "summary_enabled", false)
 	}
 
 	// 所有 worker 并行派发：startWorkersAndWait 内部用 WaitGroup 等待全部完成后触发 summary
 	orchSender := OrchSender{ID: orchAgent.ID, Name: orchAgent.Name, Avatar: orchAgent.Avatar}
-	go s.startWorkersAndWait(ctx, convID, userID, dispatch.Tasks, agentNameToID, orchAgent.Name, kbPreload, orchTaskRecord.ID, orchSender)
+	slog.Info(orchFlowLog, "stage", "orch.worker_fanout_scheduled", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_count", len(plan.Tasks), "reply_to", stringValue(workerReplyTo), "summary_enabled", orchTaskID != "")
+	go s.startWorkersAndWait(context.Background(), convID, userID, plan, orchAgent.Name, kbPreload, orchTaskID, orchSender, workerReplyTo, workerReplyTo)
 
 	return messages, nil
+}
+
+func (s *OrchestratorService) createOrchLifecycle(ctx context.Context, convID, userID, orchAgentID, dispatchPlan, originalMessage, kbPreload string, sourceMessageID, dispatchMessageID *string) (*model.OrchTask, bool) {
+	orchTaskRecord := &model.OrchTask{
+		ConversationID:    convID,
+		UserID:            userID,
+		OrchAgentID:       orchAgentID,
+		Status:            model.OrchTaskWorkersRunning,
+		DispatchPlan:      dispatchPlan,
+		OriginalMessage:   originalMessage,
+		SourceMessageID:   stringValue(sourceMessageID),
+		DispatchMessageID: stringValue(dispatchMessageID),
+		KBPreload:         kbPreload,
+		WorkerStatus:      "{}",
+		WorkerResults:     "{}",
+		RoundHistory:      "[]",
+	}
+
+	if s.orchTaskRepo == nil {
+		slog.Warn(orchFlowLog, "stage", "orch.lifecycle_repo_missing", "conversation_id", convID)
+		return orchTaskRecord, true
+	}
+	slog.Info(orchFlowLog, "stage", "orch.lifecycle_create_start", "conversation_id", convID, "orch_agent_id", orchAgentID, "source_message_id", orchTaskRecord.SourceMessageID, "dispatch_message_id", orchTaskRecord.DispatchMessageID, "status", orchTaskRecord.Status, "dispatch_plan_len", len(dispatchPlan))
+	if err := s.orchTaskRepo.Create(ctx, orchTaskRecord); err != nil {
+		slog.Error(orchFlowLog, "stage", "orch.lifecycle_create_failed", "conversation_id", convID, "orch_agent_id", orchAgentID, "source_message_id", orchTaskRecord.SourceMessageID, "dispatch_message_id", orchTaskRecord.DispatchMessageID, "error", err)
+		return nil, false
+	}
+	slog.Info(orchFlowLog, "stage", "orch.lifecycle_created", "conversation_id", convID, "orch_task_id", orchTaskRecord.ID, "status", orchTaskRecord.Status)
+	if err := s.orchTaskRepo.UpdateStatus(ctx, orchTaskRecord.ID, model.OrchTaskWorkersRunning); err != nil {
+		slog.Warn(orchFlowLog, "stage", "orch.lifecycle_status_update_failed", "conversation_id", convID, "orch_task_id", orchTaskRecord.ID, "status", model.OrchTaskWorkersRunning, "error", err)
+	}
+	return orchTaskRecord, true
 }
 
 func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
@@ -666,11 +726,27 @@ func buildOrchestratorAgentDetails(convAgents []model.ConversationAgent) []Orche
 			Name:        ca.Name,
 			Role:        ca.Role,
 			Status:      ca.Status,
-			Description: "",
+			Description: dispatchSafeAgentDescription(ca),
 			Tags:        ca.Tags,
 		})
 	}
 	return details
+}
+
+func dispatchSafeAgentDescription(agent model.ConversationAgent) string {
+	if strings.TrimSpace(agent.Description) != "" {
+		return truncateString(normalizePromptLine(agent.Description), 160)
+	}
+	switch agent.CLITool {
+	case "claude":
+		return "Claude Code CLI Agent，适合代码生成、项目理解、重构、评审与任务拆解。"
+	case "codex":
+		return "Codex CLI Agent，适合代码实现、补丁生成、测试修复和工程化任务。"
+	case "opencode":
+		return "OpenCode CLI Agent，适合通用代码任务和命令行开发工作流。"
+	default:
+		return ""
+	}
 }
 
 // waitDaemonTask waits for a daemon task to complete via channel-based
@@ -849,6 +925,20 @@ var promptWhitespaceRE = regexp.MustCompile(`\s+`)
 
 func normalizePromptLine(s string) string {
 	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalStringPtr(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
 }
 
 // agentMetadata serializes the agent identity fields into a JSON string

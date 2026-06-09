@@ -20,6 +20,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
+import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
@@ -31,6 +32,8 @@ import type { KnowledgeFile } from '@/types/knowledge';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
+  useAppBootstrap();
+
   const navigate = useNavigate();
   const location = useLocation();
   const { create, conversations } = useConversation();
@@ -301,7 +304,10 @@ const AppLayout: React.FC = () => {
           selectedAgent ? (
             <AgentSkillsPanel agent={selectedAgent} />
           ) : (
-            <div style={{ padding: 32, color: 'var(--color-text-secondary)' }}>← 选择一个 Agent 管理技能</div>
+            <div className={styles.skillsEmptyPanel}>
+              <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
+              <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
+            </div>
           )
         ) : activeNav === 'models' ? (
           selectedAgent ? (

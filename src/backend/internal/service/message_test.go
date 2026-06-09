@@ -184,6 +184,24 @@ func (r *fakeAgentRepoForMsg) GetDaemonTask(ctx context.Context, id string) (*mo
 	return r.task, nil
 }
 
+type fakeMessageDeliveryState struct{}
+
+func (c *fakeMessageDeliveryState) EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error {
+	return nil
+}
+
+func (c *fakeMessageDeliveryState) DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error) {
+	return nil, nil
+}
+
+func (c *fakeMessageDeliveryState) ClearUnread(ctx context.Context, userID, conversationID string) error {
+	return nil
+}
+
+func (c *fakeMessageDeliveryState) IncrementUnread(ctx context.Context, userID, conversationID string) error {
+	return nil
+}
+
 func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	userID := "user-1"
 	msgRepo := &fakeMsgRepo{}
@@ -334,6 +352,80 @@ func TestCreateAgentReplyPersistsArtifacts(t *testing.T) {
 	}
 }
 
+func TestGetHistoryEnrichesAttachmentURLs(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{
+		messages: []model.Message{
+			{
+				ID:             "msg-1",
+				ConversationID: "conv-1",
+				Role:           "user",
+				Content:        "image",
+				CreatedAt:      time.Now(),
+				Attachments: []model.MessageAttachment{
+					{
+						FileName:      "demo.png",
+						MimeType:      "image/png",
+						FilePath:      "uploads/originals/demo.png",
+						ThumbnailPath: "uploads/thumbnails/demo.jpg",
+					},
+				},
+			},
+		},
+	}
+	convRepo := &fakeConvRepoForMsg{
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "single"},
+	}
+	svc := NewMessageService(msgRepo, convRepo, &fakeAgentRepoForMsg{})
+	svc.SetFileURLBuilder(NewFileURLBuilder("http://111.228.35.61:8080"))
+
+	messages, err := svc.GetHistory(context.Background(), "conv-1", userID, nil, 20)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+	if len(messages) != 1 || len(messages[0].Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %+v", messages)
+	}
+	att := messages[0].Attachments[0]
+	if att.URL != "http://111.228.35.61:8080/api/uploads/originals/demo.png" {
+		t.Fatalf("attachment URL = %q", att.URL)
+	}
+	if att.ThumbnailURL != "http://111.228.35.61:8080/api/uploads/thumbnails/demo.jpg" {
+		t.Fatalf("thumbnail URL = %q", att.ThumbnailURL)
+	}
+}
+
+func TestGetHistoryUsesRepositoryEvenWithDeliveryState(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{
+		messages: []model.Message{
+			{
+				ID:             "db-msg",
+				ConversationID: "conv-1",
+				Role:           "user",
+				Content:        "fresh db message",
+				CreatedAt:      time.Now(),
+			},
+		},
+	}
+	convRepo := &fakeConvRepoForMsg{
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "single"},
+	}
+	svc := NewMessageService(msgRepo, convRepo, &fakeAgentRepoForMsg{})
+	svc.SetCacher(&fakeMessageDeliveryState{})
+
+	messages, err := svc.GetHistory(context.Background(), "conv-1", userID, nil, 200)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one repository message, got %+v", messages)
+	}
+	if messages[0].ID != "db-msg" {
+		t.Fatalf("GetHistory returned %q, want repository message", messages[0].ID)
+	}
+}
+
 func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	userID := "user-1"
 	ownerID := "user-2"
@@ -346,7 +438,7 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
 
-	_, err := svc.createAgentReply(context.Background(), "conv-1", userID, "agent-1", "hello", "")
+	_, err := svc.createAgentReply(context.Background(), "conv-1", userID, "agent-1", "hello", "", nil)
 	if !errors.Is(err, ErrMsgAgentNoPerm) {
 		t.Fatalf("expected ErrMsgAgentNoPerm, got %v", err)
 	}

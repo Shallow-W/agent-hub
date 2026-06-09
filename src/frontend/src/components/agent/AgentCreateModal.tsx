@@ -8,6 +8,7 @@ import {
   toolsConfigToJSON,
   toolsetOptions,
 } from './toolAssignments';
+import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import styles from './AgentCreateModal.module.css';
 
 interface AgentCreateModalProps {
@@ -150,12 +151,10 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         </div>
         <div className={styles.field}>
           <span className={styles.label}>人格设定</span>
-          <Input.TextArea
-            className={styles.textarea}
+          <AgentPromptTemplateField
+            open={open}
             value={systemPrompt}
-            placeholder="描述你希望这个 Agent 的风格、角色与边界"
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            onChange={(event) => setSystemPrompt(event.target.value)}
+            onChange={setSystemPrompt}
           />
           <span className={styles.helper}>支持空白，后续可在详情中继续调整。</span>
         </div>

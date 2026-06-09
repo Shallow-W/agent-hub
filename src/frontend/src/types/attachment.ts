@@ -4,6 +4,8 @@ export interface AttachmentPayload {
   file_size: number;
   file_path: string;
   thumbnail_path: string | null;
+  url?: string;
+  thumbnail_url?: string | null;
   width: number | null;
   height: number | null;
 }
@@ -16,6 +18,8 @@ export interface MessageAttachment {
   file_size: number;
   file_path: string;
   thumbnail_path: string | null;
+  url?: string;
+  thumbnail_url?: string | null;
   width: number | null;
   height: number | null;
   created_at: string;

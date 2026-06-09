@@ -7,17 +7,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/handler"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
-	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
@@ -60,9 +61,10 @@ type Config struct {
 		DB       int    `koanf:"db"`
 	} `koanf:"redis"`
 	Upload struct {
-		Dir        string `koanf:"dir"`
-		MaxImageMB int    `koanf:"max_image_mb"`
-		MaxPDFMB   int    `koanf:"max_pdf_mb"`
+		Dir           string `koanf:"dir"`
+		MaxImageMB    int    `koanf:"max_image_mb"`
+		MaxPDFMB      int    `koanf:"max_pdf_mb"`
+		PublicBaseURL string `koanf:"public_base_url"`
 	} `koanf:"upload"`
 	Log struct {
 		Level string `koanf:"level"`
@@ -138,6 +140,8 @@ func main() {
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	platformSkillRepo := repository.NewPlatformSkillRepo(db)
+	agentPromptTemplateRepo := repository.NewAgentPromptTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
 
@@ -165,13 +169,15 @@ func main() {
 		deploymentSvc.SetGitHubPublisher(pub)
 		logger.Info("GitHub Pages 永久发布已启用", "owner", firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner), "repo", firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo))
 	}
-	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
+	fileURLs := service.NewFileURLBuilder(cfg.Upload.PublicBaseURL)
+	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir, cfg.Upload.PublicBaseURL)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
-		Dir:        cfg.Upload.Dir,
-		MaxImageMB: cfg.Upload.MaxImageMB,
-		MaxPDFMB:   cfg.Upload.MaxPDFMB,
+		Dir:           cfg.Upload.Dir,
+		MaxImageMB:    cfg.Upload.MaxImageMB,
+		MaxPDFMB:      cfg.Upload.MaxPDFMB,
+		PublicBaseURL: cfg.Upload.PublicBaseURL,
 	})
 
 	// Redis 初始化
@@ -190,6 +196,8 @@ func main() {
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
+	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
@@ -203,6 +211,7 @@ func main() {
 	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
+	msgSvc.SetFileURLBuilder(fileURLs)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -211,10 +220,11 @@ func main() {
 	orchSvc.SetNotifier(hub)
 	if rdb != nil {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
-		orchSvc.SetCacher(redisMsgRepo)
+		msgSvc.SetDeliveryState(redisMsgRepo)
+		orchSvc.SetDeliveryState(redisMsgRepo)
 	} else {
-		msgSvc.SetCacher(nil)
+		msgSvc.SetDeliveryState(nil)
+		orchSvc.SetDeliveryState(nil)
 	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
@@ -228,6 +238,8 @@ func main() {
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc, hub)
+	platformSkillHandler := handler.NewPlatformSkillHandler(platformSkillSvc)
+	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
@@ -269,11 +281,19 @@ func main() {
 			uploadDir = "./uploads"
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
-			filePath := c.Param("filepath")
-			absPath, err := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
-			uploadDirAbs, _ := filepath.Abs(uploadDir)
+			filePath := cleanUploadRoutePath(c.Param("filepath"))
+			if filePath == "" {
+				c.Status(http.StatusForbidden)
+				return
+			}
+			absPath, err := filepath.Abs(filepath.Join(uploadDir, filePath))
+			uploadDirAbs, absErr := filepath.Abs(uploadDir)
 			if err != nil {
 				c.Status(http.StatusForbidden)
+				return
+			}
+			if absErr != nil {
+				c.Status(http.StatusInternalServerError)
 				return
 			}
 			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
@@ -282,7 +302,7 @@ func main() {
 			}
 
 			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
-			isThumbnail := strings.HasPrefix(filepath.Clean(filePath), string(os.PathSeparator)+"thumbnails")
+			isThumbnail := strings.HasPrefix(filepath.ToSlash(filePath), "thumbnails/")
 			ext := strings.ToLower(filepath.Ext(absPath))
 			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
 			if isThumbnail || isImage {
@@ -357,6 +377,16 @@ func main() {
 		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
+		apiGroup.GET("/platform-skills", platformSkillHandler.List)
+		apiGroup.POST("/platform-skills", platformSkillHandler.Create)
+		apiGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
+		apiGroup.PUT("/platform-skills/:id", platformSkillHandler.Update)
+		apiGroup.DELETE("/platform-skills/:id", platformSkillHandler.Delete)
+		apiGroup.GET("/agent-prompt-templates", agentPromptTemplateHandler.List)
+		apiGroup.POST("/agent-prompt-templates", agentPromptTemplateHandler.Create)
+		apiGroup.POST("/agent-prompt-templates/import-defaults", agentPromptTemplateHandler.ImportDefaults)
+		apiGroup.PUT("/agent-prompt-templates/:id", agentPromptTemplateHandler.Update)
+		apiGroup.DELETE("/agent-prompt-templates/:id", agentPromptTemplateHandler.Delete)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
@@ -522,6 +552,30 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+func cleanUploadRoutePath(value string) string {
+	cleaned := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	cleaned = strings.TrimPrefix(cleaned, "uploads/")
+	if hasDotDotSegment(cleaned) {
+		return ""
+	}
+	cleaned = path.Clean("/" + cleaned)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "." || cleaned == "" || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return filepath.FromSlash(cleaned)
+}
+
+func hasDotDotSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // initDatabase 连接数据库，若不存在则自动创建并运行迁移

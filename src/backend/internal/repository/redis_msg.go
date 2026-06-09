@@ -15,23 +15,18 @@ import (
 const (
 	// 离线消息队列 key: offline:{userID}:{conversationID}
 	offlineKeyPrefix = "offline:"
-	// 热消息缓存 key: msgs:{conversationID}
-	msgCacheKeyPrefix = "msgs:"
 	// 未读计数 key: unread:{userID}:{conversationID}
 	unreadKeyPrefix = "unread:"
-	// 缓存过期时间
-	msgCacheTTL   = 30 * time.Minute
+	// 离线投递状态过期时间
 	offlineMaxTTL = 7 * 24 * time.Hour
-	// 默认缓存条数
-	msgCacheSize = 50
 )
 
-// RedisMsgRepo Redis 消息缓存层
+// RedisMsgRepo stores transient message delivery state in Redis.
 type RedisMsgRepo struct {
 	rdb *goredis.Client
 }
 
-// NewRedisMsgRepo 创建 Redis 消息仓库
+// NewRedisMsgRepo 创建 Redis 消息投递状态仓库
 func NewRedisMsgRepo(rdb *goredis.Client) *RedisMsgRepo {
 	return &RedisMsgRepo{rdb: rdb}
 }
@@ -104,56 +99,6 @@ func (r *RedisMsgRepo) DequeueOfflineAfter(ctx context.Context, userID, conversa
 	}
 
 	return msgs, nil
-}
-
-// --- 热消息缓存（List，最近 N 条） ---
-
-func msgCacheKey(conversationID string) string {
-	return msgCacheKeyPrefix + conversationID
-}
-
-// CacheMessage 将消息追加到会话热缓存
-func (r *RedisMsgRepo) CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal message: %w", err)
-	}
-	key := msgCacheKey(conversationID)
-	pipe := r.rdb.Pipeline()
-	pipe.LPush(ctx, key, data)
-	pipe.LTrim(ctx, key, 0, int64(msgCacheSize-1))
-	pipe.Expire(ctx, key, msgCacheTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("redis cache message: %w", err)
-	}
-	return nil
-}
-
-// GetCachedMessages 从缓存获取最近消息（返回时间升序）
-func (r *RedisMsgRepo) GetCachedMessages(ctx context.Context, conversationID string, limit int) ([]model.Message, error) {
-	key := msgCacheKey(conversationID)
-	results, err := r.rdb.LRange(ctx, key, 0, int64(limit-1)).Result()
-	if err != nil {
-		return nil, fmt.Errorf("redis lrange cached: %w", err)
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	msgs := make([]model.Message, 0, len(results))
-	for i := len(results) - 1; i >= 0; i-- {
-		var m model.Message
-		if err := json.Unmarshal([]byte(results[i]), &m); err != nil {
-			continue
-		}
-		msgs = append(msgs, m)
-	}
-	return msgs, nil
-}
-
-// InvalidateCache 清除会话消息缓存
-func (r *RedisMsgRepo) InvalidateCache(ctx context.Context, conversationID string) error {
-	return r.rdb.Del(ctx, msgCacheKey(conversationID)).Err()
 }
 
 // --- 未读计数 ---

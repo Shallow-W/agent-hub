@@ -24,7 +24,9 @@ Questions to answer:
 
 <!-- How should queries be written? Batch operations? -->
 
-(To be filled by the team)
+- For optional UUID columns populated from string parameters, cast after
+  `NULLIF`: `NULLIF($n, '')::uuid`. Without the explicit cast, PostgreSQL can
+  infer the expression as `text` and fail inserts with SQLSTATE `42804`.
 
 ---
 
@@ -48,4 +50,6 @@ Questions to answer:
 
 <!-- Database-related mistakes your team has made -->
 
-(To be filled by the team)
+- `NULLIF($n, '')` is not enough for UUID columns. Use
+  `NULLIF($n, '')::uuid`, especially for optional reply anchors such as
+  `source_message_id` and `dispatch_message_id`.

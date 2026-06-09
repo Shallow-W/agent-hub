@@ -8,6 +8,7 @@ import (
 var defaultAgentTools = []string{
 	"list_group_agents",
 	"get_messages",
+	"get_agent_skill",
 	"list_tasks",
 	"create_task",
 	"update_task",
@@ -17,10 +18,10 @@ var noAgentTools = []string{}
 
 var toolsetTemplates = map[string][]string{
 	"none":          {},
-	"basic":         {"list_group_agents", "get_messages"},
+	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
 	"tasks":         defaultAgentTools,
 	"orchestrator":  append([]string{}, append(defaultAgentTools, "list_conversation_agents", "list_conversations", "get_group_info", "list_group_members")...),
-	"agent_builder": {"list_agents", "list_group_agents", "list_agent_candidates", "list_machines"},
+	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines"},
 }
 
 type toolsConfig struct {

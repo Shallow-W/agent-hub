@@ -7,10 +7,10 @@ import (
 
 var platformToolsets = map[string][]string{
 	"none":          {},
-	"basic":         {"list_group_agents", "get_messages"},
-	"tasks":         {"list_group_agents", "get_messages", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
-	"agent_builder": {"list_agents", "list_group_agents", "list_agent_candidates", "list_machines"},
+	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
+	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
+	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
+	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines"},
 }
 
 var platformToolCatalog = map[string]bool{
@@ -29,6 +29,7 @@ var platformToolCatalog = map[string]bool{
 	"list_group_members":       true,
 	"list_machines":            true,
 	"list_agent_candidates":    true,
+	"get_agent_skill":          true,
 }
 
 type agentToolsConfig struct {
