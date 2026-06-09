@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Input, Modal, Select, Tag } from 'antd';
+import { Button, Checkbox, Input, Modal, Select } from 'antd';
 import { message } from '@/utils/message';
-import type { AgentCandidate } from '@/types/agent';
-import { getDefaultAgentName, parseSkills } from './agentPresentation';
+import type { AgentCandidate, PlatformSkill } from '@/types/agent';
+import { getDefaultAgentName } from './agentPresentation';
+import { getPlatformSkills } from '@/api/platformSkill';
 import {
+  categoryMeta,
+  categoryOrder,
   getTemplateTools,
   toolCatalog,
   toolsConfigToJSON,
@@ -20,23 +23,12 @@ interface AgentCreateModalProps {
   onCreate: (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => Promise<void>;
 }
 
-function skillsInputToJSON(value: string): string {
-  const skills = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [name, ...descriptionParts] = line.split(/\s+-\s+/);
-      const description = descriptionParts.join(' - ').trim();
-      return {
-        name: (name ?? '').trim(),
-        description: description || undefined,
-        trigger: description || undefined,
-      };
-    })
-    .filter((skill) => skill.name.length > 0);
-  return skills.length > 0 ? JSON.stringify(skills) : '';
-}
+const skillTemplates = [
+  { key: 'pm', label: '产品经理', toolset: 'tasks', skillCategories: ['产品经理'] },
+  { key: 'dev', label: '开发人员', toolset: 'full', skillCategories: ['开发人员'] },
+  { key: 'manager', label: '管理助手', toolset: 'full', skillCategories: [] },
+  { key: 'empty', label: '空白', toolset: 'none', skillCategories: [] },
+];
 
 export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   open,
@@ -50,8 +42,11 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [systemPrompt, setSystemPrompt] = useState('');
   const [toolset, setToolset] = useState('tasks');
   const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
-  const [skillInput, setSkillInput] = useState('');
+  const [toolFilter, setToolFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
+  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [skillFilter, setSkillFilter] = useState<string>('all');
 
   const options = useMemo(
     () => candidates.map((candidate) => ({
@@ -69,8 +64,30 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setSystemPrompt('');
     setToolset('tasks');
     setSelectedTools(getTemplateTools('tasks'));
-    setSkillInput('');
+    setToolFilter('all');
+    setSelectedSkillIds(new Set());
+    setSkillFilter('all');
+    getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, [open, candidates]);
+
+  const filteredTools = useMemo(() => {
+    if (toolFilter === 'all') return toolCatalog;
+    return toolCatalog.filter((t) => t.category === toolFilter);
+  }, [toolFilter]);
+
+  const skillCategories = useMemo(() => {
+    const cats = new Set<string>();
+    librarySkills.forEach((s) => cats.add(s.category?.trim() || '未分类'));
+    return Array.from(cats);
+  }, [librarySkills]);
+
+  const filteredLibrarySkills = useMemo(() => {
+    let list = librarySkills;
+    if (skillFilter !== 'all') {
+      list = list.filter((s) => (s.category?.trim() || '未分类') === skillFilter);
+    }
+    return list;
+  }, [librarySkills, skillFilter]);
 
   const handleCandidateChange = (value: string) => {
     setCandidateId(value);
@@ -80,11 +97,57 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     }
   };
 
+  const handleToolsetChange = (value: string) => {
+    setToolset(value);
+    if (value !== 'custom') {
+      setSelectedTools(getTemplateTools(value));
+    }
+  };
+
+  const handleToolsChange = (values: string[]) => {
+    setToolset('custom');
+    setSelectedTools(values);
+  };
+
+  const toggleSkill = (id: string) => {
+    setSelectedSkillIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleApplyTemplate = (key: string) => {
+    const tpl = skillTemplates.find((t) => t.key === key);
+    if (!tpl) return;
+    setToolset(tpl.toolset);
+    if (tpl.toolset !== 'custom') {
+      setSelectedTools(getTemplateTools(tpl.toolset));
+    }
+    if (tpl.skillCategories.length > 0) {
+      const matched = librarySkills
+        .filter((s) => tpl.skillCategories.includes(s.category?.trim() || '未分类'))
+        .map((s) => s.id);
+      setSelectedSkillIds(new Set(matched));
+    } else {
+      setSelectedSkillIds(new Set());
+    }
+  };
+
   const handleSubmit = async () => {
     if (!candidateId || !name.trim()) return;
     setSubmitting(true);
     try {
-      const customSkills = skillsInputToJSON(skillInput);
+      const selectedLibSkills = librarySkills.filter((s) => selectedSkillIds.has(s.id));
+      const customSkillsArr = selectedLibSkills.map((s) => ({
+        name: s.name.trim(),
+        category: s.category,
+        description: s.description,
+        trigger: s.trigger || s.description,
+        detail: s.detail,
+      }));
+      const customSkills = customSkillsArr.length > 0 ? JSON.stringify(customSkillsArr) : '';
       await onCreate(
         candidateId,
         name.trim(),
@@ -104,20 +167,8 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const title = machineName ? `创建 Agent · ${machineName}` : '创建 Agent';
   const canSubmit = Boolean(candidateId && name.trim());
   const hasCandidates = options.length > 0;
-  const selectedCandidate = candidates.find((candidate) => candidate.id === candidateId);
-  const baseSkills = parseSkills(selectedCandidate?.capabilities_json);
-
-  const handleToolsetChange = (value: string) => {
-    setToolset(value);
-    if (value !== 'custom') {
-      setSelectedTools(getTemplateTools(value));
-    }
-  };
-
-  const handleToolsChange = (values: string[]) => {
-    setToolset('custom');
-    setSelectedTools(values);
-  };
+  const selectedToolCount = selectedTools.length;
+  const selectedSkillCount = selectedSkillIds.size;
 
   return (
     <Modal
@@ -126,9 +177,25 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       footer={null}
       title={title}
       centered
-      width={720}
+      width={780}
     >
       <div className={styles.content}>
+        <div className={styles.field}>
+          <span className={styles.label}>快速模板</span>
+          <div className={styles.templateRow}>
+            {skillTemplates.map((tpl) => (
+              <button
+                key={tpl.key}
+                className={styles.templatePill}
+                type="button"
+                onClick={() => handleApplyTemplate(tpl.key)}
+              >
+                {tpl.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className={styles.field}>
           <span className={styles.label}>底座</span>
           <Select
@@ -159,45 +226,128 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
           />
           <span className={styles.helper}>支持空白，后续可在详情中继续调整。</span>
         </div>
+
         <div className={styles.field}>
-          <span className={styles.label}>工具集</span>
-          <Select
-            className={styles.select}
-            value={toolset}
-            options={toolsetOptions}
-            onChange={handleToolsetChange}
-          />
+          <div className={styles.fieldHeader}>
+            <span className={styles.label}>工具集</span>
+            <span className={styles.countLabel}>已选 {selectedToolCount}/{toolCatalog.length}</span>
+          </div>
+          <div className={styles.controlRow}>
+            <span className={styles.subLabel}>模板</span>
+            <Select
+              className={styles.toolsetSelect}
+              value={toolset}
+              options={toolsetOptions}
+              onChange={handleToolsetChange}
+            />
+          </div>
+          <div className={styles.filterBar}>
+            <button
+              className={`${styles.filterPill} ${toolFilter === 'all' ? styles.filterPillActive : ''}`}
+              type="button"
+              onClick={() => setToolFilter('all')}
+            >
+              全部 {toolCatalog.length}
+            </button>
+            {categoryOrder.map((cat) => {
+              const meta = categoryMeta[cat];
+              if (!meta) return null;
+              const count = toolCatalog.filter((t) => t.category === cat).length;
+              const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+              return (
+                <button
+                  className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}
+                  key={cat}
+                  type="button"
+                  onClick={() => setToolFilter(cat)}
+                >
+                  {meta.label} {selected}/{count}
+                </button>
+              );
+            })}
+          </div>
           <Checkbox.Group value={selectedTools} onChange={(values) => handleToolsChange(values as string[])}>
             <div className={styles.toolGrid}>
-              {toolCatalog.map((tool) => (
-                <label className={styles.toolItem} key={tool.name}>
-                  <Checkbox value={tool.name} />
-                  <span>
-                    <span className={styles.toolName}>{tool.label}</span>
-                    <span className={styles.toolMeta}>{tool.name}</span>
-                  </span>
-                </label>
-              ))}
+              {filteredTools.map((tool) => {
+                const isSelected = selectedTools.includes(tool.name);
+                const meta = categoryMeta[tool.category];
+                return (
+                  <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''}`} key={tool.name}>
+                    <Checkbox value={tool.name} />
+                    <div className={styles.toolCardContent}>
+                      <span className={styles.toolCardName}>{tool.label}</span>
+                      <span className={styles.toolCardDesc}>{tool.description}</span>
+                      <div className={styles.toolCardFooter}>
+                        <span className={styles.toolCardApi}>{tool.name}</span>
+                        {meta && (
+                          <span className={styles.toolCardBadge} style={{ background: `${meta.color}18`, color: meta.color }}>
+                            {meta.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </Checkbox.Group>
         </div>
+
         <div className={styles.field}>
-          <span className={styles.label}>平台 Skills</span>
-          {baseSkills.length > 0 && (
-            <div className={styles.baseSkills}>
-              {baseSkills.slice(0, 6).map((skill) => <Tag key={skill.name}>{skill.name}</Tag>)}
-              {baseSkills.length > 6 && <Tag>+{baseSkills.length - 6}</Tag>}
-            </div>
+          <div className={styles.fieldHeader}>
+            <span className={styles.label}>平台 Skills</span>
+            <span className={styles.countLabel}>已选 {selectedSkillCount}</span>
+          </div>
+          {librarySkills.length > 0 && (
+            <>
+              <div className={styles.filterBar}>
+                <button
+                  className={`${styles.filterPill} ${skillFilter === 'all' ? styles.filterPillActive : ''}`}
+                  type="button"
+                  onClick={() => setSkillFilter('all')}
+                >
+                  全部 {librarySkills.length}
+                </button>
+                {skillCategories.map((cat) => (
+                  <button
+                    className={`${styles.filterPill} ${skillFilter === cat ? styles.filterPillActive : ''}`}
+                    key={cat}
+                    type="button"
+                    onClick={() => setSkillFilter(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.skillGrid}>
+                {filteredLibrarySkills.map((skill) => {
+                  const isSelected = selectedSkillIds.has(skill.id);
+                  return (
+                    <div
+                      className={`${styles.skillCard} ${isSelected ? styles.skillCardSelected : ''}`}
+                      key={skill.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleSkill(skill.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') toggleSkill(skill.id); }}
+                    >
+                      <div className={styles.skillCardName}>{skill.name}</div>
+                      <div className={styles.skillCardDesc}>{skill.description || '暂无描述'}</div>
+                      <div className={styles.skillCardFooter}>
+                        {skill.category && <span className={styles.skillCardBadge}>{skill.category}</span>}
+                        <span className={styles.skillCardAction}>{isSelected ? '已选' : '选择'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredLibrarySkills.length === 0 && (
+                  <div className={styles.emptyHint}>暂无可选 Skill</div>
+                )}
+              </div>
+            </>
           )}
-          <Input.TextArea
-            className={styles.textarea}
-            value={skillInput}
-            placeholder="每行一个平台 Skill，例如：代码审查 - 检查 bug 和测试缺口"
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            onChange={(event) => setSkillInput(event.target.value)}
-          />
-          <span className={styles.helper}>底座 Skills 只读；平台 Skills 会写入该 Agent 的可分配能力索引，可在详情页继续补充触发条件和详细内容。</span>
         </div>
+
         <div className={styles.footer}>
           <Button onClick={onClose}>取消</Button>
           <Button
