@@ -499,13 +499,15 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 		return messages, nil
 	}
 
-	// 批量查询引用的消息，优先使用 messages.sender_id
+	// 批量查询引用的消息。assistant 消息没有 sender_id，显示名从 artifacts_json.agent_name 取；
+	// 不能回退到 conversations.user_id，否则 worker 回复 Orch 消息时会显示成群主/用户。
 	query := `SELECT m.id, m.content, m.deleted_at,
-	          COALESCE(m.sender_id, c.user_id) AS sender_id,
-	          COALESCE(u.username, '') AS username
+	          COALESCE(m.sender_id, '') AS sender_id,
+	          COALESCE(u.username, '') AS username,
+	          m.role,
+	          COALESCE(m.artifacts_json, '') AS artifacts_json
 	          FROM messages m
-	          JOIN conversations c ON c.id = m.conversation_id
-	          LEFT JOIN users u ON u.id = COALESCE(m.sender_id, c.user_id)
+	          LEFT JOIN users u ON u.id = m.sender_id
 	          WHERE m.id = ANY($1)`
 	rows, err := r.db.QueryxContext(ctx, query, replyIDs)
 	if err != nil {
@@ -515,9 +517,9 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 
 	replyMap := make(map[string]*model.ReplyToPreview)
 	for rows.Next() {
-		var id, content, senderID, username string
+		var id, content, senderID, username, role, artifactsJSON string
 		var deletedAt *time.Time
-		if err := rows.Scan(&id, &content, &deletedAt, &senderID, &username); err != nil {
+		if err := rows.Scan(&id, &content, &deletedAt, &senderID, &username, &role, &artifactsJSON); err != nil {
 			return nil, fmt.Errorf("scan reply: %w", err)
 		}
 		preview := truncateRunes(content, 50)
@@ -528,7 +530,7 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 			ID:        id,
 			Content:   preview,
 			SenderID:  senderID,
-			Username:  username,
+			Username:  replyPreviewUsername(role, username, artifactsJSON),
 			DeletedAt: deletedAt,
 		}
 	}
@@ -542,6 +544,19 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	}
 
 	return messages, nil
+}
+
+func replyPreviewUsername(role, username, artifactsJSON string) string {
+	if role != "assistant" {
+		return username
+	}
+	var meta struct {
+		AgentName string `json:"agent_name"`
+	}
+	if err := json.Unmarshal([]byte(artifactsJSON), &meta); err == nil && meta.AgentName != "" {
+		return meta.AgentName
+	}
+	return username
 }
 
 func truncateRunes(s string, maxRunes int) string {

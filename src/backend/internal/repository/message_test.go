@@ -22,3 +22,17 @@ func TestTruncateRunesKeepsShortText(t *testing.T) {
 		t.Fatalf("expected short text unchanged, got %q", got)
 	}
 }
+
+func TestReplyPreviewUsernameUsesAssistantAgentName(t *testing.T) {
+	got := replyPreviewUsername("assistant", "wjc", `{"agent_name":"员工2"}`)
+	if got != "员工2" {
+		t.Fatalf("expected assistant agent name, got %q", got)
+	}
+}
+
+func TestReplyPreviewUsernameKeepsUserName(t *testing.T) {
+	got := replyPreviewUsername("user", "wjc", `{"agent_name":"员工2"}`)
+	if got != "wjc" {
+		t.Fatalf("expected user name, got %q", got)
+	}
+}

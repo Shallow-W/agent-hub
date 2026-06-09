@@ -581,7 +581,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <span className={styles.replyQuoteSender}>
-                  {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
+                  {escapeHtml(message.reply_to_message.username || (message.reply_to_message.sender_id ? '用户' : '助手'))}
                 </span>
                 {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
