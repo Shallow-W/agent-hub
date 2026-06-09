@@ -10,6 +10,7 @@ import {
   RightOutlined,
   SearchOutlined,
   CloseOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -21,6 +22,7 @@ import {
   updatePlatformSkill,
 } from '@/api/platformSkill';
 import { parseSkills, resolveAgentAvatar, skillsToPlatformJSON } from './agentPresentation';
+import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import type { Skill } from './agentPresentation';
 import styles from './AgentSkillsPanel.module.css';
 
@@ -48,6 +50,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [detailOpen, setDetailOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [skillManageOpen, setSkillManageOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', category: '', description: '', trigger: '', detail: '' });
 
   useEffect(() => {
@@ -346,6 +349,29 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setSelectedLibrarySkillID(null);
   };
 
+  const assignedSkillIds = useMemo(
+    () => new Set(
+      skills
+        .map((s) => librarySkills.find((ls) => ls.name.trim() === s.name.trim())?.id)
+        .filter(Boolean) as string[],
+    ),
+    [skills, librarySkills],
+  );
+
+  const handleSkillManageApply = (_tools: string[], skillIds: string[]) => {
+    const matched = librarySkills.filter((s) => skillIds.includes(s.id));
+    const additions = matched
+      .map(toAssignedSkill)
+      .filter((newSkill) => !skills.some((s) => s.name.trim() === newSkill.name.trim()));
+    if (additions.length > 0) {
+      setSkills((prev) => [...prev, ...additions]);
+      message.success(`已从模板导入 ${additions.length} 个 Skill`);
+    } else {
+      message.info('模板中的 Skills 已在已分配列表中');
+    }
+    setSkillManageOpen(false);
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -360,6 +386,9 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           </Button>
           <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
             导入默认
+          </Button>
+          <Button size="small" icon={<SettingOutlined />} onClick={() => setSkillManageOpen(true)}>
+            管理
           </Button>
           <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
             保存分配
@@ -781,6 +810,16 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           </>
         )}
       </Drawer>
+
+      <CreateTemplateManagerModal
+        open={skillManageOpen}
+        mode="skills"
+        currentTools={[]}
+        currentSkillIds={assignedSkillIds}
+        librarySkills={librarySkills}
+        onApply={handleSkillManageApply}
+        onClose={() => setSkillManageOpen(false)}
+      />
     </div>
   );
 };

@@ -20,6 +20,7 @@ func AllTools() []Tool {
 	tools = append(tools, GroupTools()...)
 	tools = append(tools, AgentManagementTools()...)
 	tools = append(tools, KnowledgeTools()...)
+	tools = append(tools, AgentCreationTools()...)
 	return tools
 }
 
@@ -413,6 +414,99 @@ func KnowledgeTools() []Tool {
 					},
 				},
 				"required": []string{"knowledge_base_id", "file_id"},
+			},
+		},
+	}
+}
+
+// AgentCreationTools Agent 自建工具——创建、更新、删除自建 Agent，列出工具模板
+func AgentCreationTools() []Tool {
+	return []Tool{
+		{
+			Name:        "create_agent",
+			Description: "创建自建 Agent。需要提供名称和系统提示词，可选指定工具模板、CLI 工具和标签",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent 名称（必填）",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "系统提示词（必填）",
+					},
+					"toolset": map[string]interface{}{
+						"type":        "string",
+						"description": "工具模板名（none/basic/tasks/orchestrator/agent_builder/agent_manager/knowledge），默认 none",
+					},
+					"cli_tool": map[string]interface{}{
+						"type":        "string",
+						"description": "CLI 工具名，默认 claude",
+					},
+					"tags": map[string]interface{}{
+						"type":        "string",
+						"description": "标签",
+					},
+				},
+				"required": []string{"name", "system_prompt"},
+			},
+		},
+		{
+			Name:        "update_agent",
+			Description: "更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表和标签",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "新名称",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "新系统提示词",
+					},
+					"toolset": map[string]interface{}{
+						"type":        "string",
+						"description": "切换工具模板",
+					},
+					"allowed_tools": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "自定义工具列表",
+					},
+					"tags": map[string]interface{}{
+						"type":        "string",
+						"description": "新标签",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "delete_agent",
+			Description: "删除自建 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "list_toolsets",
+			Description: "列出可用的工具模板及其描述，用于创建或更新 Agent 时选择合适的工具配置",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
 			},
 		},
 	}

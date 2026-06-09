@@ -159,24 +159,33 @@ func HandleAllTools(api *APIClient, agentID string) ToolHandlerFunc {
 				return nil, fmt.Errorf("group_id is required")
 			}
 			return api.doGet("/mcp/groups/"+groupID+"/members", nil)
-		// Agent 管理
-		case "get_agent_detail":
-			return handleGetAgentDetail(api, args)
-		case "update_agent_prompt":
-			return handleUpdateAgentPrompt(api, args)
-		case "start_agent":
-			return handleStartAgent(api, args)
-		case "stop_agent":
-			return handleStopAgent(api, args)
-		// 知识库
-		case "list_knowledge_bases":
-			return api.doGet("/mcp/knowledge-bases", nil)
-		case "list_knowledge_files":
-			return handleListKnowledgeFiles(api, args)
-		case "search_knowledge":
-			return handleSearchKnowledge(api, args)
-		case "read_knowledge_file":
-			return handleReadKnowledgeFile(api, args)
+tt// Agent 管理
+ttcase "get_agent_detail":
+tttreturn handleGetAgentDetail(api, args)
+ttcase "update_agent_prompt":
+tttreturn handleUpdateAgentPrompt(api, args)
+ttcase "start_agent":
+tttreturn handleStartAgent(api, args)
+ttcase "stop_agent":
+tttreturn handleStopAgent(api, args)
+tt// 知识库
+ttcase "list_knowledge_bases":
+tttreturn api.doGet("/mcp/knowledge-bases", nil)
+ttcase "list_knowledge_files":
+tttreturn handleListKnowledgeFiles(api, args)
+ttcase "search_knowledge":
+tttreturn handleSearchKnowledge(api, args)
+ttcase "read_knowledge_file":
+tttreturn handleReadKnowledgeFile(api, args)
+tt// Agent 自建
+ttcase "create_agent":
+tttreturn handleCreateAgent(api, args)
+ttcase "update_agent":
+tttreturn handleUpdateAgent(api, args)
+ttcase "delete_agent":
+tttreturn handleDeleteAgent(api, args)
+ttcase "list_toolsets":
+tttreturn handleListToolsets()
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
@@ -456,4 +465,137 @@ func handleReadKnowledgeFile(api *APIClient, args map[string]interface{}) (inter
 		return nil, fmt.Errorf("file_id is required")
 	}
 	return api.doGet("/mcp/knowledge-bases/"+kbID+"/files/"+fileID+"/text", nil)
+}
+
+// agentCreationToolsets mirrors the backend platformToolsets for computing tools_config.
+var agentCreationToolsets = map[string][]string{
+	"none":          {},
+	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
+	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
+	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members"},
+	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines"},
+	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
+	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge"},
+}
+
+func toolsConfigJSON(toolset string, allowedTools []string) string {
+	cfg := map[string]interface{}{
+		"toolset":       toolset,
+		"allowed_tools": allowedTools,
+	}
+	data, _ := json.Marshal(cfg)
+	return string(data)
+}
+
+func handleCreateAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	systemPrompt, _ := args["system_prompt"].(string)
+	if systemPrompt == "" {
+		return nil, fmt.Errorf("system_prompt is required")
+	}
+	cliTool, _ := args["cli_tool"].(string)
+	if cliTool == "" {
+		cliTool = "claude"
+	}
+	toolset, _ := args["toolset"].(string)
+	if toolset == "" {
+		toolset = "none"
+	}
+
+	var allowedTools []string
+	if tpl, ok := agentCreationToolsets[toolset]; ok {
+		allowedTools = tpl
+	} else {
+		toolset = "none"
+		allowedTools = []string{}
+	}
+
+	body := map[string]interface{}{
+		"name":         name,
+		"cli_tool":     cliTool,
+		"system_prompt": systemPrompt,
+		"tools_config": toolsConfigJSON(toolset, allowedTools),
+	}
+	if tags, ok := args["tags"].(string); ok && tags != "" {
+		body["tags"] = tags
+	}
+	return api.doPost("/api/agents", body)
+}
+
+func handleUpdateAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
+	// Fetch current agent to preserve unchanged fields
+	data, err := api.doGet("/api/agents/"+agentID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get agent detail: %w", err)
+	}
+	agent, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected agent response format")
+	}
+
+	body := map[string]interface{}{
+		"name":                    agent["name"],
+		"cli_tool":                agent["cli_tool"],
+		"system_prompt":           agent["system_prompt"],
+		"tools_config":            agent["tools_config"],
+		"capabilities_json":       agent["capabilities_json"],
+		"enable_management_tools": agent["enable_management_tools"],
+	}
+
+	// Override only provided fields
+	optionalString(args, "name", body)
+	optionalString(args, "system_prompt", body)
+	optionalString(args, "tags", body)
+
+	// Handle toolset change
+	if toolset, ok := args["toolset"].(string); ok && toolset != "" {
+		if tpl, found := agentCreationToolsets[toolset]; found {
+			body["tools_config"] = toolsConfigJSON(toolset, tpl)
+		}
+	}
+
+	// Handle allowed_tools override (custom toolset)
+	if rawTools, ok := args["allowed_tools"].([]interface{}); ok && len(rawTools) > 0 {
+		tools := make([]string, 0, len(rawTools))
+		for _, t := range rawTools {
+			if s, ok := t.(string); ok && s != "" {
+				tools = append(tools, s)
+			}
+		}
+		if len(tools) > 0 {
+			body["tools_config"] = toolsConfigJSON("", tools)
+		}
+	}
+
+	return api.doPut("/api/agents/"+agentID, body)
+}
+
+func handleDeleteAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	return api.doDelete("/api/agents/" + agentID)
+}
+
+var toolsetDescriptions = []map[string]interface{}{
+	{"name": "none", "label": "无工具", "description": "不分配任何平台工具"},
+	{"name": "basic", "label": "基础群聊", "description": "包含群 Agent 列表、消息读取、Skill 查看等基础工具"},
+	{"name": "tasks", "label": "任务协作", "description": "包含任务看板的完整增删改查能力"},
+	{"name": "orchestrator", "label": "Orchestrator", "description": "编排器模板，包含会话、任务、群组管理和知识库搜索"},
+	{"name": "agent_builder", "label": "Agent 创建", "description": "Agent 发现和详情查询工具"},
+	{"name": "agent_manager", "label": "Agent 管理", "description": "Agent 详情、提示词更新、启停控制"},
+	{"name": "knowledge", "label": "知识库", "description": "知识库列表、文件列表和关键词搜索"},
+}
+
+func handleListToolsets() (interface{}, error) {
+	return toolsetDescriptions, nil
 }

@@ -1,0 +1,320 @@
+.manager {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 520px;
+  max-height: 70vh;
+}
+
+/* ── Sidebar ── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sidebarTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.templateList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.categoryTitle {
+  padding: 8px 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.templateCard:hover {
+  border-color: rgba(47, 143, 107, 0.32);
+  background: rgba(47, 143, 107, 0.04);
+}
+
+.templateCardActive {
+  border-color: rgba(47, 143, 107, 0.32);
+  background: rgba(47, 143, 107, 0.06);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.templateCardName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.templateCardDesc {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emptySidebar {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+/* ── Editor (right panel) ── */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  min-height: 0;
+  overflow: auto;
+}
+
+.editorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editorTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fieldInput {
+  border-radius: 8px !important;
+}
+
+/* ── Selection section ── */
+
+.selectionSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.sectionCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+}
+
+.searchRow {
+  max-width: 260px;
+}
+
+.searchInput {
+  font-size: 12px;
+}
+
+/* ── Filter bar ── */
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(31, 35, 40, 0.1);
+  border-radius: 999px;
+  background: var(--color-bg-white);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filterPill:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+  color: var(--color-primary);
+}
+
+.filterPillActive {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+:global(html.dark) .filterPill {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Selection grid ── */
+
+.selectionGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 2px;
+}
+
+/* ── Tool tags ── */
+
+.toolTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 6px;
+  background: var(--color-bg-white);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.toolTag:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+}
+
+.toolTagSelected {
+  border-color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.06);
+}
+
+.toolTag input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.toolTagName {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.toolTagBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 999px;
+}
+
+:global(html.dark) .toolTag {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Skill tags ── */
+
+.skillTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 6px;
+  background: var(--color-bg-white);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.skillTag:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+}
+
+.skillTagSelected {
+  border-color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.06);
+}
+
+.skillTagName {
+  font-size: 12px;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.skillTagBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(31, 35, 40, 0.06);
+  color: var(--color-text-secondary);
+}
+
+:global(html.dark) .skillTag {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Editor actions ── */
+
+.editorActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid rgba(31, 35, 40, 0.06);
+}
+
+.rightActions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}

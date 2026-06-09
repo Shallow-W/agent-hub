@@ -2629,6 +2629,111 @@ const MCP_TOOLS = [
       });
     },
   },
+  // ── Agent 自建 ──
+  {
+    name: 'create_agent',
+    description: '创建自建 Agent。需要提供名称和系统提示词，可选指定工具模板、CLI 工具和标签。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Agent 名称（必填）' },
+        system_prompt: { type: 'string', description: '系统提示词（必填）' },
+        toolset: { type: 'string', description: '工具模板名（none/basic/tasks/orchestrator/agent_builder/agent_manager/knowledge），默认 none' },
+        cli_tool: { type: 'string', description: 'CLI 工具名，默认 claude' },
+        tags: { type: 'string', description: '标签' },
+      },
+      required: ['name', 'system_prompt'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const name = args.name;
+      if (!name) throw new Error('name is required');
+      const systemPrompt = args.system_prompt;
+      if (!systemPrompt) throw new Error('system_prompt is required');
+      const cliTool = args.cli_tool || 'claude';
+      const toolset = args.toolset || 'none';
+      const tpl = TOOLSET_TEMPLATES[toolset] || [];
+      const toolsConfig = JSON.stringify({ toolset, allowed_tools: tpl });
+      const body = { name, cli_tool: cliTool, system_prompt: systemPrompt, tools_config: toolsConfig };
+      if (args.tags) body.tags = args.tags;
+      return ctx.callApi('POST', '/api/agents', { body });
+    },
+  },
+  {
+    name: 'update_agent',
+    description: '更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表和标签。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID（必填）' },
+        name: { type: 'string', description: '新名称' },
+        system_prompt: { type: 'string', description: '新系统提示词' },
+        toolset: { type: 'string', description: '切换工具模板' },
+        allowed_tools: { type: 'array', items: { type: 'string' }, description: '自定义工具列表' },
+        tags: { type: 'string', description: '新标签' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const agentId = args.agent_id;
+      if (!agentId) throw new Error('agent_id is required');
+      // Fetch current agent
+      const res = await ctx.callApi('GET', `/api/agents/${encodeURIComponent(agentId)}`);
+      const agent = res && res.data ? res.data : res;
+      if (!agent || typeof agent !== 'object') throw new Error(`agent not found: ${agentId}`);
+      const body = {
+        name: agent.name,
+        cli_tool: agent.cli_tool,
+        system_prompt: agent.system_prompt,
+        tools_config: agent.tools_config,
+        capabilities_json: agent.capabilities_json,
+        enable_management_tools: agent.enable_management_tools,
+      };
+      // Override only provided fields
+      if (args.name) body.name = args.name;
+      if (args.system_prompt) body.system_prompt = args.system_prompt;
+      if (args.tags) body.tags = args.tags;
+      if (args.toolset) {
+        const tpl = TOOLSET_TEMPLATES[args.toolset] || [];
+        body.tools_config = JSON.stringify({ toolset: args.toolset, allowed_tools: tpl });
+      }
+      if (Array.isArray(args.allowed_tools) && args.allowed_tools.length > 0) {
+        const tools = args.allowed_tools.filter((t) => typeof t === 'string' && t);
+        if (tools.length > 0) {
+          body.tools_config = JSON.stringify({ toolset: '', allowed_tools: tools });
+        }
+      }
+      return ctx.callApi('PUT', `/api/agents/${encodeURIComponent(agentId)}`, { body });
+    },
+  },
+  {
+    name: 'delete_agent',
+    description: '删除自建 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID（必填）' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callApi('DELETE', `/api/agents/${encodeURIComponent(args.agent_id)}`),
+  },
+  {
+    name: 'list_toolsets',
+    description: '列出可用的工具模板及其描述，用于创建或更新 Agent 时选择合适的工具配置。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: () => [
+      { name: 'none', label: '无工具', description: '不分配任何平台工具' },
+      { name: 'basic', label: '基础群聊', description: '包含群 Agent 列表、消息读取、Skill 查看等基础工具' },
+      { name: 'tasks', label: '任务协作', description: '包含任务看板的完整增删改查能力' },
+      { name: 'orchestrator', label: 'Orchestrator', description: '编排器模板，包含会话、任务、群组管理和知识库搜索' },
+      { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 发现和详情查询工具' },
+      { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 详情、提示词更新、启停控制' },
+      { name: 'knowledge', label: '知识库', description: '知识库列表、文件列表和关键词搜索' },
+    ],
+  },
 ];
 
 const DEFAULT_AGENT_TOOLS = [
