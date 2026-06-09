@@ -43,17 +43,6 @@
   color: var(--color-text-secondary);
 }
 
-.body {
-  padding: 4px 0 0;
-}
-
-.skillsHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
 .headerActions {
   display: flex;
   align-items: center;
@@ -67,9 +56,14 @@
   border-color: transparent;
 }
 
+.quickCreateRow {
+  display: flex;
+  gap: 8px;
+}
+
 .overviewStrip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 1fr)) minmax(160px, 1.4fr);
+  grid-template-columns: repeat(3, minmax(96px, 1fr));
   gap: 1px;
   overflow: hidden;
   border: 1px solid rgba(31, 35, 40, 0.08);
@@ -77,8 +71,7 @@
   background: rgba(31, 35, 40, 0.08);
 }
 
-.overviewItem,
-.overviewItemWide {
+.overviewItem {
   min-width: 0;
   padding: 10px 12px;
   background: var(--color-bg-white);
@@ -110,31 +103,263 @@
   color: var(--color-text-secondary);
 }
 
+/* ── Sub-tabs ── */
+
+.subTabs {
+  display: flex;
+  gap: 6px;
+}
+
+.subTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.subTab:hover {
+  background: rgba(31, 35, 40, 0.04);
+  color: var(--color-text);
+}
+
+.subTabActive {
+  background: var(--color-bg-white);
+  color: var(--color-text);
+  border-color: rgba(31, 35, 40, 0.08);
+  box-shadow: var(--shadow-sm);
+}
+
+.subTabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+:global(html.dark) .subTabActive {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Library toolbar ── */
+
+.libraryToolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.searchInput {
+  max-width: 320px;
+}
+
+.categoryPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(31, 35, 40, 0.1);
+  border-radius: 999px;
+  background: var(--color-bg-white);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filterPill:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+  color: var(--color-primary);
+}
+
+.filterPillActive {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.filterPillActive:hover {
+  background: #247a59;
+  color: #fff;
+  border-color: #247a59;
+}
+
+:global(html.dark) .filterPill {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Card grid ── */
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.skillCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.skillCard:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+  background: rgba(47, 143, 107, 0.02);
+}
+
+.skillCardSelected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+  background: rgba(47, 143, 107, 0.04);
+}
+
+.skillCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skillCardName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillCardActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.skillCard:hover .skillCardActions {
+  opacity: 1;
+}
+
+.skillCardDesc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skillCardFooter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.categoryBadge {
+  display: inline-block;
+  max-width: 96px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(31, 35, 40, 0.08);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autoBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+:global(html.dark) .skillCard {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .filterPill {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Empty state ── */
+
+.emptyPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px dashed rgba(47, 143, 107, 0.25);
+  border-radius: 8px;
+  background: rgba(47, 143, 107, 0.03);
+  grid-column: 1 / -1;
+}
+
+.emptyTitle {
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.emptyText {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.emptyActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .empty {
   padding: 12px 0;
   font-size: 13px;
   color: var(--color-text-secondary);
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-  gap: 14px;
-}
+/* ── Base skills ── */
 
-.leftPane {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.skillSection {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.45);
+.baseSkills {
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 12px;
 }
 
 .sectionToggle {
@@ -142,12 +367,16 @@
   align-items: flex-start;
   gap: 6px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 4px 0;
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
   text-align: left;
+}
+
+.sectionToggle:hover {
+  color: var(--color-text);
 }
 
 .sectionTitleBlock {
@@ -181,163 +410,32 @@
   font-weight: 700;
 }
 
-.skillList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 10px 10px;
-}
-
-.sectionToolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.categoryGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.categoryTitle {
-  padding-top: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.skillEmptyPanel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border: 1px dashed rgba(47, 143, 107, 0.25);
-  border-radius: 8px;
-  background: rgba(47, 143, 107, 0.05);
-}
-
-.skillEmptyTitle {
-  color: var(--color-text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.skillEmptyText {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.skillEmptyActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.skillCard {
+.baseSkillGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 8px;
-  width: 100%;
+  margin-top: 8px;
+}
+
+.baseSkillCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid rgba(31, 35, 40, 0.08);
-  background: var(--color-bg-white);
   border-radius: 8px;
-  padding: 10px;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  background: var(--color-bg-white);
 }
 
-.skillCard:hover,
-.skillCardSelected {
-  border-color: rgba(47, 143, 107, 0.32);
-  background: rgba(47, 143, 107, 0.04);
-}
-
-.skillCardSelected {
-  box-shadow: inset 3px 0 0 var(--color-primary);
-}
-
-.skillCardMain {
+.baseSkillInfo {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
-.skillName {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.autoBadge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(47, 143, 107, 0.12);
-  color: var(--color-primary);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-
-.categoryBadge {
-  display: inline-block;
-  max-width: 96px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(31, 35, 40, 0.08);
-  color: var(--color-text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skillNameInput {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.skillSummary {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skillActions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.skillCard:hover .skillActions,
-.skillCardSelected .skillActions {
-  opacity: 1;
-}
-
-.skillActionsAlways {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.skillActions :global(.ant-btn),
-.skillActionsAlways :global(.ant-btn) {
-  border-radius: 7px;
-  font-weight: 600;
-}
+/* ── Icon button ── */
 
 .iconBtn {
   display: inline-flex;
@@ -354,199 +452,77 @@
 }
 
 .iconBtn:hover {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
+/* ── Drawer detail ── */
+
+.drawerCategory {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 3px 10px;
+  border-radius: 999px;
   background: rgba(47, 143, 107, 0.1);
   color: var(--color-primary);
-}
-
-.detailPane {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 8px;
-  background: var(--color-bg-white);
-  padding: 16px;
-}
-
-.detailHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.detailKicker {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-
-.detailTitle {
-  display: block;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.sourcePath {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  margin: -4px 0 14px;
-  padding: 10px 12px;
-  border: 1px solid rgba(47, 143, 107, 0.16);
-  border-radius: 8px;
-  background: rgba(47, 143, 107, 0.05);
-}
-
-.sourcePathText {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  color: var(--color-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  line-height: 1.5;
-}
-
-.sourcePathText span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   margin-bottom: 14px;
 }
 
 .fieldLabel {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
   color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.detailInput :global(textarea) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+.detailInput {
+  font-family: Consolas, monospace;
+  font-size: 13px;
 }
 
 .detailActions {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
-}
-
-.baseSkills {
-  flex-shrink: 0;
-  max-height: 220px;
-  overflow-y: auto;
-  padding-top: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid var(--color-border-light);
 }
 
-.baseSkillGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.baseSkillCard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.sourcePath {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px;
+  margin-bottom: 14px;
+  padding: 8px 10px;
   border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 8px;
-  background: var(--color-bg-white);
+  border-radius: 6px;
+  background: var(--color-bg-tertiary);
 }
 
-.baseSkillInfo {
+.sourcePathText {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  gap: 4px;
-}
-
-.quickCreateRow {
-  display: flex;
-  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
-  .workspace {
+  .cardGrid {
     grid-template-columns: 1fr;
   }
-}
-
-.detailEmpty {
-  height: 100%;
-  min-height: 220px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 24px;
-  text-align: center;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-
-.detailEmptyIcon {
-  display: block;
-  width: 34px;
-  height: 34px;
-  padding: 8px;
-  border-radius: 50%;
-  background: rgba(47, 143, 107, 0.1);
-  color: var(--color-primary);
-}
-
-.detailEmptyTitle {
-  color: var(--color-text);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.detailEmptyText {
-  max-width: 320px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-@media (max-width: 900px) {
-  .body {
-    overflow-y: auto;
-  }
-
-  .workspace {
-    height: auto;
-  }
-
-  .skillList {
-    max-height: 260px;
-  }
-}
-
-/* ── 暗色模式 ── */
-:global(html.dark) .skillCard {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .detailPane {
-  border-color: rgba(255, 255, 255, 0.08);
 }

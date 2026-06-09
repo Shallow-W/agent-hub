@@ -66,6 +66,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [toolFilter, setToolFilter] = useState<string>('all');
 
+  const filteredTools = useMemo(() => {
+    if (toolFilter === 'all') return toolCatalog;
+    return toolCatalog.filter((t) => t.category === toolFilter);
+  }, [toolFilter]);
+
   const parseTagsFromJSON = (raw: string): string => {
     if (!raw || raw === '[]') return '';
     try {
@@ -108,10 +113,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const computerName = agent.machine_name || 'local-computer';
   const editableTags = tagsValue.split(',').map((item) => item.trim()).filter(Boolean);
   const isBuiltinSystemAgent = agent.type === 'system' && !agent.user_id;
-  const filteredTools = useMemo(() => {
-    if (toolFilter === 'all') return toolCatalog;
-    return toolCatalog.filter((t) => t.category === toolFilter);
-  }, [toolFilter]);
 
   const selectedToolCount = selectedTools.length;
   const statusLabel = getStatusText(agent);
