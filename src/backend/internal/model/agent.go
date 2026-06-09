@@ -31,6 +31,7 @@ type PlatformSkill struct {
 	ID          string    `json:"id" db:"id"`
 	UserID      string    `json:"user_id" db:"user_id"`
 	Name        string    `json:"name" db:"name"`
+	Category    string    `json:"category" db:"category"`
 	Description string    `json:"description,omitempty" db:"description"`
 	Trigger     string    `json:"trigger,omitempty" db:"trigger"`
 	Detail      string    `json:"detail,omitempty" db:"detail"`

@@ -22,10 +22,10 @@ func NewPlatformSkillRepo(db *sqlx.DB) *PlatformSkillRepo {
 func (r *PlatformSkillRepo) ListByUser(ctx context.Context, userID string) ([]model.PlatformSkill, error) {
 	var list []model.PlatformSkill
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT id, user_id, name, description, trigger, detail, created_at, updated_at
+		`SELECT id, user_id, name, category, description, trigger, detail, created_at, updated_at
 		 FROM platform_skills
 		 WHERE user_id = $1
-		 ORDER BY updated_at DESC, name ASC`,
+		 ORDER BY category ASC, updated_at DESC, name ASC`,
 		userID,
 	)
 	if err != nil {
@@ -34,13 +34,13 @@ func (r *PlatformSkillRepo) ListByUser(ctx context.Context, userID string) ([]mo
 	return list, nil
 }
 
-func (r *PlatformSkillRepo) Create(ctx context.Context, userID, name, description, trigger, detail string) (*model.PlatformSkill, error) {
+func (r *PlatformSkillRepo) Create(ctx context.Context, userID, name, category, description, trigger, detail string) (*model.PlatformSkill, error) {
 	var skill model.PlatformSkill
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO platform_skills (user_id, name, description, trigger, detail)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, user_id, name, description, trigger, detail, created_at, updated_at`,
-		userID, name, description, trigger, detail,
+		`INSERT INTO platform_skills (user_id, name, category, description, trigger, detail)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id, user_id, name, category, description, trigger, detail, created_at, updated_at`,
+		userID, name, category, description, trigger, detail,
 	).StructScan(&skill)
 	if err != nil {
 		return nil, fmt.Errorf("create platform skill: %w", err)
@@ -48,14 +48,14 @@ func (r *PlatformSkillRepo) Create(ctx context.Context, userID, name, descriptio
 	return &skill, nil
 }
 
-func (r *PlatformSkillRepo) Update(ctx context.Context, id, userID, name, description, trigger, detail string) (*model.PlatformSkill, error) {
+func (r *PlatformSkillRepo) Update(ctx context.Context, id, userID, name, category, description, trigger, detail string) (*model.PlatformSkill, error) {
 	var skill model.PlatformSkill
 	err := r.db.QueryRowxContext(ctx,
 		`UPDATE platform_skills
-		 SET name = $3, description = $4, trigger = $5, detail = $6, updated_at = NOW()
+		 SET name = $3, category = $4, description = $5, trigger = $6, detail = $7, updated_at = NOW()
 		 WHERE id = $1 AND user_id = $2
-		 RETURNING id, user_id, name, description, trigger, detail, created_at, updated_at`,
-		id, userID, name, description, trigger, detail,
+		 RETURNING id, user_id, name, category, description, trigger, detail, created_at, updated_at`,
+		id, userID, name, category, description, trigger, detail,
 	).StructScan(&skill)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

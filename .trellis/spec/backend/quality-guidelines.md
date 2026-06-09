@@ -158,18 +158,21 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).Wi
 
 **Signatures**:
 - API: `GET/POST/PUT/DELETE /api/platform-skills`
+- API: `POST /api/platform-skills/import-defaults`
 - API: `PUT /api/agents/:id/custom-skills`
 - Request: `{"custom_skills": string}` where the string is a JSON array.
-- Skill item fields: `name`, `description`, `trigger`, `detail`.
+- Skill item fields: `name`, `category`, `description`, `trigger`, `detail`.
 - Runtime injection entry point: `OrchestratorService.InjectAgentConfig(agent, contextStr, userID, taskText)`.
 
 **Contracts**:
 - `agents.capabilities_json` stores daemon-scanned native skills and may include local `source_path`; it is read-only user-facing discovery data.
 - `platform_skills` stores the user's editable platform Skill library. It is independent from daemon-scanned native Skills.
 - `agents.custom_skills` stores the platform Skills assigned to one Agent as dispatch/runtime snapshots. It must not be overwritten by daemon scans.
-- Custom Skill persistence must keep only platform-safe fields: `name`, `description`, `trigger`, and `detail`. It must drop `source_path`, `auto`, and other local scan metadata.
+- Default platform Skill templates must include a stable `category` and use one consistent `detail` structure: `适用场景`, `输入要求`, `工作流程`, `输出格式`, and `质量检查`.
+- Importing default platform Skills must be idempotent: existing same-name Skills are skipped instead of duplicated or overwritten, and the response should return the current default Skills available for assignment.
+- Custom Skill persistence must keep only platform-safe fields: `name`, `category`, `description`, `trigger`, and `detail`. It must drop `source_path`, `auto`, and other local scan metadata.
 - `name` is required; duplicate names collapse to the first valid item.
-- `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.
+- `category`, `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.
 - Agent dispatch prompts include a `[平台 Skills]` section with a compact Skill index for the current Agent.
 - Skill `detail` is not injected into every prompt. It stays server-side and is progressively loaded through the read-only `get_agent_skill` MCP tool when the Agent needs the full instructions.
 - `get_agent_skill` must be authorized by the current Agent's `tools_config` allowlist and must only return Skills from that same Agent's `custom_skills`.

@@ -28,6 +28,7 @@ export interface PlatformSkill {
   id: string;
   user_id: string;
   name: string;
+  category?: string;
   description?: string;
   trigger?: string;
   detail?: string;
@@ -37,6 +38,7 @@ export interface PlatformSkill {
 
 export interface PlatformSkillRequest {
   name: string;
+  category?: string;
   description?: string;
   trigger?: string;
   detail?: string;

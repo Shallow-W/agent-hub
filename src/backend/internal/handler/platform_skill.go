@@ -19,6 +19,7 @@ func NewPlatformSkillHandler(svc *service.PlatformSkillService) *PlatformSkillHa
 
 type PlatformSkillRequest struct {
 	Name        string `json:"name" binding:"required,max=100"`
+	Category    string `json:"category"`
 	Description string `json:"description"`
 	Trigger     string `json:"trigger"`
 	Detail      string `json:"detail"`
@@ -41,12 +42,22 @@ func (h *PlatformSkillHandler) Create(c *gin.Context) {
 		return
 	}
 	userID := middleware.GetUserID(c)
-	skill, err := h.svc.Create(c.Request.Context(), userID, req.Name, req.Description, req.Trigger, req.Detail)
+	skill, err := h.svc.Create(c.Request.Context(), userID, req.Name, req.Category, req.Description, req.Trigger, req.Detail)
 	if err != nil {
 		handlePlatformSkillError(c, err, "创建平台 Skill 失败")
 		return
 	}
 	middleware.CreatedResponse(c, skill)
+}
+
+func (h *PlatformSkillHandler) ImportDefaults(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	skills, err := h.svc.ImportDefaults(c.Request.Context(), userID)
+	if err != nil {
+		handlePlatformSkillError(c, err, "导入默认平台 Skills 失败")
+		return
+	}
+	middleware.SuccessResponse(c, skills)
 }
 
 func (h *PlatformSkillHandler) Update(c *gin.Context) {
@@ -56,7 +67,7 @@ func (h *PlatformSkillHandler) Update(c *gin.Context) {
 		return
 	}
 	userID := middleware.GetUserID(c)
-	skill, err := h.svc.Update(c.Request.Context(), c.Param("id"), userID, req.Name, req.Description, req.Trigger, req.Detail)
+	skill, err := h.svc.Update(c.Request.Context(), c.Param("id"), userID, req.Name, req.Category, req.Description, req.Trigger, req.Detail)
 	if err != nil {
 		handlePlatformSkillError(c, err, "更新平台 Skill 失败")
 		return

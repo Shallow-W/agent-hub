@@ -12,6 +12,11 @@ export async function createPlatformSkill(body: PlatformSkillRequest): Promise<P
   return post<PlatformSkill>(BASE, body);
 }
 
+export async function importDefaultPlatformSkills(): Promise<PlatformSkill[]> {
+  const skills = await post<PlatformSkill[] | null>(`${BASE}/import-defaults`);
+  return skills ?? [];
+}
+
 export async function updatePlatformSkill(id: string, body: PlatformSkillRequest): Promise<PlatformSkill> {
   return put<PlatformSkill>(`${BASE}/${id}`, body);
 }

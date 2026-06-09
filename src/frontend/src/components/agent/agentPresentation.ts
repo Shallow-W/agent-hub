@@ -2,6 +2,7 @@ import type { Agent } from '@/types/agent';
 
 export interface Skill {
   name: string;
+  category?: string;
   description?: string;
   trigger?: string;
   detail?: string;
@@ -53,6 +54,7 @@ export function skillsToPlatformJSON(skills: Skill[]): string {
   const cleaned = skills
     .map((skill) => ({
       name: skill.name.trim(),
+      category: skill.category?.trim() || undefined,
       description: skill.description?.trim() || undefined,
       trigger: skill.trigger?.trim() || undefined,
       detail: skill.detail?.trim() || undefined,

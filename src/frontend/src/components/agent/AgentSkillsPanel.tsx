@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Input, Popconfirm, message } from 'antd';
 import {
   RobotOutlined,
@@ -16,6 +16,7 @@ import {
   createPlatformSkill,
   deletePlatformSkill,
   getPlatformSkills,
+  importDefaultPlatformSkills,
   updatePlatformSkill,
 } from '@/api/platformSkill';
 import { parseSkills, skillsToPlatformJSON } from './agentPresentation';
@@ -38,6 +39,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [selectedLibrarySkillID, setSelectedLibrarySkillID] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
+  const [importingDefaults, setImportingDefaults] = useState(false);
   const [libraryExpanded, setLibraryExpanded] = useState(true);
   const [baseExpanded, setBaseExpanded] = useState(false);
   const [assignedExpanded, setAssignedExpanded] = useState(true);
@@ -77,6 +79,22 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const selectedLibrarySkill = selectedLibrarySkillID
     ? librarySkills.find((skill) => skill.id === selectedLibrarySkillID) ?? null
     : null;
+  const libraryGroups = useMemo(() => {
+    const groups = new Map<string, PlatformSkill[]>();
+    librarySkills.forEach((skill) => {
+      const category = skill.category?.trim() || '未分类';
+      const items = groups.get(category) ?? [];
+      items.push(skill);
+      groups.set(category, items);
+    });
+    return Array.from(groups.entries()).map(([category, items]) => ({ category, items }));
+  }, [librarySkills]);
+
+  const refreshLibrarySkills = async () => {
+    const items = await getPlatformSkills();
+    setLibrarySkills(items);
+    return items;
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -99,6 +117,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     }
     const nextSkill: Skill = {
       name,
+      category: skill.category,
       description: skill.description,
       trigger: skill.trigger || skill.description,
       detail: skill.detail,
@@ -110,6 +129,14 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       return next;
     });
   };
+
+  const toAssignedSkill = (skill: Skill | PlatformSkill): Skill => ({
+    name: skill.name.trim(),
+    category: skill.category,
+    description: skill.description,
+    trigger: skill.trigger || skill.description,
+    detail: skill.detail,
+  });
 
   const handleAddSkill = () => {
     const name = newSkillName.trim();
@@ -129,6 +156,33 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       .finally(() => setLibraryLoading(false));
   };
 
+  const handleImportDefaults = async () => {
+    setImportingDefaults(true);
+    try {
+      const imported = await importDefaultPlatformSkills();
+      await refreshLibrarySkills();
+      const existingNames = new Set(skills.map((skill) => skill.name.trim()).filter(Boolean));
+      const additions = imported
+        .filter((skill) => !existingNames.has(skill.name.trim()))
+        .map(toAssignedSkill);
+      if (additions.length > 0) {
+        const nextSkills = [...skills, ...additions];
+        setSkills(nextSkills);
+        setSelectedSkillIdx(skills.length);
+        setSelectedLibrarySkillID(null);
+        setAssignedExpanded(true);
+        message.success(`已导入并分配 ${additions.length} 个默认平台 Skills，点击保存后生效`);
+      } else {
+        message.info('默认平台 Skills 已在当前 Agent 的已分配列表中');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error && err.message ? err.message : '导入默认平台 Skills 失败';
+      message.error(errorMessage);
+    } finally {
+      setImportingDefaults(false);
+    }
+  };
+
   const handleSaveLibrarySkill = async (skill: Skill | PlatformSkill) => {
     const name = skill.name.trim();
     if (!name) {
@@ -146,9 +200,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
             description: skill.description,
             trigger: skill.trigger,
             detail: skill.detail,
+            category: skill.category,
           })
         : await createPlatformSkill({
             name,
+            category: skill.category,
             description: skill.description,
             trigger: skill.trigger,
             detail: skill.detail,
@@ -260,8 +316,13 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
             </button>
             {assignedExpanded && (
               <div className={styles.skillList}>
+                <div className={styles.sectionToolbar}>
+                  <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
+                    导入默认 Skills
+                  </Button>
+                </div>
                 {skills.length === 0 && (
-                  <div className={styles.empty}>暂无已分配平台 Skills</div>
+                  <div className={styles.empty}>暂无已分配平台 Skills，可导入默认 Skills 或从平台库分配</div>
                 )}
                 {skills.map((skill, idx) => {
                   const isSelected = selectedSkillIdx === idx;
@@ -297,6 +358,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                         ) : (
                           <span className={styles.skillName}>
                             {skill.name}
+                            {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
                             {skill.auto && <span className={styles.autoBadge}>auto</span>}
                           </span>
                         )}
@@ -335,39 +397,47 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
             {libraryExpanded && (
               <div className={styles.skillList}>
                 {librarySkills.length === 0 && (
-                  <div className={styles.empty}>{libraryLoading ? '加载中...' : '暂无平台 Skill，可在底部创建'}</div>
+                  <div className={styles.empty}>{libraryLoading ? '加载中...' : '暂无平台 Skill，可从上方已分配区导入默认 Skills 或在底部创建'}</div>
                 )}
-                {librarySkills.map((skill) => (
-                  <div
-                    className={`${styles.skillCard} ${selectedLibrarySkillID === skill.id ? styles.skillCardSelected : ''}`}
-                    key={skill.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      setSelectedLibrarySkillID(skill.id);
-                      setSelectedSkillIdx(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        setSelectedLibrarySkillID(skill.id);
-                        setSelectedSkillIdx(null);
-                      }
-                    }}
-                  >
-                    <div className={styles.skillCardMain}>
-                      <span className={styles.skillName}>{skill.name}</span>
-                      <span className={styles.skillSummary}>{skill.description || skill.trigger || '暂无描述'}</span>
-                    </div>
-                    <span className={styles.skillActionsAlways}>
-                      <Button size="small" aria-label="分配平台 Skill" onClick={(e) => { e.stopPropagation(); addSkill(skill); }}>
-                        分配
-                      </Button>
-                      <Popconfirm title="删除这个平台 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteLibrarySkill(skill.id)}>
-                        <button className={styles.iconBtn} type="button" title="删除平台 Skill" onClick={(e) => e.stopPropagation()}>
-                          <CloseOutlined />
-                        </button>
-                      </Popconfirm>
-                    </span>
+                {libraryGroups.map((group) => (
+                  <div className={styles.categoryGroup} key={group.category}>
+                    <div className={styles.categoryTitle}>{group.category}</div>
+                    {group.items.map((skill) => (
+                      <div
+                        className={`${styles.skillCard} ${selectedLibrarySkillID === skill.id ? styles.skillCardSelected : ''}`}
+                        key={skill.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setSelectedLibrarySkillID(skill.id);
+                          setSelectedSkillIdx(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setSelectedLibrarySkillID(skill.id);
+                            setSelectedSkillIdx(null);
+                          }
+                        }}
+                      >
+                        <div className={styles.skillCardMain}>
+                          <span className={styles.skillName}>
+                            {skill.name}
+                            {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
+                          </span>
+                          <span className={styles.skillSummary}>{skill.description || skill.trigger || '暂无描述'}</span>
+                        </div>
+                        <span className={styles.skillActionsAlways}>
+                          <Button size="small" aria-label="分配平台 Skill" onClick={(e) => { e.stopPropagation(); addSkill(skill); }}>
+                            分配
+                          </Button>
+                          <Popconfirm title="删除这个平台 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteLibrarySkill(skill.id)}>
+                            <button className={styles.iconBtn} type="button" title="删除平台 Skill" onClick={(e) => e.stopPropagation()}>
+                              <CloseOutlined />
+                            </button>
+                          </Popconfirm>
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -386,6 +456,14 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                     value={selectedLibrarySkill.name}
                     onChange={(e) => updateSelectedLibrarySkill({ name: e.target.value })}
                     placeholder="平台 Skill 名称"
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>分类</span>
+                  <Input
+                    value={selectedLibrarySkill.category ?? ''}
+                    onChange={(e) => updateSelectedLibrarySkill({ category: e.target.value })}
+                    placeholder="例如：产品经理、开发人员"
                   />
                 </label>
                 <label className={styles.field}>
@@ -446,6 +524,14 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                     </Button>
                   </div>
                 )}
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>分类</span>
+                  <Input
+                    value={selectedSkill.category ?? ''}
+                    onChange={(e) => updateSelectedSkill({ category: e.target.value })}
+                    placeholder="例如：产品经理、开发人员"
+                  />
+                </label>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>描述</span>
                   <Input.TextArea

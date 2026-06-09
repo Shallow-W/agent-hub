@@ -408,11 +408,16 @@ null
 ```json
 {
   "name": "代码审查",
+  "category": "开发人员",
   "description": "检查 bug 和测试缺口",
   "trigger": "review, bug",
   "detail": "按清单检查权限、边界和测试。"
 }
 ```
+
+### POST /api/platform-skills/import-defaults
+
+将内置默认平台 Skills 导入当前用户的平台 Skill 库。默认模板覆盖产品经理和开发人员常用工作流，带有 `category` 分类，并使用统一 detail 结构：`适用场景`、`输入要求`、`工作流程`、`输出格式`、`质量检查`。已存在的同名 Skill 会跳过且不会覆盖用户内容；响应会返回当前库中可用于分配的默认 Skills。
 
 ### PUT /api/platform-skills/:id
 

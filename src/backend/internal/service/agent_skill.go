@@ -13,6 +13,7 @@ const (
 // DiscoveredSkill 兼容旧 daemon 的字符串能力，也承载真实 SKILL.md 内容。
 type DiscoveredSkill struct {
 	Name        string `json:"name"`
+	Category    string `json:"category,omitempty"`
 	Description string `json:"description,omitempty"`
 	Trigger     string `json:"trigger,omitempty"`
 	Detail      string `json:"detail,omitempty"`
@@ -76,6 +77,7 @@ func normalizeCustomSkills(raw string) (string, error) {
 		seen[name] = true
 		out = append(out, DiscoveredSkill{
 			Name:        truncateString(name, 80),
+			Category:    truncateString(strings.TrimSpace(skill.Category), 60),
 			Description: truncateString(strings.TrimSpace(skill.Description), 200),
 			Trigger:     truncateString(strings.TrimSpace(skill.Trigger), 200),
 			Detail:      truncateString(strings.TrimSpace(skill.Detail), 2000),
@@ -114,8 +116,12 @@ func BuildAgentSkillContext(raw string, _ string) string {
 		if trigger == "" {
 			trigger = "按任务语义判断"
 		}
+		label := normalizePromptLine(name)
+		if category := strings.TrimSpace(skill.Category); category != "" {
+			label = fmt.Sprintf("%s（%s）", label, normalizePromptLine(category))
+		}
 		fmt.Fprintf(&sb, "- %s：%s；触发：%s\n",
-			truncateString(normalizePromptLine(name), 80),
+			truncateString(label, 100),
 			truncateString(normalizePromptLine(desc), 200),
 			truncateString(normalizePromptLine(trigger), 200),
 		)

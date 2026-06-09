@@ -362,6 +362,7 @@ func main() {
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
 		apiGroup.GET("/platform-skills", platformSkillHandler.List)
 		apiGroup.POST("/platform-skills", platformSkillHandler.Create)
+		apiGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
 		apiGroup.PUT("/platform-skills/:id", platformSkillHandler.Update)
 		apiGroup.DELETE("/platform-skills/:id", platformSkillHandler.Delete)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
