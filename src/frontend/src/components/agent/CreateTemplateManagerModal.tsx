@@ -357,14 +357,14 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             <div>
               {selected && !selected.builtin && (
                 <Popconfirm title="确定删除该模板？" onConfirm={handleDelete} okText="删除" cancelText="取消">
-                  <Button danger icon={<DeleteOutlined />}>删除</Button>
+                  <Button danger icon={<DeleteOutlined />} size="small">删除</Button>
                 </Popconfirm>
               )}
             </div>
             <div className={styles.rightActions}>
-              <Button onClick={onClose}>关闭</Button>
-              <Button icon={<SaveOutlined />} onClick={handleSave}>保存</Button>
-              <Button type="primary" onClick={handleApply}>应用</Button>
+              <Button size="small" onClick={onClose}>关闭</Button>
+              <Button size="small" icon={<SaveOutlined />} onClick={handleSave}>保存</Button>
+              <Button size="small" type="primary" onClick={handleApply}>应用</Button>
             </div>
           </div>
         </div>
