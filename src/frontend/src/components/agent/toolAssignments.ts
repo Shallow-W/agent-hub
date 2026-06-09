@@ -30,6 +30,10 @@ export const toolCatalog: ToolCatalogItem[] = [
   { name: 'list_knowledge_files', label: '知识库文件', category: 'knowledge', description: '列出知识库中的文件' },
   { name: 'search_knowledge', label: '搜索知识库', category: 'knowledge', description: '在知识库中按关键词搜索文件' },
   { name: 'read_knowledge_file', label: '读取知识库文件', category: 'knowledge', description: '读取知识库文件的抽取文本' },
+  { name: 'create_agent', label: '创建 Agent', category: 'agent', description: '创建自建 Agent' },
+  { name: 'update_agent', label: '更新 Agent', category: 'agent', description: '更新 Agent 配置' },
+  { name: 'delete_agent', label: '删除 Agent', category: 'agent', description: '删除自建 Agent' },
+  { name: 'list_toolsets', label: '工具模板', category: 'agent', description: '列出工具模板' },
 ];
 
 export const toolsetTemplates: Record<string, string[]> = {
@@ -52,8 +56,12 @@ export const toolsetTemplates: Record<string, string[]> = {
     'list_knowledge_files',
     'search_knowledge',
     'read_knowledge_file',
+    'create_agent',
+    'update_agent',
+    'delete_agent',
+    'list_toolsets',
   ],
-  agent_builder: ['list_agents', 'list_group_agents', 'get_agent_skill', 'list_agent_candidates', 'list_machines', 'get_agent_detail'],
+  agent_builder: ['list_agents', 'list_group_agents', 'get_agent_skill', 'list_agent_candidates', 'list_machines', 'get_agent_detail', 'create_agent', 'update_agent', 'delete_agent', 'list_toolsets'],
   agent_manager: ['list_agents', 'get_agent_detail', 'update_agent_prompt', 'start_agent', 'stop_agent', 'get_agent_skill'],
   knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge', 'read_knowledge_file'],
 };

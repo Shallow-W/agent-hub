@@ -11,6 +11,7 @@ var platformToolsets = map[string][]string{
 	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
 	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
 	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines"},
+	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
 	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
 }
 
@@ -31,10 +32,18 @@ var platformToolCatalog = map[string]bool{
 	"list_machines":            true,
 	"list_agent_candidates":    true,
 	"get_agent_skill":          true,
+	"get_agent_detail":         true,
+	"update_agent_prompt":      true,
+	"start_agent":              true,
+	"stop_agent":               true,
 	"list_knowledge_bases":     true,
 	"list_knowledge_files":     true,
 	"search_knowledge":         true,
 	"read_knowledge_file":      true,
+	"create_agent":             true,
+	"update_agent":             true,
+	"delete_agent":             true,
+	"list_toolsets":            true,
 }
 
 type agentToolsConfig struct {
