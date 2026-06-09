@@ -20,7 +20,7 @@ import {
   importDefaultPlatformSkills,
   updatePlatformSkill,
 } from '@/api/platformSkill';
-import { parseSkills, skillsToPlatformJSON } from './agentPresentation';
+import { parseSkills, resolveAgentAvatar, skillsToPlatformJSON } from './agentPresentation';
 import type { Skill } from './agentPresentation';
 import styles from './AgentSkillsPanel.module.css';
 
@@ -339,7 +339,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Avatar size={40} src={agent.avatar || undefined} icon={<RobotOutlined />} className={styles.avatar} />
+        <Avatar size={40} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={styles.avatar} />
         <div className={styles.headerInfo}>
           <span className={styles.name}>{agent.name}</span>
           <span className={styles.cliTool}>@{agent.cli_tool}</span>
