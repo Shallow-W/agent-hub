@@ -88,16 +88,17 @@ const AppLayout: React.FC = () => {
   useEffect(() => {
     if (location.pathname.startsWith('/tasks')) {
       setActiveNav('workspace');
-      return;
-    }
-    if (location.pathname.startsWith('/settings')) {
+    } else if (location.pathname.startsWith('/settings')) {
       setActiveNav('settings');
-      return;
+    } else {
+      // Only reset route-based navs (workspace/settings) to 'chat';
+      // preserve overlay navs (skills, knowledge, models, contacts, chat)
+      setActiveNav((prev) => {
+        if (prev === 'workspace' || prev === 'settings') return 'chat';
+        return prev;
+      });
     }
-    if (activeNav === 'workspace' || activeNav === 'settings') {
-      setActiveNav('chat');
-    }
-  }, [activeNav, location.pathname]);
+  }, [location.pathname]);
 
   // 切换到联系人页时自动拉取数据
   useEffect(() => {
