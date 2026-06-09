@@ -115,6 +115,7 @@ body {
 
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 a {
@@ -169,4 +170,15 @@ html {
 :focus-visible {
   outline: 2px solid var(--ant-color-primary);
   outline-offset: 2px;
+}
+
+/* ── 桌面端：窗口透明圆角 ──
+   Electron transparent 窗口下，html/body/#root 必须透明，
+   只保留最内层布局容器 (.container) 的实色背景 + border-radius，
+   这样窗口四角的透明区域才能正确裁切出圆角效果。
+*/
+html.ah-desktop,
+html.ah-desktop body,
+html.ah-desktop #root {
+  background: transparent !important;
 }

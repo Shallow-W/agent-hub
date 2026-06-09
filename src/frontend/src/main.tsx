@@ -8,6 +8,12 @@ import { bindMessage } from './utils/message';
 import { bindModal } from './utils/modal';
 import './styles/globals.css';
 
+// 桌面端标记：尽早设置，让 CSS 能据此隐藏 html/body/#root 的实色背景，
+// 使 transparent 窗口 + CSS border-radius 正确裁切圆角
+if (window.agentHubDesktop?.isDesktop) {
+  document.documentElement.classList.add('ah-desktop');
+}
+
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean }

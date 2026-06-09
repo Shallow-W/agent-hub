@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, Menu, ipcMain } from 'electron';
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -27,19 +27,35 @@ function writeDesktopLog(message) {
 }
 
 function createWindow() {
+  // 隐藏系统菜单栏
+  Menu.setApplicationMenu(null);
+
   const window = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 640,
     title: 'AgentHub',
-    backgroundColor: '#f6f7fb',
+    // 无边框窗口，与前端内容融合为一体
+    frame: false,
+    // 透明窗口，让 CSS border-radius 正确裁切圆角
+    transparent: true,
+    // 任务栏图标，与标题栏图标统一
+    icon: path.join(__dirname, '..', 'public', 'favicon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  // 通知前端窗口最大化状态变化
+  window.on('maximize', () => {
+    window.webContents.send('window:maximized', true);
+  });
+  window.on('unmaximize', () => {
+    window.webContents.send('window:maximized', false);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -99,6 +115,23 @@ function startBackendIfNeeded() {
 }
 
 app.whenReady().then(async () => {
+  // 注册窗口控制 IPC
+  ipcMain.on('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.on('window:maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+  ipcMain.on('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
   startBackendIfNeeded();
   if (backendProcess) {
     try {
