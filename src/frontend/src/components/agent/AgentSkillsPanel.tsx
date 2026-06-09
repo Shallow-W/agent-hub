@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Drawer, Input, Popconfirm } from 'antd';
+import { Avatar, Button, Drawer, Input, Modal, Popconfirm } from 'antd';
 import { message } from '@/utils/message';
 import {
   RobotOutlined,
@@ -36,7 +36,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [skills, setSkills] = useState<Skill[]>([]);
   const [baseSkills, setBaseSkills] = useState<Skill[]>([]);
   const [selectedSkillIdx, setSelectedSkillIdx] = useState<number | null>(null);
-  const [newSkillName, setNewSkillName] = useState('');
   const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [selectedLibrarySkillID, setSelectedLibrarySkillID] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -48,13 +47,14 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [detailOpen, setDetailOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', category: '', description: '', trigger: '', detail: '' });
 
   useEffect(() => {
     const nextSkills = parseSkills(agent.custom_skills);
     setBaseSkills(parseSkills(agent.capabilities_json));
     setSkills(nextSkills);
     setSelectedSkillIdx(null);
-    setNewSkillName('');
     setSelectedLibrarySkillID(null);
     setDetailOpen(false);
   }, [agent.id, agent.capabilities_json, agent.custom_skills]);
@@ -175,16 +175,26 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     detail: skill.detail,
   });
 
-  const handleAddSkill = () => {
-    const name = newSkillName.trim();
-    if (!name) return;
+  const handleCreateSkill = () => {
+    const name = createForm.name.trim();
+    if (!name) {
+      message.warning('Skill 名称不能为空');
+      return;
+    }
     setLibraryLoading(true);
-    createPlatformSkill({ name })
+    createPlatformSkill({
+      name,
+      category: createForm.category.trim() || undefined,
+      description: createForm.description.trim() || undefined,
+      trigger: createForm.trigger.trim() || undefined,
+      detail: createForm.detail.trim() || undefined,
+    })
       .then((skill) => {
         setLibrarySkills((prev) => [skill, ...prev.filter((item) => item.id !== skill.id)]);
         addSkill(skill);
-        setNewSkillName('');
-        message.success('平台 Skill 已创建并分配');
+        setCreateModalOpen(false);
+        setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' });
+        message.success(`已创建并分配「${name}」`);
       })
       .catch((err) => {
         const errorMessage = err instanceof Error && err.message ? err.message : '创建平台 Skill 失败';
@@ -345,8 +355,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           <span className={styles.cliTool}>@{agent.cli_tool}</span>
         </div>
         <div className={styles.headerActions}>
-          <Button size="small" icon={<PlusOutlined />} onClick={handleAddSkill} disabled={!newSkillName.trim()}>
-            创建并分配
+          <Button size="small" icon={<PlusOutlined />} onClick={() => { setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' }); setCreateModalOpen(true); }}>
+            创建 Skill
           </Button>
           <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
             导入默认
@@ -355,15 +365,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
             保存分配
           </Button>
         </div>
-      </div>
-
-      <div className={styles.quickCreateRow}>
-        <Input
-          placeholder="输入新 Skill 名称，然后点击「创建并分配」"
-          value={newSkillName}
-          onChange={(e) => setNewSkillName(e.target.value)}
-          onPressEnter={handleAddSkill}
-        />
       </div>
 
       <div className={styles.overviewStrip}>
@@ -588,6 +589,62 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           </div>
         )}
       </div>
+
+      <Modal
+        title="创建新 Skill"
+        open={createModalOpen}
+        onCancel={() => setCreateModalOpen(false)}
+        onOk={handleCreateSkill}
+        okText="创建并分配"
+        confirmLoading={libraryLoading}
+        destroyOnHidden
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>名称 *</span>
+            <Input
+              value={createForm.name}
+              onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="例如：代码审查、需求分析"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>分类</span>
+            <Input
+              value={createForm.category}
+              onChange={(e) => setCreateForm((f) => ({ ...f, category: e.target.value }))}
+              placeholder="例如：产品经理、开发人员、测试"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>描述</span>
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              value={createForm.description}
+              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="写这个 Skill 解决什么问题、什么时候用"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>触发条件</span>
+            <Input
+              value={createForm.trigger}
+              onChange={(e) => setCreateForm((f) => ({ ...f, trigger: e.target.value }))}
+              placeholder="例如：代码审查、权限检查、写测试时使用"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>详细内容</span>
+            <Input.TextArea
+              autoSize={{ minRows: 6, maxRows: 16 }}
+              value={createForm.detail}
+              onChange={(e) => setCreateForm((f) => ({ ...f, detail: e.target.value }))}
+              placeholder="把详细规则、提示词或代码片段写在这里"
+              className={styles.detailInput}
+            />
+          </label>
+        </div>
+      </Modal>
 
       <Drawer
         title={selectedLibrarySkill ? '平台库 Skill 详情' : selectedSkill ? '已分配 Skill 详情' : 'Skill 详情'}
