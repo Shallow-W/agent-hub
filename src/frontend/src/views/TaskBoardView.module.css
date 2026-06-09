@@ -93,6 +93,7 @@
 .board {
   display: grid;
   grid-template-columns: repeat(4, minmax(210px, 1fr));
+  grid-template-rows: 1fr;
   flex: 1;
   min-height: 0;
   overflow: auto;
