@@ -306,15 +306,11 @@
 .editorActions {
   display: flex;
   justify-content: space-between;
-  align-items: center;
   gap: 8px;
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid rgba(31, 35, 40, 0.06);
+  padding-top: 4px;
 }
 
 .rightActions {
   display: flex;
   gap: 8px;
-  margin-left: auto;
 }
