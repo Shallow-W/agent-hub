@@ -10,8 +10,12 @@ import {
   RobotOutlined,
   RollbackOutlined,
   SaveOutlined,
-} from '@ant-design/icons';
-import { Input, Modal, Select, message as antMessage } from 'antd';
+  } from '@ant-design/icons';
+import { Input,
+  Modal,
+  Select,
+} from 'antd';
+import { message as antMessage } from '@/utils/message';
 import type { Artifact } from '@/types/message';
 import { aiEditArtifact, createArtifactVersion, listArtifactVersions } from '@/api/artifact';
 import { ApiError } from '@/api/client';
@@ -349,7 +353,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
           style={{ top: 16, maxWidth: 'none' }}
           title={displayLang || '代码'}
           className={styles.expandedCodeModal}
-          destroyOnClose
+          destroyOnHidden
         >
           <div className={styles.expandedCodeView}>
             <div className={styles.expandedCodeHeader}>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Button, Modal, message } from 'antd';
+import { Button, Modal } from 'antd';
+import { message } from '@/utils/message';
 import { CloudUploadOutlined } from '@ant-design/icons';
 import type { Artifact } from '@/types/message';
 import type { Deployment } from '@/types/deployment';
@@ -59,7 +60,7 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
           footer={null}
           width={520}
           title="部署发布"
-          destroyOnClose
+          destroyOnHidden
         >
           {deployment && <DeployStatusCard deployment={deployment} />}
         </Modal>

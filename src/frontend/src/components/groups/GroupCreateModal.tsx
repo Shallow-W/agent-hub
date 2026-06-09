@@ -52,7 +52,7 @@ const GroupCreateModal: React.FC<GroupCreateModalProps> = ({
       okText="创建"
       cancelText="取消"
       afterClose={handleAfterClose}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" autoComplete="off">
         <Form.Item

@@ -176,7 +176,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
         width="94vw"
         style={{ top: 16, maxWidth: 'none' }}
         className={`${styles.workspaceModal} ${styles.webpageModal}`}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
           <PreviewView artifact={artifact} />
@@ -197,7 +197,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
         style={{ top: 16, maxWidth: 'none' }}
         title={artifactTitle(artifact)}
         className={`${styles.workspaceModal} ${styles.documentModal}`}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
           <div className={styles.documentViewArea}>
@@ -217,7 +217,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
       style={{ top: 32, maxWidth: 1100 }}
       title={artifactTitle(artifact)}
       className={styles.workspaceModal}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.modalBody}>
         <div className={styles.toolbar}>

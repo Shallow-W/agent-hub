@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Badge, Dropdown, Empty, Input, List, Modal, Tabs, message } from 'antd';
+import { Avatar, Badge, Dropdown, Empty, Input, Modal, Tabs } from 'antd';
+import { message } from '@/utils/message';
 import type { MenuProps } from 'antd';
 import { DeleteOutlined, MoreOutlined, RobotOutlined, SearchOutlined, TeamOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
@@ -12,6 +13,7 @@ import type { Agent } from '@/types/agent';
 import FriendRequest from '../friends/FriendRequest';
 import layoutStyles from '@/layout/AppLayout.module.css';
 import styles from './ContactsPanel.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface ContactsPanelProps {
   conversations: Conversation[];

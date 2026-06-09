@@ -1,4 +1,4 @@
-import { message } from 'antd';
+import { message } from '@/utils/message';
 import type { ApiResponse } from '@/types/api';
 
 const TOKEN_KEY = 'agenthub_token';

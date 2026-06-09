@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, message, Tooltip, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, Tooltip, Typography } from 'antd';
+import { message } from '@/utils/message';
 import {
   CaretRightOutlined,
   DeleteOutlined,

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Input, Button, Tooltip, Spin, message } from 'antd';
+import { Input, Button, Tooltip, Spin } from 'antd';
+import { message } from '@/utils/message';
 import {
   CloseOutlined,
   LinkOutlined,

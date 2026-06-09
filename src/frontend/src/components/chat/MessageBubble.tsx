@@ -1,5 +1,6 @@
 import React, { useState, useMemo, type ReactNode } from 'react';
-import { Avatar, Typography, Spin, Button, Tooltip, Dropdown, message as antMessage } from 'antd';
+import { Avatar, Typography, Spin, Button, Tooltip, Dropdown } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
 import {
   CloseOutlined,

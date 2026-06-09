@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, message as antMessage } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   FolderOpenOutlined,
   LogoutOutlined,

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { message as antdMessage } from 'antd';
+import { message as antdMessage } from '@/utils/message';
 import type { Message, OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal, Popconfirm, Tag, message } from 'antd';
+import { Button, Input, Modal, Popconfirm, Tag } from 'antd';
+import { message } from '@/utils/message';
 import {
   CheckCircleOutlined,
   CopyOutlined,

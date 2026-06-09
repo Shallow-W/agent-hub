@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Avatar, Badge, Input, List } from 'antd';
+import { Avatar, Badge, Input } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface RobotFriendListProps {
   agents: Agent[];

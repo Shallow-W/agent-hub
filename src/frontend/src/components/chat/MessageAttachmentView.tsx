@@ -152,7 +152,7 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
             <span className={styles.modalTitleName}>{fileName}</span>
           </span>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {open && (
           <Suspense fallback={<div className={styles.pptModalLoading}>加载预览组件…</div>}>

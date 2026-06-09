@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal, Select, message } from 'antd';
+import { Button, Input, Modal, Select } from 'antd';
+import { message } from '@/utils/message';
 import type { AgentCandidate } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
 import styles from './AgentCreateModal.module.css';

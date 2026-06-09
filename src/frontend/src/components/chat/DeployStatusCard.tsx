@@ -1,5 +1,6 @@
 import React from 'react';
-import { QRCode, Tag, Button, Tooltip, message } from 'antd';
+import { QRCode, Tag, Button, Tooltip } from 'antd';
+import { message } from '@/utils/message';
 import {
   CopyOutlined,
   DownloadOutlined,

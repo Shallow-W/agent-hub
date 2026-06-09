@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Avatar, Input, List, Badge, Tabs, Skeleton, Spin, Empty, Dropdown, Modal, message } from 'antd';
+import { Avatar, Input, Badge, Tabs, Skeleton, Spin, Empty, Dropdown, Modal } from 'antd';
+import { message } from '@/utils/message';
 import type { MenuProps } from 'antd';
 import { UserAddOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import FriendRequest from './FriendRequest';
 import styles from './FriendList.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface FriendListProps {
   onStartChat: (friendId: string) => void;

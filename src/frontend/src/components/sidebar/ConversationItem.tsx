@@ -256,7 +256,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           setRenameOpen(false);
         }}
         onCancel={() => setRenameOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Input
           value={renameValue}

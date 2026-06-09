@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { message } from 'antd';
+import { message } from '@/utils/message';
 import type { Conversation, ConversationType } from '@/types/conversation';
 import * as convApi from '@/api/conversation';
 

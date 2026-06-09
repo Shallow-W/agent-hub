@@ -73,7 +73,7 @@ const NewConversationModal: React.FC<NewConversationModalProps> = ({
       okText="创建"
       cancelText="取消"
       confirmLoading={submitting}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.content}>
         <Input

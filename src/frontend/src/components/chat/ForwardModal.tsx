@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Modal, Input, List, Avatar, Empty, Spin, message as antMessage } from 'antd';
+import { Modal, Input, Avatar, Empty, Spin } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import { SearchOutlined, SendOutlined } from '@ant-design/icons';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
 import { useAuthStore } from '@/store/authStore';
 import type { Message } from '@/types/message';
 import styles from './ForwardModal.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface ForwardModalProps {
   open: boolean;
@@ -84,7 +86,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
       footer={null}
       width={480}
       className={styles.modal}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.preview}>
         <span className={styles.previewLabel}>转发内容：</span>
