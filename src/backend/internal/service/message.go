@@ -77,6 +77,36 @@ func artifactsFromTaskResult(results []ws.ArtifactResult) []model.Artifact {
 	return out
 }
 
+func artifactsFromTaskResultOrMarkdown(results []ws.ArtifactResult, content string) []model.Artifact {
+	if arts := artifactsFromTaskResult(results); len(arts) > 0 {
+		return arts
+	}
+	return artifactsFromMarkdown(content)
+}
+
+func hasCodeArtifact(artifacts []model.Artifact) bool {
+	for _, artifact := range artifacts {
+		if artifact.Type == "code" {
+			return true
+		}
+	}
+	return false
+}
+
+func codeArtifactsFromMarkdown(content string) []model.Artifact {
+	parsed := artifactsFromMarkdown(content)
+	if len(parsed) == 0 {
+		return nil
+	}
+	codeArtifacts := make([]model.Artifact, 0, len(parsed))
+	for _, artifact := range parsed {
+		if artifact.Type == "code" {
+			codeArtifacts = append(codeArtifacts, artifact)
+		}
+	}
+	return codeArtifacts
+}
+
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
 type ConvRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
@@ -378,6 +408,7 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	s.ensureParsedArtifacts(ctx, messages)
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
@@ -488,6 +519,24 @@ func (s *MessageService) enrichMessageFileURLs(message *model.Message) {
 	for i := range message.Attachments {
 		message.Attachments[i].URL = s.fileURLs.UploadURL(message.Attachments[i].FilePath)
 		message.Attachments[i].ThumbnailURL = s.fileURLs.UploadURL(message.Attachments[i].ThumbnailPath)
+	}
+}
+
+func (s *MessageService) ensureParsedArtifacts(ctx context.Context, messages []model.Message) {
+	for i := range messages {
+		msg := &messages[i]
+		if msg.Role != "assistant" || hasCodeArtifact(msg.Artifacts) || strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		arts := codeArtifactsFromMarkdown(msg.Content)
+		if len(arts) == 0 {
+			continue
+		}
+		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
+			slog.Warn("backfill message artifacts failed", "message_id", msg.ID, "error", err)
+			continue
+		}
+		msg.Artifacts = append(msg.Artifacts, arts...)
 	}
 }
 
@@ -854,7 +903,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 
 	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
-	if arts := artifactsFromTaskResult(result.Artifacts); len(arts) > 0 {
+	if arts := artifactsFromTaskResultOrMarkdown(result.Artifacts, result.Result); len(arts) > 0 {
 		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
 			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
 		} else {

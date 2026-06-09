@@ -554,7 +554,15 @@ func (s *OrchestratorService) createOrchLifecycle(ctx context.Context, convID, u
 }
 
 func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
-	if msg == nil || len(artifacts) == 0 {
+	if msg == nil {
+		return
+	}
+	if len(artifacts) == 0 {
+		artifacts = artifactsFromMarkdown(msg.Content)
+	} else if !hasCodeArtifact(artifacts) {
+		artifacts = append(artifacts, codeArtifactsFromMarkdown(msg.Content)...)
+	}
+	if len(artifacts) == 0 {
 		return
 	}
 	if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, artifacts); err != nil {
