@@ -5,6 +5,7 @@ import * as userApi from '@/api/user';
 import { setToken, clearToken } from '@/api/client';
 import { resetConversationStore } from '@/store/conversationStore';
 import { resetMessageStore } from '@/store/messageStore';
+import { resetAgentStore } from '@/store/agentStore';
 import { useWsStore } from '@/store/wsStore';
 
 interface AuthState {
@@ -39,6 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       localStorage.removeItem('agenthub_active_conv');
       setToken(data.token);
+      resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '登录失败';
@@ -57,6 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       localStorage.removeItem('agenthub_active_conv');
       setToken(data.token);
+      resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '注册失败';
@@ -91,6 +94,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     clearToken();
     resetConversationStore();
     resetMessageStore();
+    resetAgentStore();
     useWsStore.getState().disconnect();
     set({ user: null, token: null, isAuthenticated: false });
   },

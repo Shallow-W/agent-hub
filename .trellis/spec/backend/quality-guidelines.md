@@ -225,12 +225,147 @@ out = append(out, DiscoveredSkill{
 - Agent prompts must include a `{会话上下文黑板}` block with `{用户 Pin 上下文}` and `{用户手写上下文}` for orchestrator dispatch, worker dispatch, direct Agent dispatch, and Agent one-on-one chats.
 - Pin content must be length-limited and normalized before prompt insertion so a single pinned message cannot crowd out the current user request.
 - Manual context must be length-limited before persistence and before prompt insertion so it cannot crowd out the current user request.
-- Cache invalidation is required after pin/unpin because message history may be served from Redis.
 
 **Tests Required**:
 - Assert orchestrator prompt construction includes the blackboard section.
 - Assert `BuildConversationBlackboardContext` includes persisted pinned messages, user-authored context, and normalizes multi-line pin content.
 - Run backend service/handler/repository tests and frontend build after changing the pin API or message shape.
+
+### Message History and Delivery State
+
+**Scope / Trigger**: Applies when changing message history APIs, Redis message state, offline/unread behavior, websocket post-persist flows, or Orchestrator async message delivery.
+
+**Signatures**:
+- API: `GET /api/conversations/:id/messages?before=&limit=` returns DB-backed message history.
+- API: `GET /api/conversations/:id/messages/unread?limit=` may consume transient offline delivery state before falling back to DB `last_read_at`.
+- Service: `MessageDeliveryState` and `OrchDeliveryState` expose offline queue and unread-count operations only.
+- Redis keys: `offline:{userID}:{conversationID}` and `unread:{userID}:{conversationID}`.
+
+**Contracts**:
+- PostgreSQL `messages` plus attachment/artifact tables are the source of truth for message history.
+- Message history reads must call the message repository (`ListByConversation`) and must not return Redis `msgs:*` or any other hot-cache snapshot.
+- Redis may store transient delivery state only: offline queues and unread counters. It must not be required to reconstruct the conversation after refresh.
+- `postPersist` and Orchestrator `postPersistAsync` must push to WebSocket, then record offline queue/unread state for non-sender members.
+- Assistant and Orchestrator async messages are already persisted before delivery state is recorded; browser refresh recovery must come from DB history.
+- Pin/unpin/recall should update the DB and push events as needed; they must not rely on Redis history-cache invalidation.
+
+**Validation & Error Matrix**:
+- Missing conversation or no membership -> existing message service not-found/permission errors.
+- Redis unavailable -> history still works from DB; offline/unread delivery degrades but persisted messages remain recoverable.
+- Offline queue malformed payload -> skip bad item and continue with valid messages.
+
+**Good/Base/Bad Cases**:
+- Good: Hard-refreshing a chat calls DB-backed history and matches `/api/conversations` latest-message summary.
+- Base: Offline users receive queued messages through `messages/unread`; if the queue is empty, DB `last_read_at` fallback still works.
+- Bad: `GET /messages` returns Redis `msgs:<conversationID>` and shows a stale 50-message snapshot while the sidebar shows fresh DB data.
+- Bad: Code adds `InvalidateCache` calls after pin/unpin instead of keeping history DB-backed.
+
+**Tests Required**:
+- Service-test `GetHistory` with delivery state injected and assert repository messages are returned.
+- Run backend service/repository tests after changing Redis delivery state.
+- Run frontend build after changing message API response shape or client merge behavior.
+
+**Wrong vs Correct**:
+```go
+// Wrong: history reads from transient Redis state.
+cached, _ := delivery.GetCachedMessages(ctx, convID, limit)
+if len(cached) > 0 { return cached, nil }
+
+// Correct: history always reads source-of-truth rows.
+messages, err := msgRepo.ListByConversation(ctx, convID, before, limit)
+```
+
+### Agent Prompt Templates
+
+**Scope / Trigger**: Applies when changing Agent creation flows, editable system prompt templates, or template CRUD APIs.
+
+**Signatures**:
+- DB: `agent_prompt_templates(id, user_id, name, category, description, system_prompt, created_at, updated_at)`.
+- API: `GET/POST/PUT/DELETE /api/agent-prompt-templates`.
+- API: `POST /api/agent-prompt-templates/import-defaults`.
+- Frontend: `AgentCreateModal` consumes `AgentPromptTemplateField` for the system prompt field.
+
+**Contracts**:
+- Prompt templates are user-scoped server data, not frontend-only constants.
+- `(user_id, name)` is unique; importing defaults is idempotent and skips existing names.
+- `name` is required. `category` defaults to `通用`. `description` and `system_prompt` are trimmed and length-limited.
+- Selecting a template in Agent creation copies `system_prompt` into the draft Agent request; the Agent stores the resulting prompt snapshot, not a live template reference.
+- Template CRUD must not require a connected daemon. It is account configuration and should work before/after machine connection.
+
+**Validation & Error Matrix**:
+- Missing user ID or empty name -> `ErrAgentPromptTemplateInvalid` / 400.
+- Duplicate template name for the same user -> `ErrAgentPromptTemplateDuplicate` / 409.
+- Update/delete another user's or missing template -> `ErrAgentPromptTemplateNotFound` / 404.
+- Database failure -> wrapped with `%w` and handled as 500.
+
+**Good/Base/Bad Cases**:
+- Good: User imports defaults, selects "代码实现 Agent", edits the prompt, and creates a machine candidate Agent with that edited prompt.
+- Base: User deletes or renames a template after creating an Agent; existing Agents keep their stored prompt snapshot.
+- Bad: Prompt templates are hard-coded only in the frontend, so another browser or server cannot list/edit them.
+- Bad: Agent rows store a template ID and silently change behavior when the template is later edited.
+
+**Tests Required**:
+- Service tests for normalization, duplicate/default import behavior, update-not-found, and delete-not-found.
+- Frontend build after changing template request/response types or creation modal wiring.
+- Browser smoke test for opening Agent creation and loading `/api/agent-prompt-templates`.
+
+**Wrong vs Correct**:
+```go
+// Wrong: candidate Agent creation depends on a mutable template row.
+agent.SystemPromptTemplateID = req.TemplateID
+
+// Correct: template selection copies the prompt into the Agent draft.
+agent.SystemPrompt = strings.TrimSpace(req.SystemPrompt)
+```
+
+### Uploaded File Storage URLs
+
+**Scope / Trigger**: Applies when changing chat attachment upload, knowledge-base file upload, static uploaded-file serving, or the `upload` config.
+
+**Signatures**:
+- Config: `upload.dir`, `upload.public_base_url`, `upload.max_image_mb`, `upload.max_pdf_mb`.
+- API: `POST /api/upload` returns `file_path`, `thumbnail_path`, `url`, and `thumbnail_url`.
+- API: message payloads expose attachment `url` and `thumbnail_url` as computed JSON fields.
+- API: knowledge file payloads expose `url` as a computed JSON field.
+- Storage DB: `message_attachments.file_path`, `message_attachments.thumbnail_path`, and `knowledge_files.file_path` store relative paths only.
+
+**Contracts**:
+- Binary file contents live under `upload.dir`; the database stores metadata and relative storage paths, not file bytes.
+- `upload.public_base_url` is optional. Empty means return relative API URLs such as `/api/uploads/originals/a.png`; non-empty means prefix that API path with the configured origin.
+- `FileURLBuilder` is the single place that converts storage paths to API/public URLs. Do not hand-roll public URL concatenation in handlers, repositories, or frontend-only logic.
+- Message-service responses must enrich attachment URLs after database history/search reads and after offline queue reads so changing `upload.public_base_url` does not require rewriting persisted messages.
+- Static uploaded-file serving remains authenticated by `/api/uploads/*filepath` and must reject path traversal before joining with `upload.dir`.
+- Knowledge-base file content remains permission-checked by `GET /api/knowledge-bases/:id/files/:fileId/content`; the `url` field points to that checked endpoint.
+
+**Validation & Error Matrix**:
+- Empty upload -> `ErrUploadEmpty` / 400.
+- Unsupported extension or detected MIME -> `ErrUploadTypeInvalid` / 400.
+- File over configured size limit -> `ErrUploadTooBig` / 413.
+- Uploaded-file path containing `..` -> 403.
+- Missing physical file -> 404 from the serving endpoint.
+- Knowledge file without permission -> `ErrKBNoPermission` / 403.
+
+**Good/Base/Bad Cases**:
+- Good: Production sets `upload.dir: "/root/agenthub-data/uploads"` and `upload.public_base_url: "https://agenthub.example.com"`; responses carry absolute URLs while DB paths remain relative.
+- Base: Local dev leaves `upload.public_base_url` empty; frontend uses relative `/api/...` URLs.
+- Bad: Code stores `http://server-ip/...` in `message_attachments.file_path`, making server migration require database rewrites.
+- Bad: Offline queued messages return stale or empty URLs because enrichment only happens in repository reads.
+
+**Tests Required**:
+- Unit-test `FileURLBuilder` for relative and absolute public URL modes.
+- Service-test message history/offline enrichment for `url` and `thumbnail_url`.
+- Run backend service/handler/repository tests after changing upload or static serving.
+- Run frontend type-check/build after adding attachment or knowledge-file response fields.
+
+**Wrong vs Correct**:
+```go
+// Wrong: public URL is persisted or concatenated ad hoc.
+attachment.FilePath = "http://111.228.35.61:8080/api/uploads/originals/a.png"
+
+// Correct: persist a relative path and compute the URL at the service boundary.
+attachment.FilePath = "uploads/originals/a.png"
+attachment.URL = fileURLs.UploadURL(attachment.FilePath)
+```
 
 ---
 

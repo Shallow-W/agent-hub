@@ -458,6 +458,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       file_size: (p as Record<string, unknown>).file_size as number,
       file_path: (p as Record<string, unknown>).file_path as string,
       thumbnail_path: ((p as Record<string, unknown>).thumbnail_path as string) ?? null,
+      url: (p as Record<string, unknown>).url as string | undefined,
+      thumbnail_url: ((p as Record<string, unknown>).thumbnail_url as string | null | undefined) ?? null,
       width: ((p as Record<string, unknown>).width as number) ?? 0,
       height: ((p as Record<string, unknown>).height as number) ?? 0,
       created_at: new Date().toISOString(),

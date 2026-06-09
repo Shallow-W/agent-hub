@@ -38,3 +38,15 @@ type PlatformSkill struct {
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 }
+
+// AgentPromptTemplate 是用户维护的 Agent system prompt 模板。
+type AgentPromptTemplate struct {
+	ID           string    `json:"id" db:"id"`
+	UserID       string    `json:"user_id" db:"user_id"`
+	Name         string    `json:"name" db:"name"`
+	Category     string    `json:"category" db:"category"`
+	Description  string    `json:"description,omitempty" db:"description"`
+	SystemPrompt string    `json:"system_prompt,omitempty" db:"system_prompt"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}

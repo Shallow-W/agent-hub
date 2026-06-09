@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Input, Popconfirm, message } from 'antd';
 import {
   RobotOutlined,
-  CloseOutlined,
   SaveOutlined,
   EditOutlined,
   FolderOpenOutlined,
@@ -79,6 +78,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const selectedLibrarySkill = selectedLibrarySkillID
     ? librarySkills.find((skill) => skill.id === selectedLibrarySkillID) ?? null
     : null;
+  const currentSelectionLabel = selectedLibrarySkill?.name || selectedSkill?.name || '未选择';
+  const currentSelectionSource = selectedLibrarySkill ? '平台库' : selectedSkill ? '已分配' : '等待选择';
   const libraryGroups = useMemo(() => {
     const groups = new Map<string, PlatformSkill[]>();
     librarySkills.forEach((skill) => {
@@ -305,150 +306,188 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           <span className={styles.name}>{agent.name}</span>
           <span className={styles.cliTool}>@{agent.cli_tool}</span>
         </div>
+        <div className={styles.headerActions}>
+          <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
+            导入默认
+          </Button>
+          <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
+            保存分配
+          </Button>
+        </div>
+      </div>
+
+      <div className={styles.overviewStrip}>
+        <div className={styles.overviewItem}>
+          <span className={styles.overviewLabel}>已分配</span>
+          <strong className={styles.overviewValue}>{skills.length}</strong>
+        </div>
+        <div className={styles.overviewItem}>
+          <span className={styles.overviewLabel}>平台库</span>
+          <strong className={styles.overviewValue}>{librarySkills.length}</strong>
+        </div>
+        <div className={styles.overviewItem}>
+          <span className={styles.overviewLabel}>底座只读</span>
+          <strong className={styles.overviewValue}>{baseSkills.length}</strong>
+        </div>
+        <div className={styles.overviewItemWide}>
+          <span className={styles.overviewLabel}>{currentSelectionSource}</span>
+          <strong className={styles.overviewValue}>{currentSelectionLabel}</strong>
+        </div>
       </div>
 
       <div className={styles.body}>
         <div className={styles.workspace}>
           <div className={styles.leftPane}>
-            <button className={styles.sectionToggle} type="button" onClick={() => setAssignedExpanded((v) => !v)}>
-              {assignedExpanded ? <DownOutlined /> : <RightOutlined />}
-              <span className={styles.sectionTitle}>已分配平台 Skills ({skills.length})</span>
-            </button>
-            {assignedExpanded && (
-              <div className={styles.skillList}>
-                <div className={styles.sectionToolbar}>
-                  <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
-                    导入默认 Skills
-                  </Button>
-                </div>
-                {skills.length === 0 && (
-                  <div className={styles.empty}>暂无已分配平台 Skills，可导入默认 Skills 或从平台库分配</div>
-                )}
-                {skills.map((skill, idx) => {
-                  const isSelected = selectedSkillIdx === idx;
-                  return (
-                    <div
-                      className={`${styles.skillCard} ${isSelected ? styles.skillCardSelected : ''}`}
-                      key={`${skill.name}-${idx}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        setSelectedSkillIdx(idx);
-                        setSelectedLibrarySkillID(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          setSelectedSkillIdx(idx);
-                          setSelectedLibrarySkillID(null);
-                        }
-                      }}
-                    >
-                      <div className={styles.skillCardMain}>
-                        {editingSkillIdx === idx ? (
-                          <Input
-                            autoFocus
-                            size="small"
-                            value={editingSkillName}
-                            onChange={(e) => setEditingSkillName(e.target.value)}
-                            onBlur={handleCommitEditName}
-                            onPressEnter={handleCommitEditName}
-                            onClick={(e) => e.stopPropagation()}
-                            className={styles.skillNameInput}
-                          />
-                        ) : (
-                          <span className={styles.skillName}>
-                            {skill.name}
-                            {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
-                            {skill.auto && <span className={styles.autoBadge}>auto</span>}
-                          </span>
-                        )}
-                        <span className={styles.skillSummary}>
-                          {skill.description || skill.trigger || '暂无描述'}
-                        </span>
+            <section className={styles.skillSection}>
+              <button className={styles.sectionToggle} type="button" onClick={() => setAssignedExpanded((v) => !v)}>
+                {assignedExpanded ? <DownOutlined /> : <RightOutlined />}
+                <span className={styles.sectionTitleBlock}>
+                  <span className={styles.sectionTitle}>已分配</span>
+                  <span className={styles.sectionDescription}>当前 Agent 可直接使用的 Skills</span>
+                </span>
+                <span className={styles.sectionCount}>{skills.length}</span>
+              </button>
+              {assignedExpanded && (
+                <div className={styles.skillList}>
+                  {skills.length === 0 && (
+                    <div className={styles.skillEmptyPanel}>
+                      <span className={styles.skillEmptyTitle}>还没有已分配 Skill</span>
+                      <span className={styles.skillEmptyText}>先导入默认 Skills，或从下面的平台库挑选后分配给当前 Agent。</span>
+                      <div className={styles.skillEmptyActions}>
+                        <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
+                          导入默认 Skills
+                        </Button>
+                        <Button size="small" onClick={() => setLibraryExpanded(true)}>
+                          查看平台库
+                        </Button>
                       </div>
-                      <span className={styles.skillActions}>
-                        <button
-                          className={styles.iconBtn}
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleStartEditName(idx); }}
-                          title="编辑分配名称"
-                        >
-                          <EditOutlined />
-                        </button>
-                        <button
-                          className={styles.iconBtn}
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleDeleteSkill(idx); }}
-                          title="从当前 Agent 移除"
-                        >
-                          <CloseOutlined />
-                        </button>
-                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <button className={styles.sectionToggle} type="button" onClick={() => setLibraryExpanded((v) => !v)}>
-              {libraryExpanded ? <DownOutlined /> : <RightOutlined />}
-              <span className={styles.sectionTitle}>平台 Skill 库 ({librarySkills.length})</span>
-            </button>
-            {libraryExpanded && (
-              <div className={styles.skillList}>
-                {librarySkills.length === 0 && (
-                  <div className={styles.empty}>{libraryLoading ? '加载中...' : '暂无平台 Skill，可从上方已分配区导入默认 Skills 或在底部创建'}</div>
-                )}
-                {libraryGroups.map((group) => (
-                  <div className={styles.categoryGroup} key={group.category}>
-                    <div className={styles.categoryTitle}>{group.category}</div>
-                    {group.items.map((skill) => (
+                  )}
+                  {skills.map((skill, idx) => {
+                    const isSelected = selectedSkillIdx === idx;
+                    return (
                       <div
-                        className={`${styles.skillCard} ${selectedLibrarySkillID === skill.id ? styles.skillCardSelected : ''}`}
-                        key={skill.id}
+                        className={`${styles.skillCard} ${isSelected ? styles.skillCardSelected : ''}`}
+                        key={`${skill.name}-${idx}`}
                         role="button"
                         tabIndex={0}
                         onClick={() => {
-                          setSelectedLibrarySkillID(skill.id);
-                          setSelectedSkillIdx(null);
+                          setSelectedSkillIdx(idx);
+                          setSelectedLibrarySkillID(null);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            setSelectedLibrarySkillID(skill.id);
-                            setSelectedSkillIdx(null);
+                            setSelectedSkillIdx(idx);
+                            setSelectedLibrarySkillID(null);
                           }
                         }}
                       >
                         <div className={styles.skillCardMain}>
-                          <span className={styles.skillName}>
-                            {skill.name}
-                            {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
+                          {editingSkillIdx === idx ? (
+                            <Input
+                              autoFocus
+                              size="small"
+                              value={editingSkillName}
+                              onChange={(e) => setEditingSkillName(e.target.value)}
+                              onBlur={handleCommitEditName}
+                              onPressEnter={handleCommitEditName}
+                              onClick={(e) => e.stopPropagation()}
+                              className={styles.skillNameInput}
+                            />
+                          ) : (
+                            <span className={styles.skillName}>
+                              {skill.name}
+                              {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
+                              {skill.auto && <span className={styles.autoBadge}>auto</span>}
+                            </span>
+                          )}
+                          <span className={styles.skillSummary}>
+                            {skill.description || skill.trigger || '暂无描述'}
                           </span>
-                          <span className={styles.skillSummary}>{skill.description || skill.trigger || '暂无描述'}</span>
                         </div>
-                        <span className={styles.skillActionsAlways}>
-                          <Button size="small" aria-label="分配平台 Skill" onClick={(e) => { e.stopPropagation(); addSkill(skill); }}>
-                            分配
+                        <span className={styles.skillActions}>
+                          <button
+                            className={styles.iconBtn}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleStartEditName(idx); }}
+                            title="编辑分配名称"
+                          >
+                            <EditOutlined />
+                          </button>
+                          <Button size="small" danger onClick={(e) => { e.stopPropagation(); handleDeleteSkill(idx); }}>
+                            移除
                           </Button>
-                          <Popconfirm title="删除这个平台 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteLibrarySkill(skill.id)}>
-                            <button className={styles.iconBtn} type="button" title="删除平台 Skill" onClick={(e) => e.stopPropagation()}>
-                              <CloseOutlined />
-                            </button>
-                          </Popconfirm>
                         </span>
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className={styles.skillSection}>
+              <button className={styles.sectionToggle} type="button" onClick={() => setLibraryExpanded((v) => !v)}>
+                {libraryExpanded ? <DownOutlined /> : <RightOutlined />}
+                <span className={styles.sectionTitleBlock}>
+                  <span className={styles.sectionTitle}>平台库</span>
+                  <span className={styles.sectionDescription}>可分配、可编辑的团队 Skill 模板</span>
+                </span>
+                <span className={styles.sectionCount}>{librarySkills.length}</span>
+              </button>
+              {libraryExpanded && (
+                <div className={styles.skillList}>
+                  {librarySkills.length === 0 && (
+                    <div className={styles.empty}>{libraryLoading ? '加载中...' : '暂无平台 Skill，可从已分配区导入默认 Skills 或在底部创建'}</div>
+                  )}
+                  {libraryGroups.map((group) => (
+                    <div className={styles.categoryGroup} key={group.category}>
+                      <div className={styles.categoryTitle}>{group.category}</div>
+                      {group.items.map((skill) => (
+                        <div
+                          className={`${styles.skillCard} ${selectedLibrarySkillID === skill.id ? styles.skillCardSelected : ''}`}
+                          key={skill.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            setSelectedLibrarySkillID(skill.id);
+                            setSelectedSkillIdx(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              setSelectedLibrarySkillID(skill.id);
+                              setSelectedSkillIdx(null);
+                            }
+                          }}
+                        >
+                          <div className={styles.skillCardMain}>
+                            <span className={styles.skillName}>
+                              {skill.name}
+                              {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
+                            </span>
+                            <span className={styles.skillSummary}>{skill.description || skill.trigger || '暂无描述'}</span>
+                          </div>
+                          <span className={styles.skillActionsAlways}>
+                            <Button size="small" aria-label="分配平台 Skill" onClick={(e) => { e.stopPropagation(); addSkill(skill); }}>
+                              分配
+                            </Button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
 
           <div className={styles.detailPane}>
             {selectedLibrarySkill ? (
               <>
                 <div className={styles.detailHeader}>
-                  <span className={styles.detailTitle}>平台 Skill 库条目</span>
+                  <div>
+                    <span className={styles.detailKicker}>平台库条目</span>
+                    <span className={styles.detailTitle}>{selectedLibrarySkill.name}</span>
+                  </div>
                 </div>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>名称</span>
@@ -497,6 +536,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                   <Button onClick={() => addSkill(selectedLibrarySkill)}>
                     分配给当前 Agent
                   </Button>
+                  <Popconfirm title="删除这个平台 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteLibrarySkill(selectedLibrarySkill.id)}>
+                    <Button danger>
+                      删除平台 Skill
+                    </Button>
+                  </Popconfirm>
                   <Button type="primary" onClick={() => handleSaveLibrarySkill(selectedLibrarySkill)} loading={libraryLoading}>
                     保存平台 Skill 库
                   </Button>
@@ -566,7 +610,13 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                 </div>
               </>
             ) : (
-              <div className={styles.detailEmpty}>选择左侧已分配 Skill 或平台 Skill 库条目后，在这里查看和编辑详细内容</div>
+              <div className={styles.detailEmpty}>
+                <RobotOutlined className={styles.detailEmptyIcon} />
+                <span className={styles.detailEmptyTitle}>选择一个 Skill 查看详情</span>
+                <span className={styles.detailEmptyText}>
+                  可以点击左侧已分配 Skill 编辑当前 Agent 的能力，也可以从平台库条目进入后分配或维护模板。
+                </span>
+              </div>
             )}
           </div>
         </div>
@@ -575,7 +625,11 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       <div className={styles.baseSkills}>
         <button className={styles.sectionToggle} type="button" onClick={() => setBaseExpanded((v) => !v)}>
           {baseExpanded ? <DownOutlined /> : <RightOutlined />}
-          <span className={styles.sectionTitle}>底座 Skills 只读 ({baseSkills.length})</span>
+          <span className={styles.sectionTitleBlock}>
+            <span className={styles.sectionTitle}>底座只读</span>
+            <span className={styles.sectionDescription}>本地 Agent 上报的原始 Skills，可入库后再编辑</span>
+          </span>
+          <span className={styles.sectionCount}>{baseSkills.length}</span>
         </button>
         {baseExpanded && baseSkills.length === 0 ? (
           <div className={styles.empty}>当前 Agent 底座没有上报本地 Skills</div>
@@ -600,7 +654,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       <div className={styles.footer}>
         <div className={styles.addRow}>
           <Input
-            placeholder="输入新平台 Skill 名称，创建到平台库并分配给当前 Agent"
+            placeholder={`新建平台 Skill 并分配给 ${agent.name}`}
             value={newSkillName}
             onChange={(e) => setNewSkillName(e.target.value)}
             onPressEnter={handleAddSkill}

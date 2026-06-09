@@ -172,7 +172,20 @@ Authorization: Bearer <token>
 ```json
 {
   "content": "消息内容",
-  "role": "user"
+  "role": "user",
+  "attachments": [
+    {
+      "file_name": "demo.png",
+      "mime_type": "image/png",
+      "file_size": 12345,
+      "file_path": "uploads/originals/<sha>.png",
+      "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+      "url": "/api/uploads/originals/<sha>.png",
+      "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+      "width": 800,
+      "height": 600
+    }
+  ]
 }
 ```
 
@@ -184,6 +197,22 @@ Authorization: Bearer <token>
   "content": "消息内容",
   "role": "user",
   "pinned": false,
+  "attachments": [
+    {
+      "id": "uuid",
+      "message_id": "uuid",
+      "file_name": "demo.png",
+      "mime_type": "image/png",
+      "file_size": 12345,
+      "file_path": "uploads/originals/<sha>.png",
+      "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+      "url": "/api/uploads/originals/<sha>.png",
+      "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+      "width": 800,
+      "height": 600,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ],
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -213,6 +242,19 @@ Authorization: Bearer <token>
     "content": "消息内容",
     "role": "user | assistant | system",
     "pinned": false,
+    "attachments": [
+      {
+        "id": "uuid",
+        "message_id": "uuid",
+        "file_name": "demo.png",
+        "mime_type": "image/png",
+        "file_size": 12345,
+        "file_path": "uploads/originals/<sha>.png",
+        "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+        "url": "/api/uploads/originals/<sha>.png",
+        "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg"
+      }
+    ],
     "created_at": "2024-01-01T00:00:00Z"
   }
 ]
@@ -220,6 +262,37 @@ Authorization: Bearer <token>
 
 **错误响应**
 - `404 Not Found` — 对话不存在或无权限
+
+---
+
+### POST /api/upload
+
+上传聊天附件。文件二进制保存到后端配置的 `upload.dir`，数据库只保存相对路径和元信息。若配置了 `upload.public_base_url`，`url` 和 `thumbnail_url` 会返回绝对公网地址；否则返回相对 `/api/...` 地址。
+
+**请求体** `multipart/form-data`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file` | file | 图片、PDF、Office 或文本附件 |
+
+**成功响应** `201 Created`
+```json
+{
+  "file_name": "demo.png",
+  "mime_type": "image/png",
+  "file_size": 12345,
+  "file_path": "uploads/originals/<sha>.png",
+  "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+  "url": "/api/uploads/originals/<sha>.png",
+  "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+  "width": 800,
+  "height": 600
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 缺少文件或类型不支持
+- `413 Request Entity Too Large` — 文件超过大小限制
 
 ---
 

@@ -44,6 +44,24 @@ export interface PlatformSkillRequest {
   detail?: string;
 }
 
+export interface AgentPromptTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  system_prompt?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentPromptTemplateRequest {
+  name: string;
+  category?: string;
+  description?: string;
+  system_prompt?: string;
+}
+
 export interface AgentRequest {
   name: string;
   cli_tool: string;

@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	middleware "github.com/agent-hub/backend/internal/middleware"
@@ -262,7 +261,11 @@ func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 		return
 	}
 
-	absPath := filepath.Join(h.svc.GetUploadDir(), filepath.Clean(f.FilePath))
+	absPath, err := service.SafeJoinUploadPath(h.svc.GetUploadDir(), f.FilePath)
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
+		return
+	}
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
 		return

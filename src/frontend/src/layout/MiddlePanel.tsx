@@ -199,7 +199,7 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
                   <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
                   <div className={skillStyles.info}>
                     <span className={skillStyles.name}>{agent.name}</span>
-                    <span className={skillStyles.meta}>{skillCount} 平台 · {baseSkillCount} 底座</span>
+                    <span className={skillStyles.meta}>已分配 {skillCount} · 底座 {baseSkillCount}</span>
                   </div>
                 </button>
               );

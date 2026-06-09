@@ -38,11 +38,11 @@ interface AgentProfileProps {
 }
 
 const tabItems = [
-  { key: 'profile', label: 'PROFILE' },
-  { key: 'skills', label: 'SKILLS' },
-  { key: 'permissions', label: 'PERMISSIONS', icon: <SafetyOutlined /> },
+  { key: 'profile', label: '资料' },
+  { key: 'skills', label: '技能' },
+  { key: 'permissions', label: '权限', icon: <SafetyOutlined /> },
   { key: 'system_prompt', label: '系统提示词', icon: <SettingOutlined /> },
-  { key: 'tools_config', label: '工具配置', icon: <ToolOutlined /> },
+  { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
 
 function getStatusText(agent: Agent): string {
@@ -110,6 +110,20 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const computerName = agent.machine_name || 'local-computer';
   const editableTags = tagsValue.split(',').map((item) => item.trim()).filter(Boolean);
   const isBuiltinSystemAgent = agent.type === 'system' && !agent.user_id;
+  const selectedToolCount = selectedTools.length;
+  const statusLabel = getStatusText(agent);
+  const sourceLabel = agent.source === 'daemon' ? 'Daemon' : agent.source;
+  const descriptionBlocks = description
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const descriptionSummary = descriptionBlocks[0] || description;
+  const operationLines = descriptionBlocks
+    .filter((line) => line.startsWith('-'))
+    .map((line) => line.replace(/^-+\s*/, ''));
+  const descriptionNotes = descriptionBlocks
+    .filter((line) => !line.startsWith('-'))
+    .slice(1);
 
   const handleSaveProfile = async () => {
     const nextName = name.trim();
@@ -248,7 +262,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         </div>
         <div className={styles.actions}>
           <Button icon={<MessageOutlined />}>Message</Button>
-          <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
         </div>
       </div>
 
@@ -260,7 +274,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             type="button"
             onClick={() => setActiveTab(item.key)}
           >
-            {item.icon} {item.key === 'skills' ? `SKILLS (${customSkillCount})` : item.label}
+            {item.icon} {item.key === 'skills' ? `${item.label} ${customSkillCount}` : item.label}
           </button>
         ))}
       </div>
@@ -268,101 +282,158 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       <div className={styles.body}>
         {activeTab === 'profile' && (
           <>
-            <div className={styles.profileTop}>
+            <div className={styles.profileHero}>
               <Avatar
-                className={styles.clickableAvatar}
+                className={`${styles.clickableAvatar} ${styles.profileAvatar}`}
                 size={74}
                 src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
                 icon={<RobotOutlined />}
                 onClick={() => setAvatarPickerOpen(true)}
               />
-              <div className={styles.profileSummary}>
-                <div className={styles.profileName}>
-                  {agent.name}
-                  <span className={`${styles.statusDot} ${isOnline ? '' : styles.offlineDot}`} />
-                  <span className={styles.value}>{getStatusText(agent)}</span>
+              <div className={styles.profileHeroMain}>
+                <div className={styles.profileTitleRow}>
+                  <span className={styles.profileNameText}>{agent.name}</span>
+                  <span className={`${styles.statusChip} ${isOnline ? '' : styles.statusChipOffline}`}>
+                    <span className={styles.statusChipDot} />
+                    {statusLabel}
+                  </span>
                 </div>
-                <div className={styles.handle}>@{agent.cli_tool}</div>
+                <div className={styles.profileMetaLine}>@{agent.cli_tool} · {computerName}</div>
+                <div className={styles.profileDescriptionPreview}>{descriptionSummary}</div>
+                <div className={styles.heroBadges}>
+                  <span className={styles.runtimeBadge}>{runtimeLabel}</span>
+                  <span className={styles.runtimeBadge}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</span>
+                  <span className={styles.runtimeBadge}>{sourceLabel}</span>
+                </div>
               </div>
             </div>
 
-        <section className={styles.section}>
-          <div className={styles.field}>
-            <span className={styles.label}>DISPLAY NAME</span>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Agent 名称" />
-          </div>
-          <div className={styles.field}>
-            <span className={styles.label}>DESCRIPTION</span>
-            <div className={styles.descriptionText}>
-              {description}
-            </div>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.label}>TAGS</span>
-            <Input value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="coding, review, orchestration" />
-            {editableTags.length > 0 && (
-              <div className={styles.tagPreview}>
-                {editableTags.map((item) => <Tag key={item}>{item}</Tag>)}
+            <div className={styles.metricStrip}>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>状态</span>
+                <span className={styles.metricValue}>{statusLabel}</span>
               </div>
-            )}
-          </div>
-        </section>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>平台</span>
+                <span className={styles.metricValue}>{runtimeLabel}</span>
+              </div>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>平台 Skills</span>
+                <span className={styles.metricValue}>{customSkillCount}</span>
+              </div>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>工具</span>
+                <span className={styles.metricValue}>{selectedToolCount}</span>
+              </div>
+            </div>
 
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>ACTIONS</div>
-          <div className={styles.actionPanel}>
-            {isOnline ? (
-              <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
-                停止 Agent
-              </Button>
-            ) : (
-              <Button icon={<PlayCircleOutlined />} onClick={handleStartAgent}>
-                启动 Agent
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={handleRestartAgent}>
-              重启 Agent
-            </Button>
-            {!isBuiltinSystemAgent && (
-              <Popconfirm title="确定删除这个 Agent？" okText="删除" cancelText="取消" onConfirm={handleDelete}>
-                <Button danger icon={<DeleteOutlined />}>
-                  删除 Agent
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>基本资料</div>
+                  <div className={styles.sectionHint}>名称、标签和对外展示信息</div>
+                </div>
+              </div>
+              <div className={styles.formGrid}>
+                <div className={styles.field}>
+                  <span className={styles.label}>显示名称</span>
+                  <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Agent 名称" />
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>标签</span>
+                  <Input value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="coding, review, orchestration" />
+                  {editableTags.length > 0 && (
+                    <div className={styles.tagPreview}>
+                      {editableTags.map((item) => <Tag key={item}>{item}</Tag>)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>能力说明</div>
+                  <div className={styles.sectionHint}>从系统提示词中提炼出的角色和可执行操作</div>
+                </div>
+              </div>
+              <div className={styles.descriptionCard}>
+                <div className={styles.descriptionHeadline}>{descriptionSummary}</div>
+                {operationLines.length > 0 && (
+                  <div className={styles.descriptionBlock}>
+                    <span className={styles.descriptionBlockTitle}>可执行操作</span>
+                    <ul className={styles.operationList}>
+                      {operationLines.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {descriptionNotes.length > 0 && (
+                  <div className={styles.descriptionText}>
+                    {descriptionNotes.map((line) => <p key={line}>{line}</p>)}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>运行信息</div>
+                  <div className={styles.sectionHint}>设备、来源、版本和创建时间</div>
+                </div>
+              </div>
+              <div className={styles.infoGrid}>
+                <div>
+                  <span className={styles.label}>电脑</span>
+                  <div className={styles.value}>
+                    {computerName} · {sourceLabel} · {formatDateTime(agent.last_seen_at)}
+                  </div>
+                </div>
+                <div>
+                  <span className={styles.label}>创建时间</span>
+                  <div className={styles.value}>{formatDateTime(agent.created_at)}</div>
+                </div>
+                <div>
+                  <span className={styles.label}>类型</span>
+                  <div className={styles.value}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</div>
+                </div>
+                <div>
+                  <span className={styles.label}>版本</span>
+                  <div className={styles.value}>{agent.version || '未上报版本'}</div>
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>操作</div>
+                  <div className={styles.sectionHint}>控制当前 Agent 的运行状态</div>
+                </div>
+              </div>
+              <div className={styles.actionPanel}>
+                {isOnline ? (
+                  <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
+                    停止 Agent
+                  </Button>
+                ) : (
+                  <Button icon={<PlayCircleOutlined />} onClick={handleStartAgent}>
+                    启动 Agent
+                  </Button>
+                )}
+                <Button icon={<ReloadOutlined />} onClick={handleRestartAgent}>
+                  重启 Agent
                 </Button>
-              </Popconfirm>
-            )}
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>INFO</div>
-          <div className={styles.infoGrid}>
-            <div>
-              <span className={styles.label}>Computer</span>
-              <div className={styles.value}>
-                {computerName} · {agent.source} · {formatDateTime(agent.last_seen_at)}
+                {!isBuiltinSystemAgent && (
+                  <Popconfirm title="确定删除这个 Agent？" okText="删除" cancelText="取消" onConfirm={handleDelete}>
+                    <Button danger icon={<DeleteOutlined />}>
+                      删除 Agent
+                    </Button>
+                  </Popconfirm>
+                )}
               </div>
-            </div>
-            <div>
-              <span className={styles.label}>Created</span>
-              <div className={styles.value}>{formatDateTime(agent.created_at)}</div>
-            </div>
-            <div>
-              <span className={styles.label}>Type</span>
-              <div className={styles.value}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</div>
-            </div>
-            <div>
-              <span className={styles.label}>Version</span>
-              <div className={styles.value}>{agent.version || '未上报版本'}</div>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>RUNTIME CONFIGURATION</div>
-          <div className={styles.runtimeRow}>
-            <span className={styles.runtimeBadge}>{runtimeLabel}</span>
-          </div>
-        </section>
+            </section>
           </>
         )}
 
