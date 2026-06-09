@@ -1,7 +1,6 @@
 .container {
   display: flex;
   flex-direction: column;
-  height: 100%;
   padding: 16px;
   background: var(--color-bg-chat);
   gap: 12px;
@@ -45,10 +44,7 @@
 }
 
 .body {
-  flex: 1;
-  min-height: 0;
   padding: 4px 0 0;
-  overflow: hidden;
 }
 
 .skillsHeader {
@@ -124,18 +120,12 @@
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
   gap: 14px;
-  min-height: 0;
-  height: 100%;
 }
 
 .leftPane {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
 }
 
 .skillSection {
@@ -195,9 +185,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 0;
-  overflow-y: auto;
-  max-height: 252px;
   padding: 0 10px 10px;
 }
 
@@ -493,29 +480,13 @@
   gap: 4px;
 }
 
-.footer {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border-light);
-}
-
-.addRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.quickCreateRow {
+  display: flex;
   gap: 8px;
-  min-width: 0;
 }
 
 @media (max-width: 900px) {
   .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .footer {
     grid-template-columns: 1fr;
   }
 }

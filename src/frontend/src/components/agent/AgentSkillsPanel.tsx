@@ -308,6 +308,9 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           <span className={styles.cliTool}>@{agent.cli_tool}</span>
         </div>
         <div className={styles.headerActions}>
+          <Button size="small" icon={<PlusOutlined />} onClick={handleAddSkill} disabled={!newSkillName.trim()}>
+            创建并分配
+          </Button>
           <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
             导入默认
           </Button>
@@ -315,6 +318,15 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
             保存分配
           </Button>
         </div>
+      </div>
+
+      <div className={styles.quickCreateRow}>
+        <Input
+          placeholder={`输入新 Skill 名称，然后点击「创建并分配」`}
+          value={newSkillName}
+          onChange={(e) => setNewSkillName(e.target.value)}
+          onPressEnter={handleAddSkill}
+        />
       </div>
 
       <div className={styles.overviewStrip}>
@@ -652,22 +664,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
         ) : null}
       </div>
 
-      <div className={styles.footer}>
-        <div className={styles.addRow}>
-          <Input
-            placeholder={`新建平台 Skill 并分配给 ${agent.name}`}
-            value={newSkillName}
-            onChange={(e) => setNewSkillName(e.target.value)}
-            onPressEnter={handleAddSkill}
-          />
-          <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
-            创建并分配
-          </Button>
-        </div>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
-          保存
-        </Button>
-      </div>
     </div>
   );
 };
