@@ -3,6 +3,8 @@ package repository
 import (
 	"strings"
 	"testing"
+
+	"github.com/agent-hub/backend/internal/model"
 )
 
 func TestTruncateRunesDoesNotSplitMultibyteCharacters(t *testing.T) {
@@ -34,5 +36,28 @@ func TestReplyPreviewUsernameKeepsUserName(t *testing.T) {
 	got := replyPreviewUsername("user", "wjc", `{"agent_name":"员工2"}`)
 	if got != "wjc" {
 		t.Fatalf("expected user name, got %q", got)
+	}
+}
+
+func TestCollectReplyIDsSkipsEmptyAndDuplicates(t *testing.T) {
+	empty := ""
+	spaces := "   "
+	id := "15b80856-efd4-431e-8468-a95dd0b79ce6"
+	other := "72248706-553d-4a23-a82c-a7410f59b2ef"
+
+	got := collectReplyIDs([]model.Message{
+		{ReplyTo: nil},
+		{ReplyTo: &empty},
+		{ReplyTo: &spaces},
+		{ReplyTo: &id},
+		{ReplyTo: &id},
+		{ReplyTo: &other},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 reply IDs, got %#v", got)
+	}
+	if got[0] != id || got[1] != other {
+		t.Fatalf("unexpected reply IDs: %#v", got)
 	}
 }

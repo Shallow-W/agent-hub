@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -461,8 +462,15 @@ func (r *MessageRepo) fillMentions(ctx context.Context, messages []model.Message
 	for i, m := range messages {
 		ids[i] = m.ID
 	}
-	rows, err := r.db.QueryxContext(ctx,
-		`SELECT id, mentions FROM messages WHERE id = ANY($1) AND mentions IS NOT NULL`, ids)
+	query, args, err := sqlx.In(
+		`SELECT id, mentions FROM messages WHERE id IN (?) AND mentions IS NOT NULL`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build mentions query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fill mentions: %w", err)
 	}
@@ -489,28 +497,26 @@ func (r *MessageRepo) fillMentions(ctx context.Context, messages []model.Message
 
 // fillReplyTo 批量填充回复引用预览
 func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message) ([]model.Message, error) {
-	// 收集所有 reply_to ID
-	replyIDs := make([]string, 0)
-	for _, m := range messages {
-		if m.ReplyTo != nil {
-			replyIDs = append(replyIDs, *m.ReplyTo)
-		}
-	}
+	replyIDs := collectReplyIDs(messages)
 	if len(replyIDs) == 0 {
 		return messages, nil
 	}
 
 	// 批量查询引用的消息。assistant 消息没有 sender_id，显示名从 artifacts_json.agent_name 取；
 	// 不能回退到 conversations.user_id，否则 worker 回复 Orch 消息时会显示成群主/用户。
-	query := `SELECT m.id, m.content, m.deleted_at,
-	          COALESCE(m.sender_id, '') AS sender_id,
+	query, args, err := sqlx.In(`SELECT m.id, m.content, m.deleted_at,
+	          COALESCE(m.sender_id::text, '') AS sender_id,
 	          COALESCE(u.username, '') AS username,
 	          m.role,
 	          COALESCE(m.artifacts_json, '') AS artifacts_json
 	          FROM messages m
 	          LEFT JOIN users u ON u.id = m.sender_id
-	          WHERE m.id = ANY($1)`
-	rows, err := r.db.QueryxContext(ctx, query, replyIDs)
+	          WHERE m.id IN (?)`, replyIDs)
+	if err != nil {
+		return nil, fmt.Errorf("build reply query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fill reply to: %w", err)
 	}
@@ -545,6 +551,26 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	}
 
 	return messages, nil
+}
+
+func collectReplyIDs(messages []model.Message) []string {
+	replyIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.ReplyTo == nil {
+			continue
+		}
+		id := strings.TrimSpace(*m.ReplyTo)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		replyIDs = append(replyIDs, id)
+	}
+	return replyIDs
 }
 
 func replyPreviewUsername(role, username, artifactsJSON string) string {
