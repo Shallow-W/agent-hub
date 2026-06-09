@@ -20,10 +20,10 @@ var toolsetTemplates = map[string][]string{
 	"none":          {},
 	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
 	"tasks":         defaultAgentTools,
-	"orchestrator":  append([]string{}, append(defaultAgentTools, "list_conversation_agents", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "search_knowledge")...),
+	"orchestrator":  append([]string{}, append(defaultAgentTools, "list_conversation_agents", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file")...),
 	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail"},
 	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
-	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge"},
+	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
 }
 
 type toolsConfig struct {

@@ -13,6 +13,15 @@ export interface KnowledgeFile {
   uploaded_at: string;
 }
 
+export interface KnowledgeFileText {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  preview_type: KnowledgeFile['preview_type'];
+  text: string;
+  truncated: boolean;
+}
+
 /** 知识库 */
 export interface KnowledgeBase {
   id: string;

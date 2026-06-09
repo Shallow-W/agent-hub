@@ -389,8 +389,30 @@ func KnowledgeTools() []Tool {
 						"type":        "string",
 						"description": "搜索关键词（必填）",
 					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "最多返回结果数（可选，默认 20）",
+					},
 				},
 				"required": []string{"knowledge_base_id", "keyword"},
+			},
+		},
+		{
+			Name:        "read_knowledge_file",
+			Description: "读取指定知识库文件已抽取的文本内容。适合在搜索命中文件后按 file_id 获取完整可用上下文",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+					"file_id": map[string]interface{}{
+						"type":        "string",
+						"description": "文件 ID（必填）",
+					},
+				},
+				"required": []string{"knowledge_base_id", "file_id"},
 			},
 		},
 	}

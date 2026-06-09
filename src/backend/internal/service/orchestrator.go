@@ -844,18 +844,18 @@ func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content stri
 					// 文本内容：限制内联长度，防止 context 膨胀导致截断
 					text := f.PreviewText
 					if len(text) > kbMaxInlineChars {
-						text = text[:kbMaxInlineChars] + "\n...[内容已截断，使用 kb_read_file 工具读取完整内容]"
+						text = text[:kbMaxInlineChars] + "\n...[内容已截断，使用 read_knowledge_file 工具读取完整内容]"
 						needTool = true
 					}
-					kbSection.WriteString(fmt.Sprintf("- %s (%s):\n```\n%s\n```\n", f.Filename, formatFileSize(f.FileSize), text))
+					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s):\n```\n%s\n```\n", f.Filename, f.ID, formatFileSize(f.FileSize), text))
 				case "image":
-					kbSection.WriteString(fmt.Sprintf("- %s (%s, %s, 使用 kb_read_file 工具获取)\n", f.Filename, formatFileSize(f.FileSize), f.PreviewText))
+					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, %s, 使用 read_knowledge_file 工具获取)\n", f.Filename, f.ID, formatFileSize(f.FileSize), f.PreviewText))
 					needTool = true
 				case "too_large":
-					kbSection.WriteString(fmt.Sprintf("- %s (%s, 文件过大，使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 文件过大，使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
 					needTool = true
 				default:
-					kbSection.WriteString(fmt.Sprintf("- %s (%s, 使用 kb_read_file 工具读取)\n", f.Filename, formatFileSize(f.FileSize)))
+					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
 					needTool = true
 				}
 			}

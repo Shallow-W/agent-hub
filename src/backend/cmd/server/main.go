@@ -274,6 +274,8 @@ func main() {
 			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
 			kbRoutes.GET("/:id/files", knowledgeHandler.ListFiles)
+			kbRoutes.GET("/:id/search", knowledgeHandler.SearchFiles)
+			kbRoutes.GET("/:id/files/:fileId/text", knowledgeHandler.GetFileText)
 			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
 			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
@@ -447,6 +449,8 @@ func main() {
 		// 知识库
 		mcpGroup.GET("/knowledge-bases", knowledgeHandler.List)
 		mcpGroup.GET("/knowledge-bases/:id/files", knowledgeHandler.ListFiles)
+		mcpGroup.GET("/knowledge-bases/:id/search", knowledgeHandler.SearchFiles)
+		mcpGroup.GET("/knowledge-bases/:id/files/:fileId/text", knowledgeHandler.GetFileText)
 	}
 
 	registerSPARoutes(router, frontendDistDir())
