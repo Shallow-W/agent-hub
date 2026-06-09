@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Empty, Spin, Skeleton, Badge } from 'antd';
 import { ArrowDownOutlined } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
@@ -14,6 +14,7 @@ interface MessageListProps {
   onReply?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onPinChanged?: () => void;
+  onOpenThread?: (message: Message) => void;
   conversationAgents?: ConversationAgent[];
 }
 
@@ -76,6 +77,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   onReply,
   onForward,
   onPinChanged,
+  onOpenThread,
   conversationAgents = [],
 }) => {
   const {
@@ -93,6 +95,16 @@ export const MessageList: React.FC<MessageListProps> = ({
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
   const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
+
+  const replyCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const msg of messages) {
+      if (msg.reply_to) {
+        counts[msg.reply_to] = (counts[msg.reply_to] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [messages]);
   const [showNewMsgBtn, setShowNewMsgBtn] = useState(false);
   const [unreadSinceScroll, setUnreadSinceScroll] = useState(0);
   const nearBottomRef = useRef(true);
@@ -225,6 +237,8 @@ export const MessageList: React.FC<MessageListProps> = ({
                   }}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                   conversationAgents={conversationAgents}
+                  replyCount={replyCounts[msg.id]}
+                  onOpenThread={onOpenThread}
                 />
               </React.Fragment>
             );

@@ -111,6 +111,16 @@ func (r *fakeMsgRepo) UpsertConversationBlackboard(ctx context.Context, conversa
 	return r.blackboard, nil
 }
 
+func (r *fakeMsgRepo) ListReplies(ctx context.Context, messageID string) ([]model.Message, error) {
+	var replies []model.Message
+	for _, m := range r.messages {
+		if m.ReplyTo != nil && *m.ReplyTo == messageID {
+			replies = append(replies, m)
+		}
+	}
+	return replies, nil
+}
+
 type fakeConvRepoForMsg struct {
 	conv      *model.Conversation
 	timestamp bool

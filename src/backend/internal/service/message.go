@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,7 @@ type MsgRepo interface {
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
 	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
 	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
+	ListReplies(ctx context.Context, messageID string) ([]model.Message, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -441,6 +443,36 @@ func (s *MessageService) SearchMessages(ctx context.Context, conversationID, use
 	}
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
+}
+
+// GetReplies 获取某条消息的所有回复（验证消息归属和状态后再查询）
+func (s *MessageService) GetReplies(ctx context.Context, conversationID, messageID string) ([]model.Message, error) {
+	// 校验目标消息存在
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMsgNotFound
+		}
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return nil, ErrMsgNotFound
+	}
+	// 消息不属于当前对话
+	if msg.ConversationID != conversationID {
+		return nil, ErrMsgReplyWrongConv
+	}
+	// 消息已被软删除
+	if msg.DeletedAt != nil {
+		return nil, ErrMsgNotFound
+	}
+
+	replies, err := s.msgRepo.ListReplies(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("list replies: %w", err)
+	}
+	s.enrichMessagesFileURLs(replies)
+	return replies, nil
 }
 
 func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
