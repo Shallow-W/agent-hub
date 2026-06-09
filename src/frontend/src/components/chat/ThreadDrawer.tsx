@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Avatar, Drawer, Spin, Input, Button } from 'antd';
-import { SendOutlined, RobotOutlined, UserOutlined } from '@ant-design/icons';
+import { SendOutlined, RobotOutlined, UserOutlined, DownOutlined, UpOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { message as antMessage } from '@/utils/message';
@@ -222,7 +222,17 @@ const ThreadBubble: React.FC<{ message: Message; isOriginal?: boolean }> = ({ me
             type="button"
             onClick={() => setExpanded((e) => !e)}
           >
-            {collapsed ? '展开全文' : '收起'}
+            {expanded ? (
+              <>
+                收起内容
+                <UpOutlined />
+              </>
+            ) : (
+              <>
+                展开完整内容
+                <DownOutlined />
+              </>
+            )}
           </button>
         )}
       </div>
