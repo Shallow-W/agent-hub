@@ -80,6 +80,29 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     ? librarySkills.find((s) => s.id === selectedLibrarySkillID) ?? null
     : null;
 
+  const assignedCategories = useMemo(() => {
+    const cats = new Set<string>();
+    skills.forEach((s) => cats.add(s.category?.trim() || '未分类'));
+    return Array.from(cats);
+  }, [skills]);
+
+  const filteredAssignedSkills = useMemo(() => {
+    let list = skills;
+    if (categoryFilter !== 'all') {
+      list = list.filter((s) => (s.category?.trim() || '未分类') === categoryFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.description ?? '').toLowerCase().includes(q) ||
+          (s.category ?? '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [skills, categoryFilter, searchQuery]);
+
   const categories = useMemo(() => {
     const cats = new Set<string>();
     librarySkills.forEach((s) => cats.add(s.category?.trim() || '未分类'));
@@ -376,51 +399,91 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       </div>
 
       {activeTab === 'assigned' && (
-        <div className={styles.cardGrid}>
-          {skills.length === 0 && (
-            <div className={styles.emptyPanel}>
-              <span className={styles.emptyTitle}>还没有已分配 Skill</span>
-              <span className={styles.emptyText}>先导入默认 Skills，或切换到平台库挑选后分配给当前 Agent。</span>
-              <div className={styles.emptyActions}>
-                <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
-                  导入默认 Skills
-                </Button>
-                <Button size="small" onClick={() => setActiveTab('library')}>
-                  查看平台库
-                </Button>
-              </div>
+        <>
+          <div className={styles.libraryToolbar}>
+            <Input
+              prefix={<SearchOutlined />}
+              placeholder="搜索已分配 Skill 名称、描述..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={styles.searchInput}
+              allowClear
+            />
+            <div className={styles.categoryPills}>
+              <button
+                className={`${styles.filterPill} ${categoryFilter === 'all' ? styles.filterPillActive : ''}`}
+                type="button"
+                onClick={() => setCategoryFilter('all')}
+              >
+                全部
+              </button>
+              {assignedCategories.map((cat) => (
+                <button
+                  className={`${styles.filterPill} ${categoryFilter === cat ? styles.filterPillActive : ''}`}
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategoryFilter(cat)}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
-          )}
-          {skills.map((skill, idx) => (
-            <div
-              className={`${styles.skillCard} ${selectedSkillIdx === idx ? styles.skillCardSelected : ''}`}
-              key={`${skill.name}-${idx}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => openAssignedDetail(idx)}
-              onKeyDown={(e) => { if (e.key === 'Enter') openAssignedDetail(idx); }}
-            >
-              <div className={styles.skillCardHeader}>
-                <span className={styles.skillCardName}>{skill.name}</span>
-                <span className={styles.skillCardActions}>
-                  <button
-                    className={styles.iconBtn}
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleDeleteSkill(idx); }}
-                    title="移除"
-                  >
-                    <CloseOutlined />
-                  </button>
-                </span>
+          </div>
+          <div className={styles.cardGrid}>
+            {skills.length === 0 && (
+              <div className={styles.emptyPanel}>
+                <span className={styles.emptyTitle}>还没有已分配 Skill</span>
+                <span className={styles.emptyText}>先导入默认 Skills，或切换到平台库挑选后分配给当前 Agent。</span>
+                <div className={styles.emptyActions}>
+                  <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
+                    导入默认 Skills
+                  </Button>
+                  <Button size="small" onClick={() => setActiveTab('library')}>
+                    查看平台库
+                  </Button>
+                </div>
               </div>
-              <span className={styles.skillCardDesc}>{skill.description || skill.trigger || '暂无描述'}</span>
-              <div className={styles.skillCardFooter}>
-                {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
-                {skill.auto && <span className={styles.autoBadge}>auto</span>}
+            )}
+            {skills.length > 0 && filteredAssignedSkills.length === 0 && (
+              <div className={styles.emptyPanel}>
+                <span className={styles.emptyTitle}>没有匹配的 Skill</span>
+                <span className={styles.emptyText}>尝试调整搜索条件或分类筛选</span>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+            {filteredAssignedSkills.map((skill) => {
+              const idx = skills.indexOf(skill);
+              return (
+                <div
+                  className={`${styles.skillCard} ${selectedSkillIdx === idx ? styles.skillCardSelected : ''}`}
+                  key={`${skill.name}-${idx}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openAssignedDetail(idx)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') openAssignedDetail(idx); }}
+                >
+                  <div className={styles.skillCardHeader}>
+                    <span className={styles.skillCardName}>{skill.name}</span>
+                    <span className={styles.skillCardActions}>
+                      <button
+                        className={styles.iconBtn}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteSkill(idx); }}
+                        title="移除"
+                      >
+                        <CloseOutlined />
+                      </button>
+                    </span>
+                  </div>
+                  <span className={styles.skillCardDesc}>{skill.description || skill.trigger || '暂无描述'}</span>
+                  <div className={styles.skillCardFooter}>
+                    {skill.category && <span className={styles.categoryBadge}>{skill.category}</span>}
+                    {skill.auto && <span className={styles.autoBadge}>auto</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {activeTab === 'library' && (
