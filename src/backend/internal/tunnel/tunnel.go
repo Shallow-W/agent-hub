@@ -31,6 +31,8 @@ type Manager struct {
 
 	mu  sync.Mutex
 	url string
+
+	done chan error
 }
 
 // Start 启动一个指向 http://localhost:<port> 的 cloudflared 快速隧道。
@@ -54,7 +56,7 @@ func Start(ctx context.Context, port int, cacheDir string, logger *slog.Logger, 
 		return nil, fmt.Errorf("启动 cloudflared 失败: %w", err)
 	}
 
-	m := &Manager{cmd: cmd, logger: logger}
+	m := &Manager{cmd: cmd, logger: logger, done: make(chan error, 1)}
 
 	// 扫描输出，抓取公网域名。
 	var once sync.Once
@@ -84,6 +86,8 @@ func Start(ctx context.Context, port int, cacheDir string, logger *slog.Logger, 
 		if err != nil && ctx.Err() == nil {
 			logger.Warn("cloudflared 进程退出", "error", err)
 		}
+		m.done <- err
+		close(m.done)
 	}()
 	go func() {
 		<-ctx.Done()
@@ -91,6 +95,53 @@ func Start(ctx context.Context, port int, cacheDir string, logger *slog.Logger, 
 	}()
 
 	return m, nil
+}
+
+// StartAuto 持续维护 cloudflared 快速隧道。
+// 隧道退出时清空公网地址并重启，避免部署卡片继续展示已失效的 trycloudflare 链接。
+func StartAuto(ctx context.Context, port int, cacheDir string, logger *slog.Logger, onURL func(string)) {
+	const retryDelay = 5 * time.Second
+	for ctx.Err() == nil {
+		m, err := Start(ctx, port, cacheDir, logger, onURL)
+		if err != nil {
+			if onURL != nil {
+				onURL("")
+			}
+			logger.Warn("内网穿透启动失败，稍后重试", "error", err, "retry_after", retryDelay)
+			if !sleepContext(ctx, retryDelay) {
+				return
+			}
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			m.Stop()
+			return
+		case err := <-m.done:
+			if onURL != nil {
+				onURL("")
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			logger.Warn("内网穿透隧道已断开，准备重启", "error", err, "retry_after", retryDelay)
+			if !sleepContext(ctx, retryDelay) {
+				return
+			}
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // URL 返回已抓取到的公网域名（未就绪时为空）。

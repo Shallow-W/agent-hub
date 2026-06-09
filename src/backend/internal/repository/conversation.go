@@ -59,7 +59,7 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE (c.type = 'agent' AND c.archived_at IS NULL)
+			 WHERE (c.type = 'agent' AND c.user_id = $1 AND c.archived_at IS NULL)
 			    OR (c.type != 'agent' AND c.archived_at IS NULL
 			        AND EXISTS (SELECT 1 FROM conversation_members cm
 			                    WHERE cm.conversation_id = c.id AND cm.user_id = $1
@@ -207,7 +207,7 @@ func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID stri
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE (c.type = 'agent' AND c.archived_at IS NOT NULL AND c.user_id = $1)
+			 WHERE (c.type = 'agent' AND c.user_id = $1 AND c.archived_at IS NOT NULL)
 			    OR (c.type != 'agent' AND
 			        EXISTS (SELECT 1 FROM conversation_members cm
 			                WHERE cm.conversation_id = c.id AND cm.user_id = $1

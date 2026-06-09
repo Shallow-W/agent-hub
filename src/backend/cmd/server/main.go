@@ -364,6 +364,7 @@ func main() {
 		}
 
 		// 部署状态查询（需要鉴权）
+		apiGroup.GET("/deployments/capabilities", deploymentHandler.Capabilities)
 		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
 	}
 
@@ -442,6 +443,7 @@ func main() {
 		mcpGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
 		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
@@ -467,9 +469,7 @@ func main() {
 	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
 	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
 		cacheDir := filepath.Join("data", "bin")
-		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
-			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
-		}
+		go tunnel.StartAuto(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL)
 	}
 
 	// 启动 HTTP 服务器

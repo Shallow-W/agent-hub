@@ -115,12 +115,12 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	r.addedPrompt = systemPrompt
 	r.addedCLITool = expectedCLITool
 	r.addedTools = toolsConfig
 	r.addedSkills = customSkills
-	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
+	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom", EnableManagementTools: enableManagementTools}, nil
 }
 
 func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
@@ -321,6 +321,7 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 		"persona",
 		`{"toolset":"custom","allowed_tools":["list_tasks","unknown"]}`,
 		`[{"name":"审查"}]`,
+		true,
 	)
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
@@ -351,6 +352,7 @@ func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
 		"",
 		`{"toolset":"tasks"}`,
 		`not json`,
+		false,
 	)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)

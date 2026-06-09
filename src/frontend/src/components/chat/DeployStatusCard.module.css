@@ -55,11 +55,11 @@
 .url {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 13px;
   color: #2563eb;
+  line-height: 1.55;
 }
 
 .actions {

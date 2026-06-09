@@ -53,6 +53,18 @@ const agentStatusColor: Record<Agent['status'], string> = {
   stopped: 'default',
 };
 
+const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+
+function hasManagementTools(toolsConfig: string): boolean {
+  try {
+    const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
+    return Array.isArray(cfg.allowed_tools)
+      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && managementTools.has(tool));
+  } catch {
+    return false;
+  }
+}
+
 function inferOS(machine: DaemonMachine): string {
   const text = `${machine.name} ${machine.machine_id}`.toLowerCase();
   if (text.includes('darwin') || text.includes('mac')) return 'macOS';
@@ -150,6 +162,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       system_prompt: systemPrompt,
       tools_config: toolsConfig,
       custom_skills: customSkills,
+      enable_management_tools: hasManagementTools(toolsConfig),
     });
   };
 
