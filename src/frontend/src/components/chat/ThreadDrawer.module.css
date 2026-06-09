@@ -19,7 +19,7 @@
 /* ── Bubble layout ── */
 .bubble {
   display: flex;
-  padding: 6px 16px;
+  padding: 10px 16px;
 }
 
 .bubbleLeft {
@@ -230,16 +230,16 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin: 7px 0 0;
-  padding: 3px 11px;
+  margin: 4px 0 0;
+  padding: 2px 8px;
   border: 1px solid rgba(22, 163, 101, 0.16);
   border-radius: 999px;
   color: var(--color-primary);
   background: var(--color-bg-white);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .expandToggle:hover {
