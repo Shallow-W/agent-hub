@@ -296,7 +296,7 @@ const AppLayout: React.FC = () => {
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
         {/* Chat view: always mounted to preserve state across tab switches */}
-        <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : undefined}>
+        <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Outlet />
         </div>
 
@@ -313,17 +313,17 @@ const AppLayout: React.FC = () => {
           )
         )}
 
-        {/* Skills overlay */}
-        {activeNav === 'skills' && (
-          selectedAgent ? (
+        {/* Skills overlay — always mounted to avoid re-fetch */}
+        <div style={activeNav !== 'skills' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {selectedAgent ? (
             <AgentSkillsPanel agent={selectedAgent} />
           ) : (
             <div className={styles.skillsEmptyPanel}>
               <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
               <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
             </div>
-          )
-        )}
+          )}
+        </div>
 
         {/* Models overlay */}
         {activeNav === 'models' && (
