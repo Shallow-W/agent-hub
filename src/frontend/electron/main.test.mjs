@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {
   buildBackendEnv,
+  backendReadyURL,
   resolveBackendBinary,
   resolveConfigPath,
   resolveFrontendURL,
@@ -75,6 +76,10 @@ describe('Electron runtime helpers', () => {
     assert.equal(env.PATH, 'x');
     assert.equal(env.AGENTHUB_CONFIG, 'custom.yaml');
     assert.equal(env.AGENTHUB_FRONTEND_DIST, 'dist');
+  });
+
+  it('waits for the backend ready endpoint before opening the packaged desktop window', () => {
+    assert.equal(backendReadyURL(), 'http://127.0.0.1:8080/health/ready');
   });
 
   it('waits until an HTTP endpoint becomes available', async () => {

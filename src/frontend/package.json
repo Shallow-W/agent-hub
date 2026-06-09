@@ -9,7 +9,7 @@
     "dev:electron": "concurrently -k \"npm run dev -- --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "test:electron": "node --test electron/*.test.mjs",
     "build": "tsc -b && vite build",
-    "build:electron": "npm run build && electron-builder --dir",
+    "build:electron": "npm run build && node electron/package-resources.mjs && electron-builder --dir",
     "preview": "vite preview",
     "test:e2e:agent": "playwright test e2e/agent-connect.spec.ts --browser=chromium"
   },
@@ -68,7 +68,7 @@
     ],
     "extraResources": [
       {
-        "from": "../../bin",
+        "from": "../../desktop-resources/bin",
         "to": "bin"
       },
       {
@@ -76,8 +76,8 @@
         "to": "frontend-dist"
       },
       {
-        "from": "../backend/config/config.example.yaml",
-        "to": "config/config.yaml"
+        "from": "../../desktop-resources/config",
+        "to": "config"
       }
     ],
     "win": {

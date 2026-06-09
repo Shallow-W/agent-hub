@@ -9,6 +9,7 @@ import {
   EyeOutlined,
 } from '@ant-design/icons';
 import { Modal } from 'antd';
+import { getToken } from '@/api/client';
 import styles from './MessageAttachmentView.module.css';
 
 // pptx-preview 较重，仅在用户点击“预览幻灯片”打开 Modal 时动态加载，避免进入首屏 bundle。
@@ -22,7 +23,7 @@ function toUrlPath(p: string): string {
 
 /** 构建带鉴权 token 的 API URL（用于 <img>/<a> 等无法带 header 的场景） */
 function authUrl(path: string): string {
-  const token = localStorage.getItem('agenthub_token');
+  const token = getToken();
   const sep = path.includes('?') ? '&' : '?';
   return token ? `${path}${sep}token=${encodeURIComponent(token)}` : path;
 }

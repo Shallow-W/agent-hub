@@ -3,8 +3,12 @@ import type { ApiResponse } from '@/types/api';
 
 const TOKEN_KEY = 'agenthub_token';
 
-function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+export function getToken(): string | null {
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  if (localStorage.getItem(TOKEN_KEY)) {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  return token;
 }
 
 /** Build auth headers (used by both JSON client and FormData upload). */
@@ -14,11 +18,13 @@ export function getAuthHeaders(): Record<string, string> {
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.setItem(TOKEN_KEY, token);
   handling401 = false;
 }
 
 export function clearToken(): void {
+  sessionStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_KEY);
 }
 

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8080';
+const DEFAULT_READY_URL = `${DEFAULT_BACKEND_URL}/health/ready`;
 
 export function resolveFrontendURL({ env, appPath, resourcesPath }) {
   if (env.VITE_DEV_SERVER_URL) {
@@ -51,6 +52,10 @@ export function buildBackendEnv({ baseEnv, configPath, frontendDist }) {
     AGENTHUB_CONFIG: baseEnv.AGENTHUB_CONFIG || configPath,
     AGENTHUB_FRONTEND_DIST: frontendDist,
   };
+}
+
+export function backendReadyURL() {
+  return DEFAULT_READY_URL;
 }
 
 export async function waitForHTTP(url, {

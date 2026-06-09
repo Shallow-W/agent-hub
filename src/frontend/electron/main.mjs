@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  backendReadyURL,
   buildBackendEnv,
   resolveBackendBinary,
   resolveConfigPath,
@@ -135,7 +136,7 @@ app.whenReady().then(async () => {
   startBackendIfNeeded();
   if (backendProcess) {
     try {
-      await waitForHTTP('http://127.0.0.1:8080/health');
+      await waitForHTTP(backendReadyURL(), { timeoutMs: 60000 });
     } catch (error) {
       // 后端启动失败时仍打开窗口，让用户看到前端的网络错误与登录状态。
       writeDesktopLog(`backend health wait failed: ${error instanceof Error ? error.message : String(error)}`);
