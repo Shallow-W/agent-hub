@@ -74,6 +74,8 @@ export interface AddCandidateAgentRequest {
   name: string;
   cli_tool: string;
   system_prompt?: string;
+  tools_config?: string;
+  custom_skills?: string;
 }
 
 export interface OpenSkillLocationRequest {

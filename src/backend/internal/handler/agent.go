@@ -54,6 +54,8 @@ type AddCandidateAgentRequest struct {
 	Name         string `json:"name" binding:"required,max=100"`
 	CLITool      string `json:"cli_tool" binding:"required,max=50"`
 	SystemPrompt string `json:"system_prompt"`
+	ToolsConfig  string `json:"tools_config"`
+	CustomSkills string `json:"custom_skills"`
 }
 
 // List 查询可用 Agent 列表
@@ -78,17 +80,18 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":           a.ID,
-			"name":         a.Name,
-			"type":         a.Type,
-			"status":       a.Status,
-			"machine_id":   a.MachineID,
-			"machine_name": a.MachineName,
-			"version":      a.Version,
-			"cli_tool":     a.CLITool,
+			"id":            a.ID,
+			"name":          a.Name,
+			"type":          a.Type,
+			"status":        a.Status,
+			"machine_id":    a.MachineID,
+			"machine_name":  a.MachineName,
+			"version":       a.Version,
+			"cli_tool":      a.CLITool,
 			"system_prompt": a.SystemPrompt,
-			"tags":           a.Tags,
-			"custom_skills":  a.CustomSkills,
+			"tools_config":  a.ToolsConfig,
+			"tags":          a.Tags,
+			"custom_skills": a.CustomSkills,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -125,7 +128,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt)
+	agent, err := h.svc.AddCandidateAgent(c.Request.Context(), userID, c.Param("id"), req.Name, req.CLITool, req.SystemPrompt, req.ToolsConfig, req.CustomSkills)
 	if err != nil {
 		middleware.HandleServiceError(c, err, "添加候选 Agent 失败")
 		return
@@ -294,7 +297,8 @@ func (h *AgentHandler) UpdateCustomSkills(c *gin.Context) {
 		return
 	}
 
-	agent, err := h.svc.UpdateCustomSkills(c.Request.Context(), agentID, req.CustomSkills)
+	userID := middleware.GetUserID(c)
+	agent, err := h.svc.UpdateCustomSkills(c.Request.Context(), agentID, userID, req.CustomSkills)
 	if err != nil {
 		middleware.HandleServiceError(c, err, "更新自定义技能失败")
 		return

@@ -264,8 +264,13 @@ func main() {
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.GET("/:id/messages/search", msgHandler.Search)
+			convRoutes.GET("/:id/pinned-context", msgHandler.PinnedContext)
+			convRoutes.GET("/:id/blackboard", msgHandler.GetBlackboard)
+			convRoutes.PUT("/:id/blackboard", msgHandler.UpdateBlackboard)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
 			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
+			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
+			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
@@ -372,6 +377,7 @@ func main() {
 	{
 		mcpGroup.GET("/conversations", convHandler.List)
 		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		mcpGroup.GET("/conversations/:id/messages", msgHandler.History)
 
 		mcpTaskRoutes := mcpGroup.Group("/tasks")
 		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
@@ -386,6 +392,7 @@ func main() {
 		mcpGroup.GET("/agents", agentHandler.MCPList)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
 	}

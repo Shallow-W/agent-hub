@@ -10,14 +10,15 @@ import (
 
 // OrchestratorSystemPrompt is the base system prompt for the orchestrator agent.
 // It instructs the agent how to decompose tasks, dispatch to workers, and aggregate results.
-const OrchestratorSystemPrompt = `你是群聊中的任务协调者（Orchestrator）。你不亲自执行任何工作，只负责拆解任务并分派给群聊中的 Agent。使用中文交流。
+const OrchestratorSystemPrompt = `你是群聊中的任务协调者（Orchestrator）。你负责理解用户当前消息，结合群聊上下文与当前群聊 Agent 详情，判断是否需要拆解任务并分派给当前群聊中的 Agent。使用中文交流。
 
 ## 工作步骤
 
-1. 先调用 MCP 工具 list_group_agents 查询当前群聊中有哪些智能体、它们的名称和角色
-2. 分析用户需求，决定分派方案
-3. 用 @mention 格式输出分派结果（见下方格式）
-4. 如果不需要分派（例如直接回答即可），直接回复用户
+1. 先阅读用户消息、群聊最近动态和当前群聊 Agent 详情。
+2. 判断用户是否明确要求某些 Agent 参与；如果明确要求，优先按用户指定分派。
+3. 如果需要分派，拆成互不重复、可执行的小任务，用 @mention 格式输出。
+4. 如果只需要一个 Agent 处理，直接 @该 Agent。
+5. 如果不需要分派（例如闲聊、澄清、直接回答即可），直接回复用户。
 
 ## @mention 分派格式（必须严格遵守）
 
@@ -38,38 +39,120 @@ const OrchestratorSystemPrompt = `你是群聊中的任务协调者（Orchestrat
 ` + "```" + `
 
 ## 关键规则
-- 必须先调 list_group_agents 确认可用 agent 名称，@mention 中的名称必须完全匹配
-- 只需一个 Agent 时直接 @该Agent，无需多余说明
-- 禁止亲自执行具体工作`
+- 只能分派给“当前群聊 Agent 详情”中列出的 Agent，@mention 中的名称必须完全匹配。
+- “当前群聊 Agent 详情”只代表本群聊已加入的 Agent，不代表系统里的全局 Agent 池。
+- 不要编造 Agent 的简介或标签；只依据上下文中提供的真实字段判断。
+- 不要亲自执行被分派的具体任务。用户要求分派时，你只输出分派结果。
+- 分派结果要简洁，不解释你的推理过程。
+- 如果用户的指令不完整，先提出一个最小澄清问题。`
+
+// OrchestratorAgentDetail describes an agent available in the current group chat.
+type OrchestratorAgentDetail struct {
+	Name        string
+	Role        string
+	Status      string
+	Description string
+	Tags        string
+}
 
 // BuildOrchestratorPrompt builds the full prompt for an orchestrator dispatch.
+//
+// Deprecated: use BuildOrchestratorPromptWithAgents so the prompt includes
+// backend-provided agent details instead of names only.
+func BuildOrchestratorPrompt(conversationTitle string, agentList []string, recentMessages string, userMessage string) string {
+	agents := make([]OrchestratorAgentDetail, 0, len(agentList))
+	for _, name := range agentList {
+		agents = append(agents, OrchestratorAgentDetail{Name: name})
+	}
+	return BuildOrchestratorPromptWithAgents(conversationTitle, agents, "", recentMessages, userMessage)
+}
+
+// BuildOrchestratorPromptWithAgents builds the full prompt for an orchestrator dispatch.
 // conversationTitle: the group chat name
-// agentList: list of agent names available in this group chat (for @mention reference)
+// agents: backend-provided agent details available in this group chat
+// blackboardContext: shared long-term context visible to all agents in this group chat
 // recentMessages: compressed summary of recent group chat messages
 // userMessage: the user's current message
-func BuildOrchestratorPrompt(conversationTitle string, agentList []string, recentMessages string, userMessage string) string {
+func BuildOrchestratorPromptWithAgents(conversationTitle string, agents []OrchestratorAgentDetail, blackboardContext string, recentMessages string, userMessage string) string {
 	var sb strings.Builder
 
-	sb.WriteString("[当前群聊]\n")
+	sb.WriteString("{当前群聊\n")
 	sb.WriteString("群聊名称：")
 	sb.WriteString(conversationTitle)
 	sb.WriteString("\n可用 Agent：")
-	sb.WriteString(strings.Join(agentList, "、"))
-	sb.WriteString("\n\n")
+	sb.WriteString(strings.Join(agentNames(agents), "、"))
+	sb.WriteString("\n}\n\n")
 
-	sb.WriteString("[群聊最近动态]\n")
-	sb.WriteString(recentMessages)
-	sb.WriteString("\n\n")
+	sb.WriteString("{当前群聊 Agent 详情\n")
+	if len(agents) == 0 {
+		sb.WriteString("无\n")
+	} else {
+		for _, agent := range agents {
+			writeAgentDetail(&sb, agent)
+		}
+	}
+	sb.WriteString("}\n\n")
 
-	sb.WriteString("[用户消息]\n")
+	if strings.TrimSpace(blackboardContext) == "" {
+		sb.WriteString("{会话上下文黑板\n")
+		sb.WriteString("{用户 Pin 上下文\n无\n}\n")
+		sb.WriteString("{用户手写上下文\n无\n}\n")
+		sb.WriteString("}\n\n")
+	} else {
+		sb.WriteString(blackboardContext)
+		if !strings.HasSuffix(blackboardContext, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("{群聊最近动态\n")
+	if strings.TrimSpace(recentMessages) == "" {
+		sb.WriteString("无\n")
+	} else {
+		sb.WriteString(recentMessages)
+		if !strings.HasSuffix(recentMessages, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("}\n\n")
+
+	sb.WriteString("{用户消息\n")
 	sb.WriteString(userMessage)
-	sb.WriteString("\n\n")
+	sb.WriteString("\n}\n\n")
 
-	sb.WriteString("请分析用户需求，决定是否需要拆解任务并分派给相应的 Agent。\n")
-	sb.WriteString("如果只需要单个 Agent 处理，直接 @该Agent。\n")
-	sb.WriteString("如果需要多 Agent 协作，按照分派格式拆解任务。")
+	sb.WriteString("{Orchestrator 指令\n")
+	sb.WriteString("请分析用户当前消息，决定是否需要拆解任务并分派给相应的 Agent。\n")
+	sb.WriteString("如果用户明确指定了 Agent，优先分派给用户指定的 Agent。\n")
+	sb.WriteString("如果只需要单个 Agent 处理，直接 @该Agent 并给出任务。\n")
+	sb.WriteString("如果需要多 Agent 协作，按 @mention 分派格式拆解为清晰、互不重复的小任务。\n")
+	sb.WriteString("只能使用“当前群聊 Agent 详情”里真实存在的 Agent 名称；不要编造 Agent 简介、标签、群外 Agent 或不存在的成员。\n")
+	sb.WriteString("当用户要求你分派任务时，不要亲自完成这些任务，只输出分派结果。\n")
+	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+func agentNames(agents []OrchestratorAgentDetail) []string {
+	names := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		names = append(names, agent.Name)
+	}
+	return names
+}
+
+func writeAgentDetail(sb *strings.Builder, agent OrchestratorAgentDetail) {
+	fmt.Fprintf(sb, "- 名称：%s\n", fallbackText(agent.Name))
+	fmt.Fprintf(sb, "  角色：%s\n", fallbackText(agent.Role))
+	fmt.Fprintf(sb, "  状态：%s\n", fallbackText(agent.Status))
+	fmt.Fprintf(sb, "  简介：%s\n", fallbackText(agent.Description))
+	fmt.Fprintf(sb, "  标签：%s\n", fallbackText(agent.Tags))
+}
+
+func fallbackText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "未配置"
+	}
+	return value
 }
 
 // roundHistoryEntry is used to deserialize round_history JSONB.

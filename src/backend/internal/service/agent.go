@@ -35,12 +35,12 @@ type AgentRepo interface {
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
-	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error)
+	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
-	UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error)
+	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)
 	UpdateAgentStatus(ctx context.Context, id, status string) error
 	ClearAgentMachine(ctx context.Context, id string) error
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
@@ -314,14 +314,22 @@ func (s *AgentService) ListAgentCandidates(ctx context.Context, userID string) (
 }
 
 // AddCandidateAgent 将候选 Agent 添加成可用 Agent。
-func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
+func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
 	displayName = strings.TrimSpace(displayName)
 	expectedCLITool = strings.TrimSpace(expectedCLITool)
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, expectedCLITool, systemPrompt)
+	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	customSkills, err = normalizeCustomSkills(customSkills)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills)
 	if err != nil {
 		return nil, fmt.Errorf("add candidate agent: %w", err)
 	}
@@ -336,6 +344,10 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	name = strings.TrimSpace(name)
 	cliTool = strings.TrimSpace(cliTool)
 	if name == "" || cliTool == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
 	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
@@ -358,6 +370,10 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	}
 	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
 		return nil, ErrAgentNotFound
+	}
+	toolsConfig, err = normalizeToolsConfig(toolsConfig)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
 	}
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
 	if err != nil {
@@ -415,11 +431,15 @@ func (s *AgentService) UpdateTags(ctx context.Context, id, tags string) (*model.
 }
 
 // UpdateCustomSkills 更新 Agent 的 custom_skills 字段（用户可编辑，daemon 注册不会覆盖）。
-func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, customSkills string) (*model.Agent, error) {
-	if id == "" {
+func (s *AgentService) UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error) {
+	if id == "" || userID == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.UpdateCustomSkills(ctx, id, customSkills)
+	customSkills, err := normalizeCustomSkills(customSkills)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateCustomSkills(ctx, id, userID, customSkills)
 	if err != nil {
 		return nil, fmt.Errorf("update agent custom_skills: %w", err)
 	}

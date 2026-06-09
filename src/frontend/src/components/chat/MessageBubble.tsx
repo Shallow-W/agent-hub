@@ -8,6 +8,7 @@ import {
   DownOutlined,
   ForwardOutlined,
   MessageOutlined,
+  PushpinOutlined,
   ReloadOutlined,
   RollbackOutlined,
   UpOutlined,
@@ -172,6 +173,7 @@ interface MessageBubbleProps {
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
   onForward?: (message: Message) => void;
+  onTogglePin?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -211,6 +213,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onReply,
   onRecall,
   onForward,
+  onTogglePin,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -306,6 +309,14 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           onClick: () => onReply(message),
         }]
       : []),
+    ...(onTogglePin
+      ? [{
+          key: 'pin' as const,
+          icon: <PushpinOutlined />,
+          label: message.pinned ? '取消 Pin' : 'Pin 到上下文黑板',
+          onClick: () => onTogglePin(message),
+        }]
+      : []),
     ...(canRecall && onRecall
       ? [{
           key: 'recall' as const,
@@ -387,6 +398,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             />
           </Tooltip>
         )}
+        {!isSystem && onTogglePin && (
+          <Tooltip title={message.pinned ? '取消 Pin' : 'Pin 到上下文黑板'}>
+            <Button
+              type="text"
+              size="small"
+              icon={<PushpinOutlined />}
+              className={`${styles.replyBtn} ${styles.pinBtn} ${message.pinned ? styles.pinBtnActive : ''}`}
+              onClick={() => onTogglePin(message)}
+            />
+          </Tooltip>
+        )}
         {canRecall && (
           <Tooltip title="撤回">
             <Button
@@ -404,6 +426,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <Text className={styles.agentLabel}>{displayName}</Text>
               {agentName && (
                 <span className={styles.agentBadge}>Agent</span>
+              )}
+              {message.pinned && (
+                <Tooltip title="已 Pin 到上下文黑板">
+                  <PushpinOutlined className={styles.pinBadge} />
+                </Tooltip>
               )}
               <Text type="secondary" className={styles.metaTime}>
                 {formatTimestamp(message.created_at)}

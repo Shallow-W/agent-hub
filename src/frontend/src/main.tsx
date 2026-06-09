@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import theme from './theme/antd';
 import { bindMessage } from './utils/message';
+import { bindModal } from './utils/modal';
 import './styles/globals.css';
 
 class ErrorBoundary extends React.Component<
@@ -41,12 +42,16 @@ if (!rootEl) {
 }
 
 function MessageBridge({ children }: { children: React.ReactNode }) {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
 
   React.useEffect(() => {
     bindMessage(message);
-    return () => bindMessage(null);
-  }, [message]);
+    bindModal(modal);
+    return () => {
+      bindMessage(null);
+      bindModal(null);
+    };
+  }, [message, modal]);
 
   return <>{children}</>;
 }

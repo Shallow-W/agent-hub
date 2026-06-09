@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 const apiBaseURL = process.env.AGENTHUB_E2E_BASE_URL || 'http://127.0.0.1:5173';
 const backendURL = process.env.AGENTHUB_E2E_BACKEND_URL || 'http://127.0.0.1:8080';
@@ -81,6 +81,22 @@ async function loginByUI(page: Page): Promise<void> {
 
 async function confirmPopoverDelete(page: Page): Promise<void> {
   await page.locator('.ant-popover:visible').getByRole('button', { name: /^删\s*除$/ }).click();
+}
+
+async function addAgentFromCandidate(page: Page, candidateRow: Locator, name: string): Promise<void> {
+  await candidateRow.getByRole('button').click();
+  const createDialog = page.getByRole('dialog', { name: /Agent/ });
+  await expect(createDialog).toBeVisible();
+  await expect(createDialog.locator('[class*=toolGrid]')).toBeVisible();
+  await createDialog.locator('input[maxlength="100"]').fill(name);
+  const createResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/daemon/agent-candidates/')
+      && response.url().endsWith('/add')
+      && response.request().method() === 'POST'
+  ));
+  await createDialog.locator('.ant-btn-primary').click();
+  expect((await createResponse).ok()).toBeTruthy();
+  await expect(createDialog).toBeHidden();
 }
 
 async function createFakeClaudeBin(): Promise<string> {
@@ -194,20 +210,16 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
     const codexRow = dialog.getByText(new RegExp(`claude · ${machineName}`))
       .locator('xpath=ancestor::div[contains(@class,"candidateItem")][1]');
     await expect(codexRow.getByText('Claude Code', { exact: true })).toBeVisible({ timeout: 10000 });
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E A');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E A 已添加')).toBeVisible();
-
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E B');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E B 已添加')).toBeVisible();
-
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E C');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E C 已添加')).toBeVisible();
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E A');
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E B');
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E C');
 
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: new RegExp(machineName) }).click();
+  const machineButton = page.getByRole('button', { name: new RegExp(machineName) });
+  await machineButton.click();
+  if (await page.getByRole('button', { name: /AgentHub UI E2E A/ }).count() === 0) {
+    await machineButton.click();
+  }
   await expect(page.getByRole('button', { name: /AgentHub UI E2E A/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /AgentHub UI E2E C/ }).first()).toBeVisible();

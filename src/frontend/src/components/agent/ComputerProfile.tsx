@@ -138,13 +138,19 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     }
   };
 
-  const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string) => {
+  const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => {
     const candidate = machineCandidates.find((item) => item.id === candidateId);
     if (!candidate) {
       message.error('Agent 底座不存在，请刷新后重试');
       return;
     }
-    await addAgentCandidate(candidateId, name, candidate.cli_tool, systemPrompt);
+    await addAgentCandidate(candidateId, {
+      name,
+      cli_tool: candidate.cli_tool,
+      system_prompt: systemPrompt,
+      tools_config: toolsConfig,
+      custom_skills: customSkills,
+    });
   };
 
   const handleStartAgent = async (agentId: string) => {

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -20,6 +22,12 @@ func truncateString(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+var promptWhitespaceRE = regexp.MustCompile(`\s+`)
+
+func normalizePromptLine(s string) string {
+	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
 }
 
 // waitDaemonTask 轮询等待 daemon 任务完成（600ms 间隔，120s 超时）

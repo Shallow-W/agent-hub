@@ -114,6 +114,16 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 				return nil, fmt.Errorf("conversation_id is required")
 			}
 			return api.doGet("/mcp/conversations/"+id+"/agents", nil)
+		case "list_group_agents":
+			id, _ := args["conversation_id"].(string)
+			if id == "" {
+				return nil, fmt.Errorf("conversation_id is required")
+			}
+			return api.doGet("/mcp/conversations/"+id+"/agents", nil)
+		case "get_messages":
+			return handleGetMessages(api, args)
+		case "create_group":
+			return handleCreateGroup(api, args)
 		// 任务看板
 		case "list_tasks":
 			return handleListTasks(api, args)
@@ -150,6 +160,60 @@ func HandleAllTools(api *APIClient) ToolHandlerFunc {
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
 	}
+}
+
+func handleCreateGroup(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	body := map[string]interface{}{"name": name}
+	if ids, ok := args["member_ids"].([]interface{}); ok {
+		members := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if value, ok := id.(string); ok && value != "" {
+				members = append(members, value)
+			}
+		}
+		body["member_ids"] = members
+	}
+	return api.doPost("/mcp/groups", body)
+}
+
+func handleGetMessages(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	id, _ := args["conversation_id"].(string)
+	if id == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	query := map[string]string{}
+	if v, ok := args["limit"].(float64); ok && v > 0 {
+		query["limit"] = fmt.Sprintf("%.0f", v)
+	}
+	return api.doGet("/mcp/conversations/"+id+"/messages", query)
+}
+
+// AllowedToolsForAgent resolves the MCP tool allowlist for one Agent.
+func (c *APIClient) AllowedToolsForAgent(agentID string) map[string]bool {
+	if agentID == "" {
+		return noAgentToolSet()
+	}
+	data, err := c.doGet("/mcp/agents", nil)
+	if err != nil {
+		return noAgentToolSet()
+	}
+	agents, ok := data.([]interface{})
+	if !ok {
+		return noAgentToolSet()
+	}
+	for _, item := range agents {
+		agent, ok := item.(map[string]interface{})
+		if !ok || agent["id"] != agentID {
+			continue
+		}
+		raw, _ := agent["tools_config"].(string)
+		return allowedToolsFromConfig(raw)
+	}
+	return noAgentToolSet()
 }
 
 func handleListTasks(api *APIClient, args map[string]interface{}) (interface{}, error) {

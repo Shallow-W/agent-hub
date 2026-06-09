@@ -13,10 +13,11 @@ import (
 
 // Server 是 MCP Server，通过 stdio 提供 tool 能力
 type Server struct {
-	name    string
-	version string
-	tools   []Tool
-	handler ToolHandlerFunc
+	name      string
+	version   string
+	tools     []Tool
+	allowed   map[string]bool
+	handler   ToolHandlerFunc
 	transport *stdioTransport
 	logger    *slog.Logger
 }
@@ -27,9 +28,23 @@ func NewServer(name, version string, tools []Tool, handler ToolHandlerFunc, logg
 		name:    name,
 		version: version,
 		tools:   tools,
+		allowed: toolSet(func() []string {
+			names := make([]string, 0, len(tools))
+			for _, tool := range tools {
+				names = append(names, tool.Name)
+			}
+			return names
+		}()),
 		handler: handler,
 		logger:  logger,
 	}
+}
+
+// WithAllowedTools limits tools/list and tools/call to the provided tool names.
+func (s *Server) WithAllowedTools(allowed map[string]bool) *Server {
+	s.allowed = allowed
+	s.tools = filterTools(s.tools, allowed)
+	return s
 }
 
 // Serve 启动 MCP Server，从 stdin 读取请求，向 stdout 写入响应
@@ -134,6 +149,16 @@ func (s *Server) handleToolsCall(req *jsonrpcRequest) *jsonrpcResponse {
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return makeError(req.ID, errInvalidParams, "invalid params: "+err.Error())
+	}
+
+	if !s.allowed[params.Name] {
+		err := fmt.Errorf("tool not authorized: %s", params.Name)
+		return makeResponse(req.ID, map[string]interface{}{
+			"content": []map[string]interface{}{
+				{"type": "text", "text": fmt.Sprintf("Error: %v", err)},
+			},
+			"isError": true,
+		})
 	}
 
 	result, err := s.handler(params.Name, params.Arguments)

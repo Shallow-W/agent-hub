@@ -9,13 +9,15 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { getDefaultAgentName, parseCapabilities } from './agentPresentation';
+import { parseCapabilities } from './agentPresentation';
 import type {
   Agent,
+  AddCandidateAgentRequest,
   AgentCandidate,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
+import { AgentCreateModal } from './AgentCreateModal';
 import styles from './ConnectComputerModal.module.css';
 
 interface ConnectComputerModalProps {
@@ -25,7 +27,7 @@ interface ConnectComputerModalProps {
   loading: boolean;
   onClose: () => void;
   onCreate: (name: string) => Promise<CreateDaemonMachineResponse>;
-  onAddCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
+  onAddCandidate: (id: string, body: AddCandidateAgentRequest) => Promise<Agent>;
   onDeleteMachine: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
 }
@@ -87,7 +89,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
   const [creating, setCreating] = useState(false);
   const [addingID, setAddingID] = useState<string | null>(null);
   const [deletingMachineID, setDeletingMachineID] = useState<string | null>(null);
-  const [candidateNames, setCandidateNames] = useState<Record<string, string>>({});
+  const [createCandidate, setCreateCandidate] = useState<AgentCandidate | null>(null);
   const [created, setCreated] = useState<CreateDaemonMachineResponse | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const safeMachines = machines ?? [];
@@ -155,12 +157,21 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
     message.success('启动命令已复制');
   };
 
-  const handleAddCandidate = async (candidate: AgentCandidate) => {
-    const displayName = (candidateNames[candidate.id] || getDefaultAgentName(candidate.name, candidate.cli_tool)).trim();
-    if (!displayName) return;
+  const handleCreateAgent = async (candidateId: string, displayName: string, systemPrompt: string, toolsConfig: string, customSkills: string) => {
+    const candidate = safeCandidates.find((item) => item.id === candidateId);
+    if (!candidate) {
+      message.error('Agent 底座不存在，请刷新后重试');
+      return;
+    }
     setAddingID(candidate.id);
     try {
-      await onAddCandidate(candidate.id, displayName, candidate.cli_tool);
+      await onAddCandidate(candidate.id, {
+        name: displayName,
+        cli_tool: candidate.cli_tool,
+        system_prompt: systemPrompt,
+        tools_config: toolsConfig,
+        custom_skills: customSkills,
+      });
       await handleRefresh();
       message.success(`${displayName} 已添加`);
     } catch (err) {
@@ -184,6 +195,7 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
   };
 
   return (
+    <>
     <Modal
       centered
       footer={null}
@@ -307,20 +319,12 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
                         </div>
                       )}
                     </div>
-                    <Input
-                      maxLength={100}
-                      value={candidateNames[candidate.id] ?? getDefaultAgentName(candidate.name, candidate.cli_tool)}
-                      onChange={(event) => setCandidateNames((state) => ({
-                        ...state,
-                        [candidate.id]: event.target.value,
-                      }))}
-                    />
                     <Button
                       icon={<PlusOutlined />}
                       loading={addingID === candidate.id}
                       disabled={addingID !== null && addingID !== candidate.id}
                       type="primary"
-                      onClick={() => handleAddCandidate(candidate)}
+                      onClick={() => setCreateCandidate(candidate)}
                     >
                       添加 Agent
                     </Button>
@@ -332,5 +336,16 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
         </div>
       </div>
     </Modal>
+    <AgentCreateModal
+      open={createCandidate !== null}
+      machineName={createCandidate?.machine_name ?? ''}
+      candidates={createCandidate ? [createCandidate] : []}
+      onClose={() => setCreateCandidate(null)}
+      onCreate={async (candidateId, displayName, systemPrompt, toolsConfig, customSkills) => {
+        await handleCreateAgent(candidateId, displayName, systemPrompt, toolsConfig, customSkills);
+        setCreateCandidate(null);
+      }}
+    />
+    </>
   );
 };

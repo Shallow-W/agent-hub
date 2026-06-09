@@ -227,7 +227,8 @@ func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userI
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
 			        a.name, a.type, a.cli_tool, a.avatar, a.source, a.status, a.version,
-			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json, a.system_prompt
+			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json, COALESCE(a.custom_skills, '') AS custom_skills, a.system_prompt,
+			        COALESCE(a.tags, '') AS tags
 			 FROM conversation_agents ca
 			 JOIN conversations c ON c.id = ca.conversation_id
 			 JOIN agents a ON a.id = ca.agent_id
@@ -564,7 +565,9 @@ func (r *ConversationRepo) GetOrchestrator(ctx context.Context, conversationID s
 		 a.name, a.type, a.cli_tool, COALESCE(a.avatar, '') AS avatar,
 		 a.source, a.status, COALESCE(a.version, '') AS version,
 		 a.machine_id, COALESCE(a.machine_name, '') AS machine_name,
-		 a.last_seen_at, COALESCE(a.capabilities_json, '') AS capabilities_json
+		 a.last_seen_at, COALESCE(a.capabilities_json, '') AS capabilities_json,
+		 COALESCE(a.custom_skills, '') AS custom_skills,
+		 COALESCE(a.tags, '') AS tags
 		 FROM conversation_agents ca
 		 JOIN agents a ON a.id = ca.agent_id
 		 WHERE ca.conversation_id = $1 AND ca.role = 'orchestrator'`,

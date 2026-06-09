@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
+import { modal as appModal } from '@/utils/modal';
 import styles from './ConversationItem.module.css';
 
 interface ConversationItemProps {
@@ -150,7 +151,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       danger: true,
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        Modal.confirm({
+        appModal.confirm({
           title: isGroup && isOwner ? '解散并删除群聊' : '删除对话',
           content: isGroup && isOwner
             ? `确定要解散并删除「${displayName}」吗？所有成员都会失去这个群聊和聊天记录。`

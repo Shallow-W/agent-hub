@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown } from 'antd';
+import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import {
   FolderOpenOutlined,
@@ -13,6 +13,7 @@ import {
   InfoCircleOutlined,
   DeleteOutlined,
   LinkOutlined,
+  PushpinOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useConversation } from '@/hooks/useConversation';
@@ -21,7 +22,7 @@ import { useConversationStore } from '@/store/conversationStore';
 import { useWsStore } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { leaveGroup, dissolveGroup } from '@/api/group';
-import type { Message } from '@/types/message';
+import type { Message, PinnedMessage } from '@/types/message';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ChatSearchPanel } from './ChatSearchPanel';
@@ -30,16 +31,28 @@ import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
+import { getConversationBlackboard, getPinnedContext, updateConversationBlackboard } from '@/api/message';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { useAgentStore } from '@/store/agentStore';
+import { modal as appModal } from '@/utils/modal';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
+const BLACKBOARD_MAX_LEN = 8000;
+const { Text } = Typography;
+
+function getPinnedMessageAuthor(item: PinnedMessage): string {
+  const username = item.username?.trim();
+  if (username) return username;
+  if (item.role === 'assistant') return '助手';
+  if (item.role === 'system') return '系统';
+  return '用户';
+}
 
 export const ChatWindow: React.FC = () => {
   const { conversations, activeId } = useConversation();
@@ -51,6 +64,7 @@ export const ChatWindow: React.FC = () => {
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const markAllRead = useMessageStore((s) => s.markAllRead);
+  const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
   const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
@@ -60,7 +74,13 @@ export const ChatWindow: React.FC = () => {
   const [hasSearched, setHasSearched] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [blackboardOpen, setBlackboardOpen] = useState(false);
+  const [blackboardText, setBlackboardText] = useState('');
+  const [blackboardPinned, setBlackboardPinned] = useState<PinnedMessage[]>([]);
+  const [blackboardLoading, setBlackboardLoading] = useState(false);
+  const [blackboardSaving, setBlackboardSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
   const streamingContent = useMessageStore(
     (s) => (activeId ? s.streamingContent[activeId] : undefined),
@@ -68,6 +88,71 @@ export const ChatWindow: React.FC = () => {
   const isStreaming = (streamingContent ?? '').length > 0;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
+
+  useEffect(() => {
+    activeIdRef.current = activeId ?? null;
+  }, [activeId]);
+
+  const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
+    const pinned = await getPinnedContext(conversationId);
+    if (activeIdRef.current !== conversationId) return;
+    setBlackboardPinned(pinned ?? []);
+  }, []);
+
+  const openBlackboard = useCallback(async () => {
+    if (!activeId) return;
+    const conversationId = activeId;
+    setBlackboardOpen(true);
+    setBlackboardLoading(true);
+    try {
+      const [blackboard, pinned] = await Promise.all([
+        getConversationBlackboard(conversationId),
+        getPinnedContext(conversationId),
+      ]);
+      if (activeIdRef.current !== conversationId) return;
+      setBlackboardText(blackboard.manual_context ?? '');
+      setBlackboardPinned(pinned ?? []);
+    } catch {
+      antMessage.error('加载上下文黑板失败');
+    } finally {
+      if (activeIdRef.current === conversationId) {
+        setBlackboardLoading(false);
+      }
+    }
+  }, [activeId]);
+
+  const saveBlackboard = useCallback(async () => {
+    if (!activeId) return;
+    if (blackboardText.length > BLACKBOARD_MAX_LEN) {
+      antMessage.error(`黑板内容不能超过 ${BLACKBOARD_MAX_LEN} 字`);
+      return;
+    }
+    const conversationId = activeId;
+    setBlackboardSaving(true);
+    try {
+      const blackboard = await updateConversationBlackboard(conversationId, blackboardText);
+      setBlackboardText(blackboard.manual_context ?? '');
+      setBlackboardOpen(false);
+      antMessage.success('上下文黑板已保存');
+    } catch {
+      antMessage.error('保存上下文黑板失败');
+    } finally {
+      setBlackboardSaving(false);
+    }
+  }, [activeId, blackboardText]);
+
+  const handlePinnedMessageChange = useCallback(() => {
+    if (!blackboardOpen || !activeId) return;
+    void refreshBlackboardPinned(activeId).catch(() => {
+      antMessage.error('刷新 Pin 消息失败');
+    });
+  }, [activeId, blackboardOpen, refreshBlackboardPinned]);
+
+  const handleUnpinFromBlackboard = useCallback(async (messageId: string) => {
+    if (!activeId) return;
+    await toggleMessagePin(activeId, messageId, true);
+    await refreshBlackboardPinned(activeId);
+  }, [activeId, refreshBlackboardPinned, toggleMessagePin]);
 
   // 拖拽上传：drop 区覆盖整个聊天窗口（消息区 + 输入区），文件交给 ChatInput 的 processFiles 处理。
   const [isDragging, setIsDragging] = useState(false);
@@ -291,8 +376,7 @@ export const ChatWindow: React.FC = () => {
                 label: '解散群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '解散群聊',
                       content: '解散后所有成员将被移除，聊天记录将清除，此操作不可撤销。',
                       okText: '确认解散',
@@ -308,7 +392,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('解散失败');
                         }
                       },
-                    });
                   });
                 },
               }]
@@ -318,8 +401,7 @@ export const ChatWindow: React.FC = () => {
                 label: '退出群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '退出群聊',
                       content: '退出后将不再接收此群聊消息。',
                       okText: '确认退出',
@@ -335,7 +417,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('退出失败');
                         }
                       },
-                    });
                   });
                 },
               }]),
@@ -431,6 +512,9 @@ export const ChatWindow: React.FC = () => {
           <Tooltip title="搜索消息">
             <Button type="text" icon={<SearchOutlined />} size="small" onClick={toggleSearch} />
           </Tooltip>
+          <Tooltip title="上下文黑板">
+            <Button type="text" icon={<PushpinOutlined />} size="small" onClick={openBlackboard} />
+          </Tooltip>
           <Tooltip title="停止任务">
             <Button type="text" icon={<StopOutlined />} size="small" disabled={!isStreaming} onClick={handleStopTask} />
           </Tooltip>
@@ -464,7 +548,12 @@ export const ChatWindow: React.FC = () => {
           onSelectMessage={handleSelectSearchResult}
         />
       )}
-      <MessageList conversationId={activeConv.id} onReply={setReplyTo} onForward={setForwardMessage} />
+      <MessageList
+        conversationId={activeConv.id}
+        onReply={setReplyTo}
+        onForward={setForwardMessage}
+        onPinChanged={handlePinnedMessageChange}
+      />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
           <span className={styles.typingDots}>
@@ -508,6 +597,73 @@ export const ChatWindow: React.FC = () => {
         message={forwardMessage}
         currentConversationId={activeId ?? undefined}
       />
+      <Modal
+        title="上下文黑板"
+        open={blackboardOpen}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={blackboardSaving}
+        onOk={saveBlackboard}
+        onCancel={() => setBlackboardOpen(false)}
+      >
+        <div className={styles.blackboardEditor}>
+          <section className={styles.blackboardSection}>
+            <div className={styles.blackboardSectionHeader}>
+              <Text strong>Pin 的消息</Text>
+              <Text type="secondary">{blackboardPinned.length} 条</Text>
+            </div>
+            <div className={styles.pinnedList}>
+              {blackboardLoading ? (
+                <div className={styles.blackboardLoading}>加载中...</div>
+              ) : blackboardPinned.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="还没有 Pin 的消息"
+                />
+              ) : (
+                blackboardPinned.map((item) => (
+                  <div key={item.id} className={styles.pinnedItem}>
+                    <div className={styles.pinnedItemBody}>
+                      <div className={styles.pinnedItemMeta}>
+                        <Text strong>{getPinnedMessageAuthor(item)}</Text>
+                        <Text type="secondary">
+                          {new Date(item.message_created_at).toLocaleString()}
+                        </Text>
+                      </div>
+                      <div className={styles.pinnedItemContent}>
+                        {item.content || '空消息'}
+                      </div>
+                    </div>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<PushpinOutlined />}
+                      onClick={() => handleUnpinFromBlackboard(item.message_id)}
+                    >
+                      取消 Pin
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+          <section className={styles.blackboardSection}>
+            <div className={styles.blackboardSectionHeader}>
+              <Text strong>自由上下文</Text>
+              <Text type="secondary">会随每次 Agent 对话注入</Text>
+            </div>
+            <Input.TextArea
+              value={blackboardText}
+              onChange={(e) => setBlackboardText(e.target.value)}
+              placeholder="写下需要长期带给 Agent 的背景、偏好、约束或任务上下文"
+              autoSize={{ minRows: 7, maxRows: 12 }}
+              maxLength={BLACKBOARD_MAX_LEN}
+              showCount
+              disabled={blackboardLoading}
+            />
+          </section>
+        </div>
+      </Modal>
     </div>
   );
 };
