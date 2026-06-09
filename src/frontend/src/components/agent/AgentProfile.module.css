@@ -478,40 +478,146 @@
 
 .toolGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-bottom: 16px;
 }
 
-.toolItem {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-height: 58px;
-  padding: 10px 12px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 8px;
-  background: var(--color-bg-white);
-}
-
-.toolName {
-  display: block;
-  color: var(--color-text);
+.toolCountLabel {
+  margin-left: auto;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
 
-.toolMeta {
+.toolFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(31, 35, 40, 0.1);
+  border-radius: 999px;
+  background: var(--color-bg-white);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filterPill:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+  color: var(--color-primary);
+}
+
+.filterPillActive {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.filterPillActive:hover {
+  background: #247a59;
+  color: #fff;
+  border-color: #247a59;
+}
+
+.toolCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 35, 40, 0.06);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.toolCard:hover {
+  border-color: rgba(47, 143, 107, 0.3);
+}
+
+.toolCardSelected {
+  border-color: #52c41a;
+  box-shadow: 0 0 0 1px #52c41a;
+  background: rgba(82, 196, 26, 0.04);
+}
+
+.toolCardContent {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.toolDesc {
   display: block;
   margin-top: 2px;
   color: var(--color-text-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-.toolJsonPreview {
+.toolFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(31, 35, 40, 0.06);
+}
+
+.toolFooterName {
+  color: var(--color-text-secondary);
+  font-size: 11px;
   font-family: Consolas, monospace;
+}
+
+.toolFooterBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+:global(html.dark) .filterPill {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(html.dark) .filterPillActive {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+:global(html.dark) .toolCard {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:global(html.dark) .toolCard:hover {
+  border-color: rgba(47, 143, 107, 0.4);
+}
+
+:global(html.dark) .toolCardSelected {
+  border-color: #52c41a;
+  box-shadow: 0 0 0 1px #52c41a;
+  background: rgba(82, 196, 26, 0.08);
+}
+
+:global(html.dark) .toolFooter {
+  border-top-color: rgba(255, 255, 255, 0.06);
 }
 
 .monospaceTextarea {

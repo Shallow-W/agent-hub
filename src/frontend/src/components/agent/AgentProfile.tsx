@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Switch, Tag } from 'antd';
 import { message } from '@/utils/message';
 import {
@@ -24,6 +24,8 @@ import {
   resolveAgentAvatar,
 } from './agentPresentation';
 import {
+  categoryMeta,
+  categoryOrder,
   getTemplateTools,
   parseToolsConfig,
   toolCatalog,
@@ -60,12 +62,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [tagsValue, setTagsValue] = useState('');
   const [customSkillCount, setCustomSkillCount] = useState(0);
   const [systemPromptValue, setSystemPromptValue] = useState('');
-  const [toolsConfigValue, setToolsConfigValue] = useState('');
   const [selectedToolset, setSelectedToolset] = useState('tasks');
   const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
   const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+  const [toolFilter, setToolFilter] = useState<string>('all');
 
   const parseTagsFromJSON = (raw: string): string => {
     if (!raw || raw === '[]') return '';
@@ -93,7 +95,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     const parsedTools = parseToolsConfig(agent.tools_config);
     setSelectedToolset(parsedTools.toolset);
     setSelectedTools(parsedTools.allowedTools);
-    setToolsConfigValue(toolsConfigToJSON(parsedTools.toolset, parsedTools.allowedTools));
     setEnableManagementTools(agent.enable_management_tools ?? false);
   }, [agent?.id]);
 
@@ -111,6 +112,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const computerName = agent.machine_name || 'local-computer';
   const editableTags = tagsValue.split(',').map((item) => item.trim()).filter(Boolean);
   const isBuiltinSystemAgent = agent.type === 'system' && !agent.user_id;
+  const filteredTools = useMemo(() => {
+    if (toolFilter === 'all') return toolCatalog;
+    return toolCatalog.filter((t) => t.category === toolFilter);
+  }, [toolFilter]);
+
   const selectedToolCount = selectedTools.length;
   const statusLabel = getStatusText(agent);
   const sourceLabel = agent.source === 'daemon' ? 'Daemon' : agent.source;
@@ -215,13 +221,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSelectedToolset(value);
     const nextTools = value in toolsetTemplates ? getTemplateTools(value) : selectedTools;
     setSelectedTools(nextTools);
-    setToolsConfigValue(toolsConfigToJSON(value, nextTools));
   };
 
   const handleToolsChange = (values: string[]) => {
     setSelectedToolset('custom');
     setSelectedTools(values);
-    setToolsConfigValue(toolsConfigToJSON('custom', values));
   };
 
   const handleSaveToolsConfig = async () => {
@@ -236,7 +240,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         capabilities_json: agent.capabilities_json ?? '',
         enable_management_tools: enableManagementTools,
       });
-      setToolsConfigValue(nextToolsConfig);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
@@ -480,26 +483,63 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 options={toolsetOptions}
                 onChange={handleToolsetChange}
               />
+              <span className={styles.toolCountLabel}>
+                已选 {selectedToolCount}/{toolCatalog.length}
+              </span>
+            </div>
+            <div className={styles.toolFilterBar}>
+              <button
+                className={`${styles.filterPill} ${toolFilter === 'all' ? styles.filterPillActive : ''}`}
+                type="button"
+                onClick={() => setToolFilter('all')}
+              >
+                全部 {toolCatalog.length}
+              </button>
+              {categoryOrder.map((cat) => {
+                const meta = categoryMeta[cat];
+                if (!meta) return null;
+                const count = toolCatalog.filter((t) => t.category === cat).length;
+                const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+                return (
+                  <button
+                    className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}
+                    key={cat}
+                    type="button"
+                    onClick={() => setToolFilter(cat)}
+                  >
+                    {meta.label} {selected}/{count}
+                  </button>
+                );
+              })}
             </div>
             <Checkbox.Group value={selectedTools} onChange={(values) => handleToolsChange(values as string[])}>
               <div className={styles.toolGrid}>
-                {toolCatalog.map((tool) => (
-                  <label className={styles.toolItem} key={tool.name}>
-                    <Checkbox value={tool.name} />
-                    <span>
-                      <span className={styles.toolName}>{tool.label}</span>
-                      <span className={styles.toolMeta}>{tool.name} · {tool.category}</span>
-                    </span>
-                  </label>
-                ))}
+                {filteredTools.map((tool) => {
+                  const isSelected = selectedTools.includes(tool.name);
+                  const meta = categoryMeta[tool.category];
+                  return (
+                    <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''}`} key={tool.name}>
+                      <Checkbox value={tool.name} />
+                      <div className={styles.toolCardContent}>
+                        <span className={styles.toolName}>{tool.label}</span>
+                        <span className={styles.toolDesc}>{tool.description}</span>
+                        <div className={styles.toolFooter}>
+                          <span className={styles.toolFooterName}>{tool.name}</span>
+                          {meta && (
+                            <span
+                              className={styles.toolFooterBadge}
+                              style={{ background: `${meta.color}18`, color: meta.color }}
+                            >
+                              {meta.label}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </Checkbox.Group>
-            <Input.TextArea
-              autoSize={{ minRows: 4, maxRows: 10 }}
-              value={toolsConfigValue}
-              readOnly
-              className={styles.toolJsonPreview}
-            />
             <div className={styles.actionPanel}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>
                 保存工具配置
