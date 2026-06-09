@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Avatar, Tooltip } from 'antd';
 import {
   AppstoreOutlined,
@@ -15,7 +15,6 @@ import {
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { resolveUserAvatar } from '@/components/agent/agentPresentation';
-import { UserAvatarPickerModal } from './UserAvatarPickerModal';
 import styles from './SettingsPanel.module.css';
 
 type WsStatus = 'connected' | 'connecting' | 'disconnected';
@@ -63,7 +62,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const initial = username ? username.charAt(0).toUpperCase() : '?';
   const user = useAuthStore((s) => s.user);
   const avatarSrc = user ? resolveUserAvatar(user) : undefined;
-  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
   const handleNavClick = (key: string) => {
     onNavChange(key);
@@ -120,12 +118,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </Tooltip>
           <span className={styles.wsStatusText}>{wsStatusText[wsStatus]}</span>
         </div>
-        <Tooltip title="更换头像" placement="right">
+        <Tooltip title="个人信息" placement="right">
           <button
             type="button"
             className={styles.footerAvatarBtn}
-            onClick={() => setAvatarPickerOpen(true)}
-            aria-label="更换头像"
+            onClick={() => handleNavClick('settings')}
+            aria-label="个人信息"
           >
             <Avatar
               className={styles.footerAvatar}
@@ -157,11 +155,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
         </Tooltip>
       </div>
-
-      <UserAvatarPickerModal
-        open={avatarPickerOpen}
-        onClose={() => setAvatarPickerOpen(false)}
-      />
     </div>
   );
 };

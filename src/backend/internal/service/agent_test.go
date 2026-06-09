@@ -10,16 +10,20 @@ import (
 )
 
 type fakeAgentRepo struct {
-	updateResult *model.Agent
-	currentAgent *model.Agent
-	daemonTask   *model.DaemonTask
-	deleted      bool
-	registered   []string
-	machines     []model.DaemonMachine
-	machineAgent []string
-	candidates   []string
-	addedPrompt  string
-	addedCLITool string
+	updateResult  *model.Agent
+	currentAgent  *model.Agent
+	daemonTask    *model.DaemonTask
+	deleted       bool
+	registered    []string
+	machines      []model.DaemonMachine
+	machineAgent  []string
+	candidates    []string
+	addedPrompt   string
+	addedCLITool  string
+	addedTools    string
+	addedSkills   string
+	updatedUser   string
+	updatedSkills string
 }
 
 func (r *fakeAgentRepo) ListAvailable(ctx context.Context, userID string) ([]model.Agent, error) {
@@ -111,9 +115,11 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
 	r.addedPrompt = systemPrompt
 	r.addedCLITool = expectedCLITool
+	r.addedTools = toolsConfig
+	r.addedSkills = customSkills
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
 }
 
@@ -140,6 +146,16 @@ func (r *fakeAgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*m
 
 func (r *fakeAgentRepo) UpdateAvatar(_ context.Context, _, _, _ string) (*model.Agent, error) {
 	return nil, nil
+}
+
+func (r *fakeAgentRepo) UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error) {
+	return nil, nil
+}
+
+func (r *fakeAgentRepo) UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error) {
+	r.updatedUser = userID
+	r.updatedSkills = customSkills
+	return &model.Agent{ID: id, Name: "Agent", Type: "custom", CustomSkills: customSkills}, nil
 }
 
 func (r *fakeAgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
@@ -296,7 +312,16 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
-	_, err := svc.AddCandidateAgent(context.Background(), "user-1", "candidate-1", "My Agent", "codex", "persona")
+	_, err := svc.AddCandidateAgent(
+		context.Background(),
+		"user-1",
+		"candidate-1",
+		"My Agent",
+		"codex",
+		"persona",
+		`{"toolset":"custom","allowed_tools":["list_tasks","unknown"]}`,
+		`[{"name":"审查"}]`,
+	)
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
 	}
@@ -305,6 +330,80 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	}
 	if repo.addedCLITool != "codex" {
 		t.Fatalf("expected cli tool checked, got %q", repo.addedCLITool)
+	}
+	if repo.addedTools != `{"allowed_tools":["list_tasks"]}` {
+		t.Fatalf("expected normalized tools config, got %q", repo.addedTools)
+	}
+	if repo.addedSkills != `[{"name":"审查"}]` {
+		t.Fatalf("expected custom skills passed through, got %q", repo.addedSkills)
+	}
+}
+
+func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
+	repo := &fakeAgentRepo{}
+	svc := NewAgentService(repo, nil)
+	_, err := svc.AddCandidateAgent(
+		context.Background(),
+		"user-1",
+		"candidate-1",
+		"My Agent",
+		"codex",
+		"",
+		`{"toolset":"tasks"}`,
+		`not json`,
+	)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
+	}
+}
+
+func TestNormalizeCustomSkillsFiltersUnsafeFields(t *testing.T) {
+	got, err := normalizeCustomSkills(`[{"name":" review ","description":" check ","trigger":" bug ","detail":" use checklist ","source_path":"/tmp/a"},{"name":"review"},{"name":""}]`)
+	if err != nil {
+		t.Fatalf("normalize custom skills: %v", err)
+	}
+	if got != `[{"name":"review","description":"check","trigger":"bug","detail":"use checklist"}]` {
+		t.Fatalf("unexpected normalized skills: %s", got)
+	}
+}
+
+func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
+	repo := &fakeAgentRepo{}
+	svc := NewAgentService(repo, nil)
+	_, err := svc.UpdateCustomSkills(context.Background(), "agent-1", "user-1", `[{"name":" review ","description":" check ","source_path":"/tmp/a"}]`)
+	if err != nil {
+		t.Fatalf("update custom skills failed: %v", err)
+	}
+	if repo.updatedUser != "user-1" {
+		t.Fatalf("expected user id passed to repo, got %q", repo.updatedUser)
+	}
+	if repo.updatedSkills != `[{"name":"review","description":"check"}]` {
+		t.Fatalf("unexpected normalized skills: %s", repo.updatedSkills)
+	}
+}
+
+func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
+	raw := `[{"name":"代码审查","description":"检查 bug 和测试缺口","trigger":"review, bug","detail":"逐项检查边界、权限和测试。"},{"name":"文档撰写","description":"写说明","detail":"不要命中"}]`
+	got := BuildAgentSkillContext(raw, "请 review 这个工具权限 bug")
+	if !strings.Contains(got, "[平台 Skills]") {
+		t.Fatal("expected skill context section")
+	}
+	if !strings.Contains(got, "代码审查：检查 bug 和测试缺口") {
+		t.Fatalf("expected skill index, got %s", got)
+	}
+	if !strings.Contains(got, "逐项检查边界、权限和测试。") {
+		t.Fatalf("expected matched detail, got %s", got)
+	}
+	if strings.Contains(got, "不要命中") {
+		t.Fatalf("unexpected unmatched detail: %s", got)
+	}
+}
+
+func TestUpdateCustomSkillsRejectsInvalidJSON(t *testing.T) {
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.UpdateCustomSkills(context.Background(), "agent-1", "user-1", `not json`)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
 }
 

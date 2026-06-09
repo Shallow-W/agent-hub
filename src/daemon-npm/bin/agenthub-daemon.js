@@ -67,15 +67,23 @@ const agentStartQueue = [];
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 
-// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
-// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
-// 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
-function buildPlatformMcpArgs(conversationId, userId) {
+// buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
+// AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
+// group context, matching Claude Code's per-task injection behavior.
+function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
+  if (agentId) mcpServerArgs.push('--agent-id', agentId);
+  return mcpServerArgs;
+}
+
+// buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
+function buildPlatformMcpArgs(conversationId, userId, agentId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
@@ -277,6 +285,32 @@ function isCodexAuthenticated(command) {
   return status !== null && /\blogged in\b/i.test(status);
 }
 
+function existingFile(value) {
+  return value && fs.existsSync(value) ? value : null;
+}
+
+function codexLocalInstallPaths() {
+  if (process.platform !== 'win32') return [];
+  const root = process.env.LOCALAPPDATA;
+  if (!root) return [];
+  const binRoot = path.join(root, 'OpenAI', 'Codex', 'bin');
+  try {
+    return fs.readdirSync(binRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(binRoot, entry.name, 'codex.exe'))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort((a, b) => {
+        try {
+          return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+        } catch {
+          return 0;
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
 function codexExtensionPath() {
   if (process.platform !== 'win32') return null;
   const root = process.env.USERPROFILE;
@@ -297,9 +331,22 @@ function codexExtensionPath() {
   return null;
 }
 
+function resolveCodexCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_CODEX_COMMAND),
+    ...codexLocalInstallPaths(),
+    codexExtensionPath(),
+    'codex',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'codex';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
-    return codexExtensionPath() || 'codex';
+    return resolveCodexCommand();
   }
   return cliTool;
 }
@@ -308,6 +355,9 @@ function scanAgents() {
   return CANDIDATES
     .map((candidate) => {
       const command = resolveCommand(candidate.cli_tool);
+      if (candidate.cli_tool === 'codex') {
+        console.log(`Codex command resolved: ${command}`);
+      }
       const version = commandVersion(command);
       if (version === null) return null;
       if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
@@ -643,17 +693,24 @@ function buildPromptParts(task) {
   // 从 context_messages 中提取系统指令和工具配置作为 system prompt
   let systemPrompt = '';
   let remainingCtx = ctx;
+  const contextSectionBoundary = '(?=\\n\\n\\[可用工具\\]|\\n\\n\\[平台 Skills\\]|\\n\\n\\[群聊背景\\]|\\n\\n\\[调度指令\\]|\\n\\n\\[依赖输出\\]|\\n\\n\\{|$)';
 
-  const sysSection = remainingCtx.match(/^(\[系统指令\]\n[\s\S]*?)(?=\n\n\[可用工具\]|\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const sysSection = remainingCtx.match(new RegExp(`^(\\[系统指令\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (sysSection) {
     systemPrompt += sysSection[1].replace('[系统指令]\n', '').trim();
-    remainingCtx = remainingCtx.slice(sysSection[0].length);
+    remainingCtx = remainingCtx.slice(sysSection[0].length).replace(/^\s+/, '');
   }
 
-  const toolsSection = remainingCtx.match(/^(\[可用工具\]\n[\s\S]*?)(?=\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const toolsSection = remainingCtx.match(new RegExp(`^(\\[可用工具\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (toolsSection) {
     systemPrompt += (systemPrompt ? '\n\n' : '') + '# 可用工具\n' + toolsSection[1].replace('[可用工具]\n', '').trim();
-    remainingCtx = remainingCtx.slice(toolsSection[0].length);
+    remainingCtx = remainingCtx.slice(toolsSection[0].length).replace(/^\s+/, '');
+  }
+
+  const skillsSection = remainingCtx.match(new RegExp(`^(\\[平台 Skills\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
+  if (skillsSection) {
+    systemPrompt += (systemPrompt ? '\n\n' : '') + '# 平台 Skills\n' + skillsSection[1].replace('[平台 Skills]\n', '').trim();
+    remainingCtx = remainingCtx.slice(skillsSection[0].length).replace(/^\s+/, '');
   }
 
   remainingCtx = remainingCtx.trim();
@@ -691,27 +748,78 @@ function buildPromptParts(task) {
   return { systemPrompt, userPrompt: parts.join('\n') };
 }
 
+function ensureTaskWorkdir(task) {
+  const safeID = String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-');
+  const dir = path.join(os.tmpdir(), 'agenthub-cli-tasks', safeID);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function ensureAgentHubCodexHome() {
+  const configured = process.env.AGENTHUB_CODEX_HOME;
+  const dir = configured || path.join(os.homedir(), '.agenthub', 'codex');
+  fs.mkdirSync(dir, { recursive: true });
+  const configFile = path.join(dir, 'config.toml');
+  if (!fs.existsSync(configFile)) {
+    fs.writeFileSync(configFile, [
+      'model_provider = "OpenAI"',
+      'model = "gpt-5.5"',
+      'review_model = "gpt-5.5"',
+      'model_reasoning_effort = "xhigh"',
+      'disable_response_storage = true',
+      'network_access = "enabled"',
+      'windows_wsl_setup_acknowledged = true',
+      '',
+      '[model_providers.OpenAI]',
+      'name = "OpenAI"',
+      'base_url = "https://www.aitoken-api.com"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      '',
+      '[features]',
+      'goals = true',
+      '',
+    ].join('\n'), 'utf8');
+  }
+  return dir;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
+    const codexMcpFallback = [
+      '[Codex MCP 适配]',
+      '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
+      '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
+      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
+      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
+      '',
+    ].join('\n');
+    const effectivePrompt = systemPrompt
+      ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : `${codexMcpFallback}${userPrompt}`;
+    const globalArgs = [
+      '--ask-for-approval',
+      'never',
+    ];
+    const execArgs = [
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--color',
+      'never',
+      '--output-last-message',
+      outputFile,
+    ];
     return {
       command,
-      args: [
-        '--ask-for-approval',
-        'never',
-        'exec',
-        '--skip-git-repo-check',
-        '--sandbox',
-        'read-only',
-        '--color',
-        'never',
-        '--output-last-message',
-        outputFile,
-        userPrompt,
-      ],
+      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
       outputFile,
+      cwd: ensureTaskWorkdir(task),
+      env: { CODEX_HOME: ensureAgentHubCodexHome() },
     };
   }
   if (task.cli_tool === 'claude') {
@@ -724,7 +832,7 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
-      ...buildPlatformMcpArgs(),
+      ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
     ];
     if (persistent) {
       args.push('--dangerously-skip-permissions');
@@ -786,6 +894,8 @@ async function executeTask(task) {
         ['--resume', spec.sessionId, ...spec.args],
         spec.stdin,
         spec.sessionId,
+        spec.cwd,
+        spec.env,
       ));
     } catch (_err) {
       killSessionProcess(spec.sessionId);
@@ -796,6 +906,8 @@ async function executeTask(task) {
           ['--session-id', spec.sessionId, ...spec.args],
           spec.stdin,
           spec.sessionId,
+          spec.cwd,
+          spec.env,
         ));
       } catch (_err2) {
         const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -804,11 +916,13 @@ async function executeTask(task) {
           ['--session-id', freshId, ...spec.args],
           spec.stdin,
           freshId,
+          spec.cwd,
+          spec.env,
         ));
       }
     }
   } else {
-    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin));
+    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin, undefined, spec.cwd, spec.env));
   }
 
   if (spec.outputFile && fs.existsSync(spec.outputFile)) {
@@ -944,18 +1058,134 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function lineEndIndex(text, start) {
+  const nl = text.indexOf('\n', start);
+  return nl === -1 ? text.length : nl + 1;
+}
+
+function lineText(text, start, end) {
+  const raw = text.slice(start, end);
+  return raw.endsWith('\n') ? raw.slice(0, -1).replace(/\r$/, '') : raw.replace(/\r$/, '');
+}
+
+function findFenceClose(text, start, preferLast) {
+  let pos = start;
+  let first = null;
+  let last = null;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    if (/^ {0,3}`{3,}\s*$/.test(line)) {
+      const found = { start: pos, end };
+      if (!first) first = found;
+      last = found;
+      if (!preferLast) return found;
+    }
+    pos = end;
+  }
+  return preferLast ? last : first;
+}
+
+function extractFencedBlocks(text) {
+  const blocks = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    const open = line.match(/^ {0,3}`{3,}([^`]*)$/);
+    if (!open) {
+      pos = end;
+      continue;
+    }
+
+    const language = (open[1] || '').trim().toLowerCase();
+    const preferLastClose = language === 'markdown' || language === 'md';
+    const close = findFenceClose(text, end, preferLastClose);
+    if (!close) break;
+
+    blocks.push({
+      language,
+      content: text.slice(end, close.start),
+      start: pos,
+      end: close.end,
+    });
+    pos = close.end;
+  }
+  return blocks;
+}
+
+function unwrapSingleMarkdownFence(text, fencedBlocks) {
+  if (fencedBlocks.length !== 1) return null;
+  const block = fencedBlocks[0];
+  if (block.language !== 'markdown' && block.language !== 'md') return null;
+  if (text.slice(0, block.start).trim() || text.slice(block.end).trim()) return null;
+  return block.content.replace(/\s+$/, '');
+}
+
+function extractMarkdownDocumentFence(fencedBlocks) {
+  for (const block of fencedBlocks) {
+    if (block.language !== 'markdown' && block.language !== 'md') continue;
+    const content = block.content.replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(content)) return content;
+  }
+  return null;
+}
+
+function looksLikeMarkdownDocument(text) {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownDocumentTitle(text) {
+  const match = text.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : 'Document Preview';
+}
+
 function parseArtifacts(text) {
   if (typeof text !== 'string' || !text.trim()) return [];
   const artifacts = [];
   const documentLanguages = new Set(['markdown', 'md', 'txt', 'text', 'json', 'csv']);
+  const fencedBlocks = extractFencedBlocks(text);
+  const wrappedMarkdown = unwrapSingleMarkdownFence(text, fencedBlocks);
+  if (wrappedMarkdown && looksLikeMarkdownDocument(wrappedMarkdown)) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(wrappedMarkdown),
+      content: wrappedMarkdown,
+    }];
+  }
+  const embeddedMarkdown = extractMarkdownDocumentFence(fencedBlocks);
+  if (embeddedMarkdown) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(embeddedMarkdown),
+      content: embeddedMarkdown,
+    }];
+  }
+  if (looksLikeMarkdownDocument(text)) {
+    const content = text.trim();
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(content),
+      content,
+    }];
+  }
 
   // 1) 提取围栏代码块 ```lang\n...\n```
   // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
-  const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let match;
-  while ((match = fenceRe.exec(text)) !== null) {
-    const language = (match[1] || '').trim().toLowerCase();
-    let content = match[2];
+  for (const block of fencedBlocks) {
+    const language = block.language;
+    let content = block.content;
     let filename = '';
     // 识别首行文件名注释：// file: xxx 、# file: xxx 、<!-- file: xxx -->
     const firstLine = content.split('\n', 1)[0] || '';
@@ -987,7 +1217,13 @@ function parseArtifacts(text) {
 
   // 2) 提取裸 http/https URL（在代码块外，简单去重）
   // 先剔除围栏代码块，避免把代码里的 import/注释 URL 误当作网页产物
-  const textOutsideFences = text.replace(/```[^\n`]*\n[\s\S]*?```/g, ' ');
+  let textOutsideFences = '';
+  let lastIndex = 0;
+  for (const block of fencedBlocks) {
+    textOutsideFences += text.slice(lastIndex, block.start) + ' ';
+    lastIndex = block.end;
+  }
+  textOutsideFences += text.slice(lastIndex);
   // 字符类排除空白、闭合括号/尖括号/引号，以及中文标点（。，、；）避免吞掉句末标点
   const urlRe = /\bhttps?:\/\/[^\s)\]<>"'，。、；：！？]+/g;
   const seen = new Set();
@@ -1002,11 +1238,13 @@ function parseArtifacts(text) {
   return artifacts;
 }
 
-function runProcess(command, args, stdin, sessionId) {
+function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
     const detached = process.platform !== 'win32';
     const child = spawn(spec.command, spec.args, {
+      cwd: cwd || undefined,
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,
@@ -1138,7 +1376,7 @@ function stopAgentProcess(agent_id) {
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId);
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -1349,7 +1587,7 @@ function processStartQueue() {
   }
 }
 
-function handleAgentStart(ws, payload) {
+async function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
@@ -1361,123 +1599,29 @@ function handleAgentStart(ws, payload) {
     return;
   }
 
-  const sessionId = crypto.randomUUID();
-  const command = resolveCommand(cli_tool);
-  const mcpArgs = buildPlatformMcpArgs();
-
-  const args = [
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--input-format', 'stream-json',
-    '--verbose',
-    ...mcpArgs,
-    '--session-id', sessionId,
-  ];
-  if (system_prompt) {
-    args.push('--system-prompt', system_prompt);
-  }
-
   try {
-    const spec = processSpec(command, args);
-    const child = spawn(spec.command, spec.args, {
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
+    const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false);
+    const { child, sessionId, sendPrompt } = result;
+
+    // Wait briefly to detect immediate startup failure (same pattern as dispatchToClaudeSlot)
+    await sleep(2000);
+    if (child.exitCode !== null) {
+      throw new Error(`Agent process exited immediately (code=${child.exitCode})`);
+    }
+
+    child.on('error', (err) => {
+      console.error(`Agent ${agent_id} process error: ${err.message}`);
     });
 
-    // Stdout line buffer for stream-json parsing
-    let stdoutBuf = '';
-    let resultResolver = null;
-
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdoutBuf += chunk;
-      const lines = stdoutBuf.split('\n');
-      stdoutBuf = lines.pop(); // keep incomplete last line
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'assistant') {
-            agentTurnStates.set(agent_id, 'active');
-          }
-          if (event.type === 'result') {
-            agentTurnStates.set(agent_id, 'idle');
-            // Turn complete — resolve pending promise
-            const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
-            if (event.is_error || event.subtype === 'error_during_execution') {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ error: text || 'Agent execution failed' });
-              }
-            } else {
-              if (resultResolver) {
-                const r = resultResolver;
-                resultResolver = null;
-                r({ result: text || '' });
-              }
-            }
-          }
-        } catch { /* ignore non-JSON lines */ }
-      }
-    });
-
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      console.error(`[agent:${agent_id}:err] ${chunk.trim()}`);
-    });
-
+    // Handle process exit — cleanup and notify backend
     child.on('close', (code) => {
-      if (code === 0) {
-        console.log(`Agent ${agent_id} process exited normally (code=0), keeping idle config`);
-      } else {
-        console.log(`Agent ${agent_id} process exited with code ${code}, keeping idle config for auto-restart`);
-      }
-      // Reject any pending result promise
-      if (resultResolver) {
-        const r = resultResolver;
-        resultResolver = null;
-        r({ error: `Agent process exited (code=${code})` });
-      }
       if (runningAgents.get(agent_id)?.process === child) {
         runningAgents.delete(agent_id);
       }
       agentTurnStates.delete(agent_id);
+      console.log(`Agent ${agent_id} process exited (code=${code})`);
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
-
-    // sendPrompt: write user message to stdin, return promise that resolves on result event
-    const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
-      const state = agentTurnStates.get(agent_id) || 'unknown';
-      console.log(`Agent ${agent_id} sending prompt (current state: ${state})`);
-      if (child.exitCode !== null) {
-        reject(new Error('Agent process not running'));
-        return;
-      }
-      resultResolver = resolve;
-      const msg = JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text: prompt }] },
-      });
-      child.stdin.write(msg + '\n');
-      // Timeout after 120s
-      setTimeout(() => {
-        if (resultResolver === resolve) {
-          resultResolver = null;
-          reject(new Error('Agent task timed out (120s)'));
-        }
-      }, 120000);
-    });
-
-    // Queue to serialize concurrent sendPrompt calls for the same agent.
-    // Each call chains onto the previous promise so only one is active at a time.
-    let queueTail = Promise.resolve();
-    const sendPrompt = (prompt) => {
-      const run = () => sendPromptRaw(prompt);
-      queueTail = queueTail.then(run, run);
-      return queueTail;
-    };
 
     runningAgents.set(agent_id, {
       process: child,
@@ -1783,8 +1927,38 @@ const MCP_TOOLS = [
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
   },
   {
+    name: 'list_agent_candidates',
+    description: '列出当前用户电脑上扫描到的 Agent 底座候选。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates'),
+  },
+  {
+    name: 'list_conversation_agents',
+    description: '列出指定会话中的智能体，用于了解当前会话可分派的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const convId = args.conversation_id || ctx.conversationId || '';
+      if (!convId) throw new Error('conversation_id is required (no conversation context)');
+      const res = await ctx.callApi('GET', `/api/conversations/${encodeURIComponent(convId)}/agents`);
+      if (!res || !Array.isArray(res.data)) return res;
+      res.data = res.data.map(a => ({
+        name: a.name,
+        role: a.role,
+        status: a.status,
+        tags: a.tags || '',
+      }));
+      return res;
+    },
+  },
+  {
     name: 'list_group_agents',
-    description: '列出指定群聊中的智能体，包括名称(name)、角色(role: orchestrator/worker/robot)、状态(status: online/offline)、CLI工具(cli_tool)、能力描述(system_prompt)等信息。用于 orchestrator 了解群内 agent 的能力并合理分派任务。',
+    description: '列出指定群聊中的智能体，包括名称、角色、状态和标签，用于 orchestrator 了解群内可分派 Agent。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1801,8 +1975,7 @@ const MCP_TOOLS = [
         name: a.name,
         role: a.role,
         status: a.status,
-        cli_tool: a.cli_tool,
-        description: a.system_prompt || '',
+        tags: a.tags || '',
       }));
       return res;
     },
@@ -1950,6 +2123,84 @@ const MCP_TOOLS = [
   },
 ];
 
+const DEFAULT_AGENT_TOOLS = [
+  'list_group_agents',
+  'get_messages',
+  'list_tasks',
+  'create_task',
+  'update_task',
+  'move_task_status',
+];
+const NO_AGENT_TOOLS = [];
+
+const TOOLSET_TEMPLATES = {
+  none: [],
+  basic: ['list_group_agents', 'get_messages'],
+  tasks: DEFAULT_AGENT_TOOLS,
+  orchestrator: [
+    ...DEFAULT_AGENT_TOOLS,
+    'list_conversation_agents',
+    'list_conversations',
+    'get_group_info',
+    'list_group_members',
+  ],
+  agent_builder: [
+    'list_agents',
+    'list_group_agents',
+    'list_agent_candidates',
+    'list_machines',
+  ],
+};
+
+function normalizeToolName(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function uniqueToolNames(values) {
+  return [...new Set(values.map(normalizeToolName).filter(Boolean))];
+}
+
+function parseToolsConfig(raw) {
+  if (!raw || typeof raw !== 'string') return { ok: false, config: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, config: null };
+    }
+    return { ok: true, config: parsed };
+  } catch {
+    return { ok: false, config: null };
+  }
+}
+
+function allowedToolsFromConfig(raw) {
+  const parsed = parseToolsConfig(raw);
+  if (!parsed.ok) return NO_AGENT_TOOLS;
+  const config = parsed.config;
+  if (!config) return NO_AGENT_TOOLS;
+  if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
+  if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
+  if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
+    return TOOLSET_TEMPLATES[config.toolset];
+  }
+  return NO_AGENT_TOOLS;
+}
+
+async function resolveAllowedTools(ctx) {
+  if (!ctx.agentId) return NO_AGENT_TOOLS;
+  if (ctx.allowedTools !== null) return ctx.allowedTools;
+  const res = await ctx.callApi('GET', '/api/agents');
+  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
+  return ctx.allowedTools;
+}
+
+async function isToolAllowed(ctx, toolName) {
+  const allowed = await resolveAllowedTools(ctx);
+  return allowed.includes(toolName);
+}
+
 function writeMcp(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -1983,19 +2234,30 @@ async function handleMcpMessage(line, toolMap, ctx) {
     return;
   }
   if (method === 'tools/list') {
+    const allowed = await resolveAllowedTools(ctx);
+    const tools = MCP_TOOLS
+      .filter((tool) => allowed.includes(tool.name))
+      .map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
     writeMcp({
       jsonrpc: '2.0',
       id,
-      result: {
-        tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
-      },
+      result: { tools },
     });
     return;
   }
   if (method === 'tools/call') {
-    const tool = toolMap.get(params && params.name);
+    const toolName = params && params.name;
+    const tool = toolMap.get(toolName);
     if (!tool) {
-      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${params && params.name}` } });
+      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${toolName}` } });
+      return;
+    }
+    if (!(await isToolAllowed(ctx, toolName))) {
+      writeMcp({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: `工具未授权: ${toolName}` }], isError: true },
+      });
       return;
     }
     try {
@@ -2025,6 +2287,8 @@ async function runMcpServer(serverURL, apiKey) {
   const ctx = {
     conversationId: readArg('--conversation-id') || null,
     userId: readArg('--user-id') || null,
+    agentId: readArg('--agent-id') || null,
+    allowedTools: null,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };

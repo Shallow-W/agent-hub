@@ -12,7 +12,7 @@ import { useAgents } from '@/hooks/useAgents';
 import type { Agent, AgentStatus, DaemonMachine } from '@/types/agent';
 import { ConnectComputerModal } from './ConnectComputerModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
-import { formatDateTime, parseCapabilities, resolveAgentAvatar } from './agentPresentation';
+import { formatDateTime, resolveAgentAvatar } from './agentPresentation';
 import styles from './AgentList.module.css';
 
 interface AgentListProps {
@@ -105,7 +105,7 @@ export const AgentList: React.FC<AgentListProps> = ({
 
   const handleRefreshAll = async () => {
     try {
-      await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
+      await Promise.all([refresh(true), refreshMachines(true), refreshCandidates(true)]);
     } catch {
       return;
     }
@@ -223,7 +223,6 @@ export const AgentList: React.FC<AgentListProps> = ({
                       <div className={styles.machineEmpty}>暂无 Agent</div>
                     ) : (
                       machineAgents.map((agent) => {
-                        const capabilities = parseCapabilities(agent.capabilities_json);
                         return (
                           <div
                             key={agent.id}
@@ -268,14 +267,28 @@ export const AgentList: React.FC<AgentListProps> = ({
                                 </Popconfirm>
                               )}
                             </div>
-                            {capabilities.length > 0 && (
+                              {(() => {
+                            const isBuiltinSystem = agent.type === 'system' && !agent.user_id;
+                            if (isBuiltinSystem) return null;
+                            const tags = (() => {
+                              if (!agent.tags || agent.tags === '[]') return [];
+                              try {
+                                const arr = JSON.parse(agent.tags);
+                                return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : [];
+                              } catch {
+                                return [];
+                              }
+                            })();
+                            if (tags.length === 0) return null;
+                            return (
                               <div className={styles.agentTags}>
-                                {capabilities.slice(0, 3).map((item) => (
+                                {tags.slice(0, 3).map((item) => (
                                   <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
                                 ))}
-                                {capabilities.length > 3 && <Tag>+{capabilities.length - 3}</Tag>}
+                                {tags.length > 3 && <Tag>+{tags.length - 3}</Tag>}
                               </div>
-                            )}
+                            );
+                          })()}
                           </div>
                         );
                       })
@@ -297,7 +310,7 @@ export const AgentList: React.FC<AgentListProps> = ({
         onCreate={createDaemonMachine}
         onDeleteMachine={deleteDaemonMachine}
         onRefresh={async () => {
-          await Promise.all([refresh(), refreshMachines(), refreshCandidates()]);
+          await Promise.all([refresh(true), refreshMachines(true), refreshCandidates(true)]);
         }}
       />
       <AvatarPickerModal

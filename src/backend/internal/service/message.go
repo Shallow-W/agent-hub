@@ -14,6 +14,7 @@ import (
 )
 
 const maxMessageLen = 10000 // 10KB
+const maxBlackboardManualContextLen = 8000
 
 const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 
@@ -46,6 +47,11 @@ type MsgRepo interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
+	UnpinMessage(ctx context.Context, conversationID, messageID string) error
+	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
+	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
+	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -89,19 +95,20 @@ type AgentRepoForMsg interface {
 }
 
 var (
-	ErrMsgConvNotFound = errors.New("对话不存在")
-	ErrMsgConvNoPerm   = errors.New("无权操作此对话")
-	ErrMsgTooLong      = errors.New("消息内容过长")
-	ErrMsgNotFound     = errors.New("消息不存在")
-	ErrMsgNotSender    = errors.New("只能撤回自己的消息")
-	ErrMsgRecallExpired = errors.New("消息已超过2分钟，无法撤回")
-	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
-	ErrMsgEmptyContent  = errors.New("消息内容不能为空")
-	ErrMsgReplyNotFound = errors.New("回复的消息不存在")
-	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
-	ErrMsgAgentNoPerm  = errors.New("无权使用此 Agent")
-	ErrMsgAgentOffline = errors.New("Agent 未连接电脑，无法执行真实 CLI")
-	ErrMsgAgentTimeout = errors.New("Agent 执行超时")
+	ErrMsgConvNotFound      = errors.New("对话不存在")
+	ErrMsgConvNoPerm        = errors.New("无权操作此对话")
+	ErrMsgTooLong           = errors.New("消息内容过长")
+	ErrMsgNotFound          = errors.New("消息不存在")
+	ErrMsgNotSender         = errors.New("只能撤回自己的消息")
+	ErrMsgRecallExpired     = errors.New("消息已超过2分钟，无法撤回")
+	ErrMsgAlreadyDeleted    = errors.New("消息已被撤回")
+	ErrMsgEmptyContent      = errors.New("消息内容不能为空")
+	ErrMsgReplyNotFound     = errors.New("回复的消息不存在")
+	ErrMsgReplyWrongConv    = errors.New("回复的消息不属于当前对话")
+	ErrMsgAgentNoPerm       = errors.New("无权使用此 Agent")
+	ErrMsgAgentOffline      = errors.New("Agent 未连接电脑，无法执行真实 CLI")
+	ErrMsgAgentTimeout      = errors.New("Agent 执行超时")
+	ErrMsgBlackboardTooLong = errors.New("黑板内容过长")
 )
 
 // MessageService 消息业务逻辑
@@ -113,6 +120,7 @@ type MessageService struct {
 	cacher    MessageCacher
 	orchSvc   *OrchestratorService
 	daemonHub *ws.DaemonHub
+	deploySvc *DeploymentService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -144,6 +152,11 @@ func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 // SetDaemonHub 注入 DaemonHub（避免循环依赖，由 main.go 调用）
 func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
+}
+
+// SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。
+func (s *MessageService) SetDeploymentService(d *DeploymentService) {
+	s.deploySvc = d
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -221,19 +234,27 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 
 	result := &SendMessageResult{UserMessage: msg}
 
+	// 聊天「部署」指令拦截：识别后直接部署对话里最新产物并回部署状态卡片，
+	// 不经过 Agent（agent 离线也可用），且不再走常规 Agent 派发。
+	if s.deploySvc != nil && isDeployCommand(content) {
+		go s.asyncDeploy(convID, userID)
+		go s.postPersist(convID, userID, msg)
+		return result, nil
+	}
+
 	// Agent dispatch routing based on conversation type
 	switch conv.Type {
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
 		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content)
+			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
 		if s.orchSvc != nil {
 			parsedMentions := ParseMentions(content)
 			if len(mentions) > 0 || len(parsedMentions) > 0 {
-				go s.asyncMentionDispatch(convID, userID, content)
+				go s.asyncMentionDispatch(convID, userID, content, msg.Attachments)
 			}
 		}
 	default:
@@ -410,6 +431,127 @@ func (s *MessageService) SearchMessages(ctx context.Context, conversationID, use
 		return nil, err
 	}
 	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+}
+
+// PinMessage pins a message into the shared conversation context blackboard.
+func (s *MessageService) PinMessage(ctx context.Context, convID, messageID, userID string) (*model.MessagePin, error) {
+	if err := s.ensureMessageContextAccess(ctx, convID, messageID, userID); err != nil {
+		return nil, err
+	}
+	pin, err := s.msgRepo.PinMessage(ctx, convID, messageID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("pin message: %w", err)
+	}
+	s.invalidateMessageCache(ctx, convID)
+	return pin, nil
+}
+
+// UnpinMessage removes a message from the shared conversation context blackboard.
+func (s *MessageService) UnpinMessage(ctx context.Context, convID, messageID, userID string) error {
+	if err := s.ensureMessageContextAccess(ctx, convID, messageID, userID); err != nil {
+		return err
+	}
+	if err := s.msgRepo.UnpinMessage(ctx, convID, messageID); err != nil {
+		return fmt.Errorf("unpin message: %w", err)
+	}
+	s.invalidateMessageCache(ctx, convID)
+	return nil
+}
+
+// ListPinnedContext returns the user's readable pinned context entries.
+func (s *MessageService) ListPinnedContext(ctx context.Context, convID, userID string) ([]model.PinnedMessage, error) {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return nil, ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return nil, err
+	}
+	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, 20)
+	if err != nil {
+		return nil, fmt.Errorf("list pinned context: %w", err)
+	}
+	if items == nil {
+		items = []model.PinnedMessage{}
+	}
+	return items, nil
+}
+
+// GetConversationBlackboard returns the user-authored long-term context for a conversation.
+func (s *MessageService) GetConversationBlackboard(ctx context.Context, convID, userID string) (*model.ConversationBlackboard, error) {
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation blackboard: %w", err)
+	}
+	if blackboard == nil {
+		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
+	}
+	return blackboard, nil
+}
+
+// UpdateConversationBlackboard saves user-authored long-term context for a conversation.
+func (s *MessageService) UpdateConversationBlackboard(ctx context.Context, convID, userID, manualContext string) (*model.ConversationBlackboard, error) {
+	if len([]rune(manualContext)) > maxBlackboardManualContextLen {
+		return nil, ErrMsgBlackboardTooLong
+	}
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.UpsertConversationBlackboard(ctx, convID, manualContext, userID)
+	if err != nil {
+		return nil, fmt.Errorf("update conversation blackboard: %w", err)
+	}
+	return blackboard, nil
+}
+
+func (s *MessageService) ensureConversationAccess(ctx context.Context, convID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	return s.checkMembership(ctx, conv, userID)
+}
+
+func (s *MessageService) ensureMessageContextAccess(ctx context.Context, convID, messageID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return err
+	}
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil || msg.DeletedAt != nil {
+		return ErrMsgNotFound
+	}
+	if msg.ConversationID != convID {
+		return ErrMsgReplyWrongConv
+	}
+	return nil
+}
+
+func (s *MessageService) invalidateMessageCache(ctx context.Context, convID string) {
+	if s.cacher == nil {
+		return
+	}
+	if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
+		slog.Warn("invalidate cache after context pin change failed", "conversation_id", convID, "error", err)
+	}
 }
 
 // ClearUnread 清除未读计数
@@ -608,6 +750,9 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if agent.MachineID == nil || *agent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
 	}
+	if agent.Status == "stopped" {
+		return nil, fmt.Errorf("agent %q 已被用户停止", agent.Name)
+	}
 
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, userContent, contextMessages)
 	if err != nil {
@@ -681,8 +826,69 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
 
+// isDeployCommand 判断一条消息是否为聊天「部署」指令（短消息 + 关键词开头，避免长句误触）。
+func isDeployCommand(content string) bool {
+	c := strings.TrimSpace(content)
+	if c == "" {
+		return false
+	}
+	lower := strings.ToLower(c)
+	if lower == "/deploy" || strings.HasPrefix(lower, "/deploy ") {
+		return true
+	}
+	if len([]rune(c)) > 12 {
+		return false
+	}
+	for _, kw := range []string{"一键部署", "部署", "发布", "deploy"} {
+		if c == kw || strings.HasPrefix(c, kw) || strings.HasPrefix(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// asyncDeploy 异步处理聊天「部署」指令：部署对话最新产物，并以「部署助手」身份回一条带
+// 部署状态卡片的 assistant 消息（部署信息塞进 artifacts_json 元数据，前端据此渲染卡片）。
+func (s *MessageService) asyncDeploy(convID, userID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("asyncDeploy recovered", "panic", r)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var content, metaJSON string
+	dep, err := s.deploySvc.DeployLatestInConversation(ctx, convID, userID)
+	if err != nil {
+		if errors.Is(err, ErrDeployNoArtifact) {
+			content = "当前对话还没有可部署的产物，先让 Agent 生成一个网页/文档/代码产物，再发送「部署」。"
+		} else {
+			slog.Warn("chat deploy failed", "convID", convID, "error", err)
+			content = "部署失败了：" + err.Error()
+		}
+		meta, _ := json.Marshal(map[string]any{"agent_name": "部署助手"})
+		metaJSON = string(meta)
+	} else {
+		content = "✅ 已部署成功，预览地址：" + dep.URL
+		meta, _ := json.Marshal(map[string]any{
+			"agent_name": "部署助手",
+			"deployment": dep,
+		})
+		metaJSON = string(meta)
+	}
+
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, metaJSON, nil, nil, nil, nil)
+	if err != nil {
+		slog.Warn("create deploy reply failed", "convID", convID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, msg)
+}
+
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
-func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncMentionDispatch recovered", "panic", r)
@@ -695,9 +901,10 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments)
 	if err != nil {
 		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
@@ -709,7 +916,7 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
-func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
@@ -724,27 +931,63 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
 
-		// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
-		if s.orchSvc != nil {
-			agent, err := s.agentRepo.GetByID(ctx, agentID)
-			if err == nil && agent != nil {
-				// KB 优先从消息内容中预解析
-				kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-				if kbCtx != "" {
-					contextMessages = kbCtx + contextMessages
-				}
-				// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
-				// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
-				contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
-			}
+	// Include text extracted from this message's attachments before shared context.
+	if s.orchSvc != nil {
+		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+			contextMessages = attachCtx + contextMessages
 		}
+	}
 
-		agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
+	if s.orchSvc != nil {
+		agent, err := s.agentRepo.GetByID(ctx, agentID)
+		if err == nil && agent != nil {
+			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
+				contextMessages = blackboardCtx + contextMessages
+			}
+			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
+				contextMessages = kbCtx + contextMessages
+			}
+			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
+		}
+	}
+
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string) {
+	meta, _ := json.Marshal(map[string]string{"agent_name": "AgentHub"})
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, nil, nil, nil)
+	if err != nil {
+		slog.Warn("create agent failure message failed", "convID", convID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, msg)
+}
+
+func shortAgentError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	text := err.Error()
+	if strings.Contains(text, "You've hit your usage limit") {
+		return "Codex CLI 当前额度已用尽，请到 Codex 设置查看 usage，或等待额度恢复。"
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+		text = strings.TrimSpace(lines[0])
+	}
+	if len([]rune(text)) > 240 {
+		runes := []rune(text)
+		text = string(runes[:240]) + "..."
+	}
+	return text
 }
 
 func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {

@@ -17,6 +17,8 @@ import (
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/internal/ghpages"
+	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
@@ -69,6 +71,21 @@ type Config struct {
 		RPS   float64 `koanf:"rps"`
 		Burst int     `koanf:"burst"`
 	} `koanf:"rate_limit"`
+	GitHub struct {
+		Token     string `koanf:"token"`      // PAT（classic，repo 权限）；建议用环境变量 GITHUB_TOKEN 注入
+		Owner     string `koanf:"owner"`      // 仓库归属账号，如 Shallow-W；可用 GITHUB_PAGES_OWNER 覆盖
+		PagesRepo string `koanf:"pages_repo"` // 专用公开仓库名，如 agent-hub-sites；可用 GITHUB_PAGES_REPO 覆盖
+	} `koanf:"github"`
+}
+
+// firstNonEmpty 返回第一个非空字符串（用于环境变量覆盖配置文件）。
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func parseLogLevel(level string) slog.Level {
@@ -82,6 +99,15 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// isFalsy 判断环境变量是否表示「关闭」（false/0/no/off，忽略大小写与首尾空白）。
+func isFalsy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }
 
 func main() {
@@ -108,6 +134,7 @@ func main() {
 	convRepo := repository.NewConversationRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	artifactRepo := repository.NewArtifactRepo(db)
+	deploymentRepo := repository.NewDeploymentRepo(db)
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
@@ -123,8 +150,21 @@ func main() {
 	userSvc := service.NewUserService(userRepo)
 	friendSvc := service.NewFriendService(friendRepo)
 	groupSvc := service.NewGroupService(repository.NewGroupRepo(db))
+	orchCardRepo := repository.NewOrchTaskCardRepo(db)
 	taskSvc := service.NewTaskService(taskRepo)
+	taskSvc.SetOrchCardRepo(orchCardRepo)
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
+	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
+	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
+	// GitHub Pages 永久发布（环境变量优先于 config.yaml）。三项齐全才启用，否则 publisher 为 nil。
+	if pub := ghpages.NewPublisher(
+		firstNonEmpty(os.Getenv("GITHUB_TOKEN"), cfg.GitHub.Token),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo),
+	); pub != nil {
+		deploymentSvc.SetGitHubPublisher(pub)
+		logger.Info("GitHub Pages 永久发布已启用", "owner", firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner), "repo", firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo))
+	}
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -148,17 +188,21 @@ func main() {
 		logger.Info("redis connected")
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
+	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
-	agentSvc.SetJWTSecret(cfg.JWT.Secret)
+	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
-	orchSvc.SetJWTSecret(cfg.JWT.Secret)
+	orchSvc.SetTokenIssuer(tokenIssuer)
 	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	orchSvc.SetTaskSvc(taskSvc)
+	// 服务端抽取消息附件文本时需要定位上传文件。
+	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
+	msgSvc.SetDeploymentService(deploymentSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -183,11 +227,12 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadSvc)
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
-	agentHandler := handler.NewAgentHandler(agentSvc)
+	agentHandler := handler.NewAgentHandler(agentSvc, hub)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
-	taskHandler := handler.NewTaskHandler(taskSvc)
+	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
+	deploymentHandler := handler.NewDeploymentHandler(deploymentSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
 
 	// 路由设置
@@ -286,8 +331,13 @@ func main() {
 			convRoutes.POST("/:id/messages", msgHandler.Send)
 			convRoutes.GET("/:id/messages", msgHandler.History)
 			convRoutes.GET("/:id/messages/search", msgHandler.Search)
+			convRoutes.GET("/:id/pinned-context", msgHandler.PinnedContext)
+			convRoutes.GET("/:id/blackboard", msgHandler.GetBlackboard)
+			convRoutes.PUT("/:id/blackboard", msgHandler.UpdateBlackboard)
 			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
 			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
+			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
+			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
@@ -299,6 +349,8 @@ func main() {
 		apiGroup.POST("/agents", agentHandler.Create)
 		apiGroup.PUT("/agents/:id", agentHandler.Update)
 		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
+		apiGroup.PUT("/agents/:id/tags", agentHandler.UpdateTags)
+		apiGroup.PUT("/agents/:id/custom-skills", agentHandler.UpdateCustomSkills)
 		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
 		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
 		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
@@ -319,6 +371,7 @@ func main() {
 			taskRoutes.PUT("/:id", taskHandler.Update)
 			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
 			taskRoutes.DELETE("/:id", taskHandler.Delete)
+			taskRoutes.GET("/orch-cards", taskHandler.ListOrchCards)
 		}
 
 		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
@@ -328,8 +381,19 @@ func main() {
 			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
 			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
 			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
+			artifactRoutes.POST("/:rootId/deploy", deploymentHandler.Deploy)
+			artifactRoutes.POST("/:rootId/deploy-github", deploymentHandler.DeployGitHub)
 		}
+
+		// 部署状态查询（需要鉴权）
+		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
 	}
+
+	// 部署产物的公开访问（凭 deployment id 作能力令牌，无需鉴权，便于二维码/分享/直链下载）
+	router.GET("/api/sites/:id/*filepath", middleware.ValidateUUIDParam("id"), deploymentHandler.ServeSite)
+	router.GET("/api/deployments/:id/download", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
+	// 带文件名末段的下载（:name 仅用于让浏览器存成正确的 .zip 名，handler 忽略其值）
+	router.GET("/api/deployments/:id/download/:name", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
 
 	// 好友路由（需要鉴权）
 	friendGroup := router.Group("/api/friends")
@@ -350,6 +414,7 @@ func main() {
 	{
 		groupRoutes.POST("", groupHandler.CreateGroup)
 		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)
+		groupRoutes.PUT("/:id", groupHandler.UpdateGroupInfo)
 		groupRoutes.POST("/:id/members", groupHandler.AddMember)
 		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
 		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
@@ -367,11 +432,11 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
-	router.POST("/daemon/register", daemonHandler.RegisterHTTP)
-	router.GET("/daemon/agent-token", daemonHandler.IssueAgentToken)
-	router.GET("/daemon/tasks", daemonHandler.ClaimTask)
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.CompleteTask)
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.Heartbeat)
+	router.POST("/daemon/register", daemonHandler.WithMachine(daemonHandler.RegisterHTTP))
+	router.GET("/daemon/agent-token", daemonHandler.WithMachine(daemonHandler.IssueAgentToken))
+	router.GET("/daemon/tasks", daemonHandler.WithMachine(daemonHandler.ClaimTask))
+	router.POST("/daemon/tasks/:id/complete", daemonHandler.WithMachine(daemonHandler.CompleteTask))
+	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.WithMachine(daemonHandler.Heartbeat))
 
 	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
 	mcpGroup := router.Group("/mcp")
@@ -379,6 +444,7 @@ func main() {
 	{
 		mcpGroup.GET("/conversations", convHandler.List)
 		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
+		mcpGroup.GET("/conversations/:id/messages", msgHandler.History)
 
 		mcpTaskRoutes := mcpGroup.Group("/tasks")
 		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
@@ -393,6 +459,7 @@ func main() {
 		mcpGroup.GET("/agents", agentHandler.MCPList)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
 	}
@@ -403,6 +470,16 @@ func main() {
 	go hub.Run(ctx)
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
+
+	// 零配置内网穿透：未显式配置 PUBLIC_BASE_URL 且未禁用（AUTO_TUNNEL=false）时，
+	// 自动拉起 cloudflared 快速隧道并把分配到的公网域名回填到部署服务——这样无论在哪台
+	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
+	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
+		cacheDir := filepath.Join("data", "bin")
+		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
+			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
+		}
+	}
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

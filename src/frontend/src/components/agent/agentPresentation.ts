@@ -3,6 +3,7 @@ import type { Agent } from '@/types/agent';
 export interface Skill {
   name: string;
   description?: string;
+  trigger?: string;
   detail?: string;
   source_path?: string;
   auto?: boolean;
@@ -64,8 +65,15 @@ export const USER_AVATAR_KEYS: string[] = Array.from(
   (_, i): string => `user${i + 1}`,
 );
 
+/** 群聊头像 key（与 public/avatars/group-1.svg ~ group-8.svg 对应）。 */
+export const GROUP_AVATAR_KEYS: string[] = Array.from(
+  { length: 8 },
+  (_, i): string => `group-${i + 1}`,
+);
+
 /** 根据 key 返回静态头像 URL。 */
 export function avatarUrl(key: string): string {
+  if (key.startsWith('group-')) return `/avatars/${key}.svg`;
   return `/avatars/${key}.png`;
 }
 

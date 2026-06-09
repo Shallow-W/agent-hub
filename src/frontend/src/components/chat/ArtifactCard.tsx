@@ -8,6 +8,7 @@ import {
 import type { Artifact } from '@/types/message';
 import { WebpageFrame } from './WebpageFrame';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
+import { DeployButton } from './DeployButton';
 import styles from './ArtifactCard.module.css';
 
 interface Props {
@@ -75,6 +76,7 @@ export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
                   <span className={styles.webTitle}>{artifactTitle(artifact)}</span>
                   {artifact.url && <span className={styles.webUrl}>{artifact.url}</span>}
                 </div>
+                <DeployButton artifact={artifact} text />
                 <ExpandOutlined />
               </div>
             </div>
@@ -101,6 +103,7 @@ export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
               <span className={styles.documentTitle}>{artifactTitle(artifact)}</span>
               <span className={styles.documentSummary}>{documentSummary(artifact)}</span>
             </div>
+            <DeployButton artifact={artifact} text />
             <ExpandOutlined />
           </div>
         );

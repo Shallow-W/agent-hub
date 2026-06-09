@@ -56,7 +56,7 @@
 
 .conversationAvatar {
   flex-shrink: 0;
-  background: var(--gradient-agent) !important;
+  background: var(--gradient-agent);
   color: var(--color-bg-white);
   font-size: 12px;
   font-weight: 700;
@@ -202,6 +202,77 @@
   width: 30px;
   height: 30px;
   border-radius: 10px;
+}
+
+.blackboardEditor {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.blackboardSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blackboardSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pinnedList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.blackboardLoading {
+  padding: 18px 0;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.pinnedItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
+}
+
+.pinnedItem:last-child {
+  border-bottom: none;
+}
+
+.pinnedItemBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.pinnedItemMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.pinnedItemContent {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .highlightFlash {

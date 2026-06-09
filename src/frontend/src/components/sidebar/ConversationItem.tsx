@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
-import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import styles from './ConversationItem.module.css';
 
 interface ConversationItemProps {
@@ -23,6 +23,7 @@ interface ConversationItemProps {
   onDelete: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
+  onUnarchive?: () => void;
   onInviteMembers?: () => void;
   onRename?: (newTitle: string) => void;
   lastMessage?: string;
@@ -79,6 +80,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
   onDelete,
   onTogglePin,
   onArchive,
+  onUnarchive,
   onInviteMembers,
   onRename,
   lastMessage,
@@ -134,10 +136,10 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
     {
       key: 'archive',
       icon: <InboxOutlined />,
-      label: '归档',
+      label: onUnarchive ? '取消归档' : '归档',
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        onArchive();
+        onUnarchive ? onUnarchive() : onArchive();
       },
     },
     { type: 'divider' },
@@ -187,9 +189,14 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           />
         ) : isGroup ? (
           <Avatar
-            style={{ backgroundColor: '#722ed1', flexShrink: 0, borderRadius: 10 }}
+            style={{
+              backgroundColor: conversation.avatar ? 'transparent' : '#722ed1',
+              flexShrink: 0,
+              borderRadius: conversation.avatar ? '50%' : 10,
+            }}
             size={32}
-            icon={<TeamOutlined />}
+            src={conversation.avatar ? (/^(https?:|data:|\/)/i.test(conversation.avatar) ? conversation.avatar : avatarUrl(conversation.avatar)) : undefined}
+            icon={!conversation.avatar ? <TeamOutlined /> : undefined}
           />
         ) : (
           <Avatar

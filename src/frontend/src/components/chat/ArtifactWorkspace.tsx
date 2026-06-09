@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, type ReactNode } from 'react';
 import { Modal, Tabs } from 'antd';
 import { CodeOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Artifact } from '@/types/message';
 import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
+import { DeployButton } from './DeployButton';
 import styles from './ArtifactWorkspace.module.css';
 
 interface Props {
@@ -26,40 +28,122 @@ function isMarkdownArtifact(artifact: Artifact): boolean {
   return language === 'markdown' || language === 'md' || filename?.endsWith('.md') || filename?.endsWith('.markdown') || false;
 }
 
+function isPreviewableDocument(artifact?: Artifact | null): boolean {
+  if (!artifact) return false;
+  return artifact.type === 'document' || artifact.type === 'file' || isMarkdownArtifact(artifact);
+}
+
+function markdownText(children: ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(markdownText).join('');
+  if (React.isValidElement<{ children?: ReactNode }>(children)) {
+    return markdownText(children.props.children);
+  }
+  return '';
+}
+
+function looksLikeMarkdownDocument(content: string): boolean {
+  const src = content.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function unwrapMarkdownDocumentFence(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const first = lines.findIndex((line) => line.trim() !== '');
+  let last = lines.length - 1;
+  while (last >= 0 && (lines[last] ?? '').trim() === '') last -= 1;
+
+  if (first < 0 || last <= first) return content;
+  const firstLine = lines[first] ?? '';
+  const lastLine = lines[last] ?? '';
+  const opener = firstLine.match(/^ {0,3}`{3,}\s*(markdown|md)\s*$/i);
+  if (!opener || !/^ {0,3}`{3,}\s*$/.test(lastLine)) return content;
+  return lines.slice(first + 1, last).join('\n').replace(/\s+$/, '');
+}
+
+function markdownDocumentContent(content: string): string {
+  const unwrapped = unwrapMarkdownDocumentFence(content);
+  if (unwrapped !== content) return unwrapped;
+
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^ {0,3}`{3,}\s*(markdown|md)\s*$/i.test(lines[i] ?? '')) continue;
+    for (let j = lines.length - 1; j > i; j -= 1) {
+      if (!/^ {0,3}`{3,}\s*$/.test(lines[j] ?? '')) continue;
+      const candidate = lines.slice(i + 1, j).join('\n').replace(/\s+$/, '');
+      if (looksLikeMarkdownDocument(candidate)) return candidate;
+      break;
+    }
+  }
+  const headingStart = normalized.search(/^#{1,3}\s+\S.+$/m);
+  if (headingStart > 0) {
+    const candidate = normalized.slice(headingStart).replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(candidate)) return candidate;
+  }
+  return content;
+}
+
 const MarkdownPreview: React.FC<{ content: string }> = ({ content }) => {
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
   let checkboxIndex = 0;
+  const displayContent = markdownDocumentContent(content);
+  const markdownComponents: Components = {
+    input: (props) => {
+      if (props.type !== 'checkbox') {
+        return <input {...props} />;
+      }
+      const index = checkboxIndex;
+      checkboxIndex += 1;
+      const checked = checkedItems[index] ?? Boolean(props.checked);
+
+      return (
+        <input
+          {...props}
+          disabled={false}
+          checked={checked}
+          className={styles.taskCheckbox}
+          onChange={(event) => {
+            setCheckedItems((current) => ({
+              ...current,
+              [index]: event.target.checked,
+            }));
+          }}
+        />
+      );
+    },
+    code: ({ children }) => (
+      <span className={styles.documentCodeText}>{children}</span>
+    ),
+    pre: ({ children }) => {
+      const text = markdownText(children);
+      if (looksLikeMarkdownDocument(text)) {
+        return (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {markdownDocumentContent(text)}
+          </ReactMarkdown>
+        );
+      }
+      return (
+        <div className={styles.documentPlainText}>
+          {text}
+        </div>
+      );
+    },
+  };
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      components={{
-        input: (props) => {
-          if (props.type !== 'checkbox') {
-            return <input {...props} />;
-          }
-          const index = checkboxIndex;
-          checkboxIndex += 1;
-          const checked = checkedItems[index] ?? Boolean(props.checked);
-
-          return (
-            <input
-              {...props}
-              disabled={false}
-              checked={checked}
-              className={styles.taskCheckbox}
-              onChange={(event) => {
-                setCheckedItems((current) => ({
-                  ...current,
-                  [index]: event.target.checked,
-                }));
-              }}
-            />
-          );
-        },
-      }}
+      components={markdownComponents}
     >
-      {content}
+      {displayContent}
     </ReactMarkdown>
   );
 };
@@ -82,7 +166,7 @@ const PreviewView: React.FC<{ artifact: Artifact }> = ({ artifact }) => {
     }
   }
 
-  if (artifact.type === 'document' || artifact.type === 'file') {
+  if (artifact.type === 'document' || artifact.type === 'file' || isMarkdownArtifact(artifact)) {
     if (!artifact.content) {
       return (
         <div className={styles.emptyHint}>
@@ -151,18 +235,18 @@ const MetaView: React.FC<{ artifact: Artifact; agentName?: string | null }> = ({
 };
 
 export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName }) => {
-  const defaultTab = artifact?.type === 'webpage' || artifact?.type === 'document' || artifact?.type === 'file'
+  const defaultTab = artifact?.type === 'webpage' || isPreviewableDocument(artifact)
     ? 'preview'
     : 'code';
   const [activeKey, setActiveKey] = useState(defaultTab);
 
   React.useEffect(() => {
     setActiveKey(
-      artifact?.type === 'webpage' || artifact?.type === 'document' || artifact?.type === 'file'
+      artifact?.type === 'webpage' || isPreviewableDocument(artifact)
         ? 'preview'
         : 'code',
     );
-  }, [artifact?.id, artifact?.type]);
+  }, [artifact?.id, artifact?.type, artifact?.language, artifact?.filename]);
 
   if (!artifact) return null;
 
@@ -184,7 +268,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
     );
   }
 
-  const isDocument = artifact.type === 'document' || artifact.type === 'file';
+  const isDocument = isPreviewableDocument(artifact);
 
   if (isDocument) {
     return (
@@ -228,6 +312,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
               </>
             )}
           </span>
+          <DeployButton artifact={artifact} />
         </div>
         <Tabs
           activeKey={activeKey}

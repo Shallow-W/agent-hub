@@ -12,7 +12,9 @@ import (
 )
 
 type fakeMsgRepo struct {
-	messages      []model.Message
+	messages       []model.Message
+	pinnedMessages []model.PinnedMessage
+	blackboard     *model.ConversationBlackboard
 	savedArtifacts map[string][]model.Artifact
 }
 
@@ -72,6 +74,41 @@ func (r *fakeMsgRepo) SaveArtifacts(ctx context.Context, messageID string, artif
 	}
 	r.savedArtifacts[messageID] = artifacts
 	return nil
+}
+
+func (r *fakeMsgRepo) PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error) {
+	return &model.MessagePin{
+		ID:             "pin-1",
+		ConversationID: conversationID,
+		MessageID:      messageID,
+		CreatedBy:      userID,
+		CreatedAt:      time.Now(),
+	}, nil
+}
+
+func (r *fakeMsgRepo) UnpinMessage(ctx context.Context, conversationID, messageID string) error {
+	return nil
+}
+
+func (r *fakeMsgRepo) ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error) {
+	return r.pinnedMessages, nil
+}
+
+func (r *fakeMsgRepo) GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error) {
+	if r.blackboard != nil {
+		return r.blackboard, nil
+	}
+	return &model.ConversationBlackboard{ConversationID: conversationID, ManualContext: ""}, nil
+}
+
+func (r *fakeMsgRepo) UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error) {
+	r.blackboard = &model.ConversationBlackboard{
+		ConversationID: conversationID,
+		ManualContext:  manualContext,
+		UpdatedBy:      &userID,
+		UpdatedAt:      time.Now(),
+	}
+	return r.blackboard, nil
 }
 
 type fakeConvRepoForMsg struct {
@@ -158,23 +195,6 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		inConversation: true,
 	}
 	svc := NewMessageService(msgRepo, convRepo, agentRepo)
-	daemonHub := ws.NewDaemonHub(slog.Default())
-	daemonHub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(daemonHub)
-
-	go func() {
-		deadline := time.Now().Add(time.Second)
-		for time.Now().Before(deadline) {
-			if agentRepo.task != nil && daemonHub.AwaitTaskResult(agentRepo.task.ID) != nil {
-				daemonHub.ResolveTask(agentRepo.task.ID, &ws.TaskResult{
-					TaskID: agentRepo.task.ID,
-					Result: "daemon task result",
-				})
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
 
 	// Wire up DaemonHub for WS-based dispatch
 	hub := ws.NewDaemonHub(slog.Default())
@@ -189,7 +209,7 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		hub.ResolveTask("task-1", &ws.TaskResult{
 			TaskID: "task-1",
-			Result: "鐪熷疄 CLI 鍥炲",
+			Result: "daemon task result",
 		})
 	}()
 

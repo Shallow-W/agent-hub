@@ -14,7 +14,7 @@ import { useAgentStore } from '@/store/agentStore';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
-import { formatDateTime, parseCapabilities, resolveAgentAvatar } from './agentPresentation';
+import { formatDateTime, resolveAgentAvatar } from './agentPresentation';
 import styles from './ComputerProfile.module.css';
 
 interface ComputerProfileProps {
@@ -96,7 +96,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
 
   const handleRefresh = async () => {
     try {
-      await Promise.all([refreshMachines(), refreshCandidates(), refreshAgents()]);
+      await Promise.all([refreshMachines(true), refreshCandidates(true), refreshAgents(true)]);
     } catch {
       message.error('刷新电脑信息失败');
     }
@@ -137,13 +137,19 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     }
   };
 
-  const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string) => {
+  const handleCreateAgent = async (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => {
     const candidate = machineCandidates.find((item) => item.id === candidateId);
     if (!candidate) {
       message.error('Agent 底座不存在，请刷新后重试');
       return;
     }
-    await addAgentCandidate(candidateId, name, candidate.cli_tool, systemPrompt);
+    await addAgentCandidate(candidateId, {
+      name,
+      cli_tool: candidate.cli_tool,
+      system_prompt: systemPrompt,
+      tools_config: toolsConfig,
+      custom_skills: customSkills,
+    });
   };
 
   const handleStartAgent = async (agentId: string) => {
@@ -300,7 +306,6 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         ) : (
           <div className={styles.baseList}>
             {machineCandidates.map((candidate: AgentCandidate) => {
-                const capabilityList = parseCapabilities(candidate.capabilities_json);
                 return (
                 <div className={styles.baseCard} key={candidate.id}>
                   <div className={styles.baseName}>{candidate.name}</div>
@@ -308,14 +313,6 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                     {candidate.cli_tool}
                     {candidate.version ? ` · ${candidate.version}` : ''}
                   </div>
-                  {capabilityList.length > 0 && (
-                    <div className={styles.baseTags}>
-                      {capabilityList.slice(0, 3).map((item) => (
-                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
-                      ))}
-                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
-                    </div>
-                  )}
                 </div>
             );
             })}
@@ -342,7 +339,6 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         ) : (
           <div className={styles.agentList}>
             {machineAgents.map((agent) => {
-              const capabilityList = parseCapabilities(agent.capabilities_json);
               const isActive = agent.id === selectedAgentId;
               return (
                 <div
@@ -430,14 +426,28 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
                       </>
                     )}
                   </div>
-                  {capabilityList.length > 0 && (
-                    <div className={styles.agentTags}>
-                      {capabilityList.slice(0, 3).map((item) => (
-                        <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
-                      ))}
-                      {capabilityList.length > 3 && <Tag>+{capabilityList.length - 3}</Tag>}
-                    </div>
-                  )}
+                  {(() => {
+                    const isBuiltinSystem = agent.type === 'system' && !agent.user_id;
+                    if (isBuiltinSystem) return null;
+                    const tags = (() => {
+                      if (!agent.tags || agent.tags === '[]') return [];
+                      try {
+                        const arr = JSON.parse(agent.tags);
+                        return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : [];
+                      } catch {
+                        return [];
+                      }
+                    })();
+                    if (tags.length === 0) return null;
+                    return (
+                      <div className={styles.agentTags}>
+                        {tags.slice(0, 3).map((item) => (
+                          <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
+                        ))}
+                        {tags.length > 3 && <Tag>+{tags.length - 3}</Tag>}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

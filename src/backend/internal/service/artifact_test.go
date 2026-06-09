@@ -18,9 +18,10 @@ type fakeArtifactRepo struct {
 	createVersIn   model.Artifact
 	createVersRoot string
 	createCalls    int
-	versions       []model.Artifact
-	latest         *model.Artifact
-	latestErr      error
+	versions         []model.Artifact
+	latest           *model.Artifact
+	latestErr        error
+	latestRootByConv string
 }
 
 func (f *fakeArtifactRepo) ListVersions(_ context.Context, rootID string) ([]model.Artifact, error) {
@@ -57,6 +58,14 @@ func (f *fakeArtifactRepo) GetConversationIDByRoot(_ context.Context, rootID str
 		return "", repository.ErrArtifactRootNotFound
 	}
 	return id, nil
+}
+
+// GetLatestRootByConversation 实现 DeployArtifactRepo（聊天部署取对话最新产物）。
+func (f *fakeArtifactRepo) GetLatestRootByConversation(_ context.Context, convID string) (string, error) {
+	if f.latestRootByConv != "" {
+		return f.latestRootByConv, nil
+	}
+	return "", repository.ErrArtifactRootNotFound
 }
 
 // fakeArtifactConvRepo 实现 ArtifactConvRepo。

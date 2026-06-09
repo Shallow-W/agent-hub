@@ -10,20 +10,16 @@ import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
 import {
   addConversationAgent,
-  getArchivedConversations,
   getOrCreateAgentChat,
   getOrCreatePrivateChat,
-  unarchiveConversation,
 } from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
-import type { Conversation } from '@/types/conversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
-import ArchivedConversationsModal from './ArchivedConversationsModal';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
@@ -48,12 +44,11 @@ const AppLayout: React.FC = () => {
   }, [status]);
   const showDisconnectAlert = status === 'disconnected' && wasConnectedRef.current;
   const { user, logout: handleLogout } = useAuth();
+
   const fetchFriends = useFriendStore((s) => s.fetchFriends);
   const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
-  const [archivedModalOpen, setArchivedModalOpen] = useState(false);
-  const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -128,7 +123,6 @@ const AppLayout: React.FC = () => {
           return;
         }
         if (newConvModalOpen) { setNewConvModalOpen(false); return; }
-        if (archivedModalOpen) { setArchivedModalOpen(false); return; }
         if (groupModalOpen) { setGroupModalOpen(false); return; }
         return;
       }
@@ -152,28 +146,7 @@ const AppLayout: React.FC = () => {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [archivedModalOpen, groupModalOpen, newConvModalOpen]);
-
-  const showArchived = async () => {
-    try {
-      const list = await getArchivedConversations();
-      setArchivedConvs(list ?? []);
-      setArchivedModalOpen(true);
-    } catch {
-      antMessage.error('获取归档对话失败');
-    }
-  };
-
-  const handleUnarchive = async (convId: string) => {
-    try {
-      await unarchiveConversation(convId);
-      setArchivedConvs((prev) => prev.filter((c) => c.id !== convId));
-      await fetchConversations();
-      antMessage.success('已取消归档');
-    } catch {
-      antMessage.error('取消归档失败');
-    }
-  };
+  }, [groupModalOpen, newConvModalOpen]);
 
   const handleCreate = () => {
     setNewConvModalOpen(true);
@@ -297,7 +270,6 @@ const AppLayout: React.FC = () => {
           onCreateGroup={() => setGroupModalOpen(true)}
           onRefresh={() => fetchConversations()}
           onUpload={handleUpload}
-          onShowArchived={showArchived}
           onStartChat={handleStartChat}
           onStartAgentChat={handleStartAgentChat}
           onSwitchChat={() => setActiveNav('chat')}
@@ -386,12 +358,6 @@ const AppLayout: React.FC = () => {
             throw new Error('创建对话失败');
           }
         }}
-      />
-      <ArchivedConversationsModal
-        open={archivedModalOpen}
-        onCancel={() => setArchivedModalOpen(false)}
-        conversations={archivedConvs}
-        onUnarchive={handleUnarchive}
       />
     </div>
   );

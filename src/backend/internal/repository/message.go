@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,7 +26,11 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *A
 
 // messageCols 通用消息查询列（含 JOIN users 获取 username）
 const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
-COALESCE(u.username, '') AS username`
+COALESCE(u.username, '') AS username,
+EXISTS (
+	SELECT 1 FROM message_pins mp
+	WHERE mp.message_id = m.id AND mp.conversation_id = m.conversation_id AND mp.enabled = TRUE
+) AS pinned`
 
 // messageFrom 通用 FROM 子句
 const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
@@ -49,7 +55,7 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	err = tx.QueryRowxContext(ctx,
 		`INSERT INTO messages (conversation_id, role, content, artifacts_json, reply_to, sender_id, mentions)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, conversation_id, role, content, COALESCE(artifacts_json, '') AS artifacts_json, reply_to, deleted_at, created_at, sender_id`,
+		 RETURNING id, conversation_id, role, content, COALESCE(artifacts_json, '') AS artifacts_json, reply_to, deleted_at, created_at, sender_id, FALSE AS pinned`,
 		conversationID, role, content, artifactsJSON, replyTo, senderID, mentionsJSON,
 	).StructScan(&m)
 	if err != nil {
@@ -272,6 +278,106 @@ func (r *MessageRepo) SoftDelete(ctx context.Context, messageID string) error {
 		return fmt.Errorf("soft delete message: %w", err)
 	}
 	return nil
+}
+
+// PinMessage adds a message to the conversation's shared pinned context.
+func (r *MessageRepo) PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error) {
+	var pin model.MessagePin
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO message_pins (conversation_id, message_id, created_by, enabled)
+		 VALUES ($1, $2, $3, TRUE)
+		 ON CONFLICT (conversation_id, message_id)
+		 DO UPDATE SET enabled = TRUE, created_by = EXCLUDED.created_by, updated_at = NOW()
+		 RETURNING id, conversation_id, message_id, created_by, created_at`,
+		conversationID, messageID, userID,
+	).StructScan(&pin)
+	if err != nil {
+		return nil, fmt.Errorf("pin message: %w", err)
+	}
+	return &pin, nil
+}
+
+// UnpinMessage removes a message from the conversation's shared pinned context.
+func (r *MessageRepo) UnpinMessage(ctx context.Context, conversationID, messageID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE message_pins
+		 SET enabled = FALSE, updated_at = NOW()
+		 WHERE conversation_id = $1 AND message_id = $2 AND enabled = TRUE`,
+		conversationID, messageID,
+	)
+	if err != nil {
+		return fmt.Errorf("unpin message: %w", err)
+	}
+	return nil
+}
+
+// ListPinnedMessages returns active pinned messages for a conversation.
+func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var list []model.PinnedMessage
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT
+			mp.id AS pin_id,
+			mp.conversation_id,
+			mp.message_id,
+			m.role,
+			m.content,
+			m.sender_id,
+			COALESCE(sender.username, '') AS username,
+			m.created_at AS message_created_at,
+			mp.created_by AS pinned_by,
+			COALESCE(pinner.username, '') AS pinned_by_name,
+			mp.created_at AS pinned_at
+		 FROM message_pins mp
+		 JOIN messages m ON m.id = mp.message_id AND m.conversation_id = mp.conversation_id
+		 LEFT JOIN users sender ON sender.id = m.sender_id
+		 LEFT JOIN users pinner ON pinner.id = mp.created_by
+		 WHERE mp.conversation_id = $1 AND mp.enabled = TRUE AND m.deleted_at IS NULL
+		 ORDER BY mp.created_at ASC
+		 LIMIT $2`,
+		conversationID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list pinned messages: %w", err)
+	}
+	return list, nil
+}
+
+// GetConversationBlackboard returns the user-authored blackboard for a conversation.
+func (r *MessageRepo) GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error) {
+	var blackboard model.ConversationBlackboard
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT conversation_id, manual_context, updated_by, updated_at
+		 FROM conversation_blackboards
+		 WHERE conversation_id = $1`,
+		conversationID,
+	).StructScan(&blackboard)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &model.ConversationBlackboard{ConversationID: conversationID, ManualContext: ""}, nil
+		}
+		return nil, fmt.Errorf("get conversation blackboard: %w", err)
+	}
+	return &blackboard, nil
+}
+
+// UpsertConversationBlackboard saves the user-authored blackboard for a conversation.
+func (r *MessageRepo) UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error) {
+	var blackboard model.ConversationBlackboard
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO conversation_blackboards (conversation_id, manual_context, updated_by)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (conversation_id)
+		 DO UPDATE SET manual_context = EXCLUDED.manual_context, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+		 RETURNING conversation_id, manual_context, updated_by, updated_at`,
+		conversationID, manualContext, userID,
+	).StructScan(&blackboard)
+	if err != nil {
+		return nil, fmt.Errorf("upsert conversation blackboard: %w", err)
+	}
+	return &blackboard, nil
 }
 
 // fillAttachmentsAndReply 批量填充消息的附件字段和回复引用

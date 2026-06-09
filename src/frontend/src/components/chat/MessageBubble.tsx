@@ -7,6 +7,7 @@ import {
   DownOutlined,
   ForwardOutlined,
   MessageOutlined,
+  PushpinOutlined,
   ReloadOutlined,
   RollbackOutlined,
   UpOutlined,
@@ -16,11 +17,12 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
-import type { Message, OptimisticStatus, Artifact } from '@/types/message';
+import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
+import { DeployStatusCard } from './DeployStatusCard';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
@@ -91,7 +93,68 @@ function buildContentRootMap(codeArtifacts: Artifact[]): Map<string, string> {
   return map;
 }
 
+function codeLanguage(className?: string): string {
+  return className?.replace(/^language-/, '').toLowerCase() ?? '';
+}
+
+function looksLikeMarkdownDocument(text: string): boolean {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownText(children: ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(markdownText).join('');
+  if (React.isValidElement<{ children?: ReactNode }>(children)) {
+    return markdownText(children.props.children);
+  }
+  return '';
+}
+
 /** 基于本条消息的 code 产物构建 markdown 组件，使围栏代码块能接通版本能力。 */
+function unwrapMarkdownDocumentFence(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const first = lines.findIndex((line) => line.trim() !== '');
+  let last = lines.length - 1;
+  while (last >= 0 && (lines[last] ?? '').trim() === '') last -= 1;
+
+  if (first < 0 || last <= first) return content;
+  const firstLine = lines[first] ?? '';
+  const lastLine = lines[last] ?? '';
+  const opener = firstLine.match(/^ {0,3}`{3,}\s*(markdown|md)\s*$/i);
+  if (!opener || !/^ {0,3}`{3,}\s*$/.test(lastLine)) return content;
+  return lines.slice(first + 1, last).join('\n').replace(/\s+$/, '');
+}
+
+function markdownDocumentContent(content: string): string {
+  const unwrapped = unwrapMarkdownDocumentFence(content);
+  if (unwrapped !== content) return unwrapped;
+
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^ {0,3}`{3,}\s*(markdown|md)\s*$/i.test(lines[i] ?? '')) continue;
+    for (let j = lines.length - 1; j > i; j -= 1) {
+      if (!/^ {0,3}`{3,}\s*$/.test(lines[j] ?? '')) continue;
+      const candidate = lines.slice(i + 1, j).join('\n').replace(/\s+$/, '');
+      if (looksLikeMarkdownDocument(candidate)) return candidate;
+      break;
+    }
+  }
+  const headingStart = normalized.search(/^#{1,3}\s+\S.+$/m);
+  if (headingStart > 0) {
+    const candidate = normalized.slice(headingStart).replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(candidate)) return candidate;
+  }
+  return content;
+}
+
 function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
   // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
   const contentRootMap = buildContentRootMap(codeArtifacts);
@@ -100,6 +163,16 @@ function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
       const isBlock = className?.startsWith('language-');
       if (isBlock) {
         const ct = extractText(children);
+        const lang = codeLanguage(className);
+        if ((lang === 'markdown' || lang === 'md') && looksLikeMarkdownDocument(ct)) {
+          return (
+            <div className={styles.embeddedMarkdownDocument}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+                {markdownDocumentContent(ct.trim())}
+              </ReactMarkdown>
+            </div>
+          );
+        }
         const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
         return (
           <CodeBlock className={className} expandable artifactRootId={rootId}>
@@ -144,6 +217,24 @@ const sharedMarkdownComponents: Components = {
   },
 };
 
+const embeddedDocumentComponents: Components = {
+  ...sharedMarkdownComponents,
+  code({ children }) {
+    return <span className={styles.documentCodeText}>{children}</span>;
+  },
+  pre({ children }) {
+    const text = markdownText(children);
+    if (looksLikeMarkdownDocument(text)) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+          {markdownDocumentContent(text)}
+        </ReactMarkdown>
+      );
+    }
+    return <div className={styles.documentPlainText}>{text}</div>;
+  },
+};
+
 /** Renders markdown content with full GFM support. */
 const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
   content,
@@ -170,6 +261,7 @@ interface MessageBubbleProps {
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
   onForward?: (message: Message) => void;
+  onTogglePin?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -209,18 +301,20 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onReply,
   onRecall,
   onForward,
+  onTogglePin,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
   const isOptimisticSending = optimisticStatus === 'sending';
   const isOptimisticFailed = optimisticStatus === 'failed';
 
-  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool}）。
-  const agentMeta = useMemo((): { agent_id?: string; agent_name?: string } => {
+  // 从 artifacts_json 解析 agent 元信息（{agent_id, agent_name, cli_tool, deployment?}）。
+  const agentMeta = useMemo((): MessageArtifacts => {
     if (message.role !== 'assistant' || !message.artifacts_json) return {};
-    try { return JSON.parse(message.artifacts_json) as { agent_id?: string; agent_name?: string }; } catch { return {}; }
+    try { return JSON.parse(message.artifacts_json) as MessageArtifacts; } catch { return {}; }
   }, [message.role, message.artifacts_json]);
   const agentName = agentMeta.agent_name ?? null;
+  const deployment = agentMeta.deployment ?? null;
 
   // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
   // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
@@ -257,11 +351,20 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
   // 代码块回到正文原位（散文↔代码交错），仅 webpage 产物走底部卡片
   const displayContent = message.content ?? '';
-  const cardArtifacts = useMemo(
-    () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
-    [message.artifacts],
-  );
-  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）。
+  // 卡片类产物（webpage/document）每个血缘只渲染最新版本，避免历史版本产生重复卡片。
+  // （后端返回全部版本以支撑代码块的内容匹配，故此处需按 root_id 去重取最新。）
+  const cardArtifacts = useMemo(() => {
+    const all = message.artifacts?.filter((a) => a.type !== 'code') ?? [];
+    const latest = new Map<string, Artifact>();
+    for (const a of all) {
+      const key = a.root_id || a.id || '';
+      const prev = latest.get(key);
+      if (!prev || a.version > prev.version) latest.set(key, a);
+    }
+    return Array.from(latest.values());
+  }, [message.artifacts]);
+  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）；保留全部版本，
+  // 使消息 markdown 里的原始代码块总能匹配到对应版本的 root_id。
   const codeArtifacts = useMemo(
     () => message.artifacts?.filter((a) => a.type === 'code') ?? [],
     [message.artifacts],
@@ -301,6 +404,14 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           icon: <MessageOutlined />,
           label: '回复',
           onClick: () => onReply(message),
+        }]
+      : []),
+    ...(onTogglePin
+      ? [{
+          key: 'pin' as const,
+          icon: <PushpinOutlined />,
+          label: message.pinned ? '取消 Pin' : 'Pin 到上下文黑板',
+          onClick: () => onTogglePin(message),
         }]
       : []),
     ...(canRecall && onRecall
@@ -384,6 +495,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             />
           </Tooltip>
         )}
+        {!isSystem && onTogglePin && (
+          <Tooltip title={message.pinned ? '取消 Pin' : 'Pin 到上下文黑板'}>
+            <Button
+              type="text"
+              size="small"
+              icon={<PushpinOutlined />}
+              className={`${styles.replyBtn} ${styles.pinBtn} ${message.pinned ? styles.pinBtnActive : ''}`}
+              onClick={() => onTogglePin(message)}
+            />
+          </Tooltip>
+        )}
         {canRecall && (
           <Tooltip title="撤回">
             <Button
@@ -401,6 +523,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <Text className={styles.agentLabel}>{displayName}</Text>
               {agentName && (
                 <span className={styles.agentBadge}>Agent</span>
+              )}
+              {message.pinned && (
+                <Tooltip title="已 Pin 到上下文黑板">
+                  <PushpinOutlined className={styles.pinBadge} />
+                </Tooltip>
               )}
               <Text type="secondary" className={styles.metaTime}>
                 {formatTimestamp(message.created_at)}
@@ -452,6 +579,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             )}
             {cardArtifacts.length > 0 && (
               <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
+            )}
+            {deployment && (
+              <div className={styles.deployCard}>
+                <DeployStatusCard deployment={deployment} />
+              </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}
             {streaming && <span className={styles.streamingCursor} />}

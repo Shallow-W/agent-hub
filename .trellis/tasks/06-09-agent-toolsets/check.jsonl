@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend service/repository/handler checks"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend typecheck/build checks"}

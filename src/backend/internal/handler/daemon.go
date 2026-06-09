@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/agent-hub/backend/pkg/ws"
@@ -35,6 +36,21 @@ func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.Orchestra
 		allowedOrigins: allowedOrigins,
 		daemonHub:      daemonHub,
 		userHub:        userHub,
+	}
+}
+
+// WithMachine is a higher-order function that authenticates a daemon machine via
+// query token and passes the authenticated machine to the wrapped handler.
+// If authentication fails, it responds with 401 and does not call fn.
+func (h *DaemonHandler) WithMachine(fn func(*gin.Context, *model.DaemonMachine)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.Query("token")
+		machine, err := h.authenticateMachine(c.Request.Context(), token)
+		if err != nil || machine == nil {
+			middleware.ErrorResponse(c, http.StatusUnauthorized, 40100, "认证失败")
+			return
+		}
+		fn(c, machine)
 	}
 }
 
@@ -82,27 +98,22 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 	h.daemonHub.Unregister(client)
 	if machine != nil {
 		h.agentSvc.MarkMachineOffline(machine.ID)
-		// Push offline status for all agents on this machine
-		ctxOff, cancelOff := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancelOff()
-		agents, err := h.agentSvc.GetAgentsByMachine(ctxOff, machine.ID)
-		if err == nil {
-			for _, a := range agents {
-				h.pushAgentStatus(a.ID, "offline")
+		// 仅当机器未重连时才推送 offline；否则新连接已接管，无需通知
+		if !h.daemonHub.IsConnected(machine.ID) {
+			ctxOff, cancelOff := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancelOff()
+			agents, err := h.agentSvc.GetAgentsByMachine(ctxOff, machine.ID)
+			if err == nil {
+				for _, a := range agents {
+					h.pushAgentStatus(a.ID, "offline")
+				}
 			}
 		}
 	}
 }
 
 // RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
-func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40120, "message": "无效 daemon token", "data": nil})
-		return
-	}
-
+func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachine) {
 	var req struct {
 		MachineID string                    `json:"machine_id"`
 		Agents    []service.DiscoveredAgent `json:"agents"`
@@ -138,14 +149,7 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context) {
 }
 
 // ClaimTask 让已连接电脑领取一条待执行的真实 CLI 任务。
-func (h *DaemonHandler) ClaimTask(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40121, "message": "无效 machine key", "data": nil})
-		return
-	}
-
+func (h *DaemonHandler) ClaimTask(c *gin.Context, machine *model.DaemonMachine) {
 	taskCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 	task, err := h.agentSvc.ClaimDaemonTask(taskCtx, machine)
@@ -159,14 +163,7 @@ func (h *DaemonHandler) ClaimTask(c *gin.Context) {
 }
 
 // CompleteTask 接收电脑 daemon 对真实 CLI 任务的执行结果。
-func (h *DaemonHandler) CompleteTask(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40122, "message": "无效 machine key", "data": nil})
-		return
-	}
-
+func (h *DaemonHandler) CompleteTask(c *gin.Context, machine *model.DaemonMachine) {
 	var req struct {
 		Result string `json:"result"`
 		Error  string `json:"error"`
@@ -187,13 +184,7 @@ func (h *DaemonHandler) CompleteTask(c *gin.Context) {
 }
 
 // Heartbeat 接收 daemon 任务心跳，保持机器在线状态。
-func (h *DaemonHandler) Heartbeat(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40123, "message": "无效 machine key", "data": nil})
-		return
-	}
+func (h *DaemonHandler) Heartbeat(c *gin.Context, machine *model.DaemonMachine) {
 	h.agentSvc.TouchMachine(machine.ID)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "success", "data": nil})
 }
@@ -201,14 +192,7 @@ func (h *DaemonHandler) Heartbeat(c *gin.Context) {
 // IssueAgentToken 用机器 api-key 换取该机器所属用户的 agent_management scoped JWT，
 // 供本机 MCP server 调用平台 REST API。仅接受 per-machine key（可映射到用户），
 // 不接受全局 daemon token（无用户归属）。
-func (h *DaemonHandler) IssueAgentToken(c *gin.Context) {
-	token := c.Query("token")
-	machine, err := h.authenticateMachine(c.Request.Context(), token)
-	if err != nil || machine == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 40124, "message": "无效 machine key", "data": nil})
-		return
-	}
-
+func (h *DaemonHandler) IssueAgentToken(c *gin.Context, machine *model.DaemonMachine) {
 	tokenCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 	jwtToken, expiresAt, err := h.agentSvc.GenerateAgentToken(tokenCtx, machine.UserID)
@@ -417,18 +401,24 @@ func (h *DaemonHandler) handleAgentStopped(data json.RawMessage) {
 }
 
 // pushAgentStatus pushes a real-time agent status update to the agent owner via WS.
+// For system agents (no owner), broadcasts to all connected users.
 func (h *DaemonHandler) pushAgentStatus(agentID, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	agent, err := h.agentSvc.GetAgentByID(ctx, agentID)
-	if err != nil || agent == nil || agent.UserID == nil {
+	if err != nil || agent == nil {
 		return
 	}
-	h.userHub.SendToUser(*agent.UserID, ws.WSMessage{
+	msg := ws.WSMessage{
 		Type: "agent.status",
 		Data: map[string]string{
 			"agent_id":     agentID,
 			"agent_status": status,
 		},
-	})
+	}
+	if agent.UserID != nil {
+		h.userHub.SendToUser(*agent.UserID, msg)
+	} else {
+		h.userHub.Broadcast(msg)
+	}
 }

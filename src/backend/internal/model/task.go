@@ -17,8 +17,11 @@ type WorkspaceTask struct {
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 	AssigneeName   string    `json:"assignee_name,omitempty" db:"assignee_name"`
 	AgentName      string    `json:"agent_name,omitempty" db:"agent_name"`
-	OrchTaskID     *string   `json:"orch_task_id,omitempty" db:"orch_task_id"`
-	WorkerName     *string   `json:"worker_name,omitempty" db:"worker_name"`
+	OrchTaskID     *string    `json:"orch_task_id,omitempty" db:"orch_task_id"`
+	WorkerName     *string    `json:"worker_name,omitempty" db:"worker_name"`
+	TaskHash       *string    `json:"task_hash,omitempty" db:"task_hash"`
+	WorkerResult   *string    `json:"worker_result,omitempty" db:"worker_result"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 }
 
 // TaskFilter 表示任务列表查询条件。
@@ -38,6 +41,7 @@ type TaskCreateInput struct {
 	Priority       string
 	OrchTaskID     *string
 	WorkerName     *string
+	TaskHash       *string
 }
 
 // TaskUpdateInput 表示更新任务的输入。

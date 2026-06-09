@@ -34,6 +34,11 @@ type SendMessageRequest struct {
 	Mentions      []string                  `json:"mentions"`
 }
 
+// BlackboardRequest updates user-authored conversation blackboard context.
+type BlackboardRequest struct {
+	ManualContext string `json:"manual_context"`
+}
+
 // Send 发送消息
 func (h *MessageHandler) Send(c *gin.Context) {
 	convID := c.Param("id")
@@ -222,6 +227,164 @@ func (h *MessageHandler) Search(c *gin.Context) {
 		msgs = []model.Message{}
 	}
 	middleware.SuccessResponse(c, msgs)
+}
+
+// Pin 将一条消息加入群聊共享上下文黑板。
+func (h *MessageHandler) Pin(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40032, "缺少对话 ID 或消息 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	pin, err := h.svc.PinMessage(c.Request.Context(), convID, messageID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40427, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40327, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40428, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgReplyWrongConv) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40033, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50026, "Pin 消息失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, pin)
+}
+
+// Unpin 将一条消息从群聊共享上下文黑板移除。
+func (h *MessageHandler) Unpin(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40034, "缺少对话 ID 或消息 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	err := h.svc.UnpinMessage(c.Request.Context(), convID, messageID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40429, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40328, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40430, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgReplyWrongConv) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40035, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50027, "取消 Pin 消息失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, nil)
+}
+
+// PinnedContext 查询当前会话共享上下文黑板中的用户 Pin 上下文。
+func (h *MessageHandler) PinnedContext(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40036, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	items, err := h.svc.ListPinnedContext(c.Request.Context(), convID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40431, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40329, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50028, "查询 Pin 上下文失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, items)
+}
+
+// GetBlackboard 查询会话上下文黑板中的用户手写上下文。
+func (h *MessageHandler) GetBlackboard(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40037, "缺少对话 ID")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	blackboard, err := h.svc.GetConversationBlackboard(c.Request.Context(), convID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40432, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40330, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50029, "查询黑板失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, blackboard)
+}
+
+// UpdateBlackboard 保存会话上下文黑板中的用户手写上下文。
+func (h *MessageHandler) UpdateBlackboard(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40038, "缺少对话 ID")
+		return
+	}
+
+	var req BlackboardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40039, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	blackboard, err := h.svc.UpdateConversationBlackboard(c.Request.Context(), convID, userID, req.ManualContext)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgConvNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40433, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgConvNoPerm) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40331, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgBlackboardTooLong) {
+			middleware.ErrorResponse(c, http.StatusRequestEntityTooLarge, 40040, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50030, "保存黑板失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, blackboard)
 }
 
 // Recall 撤回消息

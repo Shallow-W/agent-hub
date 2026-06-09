@@ -246,6 +246,41 @@
   font-size: 13px;
 }
 
+.embeddedMarkdownDocument {
+  max-width: 820px;
+  margin: 10px 0;
+  padding: 24px 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.embeddedMarkdownDocument :global(h1) {
+  margin-top: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 22px;
+}
+
+.embeddedMarkdownDocument :global(h2) {
+  margin-top: 22px;
+  font-size: 18px;
+}
+
+.documentCodeText {
+  font: inherit;
+  color: inherit;
+}
+
+.documentPlainText {
+  margin: 8px 0 14px;
+  color: var(--color-text);
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
 .streamingCursor {
   display: inline-block;
   width: 2px;
@@ -317,12 +352,29 @@
 .bubbleAssistant .chatAvatar { order: 1; }
 .bubbleAssistant .content { order: 2; }
 .bubbleAssistant .replyBtn { order: 3; }
-.bubbleAssistant .recallBtn { order: 4; }
+.bubbleAssistant .pinBtn { order: 4; }
+.bubbleAssistant .recallBtn { order: 5; }
 
 .bubbleUser .chatAvatar { order: 0; }
 .bubbleUser .content { order: 1; }
 .bubbleUser .replyBtn { order: 2; }
-.bubbleUser .recallBtn { order: 3; }
+.bubbleUser .pinBtn { order: 3; }
+.bubbleUser .recallBtn { order: 4; }
+
+.pinBtn {
+  opacity: 0.42;
+  pointer-events: auto;
+}
+
+.pinBtnActive {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+.pinBtn:hover,
+.pinBtnActive:hover {
+  color: var(--color-primary-active);
+}
 
 .bubble:hover .replyBtn {
   opacity: 1;
@@ -425,6 +477,11 @@
   line-height: 1.5;
 }
 
+.pinBadge {
+  color: var(--color-primary);
+  font-size: 12px;
+}
+
 /* ── 暗色模式 ── */
 :global(html.dark) .innerAssistant {
   border-color: rgba(255, 255, 255, 0.06);
@@ -442,4 +499,9 @@
 /* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
 .innerUser .mention {
   color: rgba(255, 255, 255, 0.92);
+}
+
+.deployCard {
+  margin-top: 8px;
+  max-width: 460px;
 }

@@ -12,6 +12,7 @@ export interface Conversation {
   peer_name?: string;
   last_message?: string;
   member_count?: number;
+  avatar?: string;
   archived_at?: string | null;
 }
 
@@ -33,4 +34,5 @@ export interface ConversationAgent {
   machine_name: string;
   last_seen_at?: string;
   capabilities_json: string;
+  custom_skills?: string;
 }

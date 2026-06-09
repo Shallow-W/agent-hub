@@ -31,6 +31,20 @@ type AddMemberRequest struct {
 	Role   string `json:"role"`
 }
 
+// UpdateGroupInfoRequest 更新群聊信息请求体
+type UpdateGroupInfoRequest struct {
+	Title        *string `json:"title"`
+	Avatar       *string `json:"avatar"`
+	Description  *string `json:"description"`
+	Announcement *string `json:"announcement"`
+	Tags         *string `json:"tags"`
+}
+
+// ChangeRoleRequest 修改成员角色请求体
+type ChangeRoleRequest struct {
+	Role string `json:"role" binding:"required,oneof=admin member"`
+}
+
 // CreateGroup 创建群聊
 func (h *GroupHandler) CreateGroup(c *gin.Context) {
 	var req CreateGroupRequest
@@ -234,9 +248,79 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 	})
 }
 
-// ChangeRoleRequest 修改成员角色请求体
-type ChangeRoleRequest struct {
-	Role string `json:"role" binding:"required,oneof=admin member"`
+// UpdateGroupInfo 更新群聊基本信息
+func (h *GroupHandler) UpdateGroupInfo(c *gin.Context) {
+	conversationID := c.Param("id")
+	if conversationID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "缺少群聊 ID")
+		return
+	}
+
+	var req UpdateGroupInfoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "参数错误: "+err.Error())
+		return
+	}
+
+	// 至少需要一个字段
+	if req.Title == nil && req.Avatar == nil && req.Description == nil && req.Announcement == nil && req.Tags == nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40300, "至少需要更新一个字段")
+		return
+	}
+
+	// 先获取当前值，以便只更新传入的字段
+	userID := middleware.GetUserID(c)
+	conv, _, err := h.svc.GetGroupInfo(c.Request.Context(), conversationID, userID)
+	if err != nil {
+		if errors.Is(err, service.ErrGroupNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40414, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50305, "获取群聊信息失败")
+		return
+	}
+
+	// 合并：用请求值覆盖当前值
+	title := conv.Title
+	avatar := conv.Avatar
+	description := conv.Description
+	announcement := conv.Announcement
+	tags := conv.Tags
+	if req.Title != nil {
+		title = *req.Title
+	}
+	if req.Avatar != nil {
+		avatar = *req.Avatar
+	}
+	if req.Description != nil {
+		description = *req.Description
+	}
+	if req.Announcement != nil {
+		announcement = *req.Announcement
+	}
+	if req.Tags != nil {
+		tags = *req.Tags
+	}
+
+	updated, err := h.svc.UpdateGroupInfo(c.Request.Context(), conversationID, userID, title, avatar, description, announcement, tags)
+	if err != nil {
+		if errors.Is(err, service.ErrNotAdmin) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40301, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrNotMember) {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40304, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50308, "更新群聊信息失败")
+		return
+	}
+
+	middleware.SuccessResponse(c, updated)
 }
 
 // ChangeMemberRole 修改群成员角色
