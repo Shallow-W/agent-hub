@@ -198,11 +198,11 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		result1, err1 = svc.RouteMention(context.Background(), convID, userID, "@Orch 分析数据", nil)
+		result1, err1 = svc.RouteMention(context.Background(), convID, userID, "@Orch 分析数据", nil, nil)
 	}()
 	go func() {
 		defer wg.Done()
-		result2, err2 = svc.RouteMention(context.Background(), convID, userID, "@Orch 写报告", nil)
+		result2, err2 = svc.RouteMention(context.Background(), convID, userID, "@Orch 写报告", nil, nil)
 	}()
 	wg.Wait()
 
@@ -255,7 +255,6 @@ func (r *slowConcurrentAgentRepo) SetDaemonTaskOrch(_ context.Context, _, _, _ s
 func (r *slowConcurrentAgentRepo) CompleteDaemonTask(_ context.Context, _, _, _, _ string) (bool, error) {
 	return true, nil
 }
-
 
 func TestParseOrchOutput_MultilineTask(t *testing.T) {
 	// Indented continuation lines are appended to the dispatch task.
@@ -412,7 +411,7 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 		})
 	}()
 
-	result, err := svc.RouteMention(context.Background(), "c1", userID, "@Orch test", nil)
+	result, err := svc.RouteMention(context.Background(), "c1", userID, "@Orch test", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -425,5 +424,3 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Feature 5: Context length protection in buildDispatchContext
 // ---------------------------------------------------------------------------
-
-

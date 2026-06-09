@@ -19,6 +19,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
+import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
@@ -30,6 +31,7 @@ import styles from './MessageBubble.module.css';
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
+const REPLY_PREVIEW_LIMIT = 50;
 
 // ── ReactMarkdown custom components ──
 
@@ -76,6 +78,10 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   // Non-string, non-array nodes (elements, null, undefined, numbers, booleans)
   // pass through unchanged — mentions only highlight in text leaves.
   return children;
+}
+
+function truncatePreview(text: string, maxLength = REPLY_PREVIEW_LIMIT): string {
+  return truncateGraphemes(text, maxLength);
 }
 
 /**
@@ -562,11 +568,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 <span className={styles.replyQuoteSender}>
                   {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
                 </span>
-                {escapeHtml(
-                  (message.reply_to_message.content ?? '').length > 50
-                    ? (message.reply_to_message.content ?? '').slice(0, 50) + '...'
-                    : (message.reply_to_message.content ?? ''),
-                )}
+                {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
             )}
             {displayAttachments.length > 0 && (

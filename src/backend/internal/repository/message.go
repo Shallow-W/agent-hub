@@ -520,10 +520,7 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 		if err := rows.Scan(&id, &content, &deletedAt, &senderID, &username); err != nil {
 			return nil, fmt.Errorf("scan reply: %w", err)
 		}
-		preview := content
-		if len(preview) > 50 {
-			preview = preview[:50] + "..."
-		}
+		preview := truncateRunes(content, 50)
 		if deletedAt != nil {
 			preview = "[消息已撤回]"
 		}
@@ -545,4 +542,15 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	}
 
 	return messages, nil
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }
