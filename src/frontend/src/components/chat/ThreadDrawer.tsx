@@ -109,7 +109,7 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
       title={title}
       open={open}
       onClose={handleClose}
-      width={420}
+      width={520}
       placement="right"
       className={styles.drawer}
       destroyOnClose
