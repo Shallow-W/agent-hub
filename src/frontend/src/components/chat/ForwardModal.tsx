@@ -57,6 +57,8 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
           file_size: a.file_size,
           file_path: a.file_path,
           thumbnail_path: a.thumbnail_path,
+          url: a.url,
+          thumbnail_url: a.thumbnail_url,
           width: a.width,
           height: a.height,
         })),

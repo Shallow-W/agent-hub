@@ -167,10 +167,15 @@ func (r *ArtifactRepo) GetLatestByRoot(ctx context.Context, rootID string) (*mod
 	return &a, nil
 }
 
-// ListByMessageIDs 批量查询多条消息的产物，每个血缘只返回最新版本。
-// 直接对表做 DISTINCT ON (root_id)，复用 artifactCols（含 COALESCE + uuid/timestamptz 正确扫描），
-// 避免外层子查询导致 sqlx 无法将 uuid/timestamptz 映射到 Go string/time.Time 的 bug。
-// DISTINCT ON 要求 ORDER BY 首列与 DISTINCT ON 列一致，故 SQL 按 root_id, version DESC 取最新版；
+// ListByMessageIDs 批量查询多条消息的产物，返回每条消息的全部产物版本（含历史版本）。
+// 复用 artifactCols（含 COALESCE + uuid/timestamptz 正确扫描），避免外层子查询导致 sqlx
+// 无法将 uuid/timestamptz 映射到 Go string/time.Time 的 bug。
+//
+// 关键：必须返回全部版本，不能只取最新版。聊天记录不可变——消息 markdown 里保存的是
+// 产物创建时的原始版本内容，前端按「代码块内容 → root_id」匹配接通版本能力。若只返回最新
+// 版本，一旦产物被「保存/让 AI 改」编辑出 v2，最新版内容就与原始代码块对不上，导致版本下拉/
+// Diff/编辑等能力在刷新后全部丢失。返回全部版本后，原始代码块总能匹配到对应版本的 root_id；
+// 卡片类产物（webpage/document）由前端去重到最新版渲染。
 // 最终按 sort_order/id 的排序在 Go 侧完成。
 func (r *ArtifactRepo) ListByMessageIDs(ctx context.Context, messageIDs []string) (map[string][]model.Artifact, error) {
 	if len(messageIDs) == 0 {
@@ -178,10 +183,10 @@ func (r *ArtifactRepo) ListByMessageIDs(ctx context.Context, messageIDs []string
 	}
 
 	query, args, err := sqlx.In(
-		`SELECT DISTINCT ON (root_id) `+artifactCols+`
+		`SELECT `+artifactCols+`
 		 FROM artifacts
 		 WHERE message_id IN (?)
-		 ORDER BY root_id, version DESC`,
+		 ORDER BY message_id, root_id, version`,
 		messageIDs,
 	)
 	if err != nil {
@@ -194,8 +199,8 @@ func (r *ArtifactRepo) ListByMessageIDs(ctx context.Context, messageIDs []string
 		return nil, fmt.Errorf("list artifacts: %w", err)
 	}
 
-	// DISTINCT ON 要求首列排序为 root_id，最终分组和 sort_order 排序在 Go 侧完成，
-	// 保证对外每条消息内产物顺序稳定（与原行为一致）。
+	// 按 message_id 分组，最终 sort_order 排序在 Go 侧完成，保证对外每条消息内产物顺序稳定。
+	// 同一血缘的多个版本会一并归入该消息，前端按需取用（代码块匹配/卡片去重）。
 	result := make(map[string][]model.Artifact, len(messageIDs))
 	for _, a := range list {
 		result[a.MessageID] = append(result[a.MessageID], a)

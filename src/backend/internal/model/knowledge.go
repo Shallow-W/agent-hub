@@ -22,6 +22,7 @@ type KnowledgeFile struct {
 	KnowledgeBaseID string    `json:"knowledge_base_id" db:"knowledge_base_id"`
 	Filename        string    `json:"filename" db:"filename"`
 	FilePath        string    `json:"-" db:"file_path"`
+	URL             string    `json:"url,omitempty" db:"-"`
 	FileSize        int64     `json:"size" db:"file_size"`
 	MimeType        string    `json:"mime_type" db:"mime_type"`
 	PreviewText     string    `json:"preview_text,omitempty" db:"preview_text"`

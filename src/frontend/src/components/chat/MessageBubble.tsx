@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
+import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
@@ -31,6 +32,7 @@ import styles from './MessageBubble.module.css';
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
+const REPLY_PREVIEW_LIMIT = 50;
 
 // ── ReactMarkdown custom components ──
 
@@ -79,6 +81,10 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   return children;
 }
 
+function truncatePreview(text: string, maxLength = REPLY_PREVIEW_LIMIT): string {
+  return truncateGraphemes(text, maxLength);
+}
+
 /**
  * 从 code 产物列表构建「内容 → root_id」纯查找表。
  * 尾部换行符剥离后作为 key，重复内容首个产物胜出（极少见，可接受）。
@@ -94,7 +100,68 @@ function buildContentRootMap(codeArtifacts: Artifact[]): Map<string, string> {
   return map;
 }
 
+function codeLanguage(className?: string): string {
+  return className?.replace(/^language-/, '').toLowerCase() ?? '';
+}
+
+function looksLikeMarkdownDocument(text: string): boolean {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownText(children: ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(markdownText).join('');
+  if (React.isValidElement<{ children?: ReactNode }>(children)) {
+    return markdownText(children.props.children);
+  }
+  return '';
+}
+
 /** 基于本条消息的 code 产物构建 markdown 组件，使围栏代码块能接通版本能力。 */
+function unwrapMarkdownDocumentFence(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const first = lines.findIndex((line) => line.trim() !== '');
+  let last = lines.length - 1;
+  while (last >= 0 && (lines[last] ?? '').trim() === '') last -= 1;
+
+  if (first < 0 || last <= first) return content;
+  const firstLine = lines[first] ?? '';
+  const lastLine = lines[last] ?? '';
+  const opener = firstLine.match(/^ {0,3}`{3,}\s*(markdown|md)\s*$/i);
+  if (!opener || !/^ {0,3}`{3,}\s*$/.test(lastLine)) return content;
+  return lines.slice(first + 1, last).join('\n').replace(/\s+$/, '');
+}
+
+function markdownDocumentContent(content: string): string {
+  const unwrapped = unwrapMarkdownDocumentFence(content);
+  if (unwrapped !== content) return unwrapped;
+
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^ {0,3}`{3,}\s*(markdown|md)\s*$/i.test(lines[i] ?? '')) continue;
+    for (let j = lines.length - 1; j > i; j -= 1) {
+      if (!/^ {0,3}`{3,}\s*$/.test(lines[j] ?? '')) continue;
+      const candidate = lines.slice(i + 1, j).join('\n').replace(/\s+$/, '');
+      if (looksLikeMarkdownDocument(candidate)) return candidate;
+      break;
+    }
+  }
+  const headingStart = normalized.search(/^#{1,3}\s+\S.+$/m);
+  if (headingStart > 0) {
+    const candidate = normalized.slice(headingStart).replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(candidate)) return candidate;
+  }
+  return content;
+}
+
 function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
   // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
   const contentRootMap = buildContentRootMap(codeArtifacts);
@@ -103,6 +170,16 @@ function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
       const isBlock = className?.startsWith('language-');
       if (isBlock) {
         const ct = extractText(children);
+        const lang = codeLanguage(className);
+        if ((lang === 'markdown' || lang === 'md') && looksLikeMarkdownDocument(ct)) {
+          return (
+            <div className={styles.embeddedMarkdownDocument}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+                {markdownDocumentContent(ct.trim())}
+              </ReactMarkdown>
+            </div>
+          );
+        }
         const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
         return (
           <CodeBlock className={className} expandable artifactRootId={rootId}>
@@ -144,6 +221,24 @@ const sharedMarkdownComponents: Components = {
   },
   td({ children }) {
     return <td>{renderChildrenWithMentions(children)}</td>;
+  },
+};
+
+const embeddedDocumentComponents: Components = {
+  ...sharedMarkdownComponents,
+  code({ children }) {
+    return <span className={styles.documentCodeText}>{children}</span>;
+  },
+  pre({ children }) {
+    const text = markdownText(children);
+    if (looksLikeMarkdownDocument(text)) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={embeddedDocumentComponents}>
+          {markdownDocumentContent(text)}
+        </ReactMarkdown>
+      );
+    }
+    return <div className={styles.documentPlainText}>{text}</div>;
   },
 };
 
@@ -263,11 +358,20 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
   // 代码块回到正文原位（散文↔代码交错），仅 webpage 产物走底部卡片
   const displayContent = message.content ?? '';
-  const cardArtifacts = useMemo(
-    () => message.artifacts?.filter((a) => a.type !== 'code') ?? [],
-    [message.artifacts],
-  );
-  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）。
+  // 卡片类产物（webpage/document）每个血缘只渲染最新版本，避免历史版本产生重复卡片。
+  // （后端返回全部版本以支撑代码块的内容匹配，故此处需按 root_id 去重取最新。）
+  const cardArtifacts = useMemo(() => {
+    const all = message.artifacts?.filter((a) => a.type !== 'code') ?? [];
+    const latest = new Map<string, Artifact>();
+    for (const a of all) {
+      const key = a.root_id || a.id || '';
+      const prev = latest.get(key);
+      if (!prev || a.version > prev.version) latest.set(key, a);
+    }
+    return Array.from(latest.values());
+  }, [message.artifacts]);
+  // 仅 code 产物参与内联代码块的内容匹配（接通版本能力）；保留全部版本，
+  // 使消息 markdown 里的原始代码块总能匹配到对应版本的 root_id。
   const codeArtifacts = useMemo(
     () => message.artifacts?.filter((a) => a.type === 'code') ?? [],
     [message.artifacts],
@@ -355,6 +459,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       file_size: (p as Record<string, unknown>).file_size as number,
       file_path: (p as Record<string, unknown>).file_path as string,
       thumbnail_path: ((p as Record<string, unknown>).thumbnail_path as string) ?? null,
+      url: (p as Record<string, unknown>).url as string | undefined,
+      thumbnail_url: ((p as Record<string, unknown>).thumbnail_url as string | null | undefined) ?? null,
       width: ((p as Record<string, unknown>).width as number) ?? 0,
       height: ((p as Record<string, unknown>).height as number) ?? 0,
       created_at: new Date().toISOString(),
@@ -465,11 +571,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 <span className={styles.replyQuoteSender}>
                   {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
                 </span>
-                {escapeHtml(
-                  (message.reply_to_message.content ?? '').length > 50
-                    ? (message.reply_to_message.content ?? '').slice(0, 50) + '...'
-                    : (message.reply_to_message.content ?? ''),
-                )}
+                {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
             )}
             {displayAttachments.length > 0 && (

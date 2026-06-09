@@ -5,6 +5,7 @@ export type KnowledgeVisibility = 'private' | 'public';
 export interface KnowledgeFile {
   id: string;
   filename: string;
+  url?: string;
   size: number;
   mime_type: string;
   preview_type: 'text' | 'image' | 'binary' | 'too_large';

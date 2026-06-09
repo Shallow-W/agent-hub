@@ -4,14 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/agent-hub/backend/internal/service"
 )
 
-func TestSafeKnowledgeFilePathAllowsStoredRelativePath(t *testing.T) {
+func TestSafeJoinUploadPathAllowsStoredRelativePath(t *testing.T) {
 	uploadDir := t.TempDir()
 
-	got, err := safeKnowledgeFilePath(uploadDir, filepath.Join("knowledge", "kb-id", "file.txt"))
+	got, err := service.SafeJoinUploadPath(uploadDir, filepath.Join("knowledge", "kb-id", "file.txt"))
 	if err != nil {
-		t.Fatalf("safeKnowledgeFilePath returned error: %v", err)
+		t.Fatalf("SafeJoinUploadPath returned error: %v", err)
 	}
 
 	want := filepath.Join(uploadDir, "knowledge", "kb-id", "file.txt")
@@ -20,19 +22,19 @@ func TestSafeKnowledgeFilePathAllowsStoredRelativePath(t *testing.T) {
 	}
 }
 
-func TestSafeKnowledgeFilePathRejectsTraversal(t *testing.T) {
+func TestSafeJoinUploadPathRejectsTraversal(t *testing.T) {
 	uploadDir := t.TempDir()
 
-	if _, err := safeKnowledgeFilePath(uploadDir, filepath.Join("..", "secret.txt")); err == nil {
+	if _, err := service.SafeJoinUploadPath(uploadDir, filepath.Join("..", "secret.txt")); err == nil {
 		t.Fatal("expected traversal path to be rejected")
 	}
 }
 
-func TestSafeKnowledgeFilePathRejectsAbsolutePath(t *testing.T) {
+func TestSafeJoinUploadPathRejectsAbsolutePath(t *testing.T) {
 	uploadDir := t.TempDir()
 	absPath := filepath.Join(string(os.PathSeparator), "tmp", "secret.txt")
 
-	if _, err := safeKnowledgeFilePath(uploadDir, absPath); err == nil {
+	if _, err := service.SafeJoinUploadPath(uploadDir, absPath); err == nil {
 		t.Fatal("expected absolute path to be rejected")
 	}
 }

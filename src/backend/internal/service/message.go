@@ -25,15 +25,13 @@ type MessageNotifier interface {
 	IsOnline(userID string) bool
 }
 
-// MessageCacher 消息缓存接口（由 Redis repo 实现）
-type MessageCacher interface {
-	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
+// MessageDeliveryState stores transient delivery state outside the source-of-truth message DB.
+// History reads must not use this interface; it is only for offline queues and unread counts.
+type MessageDeliveryState interface {
 	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
-	GetCachedMessages(ctx context.Context, conversationID string, limit int) ([]model.Message, error)
 	DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error)
 	ClearUnread(ctx context.Context, userID, conversationID string) error
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
-	InvalidateCache(ctx context.Context, conversationID string) error
 }
 
 // MsgRepo 消息服务所需的仓库接口
@@ -117,10 +115,11 @@ type MessageService struct {
 	convRepo  ConvRepoForMsg
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
-	cacher    MessageCacher
+	delivery  MessageDeliveryState
 	orchSvc   *OrchestratorService
 	daemonHub *ws.DaemonHub
 	deploySvc *DeploymentService
+	fileURLs  *FileURLBuilder
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -131,7 +130,7 @@ type SendMessageResult struct {
 
 // NewMessageService 创建消息服务
 func NewMessageService(msgRepo MsgRepo, convRepo ConvRepoForMsg, agentRepo AgentRepoForMsg) *MessageService {
-	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, agentRepo: agentRepo}
+	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, agentRepo: agentRepo, fileURLs: NewFileURLBuilder("")}
 }
 
 // SetNotifier 注入消息推送器（避免循环依赖，由 main.go 调用）
@@ -139,9 +138,14 @@ func (s *MessageService) SetNotifier(n MessageNotifier) {
 	s.notifier = n
 }
 
-// SetCacher 注入消息缓存器
-func (s *MessageService) SetCacher(c MessageCacher) {
-	s.cacher = c
+// SetDeliveryState injects transient delivery state storage.
+func (s *MessageService) SetDeliveryState(c MessageDeliveryState) {
+	s.delivery = c
+}
+
+// SetCacher is kept for compatibility with older wiring code.
+func (s *MessageService) SetCacher(c MessageDeliveryState) {
+	s.SetDeliveryState(c)
 }
 
 // SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
@@ -157,6 +161,14 @@ func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
 // SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。
 func (s *MessageService) SetDeploymentService(d *DeploymentService) {
 	s.deploySvc = d
+}
+
+// SetFileURLBuilder injects the public URL policy for message attachments.
+func (s *MessageService) SetFileURLBuilder(builder *FileURLBuilder) {
+	if builder == nil {
+		builder = NewFileURLBuilder("")
+	}
+	s.fileURLs = builder
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -231,6 +243,7 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
+	s.enrichMessageFileURLs(msg)
 
 	result := &SendMessageResult{UserMessage: msg}
 
@@ -247,14 +260,15 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
 		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content)
+			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments, &msg.ID)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
 		if s.orchSvc != nil {
 			parsedMentions := ParseMentions(content)
 			if len(mentions) > 0 || len(parsedMentions) > 0 {
-				go s.asyncMentionDispatch(convID, userID, content)
+				slog.Info(orchFlowLog, "stage", "message.async_mention_enqueued", "conversation_id", convID, "user_id", userID, "source_message_id", msg.ID, "mention_count", len(parsedMentions))
+				go s.asyncMentionDispatch(convID, userID, msg.ID, content, msg.Attachments)
 			}
 		}
 	default:
@@ -293,23 +307,19 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 		s.notifier.PushToConversation(conversationID, memberIDs, msg)
 	}
 
-	// 缓存到 Redis
-	if s.cacher != nil {
-		if err := s.cacher.CacheMessage(ctx, conversationID, msg); err != nil {
-			slog.Warn("cache message failed", "conversation_id", conversationID, "error", err)
-		}
-
-		// 为不在线的成员加入离线队列 + 递增未读计数
+	// Record transient delivery state. The persisted message row remains the
+	// source of truth for history reads.
+	if s.delivery != nil {
 		for _, uid := range memberIDs {
 			if uid == senderID {
 				continue
 			}
 			if s.notifier != nil && !s.notifier.IsOnline(uid) {
-				if err := s.cacher.EnqueueOffline(ctx, uid, conversationID, msg); err != nil {
+				if err := s.delivery.EnqueueOffline(ctx, uid, conversationID, msg); err != nil {
 					slog.Warn("enqueue offline failed", "user_id", uid, "conversation_id", conversationID, "error", err)
 				}
 			}
-			if err := s.cacher.IncrementUnread(ctx, uid, conversationID); err != nil {
+			if err := s.delivery.IncrementUnread(ctx, uid, conversationID); err != nil {
 				slog.Warn("increment unread failed", "user_id", uid, "conversation_id", conversationID, "error", err)
 			}
 		}
@@ -333,10 +343,10 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 		return err
 	}
 
-	if s.cacher != nil {
-		_ = s.cacher.ClearUnread(ctx, userID, convID)
+	if s.delivery != nil {
+		_ = s.delivery.ClearUnread(ctx, userID, convID)
 		// 同时清空离线消息队列，防止 GetUnreadMessages 再次返回已读消息
-		_, _ = s.cacher.DequeueOfflineAfter(ctx, userID, convID, "+inf")
+		_, _ = s.delivery.DequeueOfflineAfter(ctx, userID, convID, "+inf")
 	}
 
 	return nil
@@ -362,18 +372,11 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 		limit = 200
 	}
 
-	// 仅在无游标时使用缓存（缓存是最新N条，不含历史分页）
-	if s.cacher != nil && before == nil {
-		cached, err := s.cacher.GetCachedMessages(ctx, convID, limit)
-		if err == nil && len(cached) > 0 {
-			return cached, nil
-		}
-	}
-
 	messages, err := s.msgRepo.ListByConversation(ctx, convID, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
 
@@ -397,9 +400,10 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		limit = 200
 	}
 
-	if s.cacher != nil {
-		offline, err := s.cacher.DequeueOfflineAfter(ctx, userID, convID, "-inf")
+	if s.delivery != nil {
+		offline, err := s.delivery.DequeueOfflineAfter(ctx, userID, convID, "-inf")
 		if err == nil && len(offline) > 0 {
+			s.enrichMessagesFileURLs(offline)
 			return offline, nil
 		}
 	}
@@ -415,6 +419,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
+	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
 
@@ -430,7 +435,28 @@ func (s *MessageService) SearchMessages(ctx context.Context, conversationID, use
 	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return nil, err
 	}
-	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+	messages, err := s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichMessagesFileURLs(messages)
+	return messages, nil
+}
+
+func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
+	for i := range messages {
+		s.enrichMessageFileURLs(&messages[i])
+	}
+}
+
+func (s *MessageService) enrichMessageFileURLs(message *model.Message) {
+	if message == nil || s.fileURLs == nil {
+		return
+	}
+	for i := range message.Attachments {
+		message.Attachments[i].URL = s.fileURLs.UploadURL(message.Attachments[i].FilePath)
+		message.Attachments[i].ThumbnailURL = s.fileURLs.UploadURL(message.Attachments[i].ThumbnailPath)
+	}
 }
 
 // PinMessage pins a message into the shared conversation context blackboard.
@@ -442,7 +468,6 @@ func (s *MessageService) PinMessage(ctx context.Context, convID, messageID, user
 	if err != nil {
 		return nil, fmt.Errorf("pin message: %w", err)
 	}
-	s.invalidateMessageCache(ctx, convID)
 	return pin, nil
 }
 
@@ -454,7 +479,6 @@ func (s *MessageService) UnpinMessage(ctx context.Context, convID, messageID, us
 	if err := s.msgRepo.UnpinMessage(ctx, convID, messageID); err != nil {
 		return fmt.Errorf("unpin message: %w", err)
 	}
-	s.invalidateMessageCache(ctx, convID)
 	return nil
 }
 
@@ -545,19 +569,10 @@ func (s *MessageService) ensureMessageContextAccess(ctx context.Context, convID,
 	return nil
 }
 
-func (s *MessageService) invalidateMessageCache(ctx context.Context, convID string) {
-	if s.cacher == nil {
-		return
-	}
-	if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
-		slog.Warn("invalidate cache after context pin change failed", "conversation_id", convID, "error", err)
-	}
-}
-
 // ClearUnread 清除未读计数
 func (s *MessageService) ClearUnread(ctx context.Context, userID, convID string) error {
-	if s.cacher != nil {
-		return s.cacher.ClearUnread(ctx, userID, convID)
+	if s.delivery != nil {
+		return s.delivery.ClearUnread(ctx, userID, convID)
 	}
 	return nil
 }
@@ -606,13 +621,6 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	// 软删除
 	if err := s.msgRepo.SoftDelete(ctx, messageID); err != nil {
 		return fmt.Errorf("recall message: %w", err)
-	}
-
-	// 清除该会话的 Redis 缓存，避免撤回后仍返回旧内容
-	if s.cacher != nil {
-		if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
-			slog.Warn("invalidate cache after recall failed", "conversation_id", convID, "error", err)
-		}
 	}
 
 	// 撤回成功后异步推送通知给其他成员（排除发送者）
@@ -726,7 +734,7 @@ func (s *MessageService) buildAgentHandoffs(ctx context.Context, convID string) 
 }
 
 // createAgentReply 生成 Agent 回复消息
-func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string) (*model.Message, error) {
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string, replyTo *string) (*model.Message, error) {
 	if s.agentRepo == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -808,7 +816,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, replyTo, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
@@ -888,34 +896,39 @@ func (s *MessageService) asyncDeploy(convID, userID string) {
 }
 
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
-func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+func (s *MessageService) asyncMentionDispatch(convID, userID, sourceMessageID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Warn("asyncMentionDispatch recovered", "panic", r)
+			slog.Warn(orchFlowLog, "stage", "message.async_mention_panic", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "panic", r)
 		}
 	}()
 
+	slog.Info(orchFlowLog, "stage", "message.async_mention_start", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "content_len", len(content), "content_preview", orchPreview(content))
 	s.broadcastAgentTyping(convID, true)
 	defer s.broadcastAgentTyping(convID, false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments, &sourceMessageID)
 	if err != nil {
-		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		slog.Warn(orchFlowLog, "stage", "message.async_mention_route_failed", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err), &sourceMessageID)
 		return
 	}
 	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
+		slog.Info(orchFlowLog, "stage", "message.async_mention_no_messages", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID)
 		return
 	}
+	slog.Info(orchFlowLog, "stage", "message.async_mention_messages_ready", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "message_count", len(orchResult.AgentMessages))
 	for _, agentMsg := range orchResult.AgentMessages {
+		slog.Info(orchFlowLog, "stage", "message.async_mention_push", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "message_id", agentMsg.ID, "reply_to", stringValue(agentMsg.ReplyTo), "content_len", len(agentMsg.Content))
 		s.postPersist(convID, userID, agentMsg)
 	}
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
-func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment, replyTo *string) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
@@ -930,31 +943,63 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
 
-	// 注入 Agent 系统提示词、工具配置、共享黑板和 KB 上下文（与编排器路径对齐）
+	// Include text extracted from this message's attachments before shared context.
+	if s.orchSvc != nil {
+		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+			contextMessages = attachCtx + contextMessages
+		}
+	}
+
+	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
 	if s.orchSvc != nil {
 		agent, err := s.agentRepo.GetByID(ctx, agentID)
 		if err == nil && agent != nil {
-			blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID)
-			if blackboardCtx != "" {
+			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
 				contextMessages = blackboardCtx + contextMessages
 			}
-			// KB 优先从消息内容中预解析
-			kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-			if kbCtx != "" {
+			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
 				contextMessages = kbCtx + contextMessages
 			}
-			// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
-			// 保持与编排器路径一致：系统指令 → 可用工具 → 黑板/KB上下文 → 对话交接单
 			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
 		}
 	}
 
-	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages, replyTo)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err), replyTo)
 		return
 	}
 	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string, replyTo *string) {
+	meta, _ := json.Marshal(map[string]string{"agent_name": "AgentHub"})
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, replyTo, nil, nil)
+	if err != nil {
+		slog.Warn("create agent failure message failed", "convID", convID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, msg)
+}
+
+func shortAgentError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	text := err.Error()
+	if strings.Contains(text, "You've hit your usage limit") {
+		return "Codex CLI 当前额度已用尽，请到 Codex 设置查看 usage，或等待额度恢复。"
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+		text = strings.TrimSpace(lines[0])
+	}
+	if len([]rune(text)) > 240 {
+		runes := []rune(text)
+		text = string(runes[:240]) + "..."
+	}
+	return text
 }
 
 func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {

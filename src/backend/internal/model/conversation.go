@@ -45,5 +45,6 @@ type ConversationAgent struct {
 	CapabilitiesJSON string     `json:"capabilities_json" db:"capabilities_json"`
 	CustomSkills     string     `json:"custom_skills,omitempty" db:"custom_skills"`
 	SystemPrompt     string     `json:"system_prompt,omitempty" db:"system_prompt"`
+	Description      string     `json:"description,omitempty" db:"description"`
 	Tags             string     `json:"tags,omitempty" db:"tags"`
 }

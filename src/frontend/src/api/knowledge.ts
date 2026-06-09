@@ -1,6 +1,7 @@
 import { get, post, put, del, getAuthHeaders } from './client';
 import type {
   KnowledgeBase,
+  KnowledgeFile,
   GroupKnowledgeBase,
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
@@ -54,7 +55,9 @@ export async function deleteKnowledgeFile(kbId: string, fileId: string): Promise
 }
 
 /** 获取知识库文件预览/下载 URL */
-export function getKnowledgeFileUrl(kbId: string, fileId: string): string {
+export function getKnowledgeFileUrl(kbId: string, file: Pick<KnowledgeFile, 'id' | 'url'> | string): string {
+  if (typeof file !== 'string' && file.url) return file.url;
+  const fileId = typeof file === 'string' ? file : file.id;
   return `${BASE}/${kbId}/files/${fileId}/content`;
 }
 

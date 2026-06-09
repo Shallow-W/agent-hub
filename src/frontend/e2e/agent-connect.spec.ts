@@ -146,7 +146,7 @@ async function startDaemon(command: string, extraPath: string): Promise<ChildPro
 
     const onData = (chunk: Buffer) => {
       output += chunk.toString('utf8');
-      if (!settled && /AgentHub daemon (is running|正在运行)/.test(output)) {
+      if (!settled && (/AgentHub daemon (is running|正在运行)/.test(output) || /stage=daemon\.ready/.test(output))) {
         settled = true;
         clearTimeout(timer);
         resolve(child);

@@ -30,6 +30,20 @@ func normalizePromptLine(s string) string {
 	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
 }
 
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalStringPtr(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
+}
+
 // waitDaemonTask 轮询等待 daemon 任务完成（600ms 间隔，120s 超时）
 // 供 OrchestratorService 和 MessageService 共享使用
 func waitDaemonTask(ctx context.Context, repo daemonTaskGetter, taskID string) (*model.DaemonTask, error) {

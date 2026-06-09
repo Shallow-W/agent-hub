@@ -13,6 +13,7 @@ const (
 // DiscoveredSkill 兼容旧 daemon 的字符串能力，也承载真实 SKILL.md 内容。
 type DiscoveredSkill struct {
 	Name        string `json:"name"`
+	Category    string `json:"category,omitempty"`
 	Description string `json:"description,omitempty"`
 	Trigger     string `json:"trigger,omitempty"`
 	Detail      string `json:"detail,omitempty"`
@@ -76,6 +77,7 @@ func normalizeCustomSkills(raw string) (string, error) {
 		seen[name] = true
 		out = append(out, DiscoveredSkill{
 			Name:        truncateString(name, 80),
+			Category:    truncateString(strings.TrimSpace(skill.Category), 60),
 			Description: truncateString(strings.TrimSpace(skill.Description), 200),
 			Trigger:     truncateString(strings.TrimSpace(skill.Trigger), 200),
 			Detail:      truncateString(strings.TrimSpace(skill.Detail), 2000),
@@ -91,7 +93,7 @@ func normalizeCustomSkills(raw string) (string, error) {
 	return string(data), nil
 }
 
-func BuildAgentSkillContext(raw string, taskText string) string {
+func BuildAgentSkillContext(raw string, _ string) string {
 	skills := parseDiscoveredSkills(raw)
 	if len(skills) == 0 {
 		return ""
@@ -99,7 +101,7 @@ func BuildAgentSkillContext(raw string, taskText string) string {
 
 	var sb strings.Builder
 	sb.WriteString("[平台 Skills]\n")
-	sb.WriteString("以下是用户为当前 Agent 分配的平台 Skills。先参考索引判断是否需要使用；只有命中详情时才按详情执行。\n")
+	sb.WriteString("以下是用户为当前 Agent 分配的平台 Skills。先参考索引判断是否需要使用；如需完整 Skill 详情，优先调用 MCP 工具 get_agent_skill，参数 name 填 Skill 名称。若该工具未授权，则仅依据索引执行。\n")
 	sb.WriteString("{Skill 索引\n")
 	for _, skill := range skills {
 		name := strings.TrimSpace(skill.Name)
@@ -114,71 +116,17 @@ func BuildAgentSkillContext(raw string, taskText string) string {
 		if trigger == "" {
 			trigger = "按任务语义判断"
 		}
+		label := normalizePromptLine(name)
+		if category := strings.TrimSpace(skill.Category); category != "" {
+			label = fmt.Sprintf("%s（%s）", label, normalizePromptLine(category))
+		}
 		fmt.Fprintf(&sb, "- %s：%s；触发：%s\n",
-			truncateString(normalizePromptLine(name), 80),
+			truncateString(label, 100),
 			truncateString(normalizePromptLine(desc), 200),
 			truncateString(normalizePromptLine(trigger), 200),
 		)
 	}
 	sb.WriteString("}\n")
-
-	matched := matchedSkills(skills, taskText)
-	if len(matched) > 0 {
-		sb.WriteString("{命中的平台 Skill 详情\n")
-		for _, skill := range matched {
-			detail := strings.TrimSpace(skill.Detail)
-			if detail == "" {
-				continue
-			}
-			fmt.Fprintf(&sb, "## %s\n%s\n",
-				truncateString(normalizePromptLine(skill.Name), 80),
-				truncateString(detail, 2000),
-			)
-		}
-		sb.WriteString("}\n")
-	}
 	sb.WriteString("\n")
 	return sb.String()
-}
-
-func matchedSkills(skills []DiscoveredSkill, taskText string) []DiscoveredSkill {
-	text := strings.ToLower(strings.TrimSpace(taskText))
-	if text == "" {
-		return nil
-	}
-	matched := make([]DiscoveredSkill, 0, len(skills))
-	for _, skill := range skills {
-		if strings.TrimSpace(skill.Detail) == "" {
-			continue
-		}
-		if skillMatchesText(skill, text) {
-			matched = append(matched, skill)
-		}
-	}
-	return matched
-}
-
-func skillMatchesText(skill DiscoveredSkill, text string) bool {
-	for _, part := range []string{skill.Name, skill.Trigger} {
-		for _, token := range skillMatchTokens(part) {
-			if strings.Contains(text, token) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func skillMatchTokens(value string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-		return r == ',' || r == '，' || r == ';' || r == '；' || r == '/' || r == '、' || r == '\n' || r == '\t'
-	})
-	tokens := make([]string, 0, len(fields))
-	for _, field := range fields {
-		token := strings.TrimSpace(field)
-		if token != "" {
-			tokens = append(tokens, token)
-		}
-	}
-	return tokens
 }

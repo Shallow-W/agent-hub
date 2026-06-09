@@ -11,6 +11,8 @@ type MessageAttachment struct {
 	FileSize      int64     `json:"file_size" db:"file_size"`
 	FilePath      string    `json:"file_path" db:"file_path"`
 	ThumbnailPath string    `json:"thumbnail_path,omitempty" db:"thumbnail_path"`
+	URL           string    `json:"url,omitempty" db:"-"`
+	ThumbnailURL  string    `json:"thumbnail_url,omitempty" db:"-"`
 	Width         int       `json:"width,omitempty" db:"width"`
 	Height        int       `json:"height,omitempty" db:"height"`
 	SortOrder     int       `json:"-" db:"sort_order"`

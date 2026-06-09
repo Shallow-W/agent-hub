@@ -18,19 +18,19 @@ func (h *DaemonHandler) DispatchTask(task *model.DaemonTask) {
 		return
 	}
 
-	payload := struct {
-		Type string            `json:"type"`
-		Data *model.DaemonTask `json:"data"`
-	}{
-		Type: "task.execute",
-		Data: task,
-	}
-
 	h.daemonHub.RegisterTaskPromise(task.ID)
 
 	if err := h.daemonHub.SendToMachine(task.MachineID, ws.WSMessage{
-		Type: "task.execute",
-		Data: payload,
+		Type: "task.dispatch",
+		Data: map[string]interface{}{
+			"task_id":          task.ID,
+			"cli_tool":         task.CLITool,
+			"prompt":           task.Prompt,
+			"context_messages": task.ContextMessages,
+			"agent_id":         task.AgentID,
+			"conversation_id":  task.ConversationID,
+			"user_id":          task.UserID,
+		},
 	}); err != nil {
 		h.daemonHub.RemoveTaskPromise(task.ID)
 		h.logger.Warn("daemon task dispatch failed",

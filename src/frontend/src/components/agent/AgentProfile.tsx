@@ -11,24 +11,18 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
-  CloseOutlined,
-  StarOutlined,
-  PlusOutlined,
-  DownOutlined,
-  RightOutlined,
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
+import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import {
   formatDateTime,
   getAgentDescription,
   getRuntimeLabel,
   parseSkills,
-  autoGenerateSkills,
   resolveAgentAvatar,
 } from './agentPresentation';
-import type { Skill } from './agentPresentation';
 import {
   getTemplateTools,
   parseToolsConfig,
@@ -45,11 +39,11 @@ interface AgentProfileProps {
 }
 
 const tabItems = [
-  { key: 'profile', label: 'PROFILE' },
-  { key: 'skills', label: 'SKILLS' },
-  { key: 'permissions', label: 'PERMISSIONS', icon: <SafetyOutlined /> },
+  { key: 'profile', label: '资料' },
+  { key: 'skills', label: '技能' },
+  { key: 'permissions', label: '权限', icon: <SafetyOutlined /> },
   { key: 'system_prompt', label: '系统提示词', icon: <SettingOutlined /> },
-  { key: 'tools_config', label: '工具配置', icon: <ToolOutlined /> },
+  { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
 
 function getStatusText(agent: Agent): string {
@@ -59,18 +53,12 @@ function getStatusText(agent: Agent): string {
 export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile' }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const updateAgentTags = useAgentStore((s) => s.updateAgentTags);
-  const updateCustomSkills = useAgentStore((s) => s.updateCustomSkills);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('');
   const [tagsValue, setTagsValue] = useState('');
-  const [baseSkills, setBaseSkills] = useState<Skill[]>([]);
-  const [customSkills, setCustomSkills] = useState<Skill[]>([]);
-  const [newSkillName, setNewSkillName] = useState('');
-  const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
-  const [editingSkillName, setEditingSkillName] = useState('');
-  const [savingSkills, setSavingSkills] = useState(false);
+  const [customSkillCount, setCustomSkillCount] = useState(0);
   const [systemPromptValue, setSystemPromptValue] = useState('');
   const [toolsConfigValue, setToolsConfigValue] = useState('');
   const [selectedToolset, setSelectedToolset] = useState('tasks');
@@ -78,8 +66,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
-  const [baseSkillsExpanded, setBaseSkillsExpanded] = useState(true);
-  const [customSkillsExpanded, setCustomSkillsExpanded] = useState(true);
 
   const parseTagsFromJSON = (raw: string): string => {
     if (!raw || raw === '[]') return '';
@@ -96,36 +82,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     return items.length > 0 ? JSON.stringify(items) : '';
   };
 
-  const parseCustomSkills = (raw?: string): Skill[] => {
-    if (!raw) return [];
-    try {
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.filter((s: unknown): s is Skill => typeof s === 'object' && s !== null && 'name' in s) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const customSkillsToJSON = (skills: Skill[]): string => {
-    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({
-      name: s.name,
-      description: s.description,
-      trigger: s.trigger,
-      detail: s.detail,
-    }))) : '';
-  };
-
   useEffect(() => {
     if (!agent) return;
     setActiveTab(defaultTab);
     setName(agent.name);
     setAvatar(agent.avatar ?? '');
     setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
-    setBaseSkills(parseSkills(agent.capabilities_json));
-    setCustomSkills(parseCustomSkills(agent.custom_skills));
-    setNewSkillName('');
-    setEditingSkillIdx(null);
-    setEditingSkillName('');
+    setCustomSkillCount(parseSkills(agent.custom_skills).length);
     setSystemPromptValue(agent.system_prompt ?? '');
     const parsedTools = parseToolsConfig(agent.tools_config);
     setSelectedToolset(parsedTools.toolset);
@@ -148,6 +111,20 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const computerName = agent.machine_name || 'local-computer';
   const editableTags = tagsValue.split(',').map((item) => item.trim()).filter(Boolean);
   const isBuiltinSystemAgent = agent.type === 'system' && !agent.user_id;
+  const selectedToolCount = selectedTools.length;
+  const statusLabel = getStatusText(agent);
+  const sourceLabel = agent.source === 'daemon' ? 'Daemon' : agent.source;
+  const descriptionBlocks = description
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const descriptionSummary = descriptionBlocks[0] || description;
+  const operationLines = descriptionBlocks
+    .filter((line) => line.startsWith('-'))
+    .map((line) => line.replace(/^-+\s*/, ''));
+  const descriptionNotes = descriptionBlocks
+    .filter((line) => !line.startsWith('-'))
+    .slice(1);
 
   const handleSaveProfile = async () => {
     const nextName = name.trim();
@@ -174,67 +151,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       message.error('保存 Agent 失败');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleAddSkill = () => {
-    const trimmed = newSkillName.trim();
-    if (!trimmed) return;
-    if (customSkills.some((s) => s.name === trimmed)) {
-      message.warning('该技能已存在');
-      return;
-    }
-    setCustomSkills((prev) => [...prev, { name: trimmed }]);
-    setNewSkillName('');
-  };
-
-  const handleUpdateCustomSkill = (idx: number, patch: Partial<Skill>) => {
-    setCustomSkills((prev) => prev.map((skill, i) => (
-      i === idx ? { ...skill, ...patch } : skill
-    )));
-  };
-
-  const handleDeleteSkill = (idx: number) => {
-    setCustomSkills((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const handleStartEditSkill = (idx: number) => {
-    setEditingSkillIdx(idx);
-    setEditingSkillName(customSkills[idx]?.name ?? '');
-  };
-
-  const handleCommitEditSkill = () => {
-    if (editingSkillIdx === null) return;
-    const trimmed = editingSkillName.trim();
-    if (trimmed) {
-      setCustomSkills((prev) =>
-        prev.map((s, i) => (i === editingSkillIdx ? { ...s, name: trimmed } : s))
-      );
-    }
-    setEditingSkillIdx(null);
-    setEditingSkillName('');
-  };
-
-  const handleAutoGenerate = () => {
-    const generated = autoGenerateSkills(agent);
-    const existingNames = new Set(customSkills.map((s) => s.name));
-    const merged = [
-      ...customSkills,
-      ...generated.filter((s) => !existingNames.has(s.name)),
-    ];
-    setCustomSkills(merged);
-    message.success('已自动生成技能');
-  };
-
-  const handleSaveCustomSkills = async () => {
-    setSavingSkills(true);
-    try {
-      await updateCustomSkills(agent.id, customSkillsToJSON(customSkills));
-      message.success('平台 Skills 已保存');
-    } catch {
-      message.error('保存平台 Skills 失败');
-    } finally {
-      setSavingSkills(false);
     }
   };
 
@@ -347,7 +263,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         </div>
         <div className={styles.actions}>
           <Button icon={<MessageOutlined />}>Message</Button>
-          <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
         </div>
       </div>
 
@@ -359,7 +275,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             type="button"
             onClick={() => setActiveTab(item.key)}
           >
-            {item.icon} {item.key === 'skills' ? `SKILLS (${customSkills.length})` : item.label}
+            {item.icon} {item.key === 'skills' ? `${item.label} ${customSkillCount}` : item.label}
           </button>
         ))}
       </div>
@@ -367,259 +283,162 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       <div className={styles.body}>
         {activeTab === 'profile' && (
           <>
-            <div className={styles.profileTop}>
+            <div className={styles.profileHero}>
               <Avatar
-                className={styles.clickableAvatar}
+                className={`${styles.clickableAvatar} ${styles.profileAvatar}`}
                 size={74}
                 src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
                 icon={<RobotOutlined />}
                 onClick={() => setAvatarPickerOpen(true)}
               />
-              <div className={styles.profileSummary}>
-                <div className={styles.profileName}>
-                  {agent.name}
-                  <span className={`${styles.statusDot} ${isOnline ? '' : styles.offlineDot}`} />
-                  <span className={styles.value}>{getStatusText(agent)}</span>
+              <div className={styles.profileHeroMain}>
+                <div className={styles.profileTitleRow}>
+                  <span className={styles.profileNameText}>{agent.name}</span>
+                  <span className={`${styles.statusChip} ${isOnline ? '' : styles.statusChipOffline}`}>
+                    <span className={styles.statusChipDot} />
+                    {statusLabel}
+                  </span>
                 </div>
-                <div className={styles.handle}>@{agent.cli_tool}</div>
+                <div className={styles.profileMetaLine}>@{agent.cli_tool} · {computerName}</div>
+                <div className={styles.profileDescriptionPreview}>{descriptionSummary}</div>
+                <div className={styles.heroBadges}>
+                  <span className={styles.runtimeBadge}>{runtimeLabel}</span>
+                  <span className={styles.runtimeBadge}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</span>
+                  <span className={styles.runtimeBadge}>{sourceLabel}</span>
+                </div>
               </div>
             </div>
 
-        <section className={styles.section}>
-          <div className={styles.field}>
-            <span className={styles.label}>DISPLAY NAME</span>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Agent 名称" />
-          </div>
-          <div className={styles.field}>
-            <span className={styles.label}>DESCRIPTION</span>
-            <div className={styles.descriptionText}>
-              {description}
-            </div>
-          </div>
-          <div className={styles.field}>
-            <span className={styles.label}>TAGS</span>
-            <Input value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="coding, review, orchestration" />
-            {editableTags.length > 0 && (
-              <div className={styles.tagPreview}>
-                {editableTags.map((item) => <Tag key={item}>{item}</Tag>)}
+            <div className={styles.metricStrip}>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>状态</span>
+                <span className={styles.metricValue}>{statusLabel}</span>
               </div>
-            )}
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>ACTIONS</div>
-          <div className={styles.actionPanel}>
-            {isOnline ? (
-              <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
-                停止 Agent
-              </Button>
-            ) : (
-              <Button icon={<PlayCircleOutlined />} onClick={handleStartAgent}>
-                启动 Agent
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={handleRestartAgent}>
-              重启 Agent
-            </Button>
-            {!isBuiltinSystemAgent && (
-              <Popconfirm title="确定删除这个 Agent？" okText="删除" cancelText="取消" onConfirm={handleDelete}>
-                <Button danger icon={<DeleteOutlined />}>
-                  删除 Agent
-                </Button>
-              </Popconfirm>
-            )}
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>INFO</div>
-          <div className={styles.infoGrid}>
-            <div>
-              <span className={styles.label}>Computer</span>
-              <div className={styles.value}>
-                {computerName} · {agent.source} · {formatDateTime(agent.last_seen_at)}
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>平台</span>
+                <span className={styles.metricValue}>{runtimeLabel}</span>
+              </div>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>平台 Skills</span>
+                <span className={styles.metricValue}>{customSkillCount}</span>
+              </div>
+              <div className={styles.metricItem}>
+                <span className={styles.metricLabel}>工具</span>
+                <span className={styles.metricValue}>{selectedToolCount}</span>
               </div>
             </div>
-            <div>
-              <span className={styles.label}>Created</span>
-              <div className={styles.value}>{formatDateTime(agent.created_at)}</div>
-            </div>
-            <div>
-              <span className={styles.label}>Type</span>
-              <div className={styles.value}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</div>
-            </div>
-            <div>
-              <span className={styles.label}>Version</span>
-              <div className={styles.value}>{agent.version || '未上报版本'}</div>
-            </div>
-          </div>
-        </section>
-
-        <section className={styles.section}>
-          <div className={styles.sectionTitle}>RUNTIME CONFIGURATION</div>
-          <div className={styles.runtimeRow}>
-            <span className={styles.runtimeBadge}>{runtimeLabel}</span>
-          </div>
-        </section>
-          </>
-        )}
-
-        {activeTab === 'skills' && (
-          <>
-            <section className={styles.section}>
-              <button
-                className={styles.sectionToggle}
-                type="button"
-                onClick={() => setBaseSkillsExpanded((v) => !v)}
-              >
-                {baseSkillsExpanded ? <DownOutlined /> : <RightOutlined />}
-                <span className={styles.sectionTitle}>底座自带 Skills (只读)</span>
-                <span className={styles.sectionCount}>{baseSkills.length}</span>
-              </button>
-              {baseSkillsExpanded && (
-                baseSkills.length === 0 ? (
-                  <div className={styles.skillsEmpty}>该 Agent 底座未上报技能信息</div>
-                ) : (
-                  <div className={styles.skillGrid}>
-                    {baseSkills.map((skill, idx) => (
-                      <div className={styles.skillCard} key={idx}>
-                        {skill.auto && (
-                          <span className={styles.skillBadge}>auto</span>
-                        )}
-                        <div className={styles.skillName}>{skill.name}</div>
-                        {skill.description && (
-                          <div className={styles.skillDesc}>{skill.description}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
-            </section>
 
             <section className={styles.section}>
-              <button
-                className={styles.sectionToggle}
-                type="button"
-                onClick={() => setCustomSkillsExpanded((v) => !v)}
-              >
-                {customSkillsExpanded ? <DownOutlined /> : <RightOutlined />}
-                <span className={styles.sectionTitle}>平台 Skills (可编辑)</span>
-                <span className={styles.sectionCount}>{customSkills.length}</span>
-              </button>
-              {customSkillsExpanded && (
-                <>
-                  <div className={styles.skillsHeader}>
-                    <div className={styles.skillActions}>
-                      <Button
-                        size="small"
-                        icon={<StarOutlined />}
-                        onClick={handleAutoGenerate}
-                      >
-                        自动生成
-                      </Button>
-                      <Button
-                        size="small"
-                        icon={<SaveOutlined />}
-                        loading={savingSkills}
-                        onClick={handleSaveCustomSkills}
-                      >
-                        保存
-                      </Button>
-                    </div>
-                  </div>
-                  {customSkills.length === 0 ? (
-                    <div className={styles.skillsEmpty}>
-                      暂无平台 Skills，点击「自动生成」或在下方添加
-                    </div>
-                  ) : (
-                    <div className={styles.customSkillList}>
-                      {customSkills.map((skill, idx) => (
-                        <div className={styles.skillCard} key={idx}>
-                          <button
-                            className={styles.skillDelete}
-                            type="button"
-                            onClick={() => handleDeleteSkill(idx)}
-                            title="删除"
-                          >
-                            <CloseOutlined />
-                          </button>
-                          {editingSkillIdx === idx ? (
-                            <Input
-                              autoFocus
-                              size="small"
-                              value={editingSkillName}
-                              onChange={(e) => setEditingSkillName(e.target.value)}
-                              onBlur={handleCommitEditSkill}
-                              onPressEnter={handleCommitEditSkill}
-                              className={styles.skillNameInput}
-                            />
-                          ) : (
-                            <div
-                              className={styles.skillName}
-                              onClick={() => handleStartEditSkill(idx)}
-                              title="点击编辑名称"
-                            >
-                              {skill.name}
-                            </div>
-                          )}
-                          {skill.description && (
-                            <div className={styles.skillDesc}>{skill.description}</div>
-                          )}
-                          {skill.trigger && (
-                            <div className={styles.skillTrigger}>触发：{skill.trigger}</div>
-                          )}
-                          <div className={styles.skillEditor}>
-                            <label className={styles.skillField}>
-                              <span>描述</span>
-                              <Input.TextArea
-                                autoSize={{ minRows: 2, maxRows: 4 }}
-                                value={skill.description ?? ''}
-                                onChange={(e) => handleUpdateCustomSkill(idx, { description: e.target.value })}
-                                placeholder="这个 Skill 解决什么问题"
-                              />
-                            </label>
-                            <label className={styles.skillField}>
-                              <span>触发条件</span>
-                              <Input
-                                value={skill.trigger ?? ''}
-                                onChange={(e) => handleUpdateCustomSkill(idx, { trigger: e.target.value })}
-                                placeholder="例如：代码审查、修复 bug、写测试时使用"
-                              />
-                            </label>
-                            <label className={styles.skillField}>
-                              <span>详细内容</span>
-                              <Input.TextArea
-                                autoSize={{ minRows: 3, maxRows: 8 }}
-                                value={skill.detail ?? ''}
-                                onChange={(e) => handleUpdateCustomSkill(idx, { detail: e.target.value })}
-                                placeholder="渐进式加载时注入给 Agent 的具体规则、步骤或模板"
-                                className={styles.monospaceTextarea}
-                              />
-                            </label>
-                          </div>
-                        </div>
-                      ))}
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>基本资料</div>
+                  <div className={styles.sectionHint}>名称、标签和对外展示信息</div>
+                </div>
+              </div>
+              <div className={styles.formGrid}>
+                <div className={styles.field}>
+                  <span className={styles.label}>显示名称</span>
+                  <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Agent 名称" />
+                </div>
+                <div className={styles.field}>
+                  <span className={styles.label}>标签</span>
+                  <Input value={tagsValue} onChange={(event) => setTagsValue(event.target.value)} placeholder="coding, review, orchestration" />
+                  {editableTags.length > 0 && (
+                    <div className={styles.tagPreview}>
+                      {editableTags.map((item) => <Tag key={item}>{item}</Tag>)}
                     </div>
                   )}
-                  <div className={styles.skillAddRow}>
-                    <Input
-                      className={styles.inputFlex}
-                      placeholder="输入新技能名称"
-                      value={newSkillName}
-                      onChange={(e) => setNewSkillName(e.target.value)}
-                      onPressEnter={handleAddSkill}
-                    />
-                    <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
-                      添加
-                    </Button>
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>能力说明</div>
+                  <div className={styles.sectionHint}>从系统提示词中提炼出的角色和可执行操作</div>
+                </div>
+              </div>
+              <div className={styles.descriptionCard}>
+                <div className={styles.descriptionHeadline}>{descriptionSummary}</div>
+                {operationLines.length > 0 && (
+                  <div className={styles.descriptionBlock}>
+                    <span className={styles.descriptionBlockTitle}>可执行操作</span>
+                    <ul className={styles.operationList}>
+                      {operationLines.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
                   </div>
-                </>
-              )}
+                )}
+                {descriptionNotes.length > 0 && (
+                  <div className={styles.descriptionText}>
+                    {descriptionNotes.map((line) => <p key={line}>{line}</p>)}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>运行信息</div>
+                  <div className={styles.sectionHint}>设备、来源、版本和创建时间</div>
+                </div>
+              </div>
+              <div className={styles.infoGrid}>
+                <div>
+                  <span className={styles.label}>电脑</span>
+                  <div className={styles.value}>
+                    {computerName} · {sourceLabel} · {formatDateTime(agent.last_seen_at)}
+                  </div>
+                </div>
+                <div>
+                  <span className={styles.label}>创建时间</span>
+                  <div className={styles.value}>{formatDateTime(agent.created_at)}</div>
+                </div>
+                <div>
+                  <span className={styles.label}>类型</span>
+                  <div className={styles.value}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</div>
+                </div>
+                <div>
+                  <span className={styles.label}>版本</span>
+                  <div className={styles.value}>{agent.version || '未上报版本'}</div>
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <div className={styles.sectionTitle}>操作</div>
+                  <div className={styles.sectionHint}>控制当前 Agent 的运行状态</div>
+                </div>
+              </div>
+              <div className={styles.actionPanel}>
+                {isOnline ? (
+                  <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
+                    停止 Agent
+                  </Button>
+                ) : (
+                  <Button icon={<PlayCircleOutlined />} onClick={handleStartAgent}>
+                    启动 Agent
+                  </Button>
+                )}
+                <Button icon={<ReloadOutlined />} onClick={handleRestartAgent}>
+                  重启 Agent
+                </Button>
+                {!isBuiltinSystemAgent && (
+                  <Popconfirm title="确定删除这个 Agent？" okText="删除" cancelText="取消" onConfirm={handleDelete}>
+                    <Button danger icon={<DeleteOutlined />}>
+                      删除 Agent
+                    </Button>
+                  </Popconfirm>
+                )}
+              </div>
             </section>
           </>
         )}
+
+        {activeTab === 'skills' && <AgentSkillsPanel agent={agent} />}
 
         {activeTab === 'system_prompt' && (
           <section className={styles.section}>

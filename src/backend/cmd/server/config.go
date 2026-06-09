@@ -41,9 +41,10 @@ type Config struct {
 		DB       int    `koanf:"db"`
 	} `koanf:"redis"`
 	Upload struct {
-		Dir        string `koanf:"dir"`
-		MaxImageMB int    `koanf:"max_image_mb"`
-		MaxPDFMB   int    `koanf:"max_pdf_mb"`
+		Dir           string `koanf:"dir"`
+		MaxImageMB    int    `koanf:"max_image_mb"`
+		MaxPDFMB      int    `koanf:"max_pdf_mb"`
+		PublicBaseURL string `koanf:"public_base_url"`
 	} `koanf:"upload"`
 	Log struct {
 		Level string `koanf:"level"`
@@ -52,6 +53,11 @@ type Config struct {
 		RPS   float64 `koanf:"rps"`
 		Burst int     `koanf:"burst"`
 	} `koanf:"rate_limit"`
+	GitHub struct {
+		Token     string `koanf:"token"`      // PAT（classic，repo 权限）；建议用环境变量 GITHUB_TOKEN 注入
+		Owner     string `koanf:"owner"`      // 仓库归属账号，如 Shallow-W；可用 GITHUB_PAGES_OWNER 覆盖
+		PagesRepo string `koanf:"pages_repo"` // 专用公开仓库名，如 agent-hub-sites；可用 GITHUB_PAGES_REPO 覆盖
+	} `koanf:"github"`
 }
 
 // loadConfig 从 YAML 文件加载配置
@@ -103,4 +109,23 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// firstNonEmpty 返回第一个非空字符串（用于环境变量覆盖配置文件）。
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// isFalsy 判断环境变量是否表示「关闭」（false/0/no/off，忽略大小写与首尾空白）。
+func isFalsy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }

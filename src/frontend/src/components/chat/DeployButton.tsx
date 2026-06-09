@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Button, Modal } from 'antd';
+import { Dropdown, Button, Modal } from 'antd';
+import type { MenuProps } from 'antd';
 import { message } from '@/utils/message';
-import { CloudUploadOutlined } from '@ant-design/icons';
+import { CloudUploadOutlined, GlobalOutlined, GithubOutlined } from '@ant-design/icons';
 import type { Artifact } from '@/types/message';
 import type { Deployment } from '@/types/deployment';
-import { deployArtifact } from '@/api/deployment';
+import { deployArtifact, publishToGitHub } from '@/api/deployment';
 import { DeployStatusCard } from './DeployStatusCard';
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
   text?: boolean;
 }
 
-/** 部署按钮：触发产物部署，成功后弹出部署状态卡片。 */
+/** 部署按钮：下拉选择「内网穿透即时预览」或「GitHub Pages 永久发布」，成功后弹出状态卡片。 */
 export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }) => {
   const rootId = artifact.root_id || artifact.id;
   const [loading, setLoading] = useState(false);
@@ -23,11 +24,11 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
 
   if (!rootId) return null;
 
-  const handleDeploy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const run = async (target: 'tunnel' | 'github') => {
     setLoading(true);
     try {
-      const dep = await deployArtifact(rootId);
+      const dep =
+        target === 'github' ? await publishToGitHub(rootId) : await deployArtifact(rootId);
       setDeployment(dep);
       setOpen(true);
       if (dep.status === 'failed') {
@@ -40,19 +41,39 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
     }
   };
 
+  const items: MenuProps['items'] = [
+    {
+      key: 'tunnel',
+      icon: <GlobalOutlined />,
+      label: '即时预览（内网穿透）',
+    },
+    {
+      key: 'github',
+      icon: <GithubOutlined />,
+      label: '永久发布到 GitHub Pages',
+    },
+  ];
+
+  const onClick: MenuProps['onClick'] = ({ key, domEvent }) => {
+    domEvent.stopPropagation();
+    void run(key as 'tunnel' | 'github');
+  };
+
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
   return (
     <>
-      <Button
-        size={size}
-        type={text ? 'text' : 'default'}
-        loading={loading}
-        icon={<CloudUploadOutlined />}
-        onClick={handleDeploy}
-      >
-        部署
-      </Button>
+      <Dropdown menu={{ items, onClick }} trigger={['click']}>
+        <Button
+          size={size}
+          type={text ? 'text' : 'default'}
+          loading={loading}
+          icon={<CloudUploadOutlined />}
+          onClick={stop}
+        >
+          部署
+        </Button>
+      </Dropdown>
       <div onClick={stop} role="presentation">
         <Modal
           open={open}

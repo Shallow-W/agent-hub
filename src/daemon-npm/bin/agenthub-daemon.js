@@ -12,6 +12,41 @@ const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
 const WS_PING_INTERVAL_MS = 30000;
 const INBOUND_WATCHDOG_MS = 70000;
+const DAEMON_LOG_EVENT = 'daemon_flow';
+
+function logValue(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value);
+  const text = String(value);
+  return /^[A-Za-z0-9._:/@=-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+function logFlow(level, stage, fields = {}) {
+  const pairs = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${logValue(value)}`);
+  const line = [
+    new Date().toISOString(),
+    DAEMON_LOG_EVENT,
+    `level=${level}`,
+    `stage=${stage}`,
+    ...pairs,
+  ].join(' ');
+  if (level === 'error' || level === 'warn' || process.argv.includes('--mcp')) {
+    console.error(line);
+    return;
+  }
+  console.log(line);
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function firstLine(value) {
+  return String(value || '').split(/\r?\n/)[0].trim();
+}
 
 let WebSocket;
 try {
@@ -27,8 +62,42 @@ function safeSend(ws, data) {
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(data);
+      return true;
     }
   } catch { /* connection already closed */ }
+  return false;
+}
+
+function sendTaskComplete(data) {
+  const taskId = data && data.task_id;
+  if (!taskId) return;
+  const envelope = JSON.stringify({ type: 'task.complete', data });
+  if (safeSend(currentDaemonWs, envelope)) {
+    pendingTaskCompletions.delete(taskId);
+    logFlow('info', 'task.complete_sent', {
+      task_id: taskId,
+      has_error: Boolean(data.error),
+      result_len: typeof data.result === 'string' ? data.result.length : 0,
+      artifact_count: Array.isArray(data.artifacts) ? data.artifacts.length : 0,
+      pending_count: pendingTaskCompletions.size,
+    });
+    return;
+  }
+  pendingTaskCompletions.set(taskId, data);
+  logFlow('warn', 'task.complete_buffered', {
+    task_id: taskId,
+    has_error: Boolean(data.error),
+    pending_count: pendingTaskCompletions.size,
+  });
+}
+
+function flushPendingTaskCompletions() {
+  if (pendingTaskCompletions.size > 0) {
+    logFlow('info', 'task.complete_flush_start', { pending_count: pendingTaskCompletions.size });
+  }
+  for (const data of pendingTaskCompletions.values()) {
+    sendTaskComplete(data);
+  }
 }
 
 function onWebSocket(ws, eventName, handler) {
@@ -60,6 +129,8 @@ const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
 const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
+let currentDaemonWs = null;
+const pendingTaskCompletions = new Map(); // taskID → task.complete data, flushed after WS reconnect
 
 // Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
 const conversationSessions = new Map();
@@ -80,7 +151,7 @@ function saveSessionMap() {
     fs.mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true });
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2));
   } catch (err) {
-    console.error(`Failed to save session map: ${err.message}`);
+    logFlow('warn', 'session_map.save_failed', { file: SESSIONS_FILE, error: errorMessage(err) });
   }
 }
 
@@ -91,16 +162,23 @@ const agentStartQueue = [];
 // 轮询模式下的后端连接信息，供派发任务时给 Claude Code 注入平台 MCP server。
 const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 
-// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
-// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
-// 仅在已知后端连接信息时生效；其它 CLI（openclaw/codex）无按次注入能力，返回空。
-function buildPlatformMcpArgs(conversationId, userId, agentId) {
+// buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
+// AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
+// group context, matching Claude Code's per-task injection behavior.
+function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
   if (agentId) mcpServerArgs.push('--agent-id', agentId);
+  return mcpServerArgs;
+}
+
+// buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
+function buildPlatformMcpArgs(conversationId, userId, agentId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
       'agenthub-platform': {
@@ -131,9 +209,9 @@ function registerOpenClawMcp(mcpArgs) {
     encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 0) {
-    console.log('已为 OpenClaw 配置平台 MCP（agenthub-platform）。');
+    logFlow('info', 'mcp_config.openclaw_configured', { server: 'agenthub-platform' });
   } else {
-    console.error(`OpenClaw MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+    logFlow('warn', 'mcp_config.openclaw_failed', { error: firstLine(result.stderr || result.stdout) });
   }
 }
 
@@ -148,9 +226,9 @@ function registerCodexMcp(mcpArgs) {
     encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 0) {
-    console.log('已为 Codex 配置平台 MCP（agenthub-platform）。');
+    logFlow('info', 'mcp_config.codex_configured', { server: 'agenthub-platform' });
   } else {
-    console.error(`Codex MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+    logFlow('warn', 'mcp_config.codex_failed', { error: firstLine(result.stderr || result.stdout) });
   }
 }
 
@@ -163,6 +241,7 @@ function killSessionProcess(sessionId) {
     } else {
       process.kill(-child.pid, 'SIGKILL');
     }
+    logFlow('info', 'process.kill_session', { session_id: sessionId, pid: child.pid });
   } catch { /* already dead */ }
   activeSessions.delete(sessionId);
 }
@@ -302,6 +381,32 @@ function isCodexAuthenticated(command) {
   return status !== null && /\blogged in\b/i.test(status);
 }
 
+function existingFile(value) {
+  return value && fs.existsSync(value) ? value : null;
+}
+
+function codexLocalInstallPaths() {
+  if (process.platform !== 'win32') return [];
+  const root = process.env.LOCALAPPDATA;
+  if (!root) return [];
+  const binRoot = path.join(root, 'OpenAI', 'Codex', 'bin');
+  try {
+    return fs.readdirSync(binRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(binRoot, entry.name, 'codex.exe'))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort((a, b) => {
+        try {
+          return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+        } catch {
+          return 0;
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
 function codexExtensionPath() {
   if (process.platform !== 'win32') return null;
   const root = process.env.USERPROFILE;
@@ -322,9 +427,22 @@ function codexExtensionPath() {
   return null;
 }
 
+function resolveCodexCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_CODEX_COMMAND),
+    ...codexLocalInstallPaths(),
+    codexExtensionPath(),
+    'codex',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'codex';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
-    return codexExtensionPath() || 'codex';
+    return resolveCodexCommand();
   }
   return cliTool;
 }
@@ -333,6 +451,9 @@ function scanAgents() {
   return CANDIDATES
     .map((candidate) => {
       const command = resolveCommand(candidate.cli_tool);
+      if (candidate.cli_tool === 'codex') {
+        console.log(`Codex command resolved: ${command}`);
+      }
       const version = commandVersion(command);
       if (version === null) return null;
       if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
@@ -723,28 +844,78 @@ function buildPromptParts(task) {
   return { systemPrompt, userPrompt: parts.join('\n') };
 }
 
+function ensureTaskWorkdir(task) {
+  const safeID = String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-');
+  const dir = path.join(os.tmpdir(), 'agenthub-cli-tasks', safeID);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function ensureAgentHubCodexHome() {
+  const configured = process.env.AGENTHUB_CODEX_HOME;
+  const dir = configured || path.join(os.homedir(), '.agenthub', 'codex');
+  fs.mkdirSync(dir, { recursive: true });
+  const configFile = path.join(dir, 'config.toml');
+  if (!fs.existsSync(configFile)) {
+    fs.writeFileSync(configFile, [
+      'model_provider = "OpenAI"',
+      'model = "gpt-5.5"',
+      'review_model = "gpt-5.5"',
+      'model_reasoning_effort = "xhigh"',
+      'disable_response_storage = true',
+      'network_access = "enabled"',
+      'windows_wsl_setup_acknowledged = true',
+      '',
+      '[model_providers.OpenAI]',
+      'name = "OpenAI"',
+      'base_url = "https://www.aitoken-api.com"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      '',
+      '[features]',
+      'goals = true',
+      '',
+    ].join('\n'), 'utf8');
+  }
+  return dir;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
-    const codexPrompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
+    const codexMcpFallback = [
+      '[Codex MCP 适配]',
+      '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
+      '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
+      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
+      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
+      '',
+    ].join('\n');
+    const effectivePrompt = systemPrompt
+      ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : `${codexMcpFallback}${userPrompt}`;
+    const globalArgs = [
+      '--ask-for-approval',
+      'never',
+    ];
+    const execArgs = [
+      '--skip-git-repo-check',
+      '--sandbox',
+      'read-only',
+      '--color',
+      'never',
+      '--output-last-message',
+      outputFile,
+    ];
     return {
       command,
-      args: [
-        '--ask-for-approval',
-        'never',
-        'exec',
-        '--skip-git-repo-check',
-        '--sandbox',
-        'read-only',
-        '--color',
-        'never',
-        '--output-last-message',
-        outputFile,
-        codexPrompt,
-      ],
+      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
       outputFile,
+      cwd: ensureTaskWorkdir(task),
+      env: { CODEX_HOME: ensureAgentHubCodexHome() },
     };
   }
   if (task.cli_tool === 'claude') {
@@ -803,13 +974,31 @@ function commandForTask(task) {
 
 async function executeTask(task) {
   if (task.cli_tool === OPEN_PATH_TOOL) {
+    logFlow('info', 'task.open_path_start', { task_id: task.id });
     return openSkillLocation(task.prompt);
   }
   const spec = commandForTask(task);
+  const taskMeta = {
+    task_id: task.id,
+    cli_tool: task.cli_tool || 'unknown',
+    agent_id: task.agent_id,
+    conversation_id: task.conversation_id,
+  };
+  logFlow('info', 'task.command_prepared', {
+    ...taskMeta,
+    command: spec.command,
+    args_count: Array.isArray(spec.args) ? spec.args.length : 0,
+    has_stdin: typeof spec.stdin === 'string' && spec.stdin.length > 0,
+    stdin_len: typeof spec.stdin === 'string' ? spec.stdin.length : 0,
+    session_id: spec.sessionId,
+    output_file: Boolean(spec.outputFile),
+    result_format: spec.resultFormat,
+  });
 
   let stdout;
   let stderr;
   if (spec.sessionId) {
+    logFlow('info', 'task.session_resume_start', { ...taskMeta, session_id: spec.sessionId });
     killSessionProcess(spec.sessionId);
     await sleep(1000);
 
@@ -819,8 +1008,16 @@ async function executeTask(task) {
         ['--resume', spec.sessionId, ...spec.args],
         spec.stdin,
         spec.sessionId,
+        spec.cwd,
+        spec.env,
+        { ...taskMeta, mode: 'resume' },
       ));
     } catch (_err) {
+      logFlow('warn', 'task.session_resume_failed', {
+        ...taskMeta,
+        session_id: spec.sessionId,
+        error: errorMessage(_err),
+      });
       killSessionProcess(spec.sessionId);
       await sleep(500);
       try {
@@ -829,30 +1026,48 @@ async function executeTask(task) {
           ['--session-id', spec.sessionId, ...spec.args],
           spec.stdin,
           spec.sessionId,
+          spec.cwd,
+          spec.env,
+          { ...taskMeta, mode: 'session_id_retry' },
         ));
       } catch (_err2) {
-        const freshId = crypto.randomUUID();
+        const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        logFlow('warn', 'task.session_fresh_start', {
+          ...taskMeta,
+          previous_session_id: spec.sessionId,
+          fresh_session_id: freshId,
+          error: errorMessage(_err2),
+        });
         ({ stdout, stderr } = await runProcess(
           spec.command,
           ['--session-id', freshId, ...spec.args],
           spec.stdin,
           freshId,
+          spec.cwd,
+          spec.env,
+          { ...taskMeta, mode: 'fresh_session' },
         ));
       }
     }
   } else {
-    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin));
+    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin, undefined, spec.cwd, spec.env, { ...taskMeta, mode: 'one_shot' }));
   }
 
   if (spec.outputFile && fs.existsSync(spec.outputFile)) {
     const text = fs.readFileSync(spec.outputFile, 'utf8').trim();
     fs.rmSync(spec.outputFile, { force: true });
-    if (text) return text;
+    if (text) {
+      logFlow('info', 'task.result_ready', { ...taskMeta, source: 'output_file', result_len: text.length });
+      return text;
+    }
   }
   if (spec.resultFormat === 'openclaw-json') {
-    return parseOpenClawOutput(stdout);
+    const parsed = parseOpenClawOutput(stdout);
+    logFlow('info', 'task.result_ready', { ...taskMeta, source: 'openclaw_json', result_len: parsed.length });
+    return parsed;
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
+  logFlow('info', 'task.result_ready', { ...taskMeta, source: 'stdio', result_len: text.length });
   return text || '(Agent CLI 没有返回内容)';
 }
 
@@ -977,18 +1192,134 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function lineEndIndex(text, start) {
+  const nl = text.indexOf('\n', start);
+  return nl === -1 ? text.length : nl + 1;
+}
+
+function lineText(text, start, end) {
+  const raw = text.slice(start, end);
+  return raw.endsWith('\n') ? raw.slice(0, -1).replace(/\r$/, '') : raw.replace(/\r$/, '');
+}
+
+function findFenceClose(text, start, preferLast) {
+  let pos = start;
+  let first = null;
+  let last = null;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    if (/^ {0,3}`{3,}\s*$/.test(line)) {
+      const found = { start: pos, end };
+      if (!first) first = found;
+      last = found;
+      if (!preferLast) return found;
+    }
+    pos = end;
+  }
+  return preferLast ? last : first;
+}
+
+function extractFencedBlocks(text) {
+  const blocks = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const end = lineEndIndex(text, pos);
+    const line = lineText(text, pos, end);
+    const open = line.match(/^ {0,3}`{3,}([^`]*)$/);
+    if (!open) {
+      pos = end;
+      continue;
+    }
+
+    const language = (open[1] || '').trim().toLowerCase();
+    const preferLastClose = language === 'markdown' || language === 'md';
+    const close = findFenceClose(text, end, preferLastClose);
+    if (!close) break;
+
+    blocks.push({
+      language,
+      content: text.slice(end, close.start),
+      start: pos,
+      end: close.end,
+    });
+    pos = close.end;
+  }
+  return blocks;
+}
+
+function unwrapSingleMarkdownFence(text, fencedBlocks) {
+  if (fencedBlocks.length !== 1) return null;
+  const block = fencedBlocks[0];
+  if (block.language !== 'markdown' && block.language !== 'md') return null;
+  if (text.slice(0, block.start).trim() || text.slice(block.end).trim()) return null;
+  return block.content.replace(/\s+$/, '');
+}
+
+function extractMarkdownDocumentFence(fencedBlocks) {
+  for (const block of fencedBlocks) {
+    if (block.language !== 'markdown' && block.language !== 'md') continue;
+    const content = block.content.replace(/\s+$/, '');
+    if (looksLikeMarkdownDocument(content)) return content;
+  }
+  return null;
+}
+
+function looksLikeMarkdownDocument(text) {
+  const src = text.trim();
+  if (src.length < 40) return false;
+  const headingMatches = src.match(/^#{1,3}\s+\S.+$/gm) || [];
+  if (headingMatches.length === 0) return false;
+  if (headingMatches.length >= 2) return true;
+  return /(^|\n)(?:[-*]\s+\S|\|.+\||```)/.test(src);
+}
+
+function markdownDocumentTitle(text) {
+  const match = text.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : 'Document Preview';
+}
+
 function parseArtifacts(text) {
   if (typeof text !== 'string' || !text.trim()) return [];
   const artifacts = [];
   const documentLanguages = new Set(['markdown', 'md', 'txt', 'text', 'json', 'csv']);
+  const fencedBlocks = extractFencedBlocks(text);
+  const wrappedMarkdown = unwrapSingleMarkdownFence(text, fencedBlocks);
+  if (wrappedMarkdown && looksLikeMarkdownDocument(wrappedMarkdown)) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(wrappedMarkdown),
+      content: wrappedMarkdown,
+    }];
+  }
+  const embeddedMarkdown = extractMarkdownDocumentFence(fencedBlocks);
+  if (embeddedMarkdown) {
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(embeddedMarkdown),
+      content: embeddedMarkdown,
+    }];
+  }
+  if (looksLikeMarkdownDocument(text)) {
+    const content = text.trim();
+    return [{
+      type: 'document',
+      language: 'markdown',
+      filename: '',
+      title: markdownDocumentTitle(content),
+      content,
+    }];
+  }
 
   // 1) 提取围栏代码块 ```lang\n...\n```
   // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
-  const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let match;
-  while ((match = fenceRe.exec(text)) !== null) {
-    const language = (match[1] || '').trim().toLowerCase();
-    let content = match[2];
+  for (const block of fencedBlocks) {
+    const language = block.language;
+    let content = block.content;
     let filename = '';
     // 识别首行文件名注释：// file: xxx 、# file: xxx 、<!-- file: xxx -->
     const firstLine = content.split('\n', 1)[0] || '';
@@ -1020,7 +1351,13 @@ function parseArtifacts(text) {
 
   // 2) 提取裸 http/https URL（在代码块外，简单去重）
   // 先剔除围栏代码块，避免把代码里的 import/注释 URL 误当作网页产物
-  const textOutsideFences = text.replace(/```[^\n`]*\n[\s\S]*?```/g, ' ');
+  let textOutsideFences = '';
+  let lastIndex = 0;
+  for (const block of fencedBlocks) {
+    textOutsideFences += text.slice(lastIndex, block.start) + ' ';
+    lastIndex = block.end;
+  }
+  textOutsideFences += text.slice(lastIndex);
   // 字符类排除空白、闭合括号/尖括号/引号，以及中文标点（。，、；）避免吞掉句末标点
   const urlRe = /\bhttps?:\/\/[^\s)\]<>"'，。、；：！？]+/g;
   const seen = new Set();
@@ -1035,14 +1372,25 @@ function parseArtifacts(text) {
   return artifacts;
 }
 
-function runProcess(command, args, stdin, sessionId) {
+function runProcess(command, args, stdin, sessionId, cwd, extraEnv, meta = {}) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
     const detached = process.platform !== 'win32';
+    const startedAt = Date.now();
     const child = spawn(spec.command, spec.args, {
+      cwd: cwd || undefined,
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,
+    });
+    logFlow('info', 'process.spawn', {
+      ...meta,
+      command: spec.command,
+      args_count: spec.args.length,
+      stdin_len: typeof stdin === 'string' ? stdin.length : 0,
+      session_id: sessionId,
+      pid: child.pid,
     });
     if (sessionId) {
       activeSessions.set(sessionId, child);
@@ -1062,6 +1410,13 @@ function runProcess(command, args, stdin, sessionId) {
           child.kill();
         }
       } catch { /* ignore */ }
+      logFlow('error', 'process.timeout', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        timeout_ms: EXEC_TIMEOUT_MS,
+      });
       reject(new Error(`CLI execution timed out after ${EXEC_TIMEOUT_MS / 1000}s`));
     }, EXEC_TIMEOUT_MS);
 
@@ -1075,10 +1430,27 @@ function runProcess(command, args, stdin, sessionId) {
     });
     child.on('error', (error) => {
       clearTimeout(timer);
+      logFlow('error', 'process.error', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        error: errorMessage(error),
+      });
       reject(error);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      logFlow(code === 0 ? 'info' : 'warn', 'process.exit', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        exit_code: code,
+        duration_ms: Date.now() - startedAt,
+        stdout_len: stdout.length,
+        stderr_len: stderr.length,
+      });
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
@@ -1091,11 +1463,21 @@ function runProcess(command, args, stdin, sessionId) {
 
 async function register(serverURL, apiKey) {
   const agents = scanAgents();
-  console.log(`AgentHub daemon 发现 ${agents.length} 个 Agent：`);
+  logFlow('info', 'register.scan_completed', {
+    machine_id: os.hostname(),
+    agent_count: agents.length,
+    agents: agents.map((agent) => `${agent.name}:${agent.cli_tool}`),
+  });
   for (const agent of agents) {
     const version = agent.version ? ` ${String(agent.version).split('\n')[0].trim()}` : '';
     const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
-    console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
+    logFlow('info', 'register.agent_detected', {
+      machine_id: os.hostname(),
+      agent_name: agent.name,
+      cli_tool: agent.cli_tool,
+      version: version.trim(),
+      skill_count: skillCount,
+    });
   }
   const res = await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
@@ -1104,11 +1486,69 @@ async function register(serverURL, apiKey) {
   if (res && res.data && res.data.daemon_token && !daemonConn.daemonToken) {
     daemonConn.daemonToken = res.data.daemon_token;
   }
-  console.log('详细能力已上报，请在 AgentHub 网页端查看。');
-  console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
+  logFlow('info', 'register.completed', {
+    machine_id: os.hostname(),
+    agent_count: agents.length,
+    daemon_token_received: Boolean(res && res.data && res.data.daemon_token),
+  });
+  logFlow('info', 'daemon.ready', { machine_id: os.hostname(), transport: WebSocket ? 'websocket' : 'polling' });
 }
 
+// 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
+function startHeartbeat(serverURL, apiKey, taskId) {
+  const timer = setInterval(async () => {
+    try {
+      await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${taskId}/heartbeat`), {});
+    } catch (error) {
+      logFlow('warn', 'task.heartbeat_failed', { task_id: taskId, error: errorMessage(error) });
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
 
+async function pollTasks(serverURL, apiKey) {
+  for (;;) {
+    try {
+      const response = await requestJSON('GET', apiURL(serverURL, apiKey, '/daemon/tasks'));
+      const task = response ? response.data : null;
+      if (!task) {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+
+      logFlow('info', 'poll.task_claimed', {
+        task_id: task.id,
+        cli_tool: task.cli_tool,
+        agent_id: task.agent_id,
+        conversation_id: task.conversation_id,
+      });
+      const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
+      try {
+        const result = await executeTask(task);
+        stopHeartbeat();
+        await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
+        logFlow('info', 'poll.task_completed', {
+          task_id: task.id,
+          cli_tool: task.cli_tool,
+          result_len: typeof result === 'string' ? result.length : 0,
+        });
+      } catch (error) {
+        stopHeartbeat();
+        await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        logFlow('error', 'poll.task_failed', {
+          task_id: task.id,
+          cli_tool: task.cli_tool,
+          error: errorMessage(error),
+        });
+      }
+    } catch (error) {
+      logFlow('warn', 'poll.failed', { error: errorMessage(error), retry_ms: POLL_INTERVAL_MS * 2 });
+      await sleep(POLL_INTERVAL_MS * 2);
+    }
+  }
+}
 function stopAgentProcess(agent_id) {
   const entry = runningAgents.get(agent_id);
   if (!entry) return;
@@ -1118,6 +1558,12 @@ function stopAgentProcess(agent_id) {
     } else {
       process.kill(-entry.process.pid, 'SIGKILL');
     }
+    logFlow('info', 'agent.process_killed', {
+      agent_id,
+      session_id: entry.sessionId,
+      pid: entry.process.pid,
+      conversation_id: entry.currentConversationId,
+    });
   } catch { /* already dead */ }
   runningAgents.delete(agent_id);
 }
@@ -1151,6 +1597,18 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  logFlow('info', 'agent.process_spawn', {
+    agent_id: agentId,
+    conversation_id: conversationId,
+    user_id: userId,
+    command: spec.command,
+    args_count: spec.args.length,
+    session_id: effectiveSessionId,
+    resume,
+    mcp_enabled: mcpArgs.length > 0,
+    system_prompt_len: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
+    pid: child.pid,
+  });
 
   let stdoutBuf = '';
   let resultResolver = null;
@@ -1170,6 +1628,14 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
         if (event.type === 'result') {
           agentTurnStates.set(agentId, 'idle');
           const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
+          logFlow(event.is_error || event.subtype === 'error_during_execution' ? 'warn' : 'info', 'agent.turn_result', {
+            agent_id: agentId,
+            conversation_id: conversationId,
+            session_id: effectiveSessionId,
+            is_error: Boolean(event.is_error || event.subtype === 'error_during_execution'),
+            subtype: event.subtype,
+            result_len: typeof text === 'string' ? text.length : 0,
+          });
           if (resultResolver) {
             const r = resultResolver;
             resultResolver = null;
@@ -1186,17 +1652,31 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
 
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
-    console.error(`[agent:${agentId}:err] ${chunk.trim()}`);
+    logFlow('warn', 'agent.stderr', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      message: truncateStr(chunk.trim(), 500),
+    });
   });
 
   // Reject any pending resultResolver if process exits mid-turn
   child.on('close', (code) => {
+    const hadPendingTurn = Boolean(resultResolver);
     if (resultResolver) {
       const r = resultResolver;
       resultResolver = null;
       r({ error: `Agent process exited (code=${code})` });
     }
     agentTurnStates.delete(agentId);
+    logFlow(code === 0 ? 'info' : 'warn', 'agent.process_close', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      pid: child.pid,
+      exit_code: code,
+      pending_turn: hadPendingTurn,
+    });
   });
 
   let queueTail = Promise.resolve();
@@ -1206,6 +1686,12 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
       return;
     }
     resultResolver = resolve;
+    logFlow('info', 'agent.prompt_sent', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      prompt_len: typeof prompt === 'string' ? prompt.length : 0,
+    });
     const msg = JSON.stringify({
       type: 'user',
       message: { role: 'user', content: [{ type: 'text', text: prompt }] },
@@ -1214,6 +1700,12 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
     const timer = setTimeout(() => {
       if (resultResolver === resolve) {
         resultResolver = null;
+        logFlow('error', 'agent.turn_timeout', {
+          agent_id: agentId,
+          conversation_id: conversationId,
+          session_id: effectiveSessionId,
+          timeout_ms: EXEC_TIMEOUT_MS,
+        });
         reject(new Error('Agent task timed out (120s)'));
       }
     }, EXEC_TIMEOUT_MS);
@@ -1245,10 +1737,20 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   // Fast path: same conversation or unbound agent (null = accept any), process running
   if (slot?.sendPrompt && (slot.currentConversationId === conversationId || slot.currentConversationId === null)) {
     if (slot.currentConversationId === null) {
-      console.log(`Agent ${agentId}: fast path (unbound → binding to conversation ${conversationId})`);
+      logFlow('info', 'agent.dispatch_fast_path', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        previous_conversation_id: 'unbound',
+        session_id: slot.sessionId,
+      });
       slot.currentConversationId = conversationId;
     } else {
-      console.log(`Agent ${agentId}: fast path (same conversation ${conversationId})`);
+      logFlow('info', 'agent.dispatch_fast_path', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        previous_conversation_id: slot.currentConversationId,
+        session_id: slot.sessionId,
+      });
     }
     const response = await slot.sendPrompt(prompt);
     if (response.error) throw new Error(response.error);
@@ -1257,7 +1759,12 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
 
   // Kill existing process if serving a different conversation
   if (slot?.process) {
-    console.log(`Agent ${agentId}: switching conversation ${slot.currentConversationId} → ${conversationId}`);
+    logFlow('info', 'agent.conversation_switch', {
+      agent_id: agentId,
+      from_conversation_id: slot.currentConversationId,
+      to_conversation_id: conversationId,
+      previous_session_id: slot.sessionId,
+    });
     stopAgentProcess(agentId);
     await sleep(500);
   }
@@ -1274,7 +1781,11 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       }
     } catch {
       // Resume failed — spawn fresh with new session ID
-      console.log(`Agent ${agentId}: --resume failed, spawning fresh`);
+      logFlow('warn', 'agent.resume_failed', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        session_id: validSessionId,
+      });
       result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
     }
   } else {
@@ -1290,8 +1801,14 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       runningAgents.delete(agentId);
     }
     agentTurnStates.delete(agentId);
-    console.log(`Agent ${agentId} process exited (code=${code})`);
-    safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
+    logFlow(code === 0 ? 'info' : 'warn', 'agent.process_exit', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: sessionId,
+      pid: child.pid,
+      exit_code: code,
+    });
+    safeSend(currentDaemonWs, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
   });
 
   // Register in runningAgents with conversation tracking
@@ -1309,7 +1826,13 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   conversationSessions.set(sessionKey, sessionId);
   saveSessionMap();
 
-  console.log(`Agent ${agentId} spawned for conversation ${conversationId} (session=${sessionId}, pid=${child.pid})`);
+  logFlow('info', 'agent.slot_spawned', {
+    agent_id: agentId,
+    conversation_id: conversationId,
+    session_id: sessionId,
+    pid: child.pid,
+    resumed: Boolean(validSessionId),
+  });
 
   // Send the prompt
   const response = await sendPrompt(prompt);
@@ -1319,6 +1842,11 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
 
 function enqueueAgentStart(ws, payload) {
   agentStartQueue.push({ ws, payload });
+  logFlow('info', 'agent.start_queued', {
+    agent_id: payload && payload.agent_id,
+    cli_tool: payload && payload.cli_tool,
+    queue_len: agentStartQueue.length,
+  });
   processStartQueue();
 }
 
@@ -1344,10 +1872,15 @@ async function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
+  logFlow('info', 'agent.start_requested', {
+    agent_id,
+    cli_tool,
+    system_prompt_len: typeof system_prompt === 'string' ? system_prompt.length : 0,
+  });
   stopAgentProcess(agent_id);
 
   if (cli_tool !== 'claude') {
-    console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
+    logFlow('warn', 'agent.start_unsupported', { agent_id, cli_tool });
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
     return;
   }
@@ -1363,7 +1896,7 @@ async function handleAgentStart(ws, payload) {
     }
 
     child.on('error', (err) => {
-      console.error(`Agent ${agent_id} process error: ${err.message}`);
+      logFlow('error', 'agent.process_error', { agent_id, cli_tool, session_id: sessionId, pid: child.pid, error: errorMessage(err) });
     });
 
     // Handle process exit — cleanup and notify backend
@@ -1372,7 +1905,13 @@ async function handleAgentStart(ws, payload) {
         runningAgents.delete(agent_id);
       }
       agentTurnStates.delete(agent_id);
-      console.log(`Agent ${agent_id} process exited (code=${code})`);
+      logFlow(code === 0 ? 'info' : 'warn', 'agent.process_exit', {
+        agent_id,
+        cli_tool,
+        session_id: sessionId,
+        pid: child.pid,
+        exit_code: code,
+      });
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
 
@@ -1386,11 +1925,11 @@ async function handleAgentStart(ws, payload) {
     idleAgentConfigs.set(agent_id, { cliTool: cli_tool, sessionId, systemPrompt: system_prompt || '' });
     agentTurnStates.set(agent_id, 'idle');
 
-    console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
+    logFlow('info', 'agent.started', { agent_id, cli_tool, session_id: sessionId, pid: child.pid });
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id } }));
   } catch (error) {
-    console.error(`Agent ${agent_id} start failed: ${error.message}`);
-    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: error.message } }));
+    logFlow('error', 'agent.start_failed', { agent_id, cli_tool, error: errorMessage(error) });
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: errorMessage(error) } }));
   }
 }
 
@@ -1401,7 +1940,7 @@ function handleAgentStop(ws, payload) {
   runningAgents.delete(agent_id);
   idleAgentConfigs.delete(agent_id);
   agentTurnStates.delete(agent_id);
-  console.log(`Agent ${agent_id} stopped`);
+  logFlow('info', 'agent.stopped', { agent_id });
   safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
 }
 
@@ -1412,8 +1951,9 @@ function handleAgentRestart(ws, payload) {
 
 async function connectWS(serverURL, apiKey) {
   if (!WebSocket) {
-    console.error('WebSocket not available. Please install ws: npm install ws, or use Node.js 22+');
-    console.log('Falling back to HTTP polling...');
+    logFlow('warn', 'ws.unavailable_fallback_to_polling', {
+      reason: 'WebSocket not available. Please install ws or use Node.js 22+',
+    });
     return pollTasks(serverURL, apiKey);
   }
 
@@ -1425,7 +1965,11 @@ async function connectWS(serverURL, apiKey) {
   let reconnectAttempts = 0;
 
   function connect() {
-    console.log(`AgentHub daemon connecting to ${protocol}//${url.host}/daemon/ws ...`);
+    logFlow('info', 'ws.connect_start', {
+      server: `${protocol}//${url.host}${wsPath}`,
+      reconnect_attempt: reconnectAttempts,
+      machine_id: os.hostname(),
+    });
     const ws = new WebSocket(wsURL);
     let pingTimer = null;
     let watchdogTimer = null;
@@ -1433,14 +1977,18 @@ async function connectWS(serverURL, apiKey) {
     function resetWatchdog() {
       if (watchdogTimer) clearTimeout(watchdogTimer);
       watchdogTimer = setTimeout(() => {
-        console.warn(`No message from server for ${INBOUND_WATCHDOG_MS / 1000}s, closing WS to reconnect.`);
+        logFlow('warn', 'ws.inbound_watchdog_timeout', {
+          timeout_ms: INBOUND_WATCHDOG_MS,
+          machine_id: os.hostname(),
+        });
         try { ws.close(); } catch { /* ignore */ }
       }, INBOUND_WATCHDOG_MS);
     }
 
     onWebSocket(ws, 'open', () => {
+      currentDaemonWs = ws;
       reconnectAttempts = 0;
-      console.log('AgentHub daemon WS connected.');
+      logFlow('info', 'ws.connected', { machine_id: os.hostname(), server: `${protocol}//${url.host}${wsPath}` });
       resetWatchdog();
       // Send register message over WS
       const agents = scanAgents();
@@ -1448,6 +1996,12 @@ async function connectWS(serverURL, apiKey) {
         type: 'daemon.register',
         data: { machine_id: os.hostname(), agents },
       }));
+      logFlow('info', 'ws.register_sent', {
+        machine_id: os.hostname(),
+        agent_count: agents.length,
+        agents: agents.map((agent) => `${agent.name}:${agent.cli_tool}`),
+      });
+      flushPendingTaskCompletions();
       // Start ping interval
       pingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -1462,6 +2016,7 @@ async function connectWS(serverURL, apiKey) {
       try {
         envelope = JSON.parse(data.toString());
       } catch {
+        logFlow('warn', 'ws.message_parse_failed', { bytes: Buffer.byteLength(data) });
         return;
       }
 
@@ -1473,20 +2028,34 @@ async function connectWS(serverURL, apiKey) {
       }
 
       if (envelope.type === 'agent.start') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+          cli_tool: envelope.data && envelope.data.cli_tool,
+        });
         enqueueAgentStart(ws, envelope.data);
         return;
       }
       if (envelope.type === 'agent.stop') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+        });
         handleAgentStop(ws, envelope.data);
         return;
       }
       if (envelope.type === 'agent.restart') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+          cli_tool: envelope.data && envelope.data.cli_tool,
+        });
         handleAgentRestart(ws, envelope.data);
         return;
       }
 
       if (envelope.type === 'task.dispatch') {
-        const d = envelope.data;
+        const d = envelope.data || {};
         const task = {
           id: d.task_id,
           cli_tool: d.cli_tool,
@@ -1496,11 +2065,24 @@ async function connectWS(serverURL, apiKey) {
           conversation_id: d.conversation_id,
           user_id: d.user_id,
         };
-        if (!task.id) return;
+        if (!task.id) {
+          logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
+          return;
+        }
 
         const { systemPrompt, userPrompt } = buildPromptParts(task);
 
-        console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
+        logFlow('info', 'task.dispatch_received', {
+          task_id: task.id,
+          cli_tool: task.cli_tool || 'unknown',
+          agent_id: task.agent_id,
+          conversation_id: task.conversation_id,
+          user_id: task.user_id,
+          prompt_len: typeof task.prompt === 'string' ? task.prompt.length : 0,
+          context_len: typeof task.context_messages === 'string' ? task.context_messages.length : 0,
+          system_prompt_len: systemPrompt.length,
+          user_prompt_len: userPrompt.length,
+        });
         try {
           let result;
           if (
@@ -1510,49 +2092,74 @@ async function connectWS(serverURL, apiKey) {
             process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
           ) {
             // Unified stream-json slot path with conversation isolation
+            logFlow('info', 'task.execution_start', {
+              task_id: task.id,
+              cli_tool: task.cli_tool,
+              agent_id: task.agent_id,
+              conversation_id: task.conversation_id,
+              mode: 'claude_slot',
+            });
             result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
           } else {
             // Non-claude or missing info — use legacy per-task spawn
+            logFlow('info', 'task.execution_start', {
+              task_id: task.id,
+              cli_tool: task.cli_tool,
+              agent_id: task.agent_id,
+              conversation_id: task.conversation_id,
+              mode: 'legacy_spawn',
+            });
             result = await executeTask(task);
           }
           const artifacts = parseArtifacts(result);
-          safeSend(ws, JSON.stringify({
-            type: 'task.complete',
-            data: { task_id: task.id, result, artifacts },
-          }));
-          console.log(`AgentHub daemon task ${task.id} completed (${artifacts.length} artifact(s)).`);
+          sendTaskComplete({ task_id: task.id, result, artifacts });
+          logFlow('info', 'task.execution_completed', {
+            task_id: task.id,
+            cli_tool: task.cli_tool,
+            agent_id: task.agent_id,
+            conversation_id: task.conversation_id,
+            result_len: typeof result === 'string' ? result.length : 0,
+            artifact_count: artifacts.length,
+          });
         } catch (error) {
-          safeSend(ws, JSON.stringify({
-            type: 'task.complete',
-            data: {
-              task_id: task.id,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          }));
-          console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
+          sendTaskComplete({
+            task_id: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          logFlow('error', 'task.execution_failed', {
+            task_id: task.id,
+            cli_tool: task.cli_tool,
+            agent_id: task.agent_id,
+            conversation_id: task.conversation_id,
+            error: errorMessage(error),
+          });
         }
         return;
       }
 
-      console.log(`AgentHub daemon unknown WS message: ${envelope.type}`);
+      logFlow('warn', 'ws.unknown_message', { type: envelope.type });
     });
 
     onWebSocket(ws, 'close', (code, reason) => {
+      if (currentDaemonWs === ws) currentDaemonWs = null;
       if (pingTimer) clearInterval(pingTimer);
       if (watchdogTimer) clearTimeout(watchdogTimer);
-      // Clean up all running agent entries on disconnect
-      for (const [agentId] of runningAgents) {
-        stopAgentProcess(agentId);
-      }
-      runningAgents.clear();
-      idleAgentConfigs.clear();
-      agentTurnStates.clear();
-      console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
+      // Keep running agent processes alive across short control-channel reconnects.
+      // In-flight task completions are buffered and flushed after reconnect.
+      reconnectAttempts += 1;
+      logFlow('warn', 'ws.closed', {
+        code,
+        reason: reason ? reason.toString() : '',
+        reconnect_attempt: reconnectAttempts,
+        retry_ms: WS_RECONNECT_DELAY_MS,
+        running_agent_count: runningAgents.size,
+        pending_completion_count: pendingTaskCompletions.size,
+      });
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
 
     onWebSocket(ws, 'error', (error) => {
-      console.error(`AgentHub daemon WS error: ${error.message}`);
+      logFlow('error', 'ws.error', { error: errorMessage(error), reconnect_attempt: reconnectAttempts });
       // close handler will trigger reconnect
     });
   }
@@ -1683,6 +2290,28 @@ const MCP_TOOLS = [
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+  },
+  {
+    name: 'get_agent_skill',
+    description: '查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '平台 Skill 名称，必须属于当前 Agent' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!name) throw new Error('name is required');
+      const agent = await resolveCurrentAgent(ctx);
+      if (!agent) throw new Error('current agent not found');
+      const skills = parsePlatformSkills(agent.custom_skills);
+      const skill = skills.find((item) => item.name.toLowerCase() === name.toLowerCase());
+      if (!skill) throw new Error(`skill not found for current agent: ${name}`);
+      return skill;
+    },
   },
   {
     name: 'list_agent_candidates',
@@ -1884,6 +2513,7 @@ const MCP_TOOLS = [
 const DEFAULT_AGENT_TOOLS = [
   'list_group_agents',
   'get_messages',
+  'get_agent_skill',
   'list_tasks',
   'create_task',
   'update_task',
@@ -1893,7 +2523,7 @@ const NO_AGENT_TOOLS = [];
 
 const TOOLSET_TEMPLATES = {
   none: [],
-  basic: ['list_group_agents', 'get_messages'],
+  basic: ['list_group_agents', 'get_messages', 'get_agent_skill'],
   tasks: DEFAULT_AGENT_TOOLS,
   orchestrator: [
     ...DEFAULT_AGENT_TOOLS,
@@ -1905,6 +2535,7 @@ const TOOLSET_TEMPLATES = {
   agent_builder: [
     'list_agents',
     'list_group_agents',
+    'get_agent_skill',
     'list_agent_candidates',
     'list_machines',
   ],
@@ -1944,12 +2575,37 @@ function allowedToolsFromConfig(raw) {
   return NO_AGENT_TOOLS;
 }
 
+async function resolveCurrentAgent(ctx) {
+  if (!ctx.agentId) return null;
+  if (ctx.currentAgent !== undefined) return ctx.currentAgent;
+  const res = await ctx.callApi('GET', '/api/agents');
+  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+  ctx.currentAgent = agents.find((item) => item && item.id === ctx.agentId) || null;
+  return ctx.currentAgent;
+}
+
+function parsePlatformSkills(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === 'object' && typeof item.name === 'string' && item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        description: typeof item.description === 'string' ? item.description : '',
+        trigger: typeof item.trigger === 'string' ? item.trigger : '',
+        detail: typeof item.detail === 'string' ? item.detail : '',
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function resolveAllowedTools(ctx) {
   if (!ctx.agentId) return NO_AGENT_TOOLS;
   if (ctx.allowedTools !== null) return ctx.allowedTools;
-  const res = await ctx.callApi('GET', '/api/agents');
-  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
-  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  const agent = await resolveCurrentAgent(ctx);
   ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
   return ctx.allowedTools;
 }
@@ -2047,6 +2703,7 @@ async function runMcpServer(serverURL, apiKey) {
     userId: readArg('--user-id') || null,
     agentId: readArg('--agent-id') || null,
     allowedTools: null,
+    currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };
@@ -2065,14 +2722,14 @@ async function runMcpServer(serverURL, apiKey) {
     }
   });
   process.stdin.on('end', () => process.exit(0));
-  console.error(`AgentHub MCP server (stdio) 已就绪，暴露 ${MCP_TOOLS.length} 个工具。`);
+  logFlow('info', 'mcp.ready', { tool_count: MCP_TOOLS.length });
 }
 
 async function main() {
   const serverURL = readArg('--server-url');
   const apiKey = readArg('--api-key');
   if (!serverURL || !apiKey) {
-    console.error('Usage: npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]');
+    logFlow('error', 'cli.usage_error', { usage: 'npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]' });
     process.exit(2);
   }
 
@@ -2092,7 +2749,7 @@ async function main() {
 
 if (require.main === module) {
   main().catch((error) => {
-    console.error(`AgentHub daemon failed: ${error.message}`);
+    logFlow('error', 'daemon.failed', { error: errorMessage(error) });
     process.exit(1);
   });
 }

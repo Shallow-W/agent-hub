@@ -27,6 +27,24 @@ function authUrl(path: string): string {
   return token ? `${path}${sep}token=${encodeURIComponent(token)}` : path;
 }
 
+function attachmentFileUrl(attachment: MessageAttachment): string {
+  return attachment.url || `/api${toUrlPath(attachment.file_path)}`;
+}
+
+function attachmentThumbUrl(attachment: MessageAttachment): string {
+  if (attachment.thumbnail_url) return attachment.thumbnail_url;
+  if (attachment.thumbnail_path) return `/api${toUrlPath(attachment.thumbnail_path)}`;
+  return attachmentFileUrl(attachment);
+}
+
+function attachmentAPIPrefix(attachment: MessageAttachment): string {
+  const url = attachment.url;
+  if (!url) return '';
+  const marker = '/api/uploads/';
+  const idx = url.indexOf(marker);
+  return idx > 0 ? url.slice(0, idx) : '';
+}
+
 function attachmentName(attachment: Pick<MessageAttachment, 'file_name' | 'file_path'>): string {
   const name = attachment.file_name?.trim();
   if (name) return name;
@@ -36,7 +54,7 @@ function attachmentName(attachment: Pick<MessageAttachment, 'file_name' | 'file_
 
 function pptPreviewUrl(attachment: MessageAttachment): string {
   const relativePath = toUrlPath(attachment.file_path).replace(/^\/?uploads\//, '');
-  return authUrl(`/api/ppt-preview/${relativePath}`);
+  return authUrl(`${attachmentAPIPrefix(attachment)}/api/ppt-preview/${relativePath}`);
 }
 
 interface Props {
@@ -64,11 +82,9 @@ export const MessageAttachmentView: React.FC<Props> = ({ attachments }) => {
 };
 
 const ImageAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
-  const filePath = `/api${toUrlPath(attachment.file_path)}`;
+  const filePath = attachmentFileUrl(attachment);
   const fileName = attachmentName(attachment);
-  const thumbSrc = attachment.thumbnail_path
-    ? `/api${toUrlPath(attachment.thumbnail_path)}`
-    : filePath;
+  const thumbSrc = attachmentThumbUrl(attachment);
 
   return (
     <a
@@ -90,7 +106,7 @@ const ImageAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachme
 
 const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => (
   <a
-    href={authUrl(`/api${toUrlPath(attachment.file_path)}`)}
+    href={authUrl(attachmentFileUrl(attachment))}
     target="_blank"
     rel="noopener noreferrer"
     download={attachmentName(attachment)}
@@ -108,7 +124,7 @@ const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment
 
 const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
   const [open, setOpen] = useState(false);
-  const fileUrl = authUrl(`/api${toUrlPath(attachment.file_path)}`);
+  const fileUrl = authUrl(attachmentFileUrl(attachment));
   const fileName = attachmentName(attachment);
   const previewUrl = pptPreviewUrl(attachment);
 
@@ -166,7 +182,7 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
 
 const GenericFileAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => (
   <a
-    href={authUrl(`/api${toUrlPath(attachment.file_path)}`)}
+    href={authUrl(attachmentFileUrl(attachment))}
     download={attachmentName(attachment)}
     className={styles.pdfCard}
   >

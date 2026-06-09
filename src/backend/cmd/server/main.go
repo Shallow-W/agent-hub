@@ -7,15 +7,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/handler"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
@@ -50,6 +53,8 @@ func main() {
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	platformSkillRepo := repository.NewPlatformSkillRepo(db)
+	agentPromptTemplateRepo := repository.NewAgentPromptTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
 
@@ -68,13 +73,24 @@ func main() {
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
 	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
-	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
+	// GitHub Pages 永久发布（环境变量优先于 config.yaml）。三项齐全才启用，否则 publisher 为 nil。
+	if pub := ghpages.NewPublisher(
+		firstNonEmpty(os.Getenv("GITHUB_TOKEN"), cfg.GitHub.Token),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo),
+	); pub != nil {
+		deploymentSvc.SetGitHubPublisher(pub)
+		logger.Info("GitHub Pages 永久发布已启用", "owner", firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner), "repo", firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo))
+	}
+	fileURLs := service.NewFileURLBuilder(cfg.Upload.PublicBaseURL)
+	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir, cfg.Upload.PublicBaseURL)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
-		Dir:        cfg.Upload.Dir,
-		MaxImageMB: cfg.Upload.MaxImageMB,
-		MaxPDFMB:   cfg.Upload.MaxPDFMB,
+		Dir:           cfg.Upload.Dir,
+		MaxImageMB:    cfg.Upload.MaxImageMB,
+		MaxPDFMB:      cfg.Upload.MaxPDFMB,
+		PublicBaseURL: cfg.Upload.PublicBaseURL,
 	})
 
 	// Redis 初始化
@@ -93,6 +109,8 @@ func main() {
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
+	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
@@ -102,8 +120,11 @@ func main() {
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	orchSvc.SetTaskSvc(taskSvc)
+	// 服务端抽取消息附件文本时需要定位上传文件。
+	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
+	msgSvc.SetFileURLBuilder(fileURLs)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -112,10 +133,11 @@ func main() {
 	orchSvc.SetNotifier(hub)
 	if rdb != nil {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
-		orchSvc.SetCacher(redisMsgRepo)
+		msgSvc.SetDeliveryState(redisMsgRepo)
+		orchSvc.SetDeliveryState(redisMsgRepo)
 	} else {
-		msgSvc.SetCacher(nil)
+		msgSvc.SetDeliveryState(nil)
+		orchSvc.SetDeliveryState(nil)
 	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
@@ -129,6 +151,8 @@ func main() {
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc, hub)
+	platformSkillHandler := handler.NewPlatformSkillHandler(platformSkillSvc)
+	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
@@ -202,11 +226,19 @@ func main() {
 			uploadDir = "./uploads"
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
-			filePath := c.Param("filepath")
-			absPath, err := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
-			uploadDirAbs, _ := filepath.Abs(uploadDir)
+			filePath := cleanUploadRoutePath(c.Param("filepath"))
+			if filePath == "" {
+				c.Status(http.StatusForbidden)
+				return
+			}
+			absPath, err := filepath.Abs(filepath.Join(uploadDir, filePath))
+			uploadDirAbs, absErr := filepath.Abs(uploadDir)
 			if err != nil {
 				c.Status(http.StatusForbidden)
+				return
+			}
+			if absErr != nil {
+				c.Status(http.StatusInternalServerError)
 				return
 			}
 			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
@@ -215,7 +247,7 @@ func main() {
 			}
 
 			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
-			isThumbnail := strings.HasPrefix(filepath.Clean(filePath), string(os.PathSeparator)+"thumbnails")
+			isThumbnail := strings.HasPrefix(filepath.ToSlash(filePath), "thumbnails/")
 			ext := strings.ToLower(filepath.Ext(absPath))
 			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
 			if isThumbnail || isImage {
@@ -290,6 +322,16 @@ func main() {
 		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
+		apiGroup.GET("/platform-skills", platformSkillHandler.List)
+		apiGroup.POST("/platform-skills", platformSkillHandler.Create)
+		apiGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
+		apiGroup.PUT("/platform-skills/:id", platformSkillHandler.Update)
+		apiGroup.DELETE("/platform-skills/:id", platformSkillHandler.Delete)
+		apiGroup.GET("/agent-prompt-templates", agentPromptTemplateHandler.List)
+		apiGroup.POST("/agent-prompt-templates", agentPromptTemplateHandler.Create)
+		apiGroup.POST("/agent-prompt-templates/import-defaults", agentPromptTemplateHandler.ImportDefaults)
+		apiGroup.PUT("/agent-prompt-templates/:id", agentPromptTemplateHandler.Update)
+		apiGroup.DELETE("/agent-prompt-templates/:id", agentPromptTemplateHandler.Delete)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
@@ -315,6 +357,7 @@ func main() {
 			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
 			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
 			artifactRoutes.POST("/:rootId/deploy", deploymentHandler.Deploy)
+			artifactRoutes.POST("/:rootId/deploy-github", deploymentHandler.DeployGitHub)
 		}
 
 		// 部署状态查询（需要鉴权）
@@ -406,6 +449,16 @@ func main() {
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
 
+	// 零配置内网穿透：未显式配置 PUBLIC_BASE_URL 且未禁用（AUTO_TUNNEL=false）时，
+	// 自动拉起 cloudflared 快速隧道并把分配到的公网域名回填到部署服务——这样无论在哪台
+	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
+	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
+		cacheDir := filepath.Join("data", "bin")
+		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
+			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
+		}
+	}
+
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	srv := &http.Server{
@@ -459,6 +512,30 @@ func frontendDistDir() string {
 		}
 	}
 	return filepath.Clean("../../frontend/dist")
+}
+
+func cleanUploadRoutePath(value string) string {
+	cleaned := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	cleaned = strings.TrimPrefix(cleaned, "uploads/")
+	if hasDotDotSegment(cleaned) {
+		return ""
+	}
+	cleaned = path.Clean("/" + cleaned)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "." || cleaned == "" || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return filepath.FromSlash(cleaned)
+}
+
+func hasDotDotSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func frontendDistCandidates() []string {

@@ -1,11 +1,8 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"os"
-	"path"
-	"path/filepath"
 	"strings"
 
 	middleware "github.com/agent-hub/backend/internal/middleware"
@@ -264,9 +261,9 @@ func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 		return
 	}
 
-	absPath, err := safeKnowledgeFilePath(h.svc.GetUploadDir(), f.FilePath)
+	absPath, err := service.SafeJoinUploadPath(h.svc.GetUploadDir(), f.FilePath)
 	if err != nil {
-		c.Status(http.StatusForbidden)
+		middleware.ErrorResponse(c, http.StatusNotFound, 40466, "文件不存在")
 		return
 	}
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
@@ -293,29 +290,6 @@ func isPreviewMIME(mime string) bool {
 		"application/pdf": true, "application/json": true,
 	}
 	return previewTypes[mime]
-}
-
-func safeKnowledgeFilePath(uploadDir, filePath string) (string, error) {
-	normalized := strings.ReplaceAll(filePath, "\\", "/")
-	if normalized == "" || strings.HasPrefix(normalized, "/") || filepath.IsAbs(filePath) || filepath.VolumeName(filePath) != "" {
-		return "", fmt.Errorf("absolute path is not allowed")
-	}
-	cleaned := path.Clean(normalized)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", fmt.Errorf("invalid file path")
-	}
-	absPath, err := filepath.Abs(filepath.Join(uploadDir, filepath.FromSlash(cleaned)))
-	if err != nil {
-		return "", err
-	}
-	uploadDirAbs, err := filepath.Abs(uploadDir)
-	if err != nil {
-		return "", err
-	}
-	if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
-		return "", fmt.Errorf("path escapes upload dir")
-	}
-	return absPath, nil
 }
 
 // ListGroup 获取群组中当前用户可用的知识库列表（自己的全部 + 其他成员的公开 KB）。

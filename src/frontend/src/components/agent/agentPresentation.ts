@@ -2,6 +2,7 @@ import type { Agent } from '@/types/agent';
 
 export interface Skill {
   name: string;
+  category?: string;
   description?: string;
   trigger?: string;
   detail?: string;
@@ -47,6 +48,19 @@ export function parseSkills(value?: string): Skill[] {
     return value.split(',').map((item) => item.trim()).filter(Boolean).map((name) => ({ name }));
   }
   return [];
+}
+
+export function skillsToPlatformJSON(skills: Skill[]): string {
+  const cleaned = skills
+    .map((skill) => ({
+      name: skill.name.trim(),
+      category: skill.category?.trim() || undefined,
+      description: skill.description?.trim() || undefined,
+      trigger: skill.trigger?.trim() || undefined,
+      detail: skill.detail?.trim() || undefined,
+    }))
+    .filter((skill) => skill.name.length > 0);
+  return cleaned.length > 0 ? JSON.stringify(cleaned) : '';
 }
 
 /** 命名头像 key（与 public/avatars 下的文件名对应）。 */

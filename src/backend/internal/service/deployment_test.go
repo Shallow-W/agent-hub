@@ -138,6 +138,45 @@ func TestDeploy_DocumentRendersMarkdownAndNamesSource(t *testing.T) {
 	}
 }
 
+func TestDeploy_DocumentMatchesPreviewContentNormalization(t *testing.T) {
+	md := "下面是一个可预览的 Markdown 文档内容：\n\n````markdown\n# 明天吃啥计划\n\n日期：2026-06-10\n\n## 早餐\n\n- 鸡蛋三明治\n\n```text\n早餐目标：简单、顶饱、不油腻。\n```\n````\n"
+	want := "# 明天吃啥计划\n\n日期：2026-06-10\n\n## 早餐\n\n- 鸡蛋三明治\n\n```text\n早餐目标：简单、顶饱、不油腻。\n```"
+	art := &model.Artifact{Type: "document", Title: "明天吃啥计划", Language: "markdown", Content: md}
+	svc, _, dir := newDeploySvc(t, art, &model.ConversationMember{}, "owner")
+
+	dep, err := svc.Deploy(context.Background(), "root-1", "member-x")
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+
+	idx, err := os.ReadFile(filepath.Join(dir, dep.ID, "index.html"))
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(idx)
+	if strings.Contains(html, "下面是一个可预览") {
+		t.Fatalf("deploy preview leaked assistant intro: %s", html)
+	}
+	if strings.Contains(html, "```markdown") || strings.Contains(html, "```text") {
+		t.Fatalf("deploy preview leaked markdown fences: %s", html)
+	}
+	if !strings.Contains(html, "<h1") || !strings.Contains(html, "明天吃啥计划") || !strings.Contains(html, "早餐目标") {
+		t.Fatalf("deploy preview missing normalized markdown content: %s", html)
+	}
+
+	matches, _ := filepath.Glob(filepath.Join(dir, dep.ID, "*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one .md source file, got %v", matches)
+	}
+	srcBytes, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read source .md: %v", err)
+	}
+	if string(srcBytes) != want {
+		t.Fatalf("source .md = %q, want %q", string(srcBytes), want)
+	}
+}
+
 func TestDeploy_NonMemberDenied(t *testing.T) {
 	art := &model.Artifact{Type: "webpage", Content: "<h1>x</h1>"}
 	// member 为 nil 且 conv.UserID != 调用者 → 拒绝

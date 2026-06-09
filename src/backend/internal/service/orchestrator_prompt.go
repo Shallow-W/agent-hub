@@ -40,6 +40,7 @@ const OrchestratorSystemPrompt = `你是群聊中的任务协调者（Orchestrat
 
 ## 关键规则
 - 只能分派给“当前群聊 Agent 详情”中列出的 Agent，@mention 中的名称必须完全匹配。
+- 必须使用 prompt 中提供的 Agent 列表/详情作为分派依据，不要因为无法额外查询群聊成员而拒绝作为 Orchestrator 工作。
 - “当前群聊 Agent 详情”只代表本群聊已加入的 Agent，不代表系统里的全局 Agent 池。
 - 不要编造 Agent 的简介或标签；只依据上下文中提供的真实字段判断。
 - 不要亲自执行被分派的具体任务。用户要求分派时，你只输出分派结果。
@@ -54,6 +55,27 @@ type OrchestratorAgentDetail struct {
 	Description string
 	Tags        string
 }
+
+const OrchestratorSummarySystemPrompt = `你是群聊中的任务协调者（Orchestrator）。现在处于汇总与决策阶段，而不是首次分派阶段。使用中文交流。
+
+## 当前阶段规则
+
+1. 你已经拿到了本轮所有 worker 的执行结果，必须先汇总并判断结果是否正确。
+2. 汇总阶段不要因为无法额外查询群聊成员而拒绝汇总；当前 prompt 中的 worker 名称就是可用 Agent 名称。
+3. 如果任务已完成，直接给出最终汇总与判定，不要包含任何 @mention。
+4. 如果用户明确要求继续下一轮，或你判断还需要进一步验证，请使用 @mention 格式分派下一轮任务。
+5. 下一轮只能 @本轮结果中出现过的 worker 名称，@mention 中的名称必须完全匹配。
+
+## @mention 分派格式
+
+每个 @mention 独占一段，一段只有一个 @mention。多段之间用空行分隔表示并行。
+
+示例：
+` + "```" + `
+@AgentA 继续完成下一轮任务
+
+@AgentB 继续完成下一轮任务
+` + "```" + ``
 
 // BuildOrchestratorPrompt builds the full prompt for an orchestrator dispatch.
 //
@@ -167,7 +189,7 @@ type roundHistoryEntry struct {
 // this prompt and must either conclude or dispatch more work via @mention.
 func BuildSummaryPrompt(orchTask *model.OrchTask) string {
 	var sb strings.Builder
-	sb.WriteString(OrchestratorSystemPrompt)
+	sb.WriteString(OrchestratorSummarySystemPrompt)
 	sb.WriteString("\n\n---\n\n")
 
 	sb.WriteString("[汇总与决策任务]\n")
@@ -208,6 +230,7 @@ func BuildSummaryPrompt(orchTask *model.OrchTask) string {
 	// Decision guidance
 	sb.WriteString("[决策指引]\n")
 	sb.WriteString("请先汇总各 Agent 的成果。\n")
+	sb.WriteString("如果原始用户请求要求继续下一轮（例如“继续再出一轮”“第二轮”），请在汇总本轮结果后继续使用 @mention 给同一批 Agent 分派下一轮任务。\n")
 	sb.WriteString("如果你认为任务已全部完成，直接给出最终结论即可（不要包含任何 @mention）。\n")
 	sb.WriteString("如果需要进一步工作，请使用 @mention 格式分派新的任务（可以使用与之前相同的 Agent）。\n")
 

@@ -4,6 +4,7 @@ import { message } from '@/utils/message';
 import {
   CopyOutlined,
   DownloadOutlined,
+  GithubOutlined,
   GlobalOutlined,
   LinkOutlined,
 } from '@ant-design/icons';
@@ -24,6 +25,7 @@ interface Props {
 /** 部署状态卡片：状态徽标 + 预览链接 + 二维码 + 源码下载。 */
 export const DeployStatusCard: React.FC<Props> = ({ deployment }) => {
   const meta = STATUS_META[deployment.status] ?? STATUS_META.pending;
+  const isGitHub = deployment.mode === 'github';
   const previewUrl = absoluteDeployURL(deployment.url);
   // 优先用后端给的 download_url（配置公网基址时为绝对地址），否则按当前来源兜底拼接。
   const downloadUrl = deployment.download_url
@@ -42,10 +44,16 @@ export const DeployStatusCard: React.FC<Props> = ({ deployment }) => {
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <GlobalOutlined className={styles.headerIcon} />
-        <span className={styles.title}>部署发布</span>
+        {isGitHub ? <GithubOutlined className={styles.headerIcon} /> : <GlobalOutlined className={styles.headerIcon} />}
+        <span className={styles.title}>{isGitHub ? 'GitHub Pages 发布' : '部署发布'}</span>
         <Tag color={meta.color} className={styles.status}>{meta.label}</Tag>
       </div>
+
+      {isGitHub && deployment.status === 'success' && (
+        <div className={styles.hint}>
+          已推送到 GitHub Pages，链接永久有效。首次发布或更新后，Pages 构建约需 30s–2min，期间打开可能短暂 404，稍候刷新即可。
+        </div>
+      )}
 
       {deployment.status === 'success' && (
         <div className={styles.body}>
