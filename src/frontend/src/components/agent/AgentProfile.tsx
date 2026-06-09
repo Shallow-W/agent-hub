@@ -4,7 +4,6 @@ import { message } from '@/utils/message';
 import {
   MessageOutlined,
   RobotOutlined,
-  SafetyOutlined,
   SettingOutlined,
   ToolOutlined,
   DeleteOutlined,
@@ -42,9 +41,8 @@ interface AgentProfileProps {
 
 const tabItems = [
   { key: 'profile', label: '资料' },
-  { key: 'skills', label: '技能' },
-  { key: 'permissions', label: '权限', icon: <SafetyOutlined /> },
   { key: 'system_prompt', label: '系统提示词', icon: <SettingOutlined /> },
+  { key: 'skills', label: '技能' },
   { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
 
