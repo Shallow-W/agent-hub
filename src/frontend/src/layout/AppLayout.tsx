@@ -57,9 +57,6 @@ const AppLayout: React.FC = () => {
   const fetchFriends = useFriendStore((s) => s.fetchFriends);
   const fetchPending = useFriendStore((s) => s.fetchPending);
   const [activeNav, setActiveNav] = useState('chat');
-  // 用 ref 跟踪 activeNav，避免路由同步 effect 因 activeNav 依赖产生循环覆盖
-  const activeNavRef = useRef(activeNav);
-  activeNavRef.current = activeNav;
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
@@ -93,14 +90,15 @@ const AppLayout: React.FC = () => {
   useEffect(() => {
     if (location.pathname.startsWith('/tasks')) {
       setActiveNav('workspace');
-      return;
-    }
-    if (location.pathname.startsWith('/settings')) {
+    } else if (location.pathname.startsWith('/settings')) {
       setActiveNav('settings');
-      return;
-    }
-    if (activeNavRef.current === 'workspace' || activeNavRef.current === 'settings') {
-      setActiveNav('chat');
+    } else {
+      // Only reset route-based navs (workspace/settings) to 'chat';
+      // preserve overlay navs (skills, knowledge, models, contacts, chat)
+      setActiveNav((prev) => {
+        if (prev === 'workspace' || prev === 'settings') return 'chat';
+        return prev;
+      });
     }
   }, [location.pathname]);
 
@@ -304,13 +302,13 @@ const AppLayout: React.FC = () => {
         {/* 右侧：聊天区域 / 智能体详情 */}
         <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
           {/* Chat view: always mounted to preserve state across tab switches */}
-          <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : undefined}>
+          <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <Outlet />
           </div>
 
-          {/* Knowledge overlay */}
-          {activeNav === 'knowledge' && (
-            selectedKnowledgeFile && selectedKbId ? (
+          {/* Knowledge overlay — always mounted to avoid re-fetch */}
+          <div style={activeNav !== 'knowledge' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {selectedKnowledgeFile && selectedKbId ? (
               <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
             ) : (
               <div className={styles.emptyRightPanel}>
@@ -318,20 +316,20 @@ const AppLayout: React.FC = () => {
                 <div className={styles.emptyRightTitle}>知识库管理</div>
                 <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
               </div>
-            )
-          )}
+            )}
+          </div>
 
-          {/* Skills overlay */}
-          {activeNav === 'skills' && (
-            selectedAgent ? (
+          {/* Skills overlay — always mounted to avoid re-fetch */}
+          <div style={activeNav !== 'skills' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {selectedAgent ? (
               <AgentSkillsPanel agent={selectedAgent} />
             ) : (
               <div className={styles.skillsEmptyPanel}>
                 <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
                 <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
               </div>
-            )
-          )}
+            )}
+          </div>
 
           {/* Models overlay */}
           {activeNav === 'models' && (
