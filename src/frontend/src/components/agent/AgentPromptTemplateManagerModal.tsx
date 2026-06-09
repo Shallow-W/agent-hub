@@ -67,7 +67,6 @@ export const AgentPromptTemplateManagerModal: React.FC<AgentPromptTemplateManage
 
   useEffect(() => {
     if (!open) return;
-    if (selectedID && templates.some((template) => template.id === selectedID)) return;
     const first = templates[0];
     if (first) {
       setSelectedID(first.id);
@@ -76,7 +75,7 @@ export const AgentPromptTemplateManagerModal: React.FC<AgentPromptTemplateManage
       setSelectedID(null);
       setDraft(EMPTY_DRAFT);
     }
-  }, [open, selectedID, templates]);
+  }, [open]);
 
   const refreshTemplates = async () => {
     const items = await getAgentPromptTemplates();

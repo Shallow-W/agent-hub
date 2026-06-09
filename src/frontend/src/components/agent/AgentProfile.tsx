@@ -22,6 +22,7 @@ import {
   parseSkills,
   resolveAgentAvatar,
 } from './agentPresentation';
+import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import {
   categoryMeta,
   categoryOrder,
@@ -442,12 +443,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'system_prompt' && (
           <section className={styles.section}>
             <div className={styles.sectionTitle}>系统提示词 (System Prompt)</div>
-            <Input.TextArea
-              autoSize={{ minRows: 8, maxRows: 24 }}
+            <AgentPromptTemplateField
+              open={activeTab === 'system_prompt'}
               value={systemPromptValue}
-              onChange={(e) => setSystemPromptValue(e.target.value)}
-              placeholder="设定 Agent 的角色、人格、行为准则和工作风格。&#10;&#10;示例：&#10;你是一个资深的 Go 后端工程师，擅长代码审查和架构设计。&#10;- 使用中文回复&#10;- 代码注释使用英文&#10;- 遵循 SOLID 原则"
-              className={styles.monospaceTextarea}
+              onChange={setSystemPromptValue}
             />
             <div className={styles.actionPanel}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveSystemPrompt}>
