@@ -198,6 +198,55 @@
   margin: 8px 0;
 }
 
+/* ── Collapse / expand ── */
+.innerCollapsed {
+  max-height: 200px;
+  overflow: hidden;
+}
+
+.fadeMaskOther {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48px;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--color-surface-strong) 78%);
+}
+
+.fadeMaskOwn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48px;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(47, 143, 107, 0), var(--color-user-bubble-to) 78%);
+}
+
+.expandToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 7px 0 0;
+  padding: 3px 11px;
+  border: 1px solid rgba(22, 163, 101, 0.16);
+  border-radius: 999px;
+  color: var(--color-primary);
+  background: var(--color-bg-white);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.expandToggle:hover {
+  color: var(--color-primary-active);
+  border-color: rgba(22, 163, 101, 0.28);
+}
+
 /* ── Original message highlight ── */
 .bubbleOriginal .innerOther,
 .bubbleOriginal .innerOwn {
@@ -212,15 +261,6 @@
   padding: 6px 20px;
   font-size: 12px;
   color: var(--color-text-tertiary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  width: 100%;
-  text-align: left;
-}
-
-.divider:hover {
-  color: var(--color-text-secondary);
 }
 
 .divider::before,
@@ -229,15 +269,6 @@
   flex: 1;
   height: 1px;
   background: var(--color-border);
-}
-
-.dividerToggle {
-  flex-shrink: 0;
-  padding: 1px 8px;
-  border-radius: 4px;
-  background: var(--color-surface);
-  color: var(--color-primary);
-  font-size: 11px;
 }
 
 /* ── Reply list ── */

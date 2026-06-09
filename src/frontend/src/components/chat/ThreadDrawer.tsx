@@ -13,6 +13,9 @@ import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './ThreadDrawer.module.css';
 
+const COLLAPSE_CHAR_LIMIT = 500;
+const COLLAPSE_LINE_LIMIT = 12;
+
 interface ThreadDrawerProps {
   conversationId: string;
   originalMessage: Message | null;
@@ -30,7 +33,6 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const sendMessage = useMessageStore((s) => s.sendMessage);
 
@@ -102,17 +104,11 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
       {originalMessage && (
         <>
           <ThreadBubble message={originalMessage} isOriginal />
-          <button
-            className={styles.divider}
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-          >
+          <div className={styles.divider}>
             <span>{replies.length} 条回复</span>
-            <span className={styles.dividerToggle}>{collapsed ? '展开' : '收起'}</span>
-          </button>
+          </div>
         </>
       )}
-      {!collapsed && (
       <div className={styles.replyList} ref={listRef}>
         {loading ? (
           <div className={styles.loadingArea}>
@@ -124,7 +120,6 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
           replies.map((msg) => <ThreadBubble key={msg.id} message={msg} />)
         )}
       </div>
-      )}
       <div className={styles.inputArea}>
         <Input.TextArea
           value={inputValue}
@@ -192,6 +187,11 @@ const ThreadBubble: React.FC<{ message: Message; isOriginal?: boolean }> = ({ me
   const name = resolveName(message);
   const avatar = resolveAvatar(message, isOwn);
   const time = formatTime(message.created_at);
+  const [expanded, setExpanded] = useState(false);
+
+  const content = message.content || '';
+  const shouldCollapse = content.length > COLLAPSE_CHAR_LIMIT || content.split('\n').length > COLLAPSE_LINE_LIMIT;
+  const collapsed = shouldCollapse && !expanded;
 
   return (
     <div className={`${styles.bubble} ${isOwn ? styles.bubbleRight : styles.bubbleLeft} ${isOriginal ? styles.bubbleOriginal : ''}`}>
@@ -208,13 +208,23 @@ const ThreadBubble: React.FC<{ message: Message; isOriginal?: boolean }> = ({ me
           <span className={styles.bubbleName}>{escapeHtml(name)}</span>
           <span className={styles.bubbleTime}>{time}</span>
         </div>
-        <div className={`${styles.bubbleInner} ${isOwn ? styles.innerOwn : styles.innerOther}`}>
+        <div className={`${styles.bubbleInner} ${isOwn ? styles.innerOwn : styles.innerOther} ${collapsed ? styles.innerCollapsed : ''}`}>
           <div className={styles.markdownBody}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content || ''}
+              {content}
             </ReactMarkdown>
           </div>
+          {collapsed && <div className={isOwn ? styles.fadeMaskOwn : styles.fadeMaskOther} />}
         </div>
+        {shouldCollapse && (
+          <button
+            className={styles.expandToggle}
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+          >
+            {collapsed ? '展开全文' : '收起'}
+          </button>
+        )}
       </div>
     </div>
   );
