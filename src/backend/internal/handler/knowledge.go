@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"strconv"
@@ -313,10 +314,29 @@ func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 	if isPreviewMIME(f.MimeType) {
 		contentDisp = "inline"
 	}
-	c.Header("Content-Disposition", contentDisp+"; filename=\""+f.Filename+"\"")
+	c.Header("Content-Disposition", contentDispositionHeader(contentDisp, f.Filename))
 	c.Header("Content-Type", f.MimeType)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.File(absPath)
+}
+
+func contentDispositionHeader(disposition, filename string) string {
+	name := strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\n':
+			return -1
+		default:
+			return r
+		}
+	}, strings.TrimSpace(filename))
+	if name == "" {
+		name = "download"
+	}
+	header := mime.FormatMediaType(disposition, map[string]string{"filename": name})
+	if header == "" {
+		return disposition
+	}
+	return header
 }
 
 func (h *KnowledgeHandler) GetFileText(c *gin.Context) {

@@ -529,9 +529,12 @@ func frontendDistDir() string {
 
 func cleanUploadRoutePath(value string) string {
 	cleaned := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	if cleaned == "" || strings.HasPrefix(cleaned, "//") {
+		return ""
+	}
 	cleaned = strings.TrimPrefix(cleaned, "/")
 	cleaned = strings.TrimPrefix(cleaned, "uploads/")
-	if hasDotDotSegment(cleaned) {
+	if cleaned == "" || strings.Contains(cleaned, ":") || strings.HasPrefix(cleaned, "/") || hasDotDotSegment(cleaned) {
 		return ""
 	}
 	cleaned = path.Clean("/" + cleaned)

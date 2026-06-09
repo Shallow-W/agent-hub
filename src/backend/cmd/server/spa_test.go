@@ -143,6 +143,21 @@ func TestRegisterSPARoutesDoesNotHandleAPINotFound(t *testing.T) {
 	}
 }
 
+func TestCleanUploadRoutePathRejectsWindowsRootedPaths(t *testing.T) {
+	for _, input := range []string{
+		"/C:/Windows/win.ini",
+		"C:/Windows/win.ini",
+		`C:\Windows\win.ini`,
+		"//server/share/file.txt",
+		`\\server\share\file.txt`,
+		"uploads/C:/Windows/win.ini",
+	} {
+		if got := cleanUploadRoutePath(input); got != "" {
+			t.Fatalf("cleanUploadRoutePath(%q) = %q, want empty", input, got)
+		}
+	}
+}
+
 func TestFrontendDistDirUsesEnvironmentPath(t *testing.T) {
 	distDir := t.TempDir()
 	t.Setenv("AGENTHUB_FRONTEND_DIST", distDir)

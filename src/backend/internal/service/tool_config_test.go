@@ -88,6 +88,18 @@ func TestPlatformToolCatalogIncludesTemplateTools(t *testing.T) {
 	}
 }
 
+func TestAgentBuilderToolsetIncludesAgentCreationTools(t *testing.T) {
+	tools := map[string]bool{}
+	for _, tool := range platformToolsets["agent_builder"] {
+		tools[tool] = true
+	}
+	for _, tool := range []string{"create_agent", "update_agent", "delete_agent", "list_toolsets"} {
+		if !tools[tool] {
+			t.Fatalf("expected agent_builder toolset to include %s, got %#v", tool, platformToolsets["agent_builder"])
+		}
+	}
+}
+
 func TestNormalizeToolsConfig_AllowsKnowledgeTools(t *testing.T) {
 	raw := `{"toolset":"knowledge","allowed_tools":["list_knowledge_bases","list_knowledge_files","search_knowledge","read_knowledge_file"]}`
 	got, err := normalizeToolsConfig(raw)

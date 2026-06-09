@@ -139,6 +139,39 @@ func TestAllowedToolsFromConfig_KnowledgeToolsetsIncludeReadAndSearch(t *testing
 	}
 }
 
+func TestAgentBuilderToolsetsIncludeAgentCreationTools(t *testing.T) {
+	for _, source := range []struct {
+		name  string
+		tools map[string]bool
+	}{
+		{name: "runtime", tools: allowedToolsFromConfig(`{"toolset":"agent_builder"}`)},
+		{name: "creation", tools: toolSet(agentCreationToolsets["agent_builder"])},
+	} {
+		for _, tool := range []string{"create_agent", "update_agent", "delete_agent", "list_toolsets"} {
+			if !source.tools[tool] {
+				t.Fatalf("expected %s agent_builder toolset to include %s, got %#v", source.name, tool, source.tools)
+			}
+		}
+	}
+}
+
+func TestAgentCreationToolsetsMatchRuntimeTemplates(t *testing.T) {
+	for name, runtimeTools := range toolsetTemplates {
+		creationTools, ok := agentCreationToolsets[name]
+		if !ok {
+			t.Fatalf("missing creation toolset %s", name)
+		}
+		if len(runtimeTools) != len(creationTools) {
+			t.Fatalf("toolset %s length mismatch: runtime=%#v creation=%#v", name, runtimeTools, creationTools)
+		}
+		for i, tool := range runtimeTools {
+			if creationTools[i] != tool {
+				t.Fatalf("toolset %s tool[%d] mismatch: runtime=%q creation=%q", name, i, tool, creationTools[i])
+			}
+		}
+	}
+}
+
 func TestKnowledgeToolHandlersUseBackendSearchAndTextEndpoints(t *testing.T) {
 	var seen []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
