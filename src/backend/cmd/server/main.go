@@ -304,6 +304,7 @@ func main() {
 			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
 			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
+			convRoutes.GET("/:id/messages/:messageId/replies", msgHandler.Replies)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
 		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)

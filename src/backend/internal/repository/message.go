@@ -195,6 +195,20 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 	return r.fillAttachmentsAndReply(ctx, list)
 }
 
+// ListReplies 查询某条消息的所有非删除回复，按时间正序
+func (r *MessageRepo) ListReplies(ctx context.Context, messageID string) ([]model.Message, error) {
+	var list []model.Message
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT `+messageCols+` FROM `+messageFrom+
+			` WHERE m.reply_to = $1 AND m.deleted_at IS NULL ORDER BY m.created_at ASC`,
+		messageID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list replies: %w", err)
+	}
+	return r.fillAttachmentsAndReply(ctx, list)
+}
+
 // GetByID 按 ID 查找消息
 func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, error) {
 	var m model.Message

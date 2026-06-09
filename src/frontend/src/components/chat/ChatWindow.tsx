@@ -29,6 +29,7 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ChatSearchPanel } from './ChatSearchPanel';
 import { ForwardModal } from './ForwardModal';
+import { ThreadDrawer } from './ThreadDrawer';
 import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
@@ -80,6 +81,7 @@ export const ChatWindow: React.FC = () => {
   const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
+  const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -589,6 +591,7 @@ export const ChatWindow: React.FC = () => {
         onReply={setReplyTo}
         onForward={setForwardMessage}
         onPinChanged={handlePinnedMessageChange}
+        onOpenThread={setThreadMessage}
         conversationAgents={conversationAgents}
       />
       {otherTyping.length > 0 && (
@@ -633,6 +636,12 @@ export const ChatWindow: React.FC = () => {
         onClose={() => setForwardMessage(null)}
         message={forwardMessage}
         currentConversationId={activeId ?? undefined}
+      />
+      <ThreadDrawer
+        conversationId={activeId ?? ''}
+        originalMessage={threadMessage}
+        open={threadMessage !== null}
+        onClose={() => setThreadMessage(null)}
       />
       <Modal
         title="上下文黑板"

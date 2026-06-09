@@ -387,6 +387,35 @@ func (h *MessageHandler) UpdateBlackboard(c *gin.Context) {
 	middleware.SuccessResponse(c, blackboard)
 }
 
+// Replies 获取某条消息的所有回复
+func (h *MessageHandler) Replies(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40041, "缺少对话 ID 或消息 ID")
+		return
+	}
+
+	replies, err := h.svc.GetReplies(c.Request.Context(), convID, messageID)
+	if err != nil {
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40434, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgReplyWrongConv) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40043, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50031, "获取回复失败")
+		return
+	}
+
+	if replies == nil {
+		replies = []model.Message{}
+	}
+	middleware.SuccessResponse(c, replies)
+}
+
 // Recall 撤回消息
 func (h *MessageHandler) Recall(c *gin.Context) {
 	convID := c.Param("id")

@@ -271,6 +271,8 @@ interface MessageBubbleProps {
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
   conversationAgents?: ConversationAgent[];
+  replyCount?: number;
+  onOpenThread?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -312,6 +314,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onForward,
   onTogglePin,
   conversationAgents = [],
+  replyCount = 0,
+  onOpenThread,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -608,6 +612,19 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <Spin size="small" className={styles.sendingSpin} />
             )}
           </div>
+          {replyCount > 0 && onOpenThread && (
+            <button
+              className={styles.threadBtn}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenThread(message);
+              }}
+            >
+              <MessageOutlined />
+              {replyCount} 条回复
+            </button>
+          )}
           {shouldCollapse && (
             <button
               className={styles.expandToggle}
