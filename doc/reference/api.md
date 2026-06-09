@@ -410,7 +410,7 @@ null
     "cli_tool": "codex",
     "system_prompt": "你是一个资深工程师",
     "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_tasks\"]}",
-    "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]",
+    "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\",\"trigger\":\"review, bug\",\"detail\":\"按清单检查权限、边界和测试。\"}]",
     "tags": "[\"coding\"]",
     "status": "online"
   }
@@ -428,7 +428,7 @@ null
   "cli_tool": "codex",
   "system_prompt": "你是一个资深工程师",
   "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_group_agents\",\"get_messages\",\"list_tasks\"]}",
-  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\",\"trigger\":\"review, bug\",\"detail\":\"按清单检查权限、边界和测试。\"}]"
 }
 ```
 
@@ -457,7 +457,7 @@ null
   "cli_tool": "codex",
   "system_prompt": "你是一个资深工程师",
   "tools_config": "{\"toolset\":\"tasks\",\"allowed_tools\":[\"list_group_agents\",\"get_messages\",\"list_tasks\"]}",
-  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\",\"trigger\":\"review, bug\",\"detail\":\"按清单检查权限、边界和测试。\"}]"
 }
 ```
 
@@ -467,13 +467,13 @@ null
 
 ### PUT /api/agents/:id/custom-skills
 
-更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力标签，不会被 daemon 底座扫描覆盖。
-仅允许更新当前用户拥有的自建 Agent；保存前会校验为 JSON 数组并只保留 `name`、`description` 字段。
+更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力索引和渐进式加载内容，不会被 daemon 底座扫描覆盖。
+仅允许更新当前用户拥有的自建 Agent；保存前会校验为 JSON 数组并只保留 `name`、`description`、`trigger`、`detail` 字段，过滤 `source_path` 等本机扫描字段。
 
 **请求体**
 ```json
 {
-  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\",\"trigger\":\"review, bug\",\"detail\":\"按清单检查权限、边界和测试。\"}]"
 }
 ```
 
@@ -481,7 +481,7 @@ null
 ```json
 {
   "id": "uuid",
-  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\"}]"
+  "custom_skills": "[{\"name\":\"代码审查\",\"description\":\"检查 bug 和测试缺口\",\"trigger\":\"review, bug\",\"detail\":\"按清单检查权限、边界和测试。\"}]"
 }
 ```
 

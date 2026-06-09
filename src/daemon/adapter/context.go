@@ -22,7 +22,7 @@ func FormatContextAsSystemPrompt(contextMessagesJSON string) string {
 	}
 	var handoffs []AgentHandoff
 	if err := json.Unmarshal([]byte(contextMessagesJSON), &handoffs); err != nil || len(handoffs) == 0 {
-		return ""
+		return strings.TrimSpace(contextMessagesJSON)
 	}
 
 	var sb strings.Builder

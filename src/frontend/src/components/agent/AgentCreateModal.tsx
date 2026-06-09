@@ -25,9 +25,11 @@ function skillsInputToJSON(value: string): string {
     .filter(Boolean)
     .map((line) => {
       const [name, ...descriptionParts] = line.split(/\s+-\s+/);
+      const description = descriptionParts.join(' - ').trim();
       return {
         name: (name ?? '').trim(),
-        description: descriptionParts.join(' - ').trim() || undefined,
+        description: description || undefined,
+        trigger: description || undefined,
       };
     })
     .filter((skill) => skill.name.length > 0);
@@ -194,7 +196,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
             autoSize={{ minRows: 3, maxRows: 6 }}
             onChange={(event) => setSkillInput(event.target.value)}
           />
-          <span className={styles.helper}>底座 Skills 只读；平台 Skills 会写入该 Agent 的可分配能力标签。</span>
+          <span className={styles.helper}>底座 Skills 只读；平台 Skills 会写入该 Agent 的可分配能力索引，可在详情页继续补充触发条件和详细内容。</span>
         </div>
         <div className={styles.footer}>
           <Button onClick={onClose}>取消</Button>

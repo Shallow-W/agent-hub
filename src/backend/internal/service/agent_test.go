@@ -358,11 +358,11 @@ func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
 }
 
 func TestNormalizeCustomSkillsFiltersUnsafeFields(t *testing.T) {
-	got, err := normalizeCustomSkills(`[{"name":" review ","description":" check ","detail":"NO","source_path":"/tmp/a"},{"name":"review"},{"name":""}]`)
+	got, err := normalizeCustomSkills(`[{"name":" review ","description":" check ","trigger":" bug ","detail":" use checklist ","source_path":"/tmp/a"},{"name":"review"},{"name":""}]`)
 	if err != nil {
 		t.Fatalf("normalize custom skills: %v", err)
 	}
-	if got != `[{"name":"review","description":"check"}]` {
+	if got != `[{"name":"review","description":"check","trigger":"bug","detail":"use checklist"}]` {
 		t.Fatalf("unexpected normalized skills: %s", got)
 	}
 }
@@ -379,6 +379,23 @@ func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
 	}
 	if repo.updatedSkills != `[{"name":"review","description":"check"}]` {
 		t.Fatalf("unexpected normalized skills: %s", repo.updatedSkills)
+	}
+}
+
+func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
+	raw := `[{"name":"代码审查","description":"检查 bug 和测试缺口","trigger":"review, bug","detail":"逐项检查边界、权限和测试。"},{"name":"文档撰写","description":"写说明","detail":"不要命中"}]`
+	got := BuildAgentSkillContext(raw, "请 review 这个工具权限 bug")
+	if !strings.Contains(got, "[平台 Skills]") {
+		t.Fatal("expected skill context section")
+	}
+	if !strings.Contains(got, "代码审查：检查 bug 和测试缺口") {
+		t.Fatalf("expected skill index, got %s", got)
+	}
+	if !strings.Contains(got, "逐项检查边界、权限和测试。") {
+		t.Fatalf("expected matched detail, got %s", got)
+	}
+	if strings.Contains(got, "不要命中") {
+		t.Fatalf("unexpected unmatched detail: %s", got)
 	}
 }
 

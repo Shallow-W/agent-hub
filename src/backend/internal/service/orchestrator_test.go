@@ -241,6 +241,28 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 	}
 }
 
+func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {
+	agent := &model.Agent{
+		ID:           "agent-3",
+		Name:         "SkillAgent",
+		CustomSkills: `[{"name":"权限审查","description":"检查工具权限","trigger":"权限","detail":"确认 MCP 白名单和拒绝路径。"}]`,
+	}
+	svc := NewOrchestratorService(nil, nil, nil)
+	got := svc.InjectAgentConfig(agent, "[群聊背景]\nhello", "u1", "请检查工具权限")
+	if !strings.Contains(got, "[平台 Skills]") {
+		t.Fatalf("expected platform skills section, got %s", got)
+	}
+	if !strings.Contains(got, "权限审查：检查工具权限") {
+		t.Fatalf("expected skill index, got %s", got)
+	}
+	if !strings.Contains(got, "确认 MCP 白名单和拒绝路径。") {
+		t.Fatalf("expected matched skill detail, got %s", got)
+	}
+	if !strings.Contains(got, "[群聊背景]") {
+		t.Fatalf("expected original context preserved, got %s", got)
+	}
+}
+
 func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T) {
 	svc := NewOrchestratorService(
 		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},

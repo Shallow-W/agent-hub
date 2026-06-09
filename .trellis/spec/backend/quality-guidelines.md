@@ -152,6 +152,61 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
 ```
 
+### Agent Platform Skills
+
+**Scope / Trigger**: Applies when changing `agents.custom_skills`, Agent dispatch context construction, daemon prompt splitting, or the Agent Skills UI.
+
+**Signatures**:
+- API: `PUT /api/agents/:id/custom-skills`
+- Request: `{"custom_skills": string}` where the string is a JSON array.
+- Skill item fields: `name`, `description`, `trigger`, `detail`.
+- Runtime injection entry point: `OrchestratorService.InjectAgentConfig(agent, contextStr, userID, taskText)`.
+
+**Contracts**:
+- `agents.capabilities_json` stores daemon-scanned native skills and may include local `source_path`; it is read-only user-facing discovery data.
+- `agents.custom_skills` stores user-assigned platform Skills. It must not be overwritten by daemon scans.
+- Custom Skill persistence must keep only platform-safe fields: `name`, `description`, `trigger`, and `detail`. It must drop `source_path`, `auto`, and other local scan metadata.
+- `name` is required; duplicate names collapse to the first valid item.
+- `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.
+- Agent dispatch prompts include a `[平台 Skills]` section with a compact Skill index for the current Agent.
+- Skill `detail` is progressively injected only when the current task text matches the Skill name or trigger tokens.
+- Orchestrator group Agent detail prompts must not expose raw `custom_skills` detail. They should continue using dispatch-safe description/tags only.
+- Daemon prompt splitting must move `[平台 Skills]` into the system prompt area where the target CLI supports it; CLIs without a system prompt flag should receive it before the user prompt.
+
+**Validation & Error Matrix**:
+- Empty `custom_skills` -> saved as empty string, no Skill context injected.
+- Invalid JSON -> `ErrAgentInvalidInput`.
+- Non-array JSON -> `ErrAgentInvalidInput`.
+- Empty Skill names -> skipped.
+- Attempt to update another user's or non-custom Agent Skills -> `ErrAgentNotFound`.
+
+**Good/Base/Bad Cases**:
+- Good: Agent A has `custom_skills` with `trigger: "review, bug"` and task text includes "review"; prompt includes the Skill index and the matched `detail`.
+- Base: Task text does not match any trigger; prompt includes only the Skill index and omits all details.
+- Bad: Prompt injects every Skill detail on every request, causing context bloat.
+- Bad: Saving platform Skills preserves `source_path` from daemon-scanned native Skills.
+
+**Tests Required**:
+- Service test for custom Skill normalization, unsafe field filtering, and `trigger`/`detail` preservation.
+- Service test for progressive prompt injection: index always present, matched detail included, unmatched detail omitted.
+- Dispatch context test asserting `InjectAgentConfig` preserves existing blackboard/group context after the Skill section.
+- Browser E2E verifying UI round-trip and API persistence for `tools_config` plus structured platform Skills.
+
+**Wrong vs Correct**:
+```go
+// Wrong: platform Skills are only treated as display tags.
+out = append(out, DiscoveredSkill{Name: name, Description: description})
+
+// Correct: platform Skills keep trigger/detail for progressive loading,
+// while local scan metadata stays out of persistence.
+out = append(out, DiscoveredSkill{
+    Name: name,
+    Description: description,
+    Trigger: trigger,
+    Detail: detail,
+})
+```
+
 ### Conversation Context Blackboard
 
 **Scope / Trigger**: Applies when changing message pin APIs, group-chat prompt context, or Agent dispatch context construction.

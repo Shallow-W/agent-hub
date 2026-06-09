@@ -21,7 +21,7 @@
 - 调度时：用自建 Agent 的 system_prompt 替换默认值，通过对应 CLI 工具的适配器执行
 - `agents.tools_config` 使用 `{"toolset": string, "allowed_tools": string[]}` 作为 per-Agent MCP 工具授权配置；后端保存前过滤未知工具名。
 - 省略或传空 `tools_config` 保存为无工具配置，runtime 不授予默认工具。
-- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖；后端仅允许当前用户更新自建 Agent 的平台 Skills。
+- `agents.custom_skills` 存储用户为该 Agent 分配的平台 Skills，不由 daemon 底座扫描覆盖；后端仅允许当前用户更新自建 Agent 的平台 Skills，并保留 `name`、`description`、`trigger`、`detail` 用于渐进式提示词加载。
 
 ### M8-3 自建 Agent 对话验证
 
@@ -42,6 +42,7 @@
 ## 验证记录
 
 - 2026-06-09：使用账号 `wjc` 在 WebUI 创建测试 Agent，确认 `tools_config` 和 `custom_skills` 落库；随后在详情页将工具集改为 `none`，API 返回 `{"toolset":"none","allowed_tools":[]}`。
+- 2026-06-09：使用 Playwright 登录账号 `wjc` 创建临时测试 Agent，验证工具集、结构化平台 Skills（含 trigger/detail）在 UI 和 API 中保存、刷新回显一致；测试完成后删除临时 Agent。
 
 ## 依赖
 

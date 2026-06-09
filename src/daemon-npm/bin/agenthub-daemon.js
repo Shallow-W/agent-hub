@@ -644,17 +644,24 @@ function buildPromptParts(task) {
   // 从 context_messages 中提取系统指令和工具配置作为 system prompt
   let systemPrompt = '';
   let remainingCtx = ctx;
+  const contextSectionBoundary = '(?=\\n\\n\\[可用工具\\]|\\n\\n\\[平台 Skills\\]|\\n\\n\\[群聊背景\\]|\\n\\n\\[调度指令\\]|\\n\\n\\[依赖输出\\]|\\n\\n\\{|$)';
 
-  const sysSection = remainingCtx.match(/^(\[系统指令\]\n[\s\S]*?)(?=\n\n\[可用工具\]|\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const sysSection = remainingCtx.match(new RegExp(`^(\\[系统指令\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (sysSection) {
     systemPrompt += sysSection[1].replace('[系统指令]\n', '').trim();
-    remainingCtx = remainingCtx.slice(sysSection[0].length);
+    remainingCtx = remainingCtx.slice(sysSection[0].length).replace(/^\s+/, '');
   }
 
-  const toolsSection = remainingCtx.match(/^(\[可用工具\]\n[\s\S]*?)(?=\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const toolsSection = remainingCtx.match(new RegExp(`^(\\[可用工具\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (toolsSection) {
     systemPrompt += (systemPrompt ? '\n\n' : '') + '# 可用工具\n' + toolsSection[1].replace('[可用工具]\n', '').trim();
-    remainingCtx = remainingCtx.slice(toolsSection[0].length);
+    remainingCtx = remainingCtx.slice(toolsSection[0].length).replace(/^\s+/, '');
+  }
+
+  const skillsSection = remainingCtx.match(new RegExp(`^(\\[平台 Skills\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
+  if (skillsSection) {
+    systemPrompt += (systemPrompt ? '\n\n' : '') + '# 平台 Skills\n' + skillsSection[1].replace('[平台 Skills]\n', '').trim();
+    remainingCtx = remainingCtx.slice(skillsSection[0].length).replace(/^\s+/, '');
   }
 
   remainingCtx = remainingCtx.trim();
@@ -697,6 +704,7 @@ function commandForTask(task) {
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
+    const codexPrompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
     return {
       command,
       args: [
@@ -710,7 +718,7 @@ function commandForTask(task) {
         'never',
         '--output-last-message',
         outputFile,
-        userPrompt,
+        codexPrompt,
       ],
       outputFile,
     };

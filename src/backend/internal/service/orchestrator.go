@@ -315,7 +315,7 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
+	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID, content)
 
 	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
 	if err != nil {
@@ -355,7 +355,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	// agent.Type 可能是 "system" 或 "custom"。
 	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
 	orchCtx += kbPreload
-	agentConfig := s.InjectAgentConfig(orchAgent, "", userID)
+	agentConfig := s.InjectAgentConfig(orchAgent, "", userID, content)
 	orchCtx = agentConfig + orchCtx
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
@@ -668,7 +668,7 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 
 // InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
 // Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
-func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
+func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string, taskText string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
 		sb.WriteString("[系统指令]\n")
@@ -680,6 +680,13 @@ func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString("[可用工具]\n")
 		sb.WriteString(agent.ToolsConfig)
 		sb.WriteString("\n\n")
+	}
+
+	if skillCtx := BuildAgentSkillContext(agent.CustomSkills, taskText); skillCtx != "" {
+		sb.WriteString(skillCtx)
+		if !strings.HasSuffix(skillCtx, "\n\n") {
+			sb.WriteString("\n\n")
+		}
 	}
 
 	sb.WriteString(contextStr)

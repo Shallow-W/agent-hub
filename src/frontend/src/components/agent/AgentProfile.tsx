@@ -106,7 +106,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   };
 
   const customSkillsToJSON = (skills: Skill[]): string => {
-    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({ name: s.name, description: s.description }))) : '';
+    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({
+      name: s.name,
+      description: s.description,
+      trigger: s.trigger,
+      detail: s.detail,
+    }))) : '';
   };
 
   useEffect(() => {
@@ -180,6 +185,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     }
     setCustomSkills((prev) => [...prev, { name: trimmed }]);
     setNewSkillName('');
+  };
+
+  const handleUpdateCustomSkill = (idx: number, patch: Partial<Skill>) => {
+    setCustomSkills((prev) => prev.map((skill, i) => (
+      i === idx ? { ...skill, ...patch } : skill
+    )));
   };
 
   const handleDeleteSkill = (idx: number) => {
@@ -522,7 +533,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                       暂无平台 Skills，点击「自动生成」或在下方添加
                     </div>
                   ) : (
-                    <div className={styles.skillGrid}>
+                    <div className={styles.customSkillList}>
                       {customSkills.map((skill, idx) => (
                         <div className={styles.skillCard} key={idx}>
                           <button
@@ -555,6 +566,38 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                           {skill.description && (
                             <div className={styles.skillDesc}>{skill.description}</div>
                           )}
+                          {skill.trigger && (
+                            <div className={styles.skillTrigger}>触发：{skill.trigger}</div>
+                          )}
+                          <div className={styles.skillEditor}>
+                            <label className={styles.skillField}>
+                              <span>描述</span>
+                              <Input.TextArea
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                value={skill.description ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { description: e.target.value })}
+                                placeholder="这个 Skill 解决什么问题"
+                              />
+                            </label>
+                            <label className={styles.skillField}>
+                              <span>触发条件</span>
+                              <Input
+                                value={skill.trigger ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { trigger: e.target.value })}
+                                placeholder="例如：代码审查、修复 bug、写测试时使用"
+                              />
+                            </label>
+                            <label className={styles.skillField}>
+                              <span>详细内容</span>
+                              <Input.TextArea
+                                autoSize={{ minRows: 3, maxRows: 8 }}
+                                value={skill.detail ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { detail: e.target.value })}
+                                placeholder="渐进式加载时注入给 Agent 的具体规则、步骤或模板"
+                                className={styles.monospaceTextarea}
+                              />
+                            </label>
+                          </div>
                         </div>
                       ))}
                     </div>

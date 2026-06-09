@@ -945,7 +945,7 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 			}
 			// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
 			// 保持与编排器路径一致：系统指令 → 可用工具 → 黑板/KB上下文 → 对话交接单
-			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
 		}
 	}
 

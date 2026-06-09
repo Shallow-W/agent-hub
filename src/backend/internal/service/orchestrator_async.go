@@ -42,7 +42,6 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		return
 	}
 
-
 	// 权限校验
 	if agent.UserID != nil && *agent.UserID != userID {
 		s.markWorkerFailed(orchTaskID, task.AgentName, task.Task, "permission denied")
@@ -92,7 +91,7 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 	if kbPreload != "" {
 		dispatchCtx = kbPreload + dispatchCtx
 	}
-	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID)
+	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID, task.Task)
 
 	// 统一路径：创建 daemon task → WS dispatch → channel wait → 创建消息
 	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, task.Task, dispatchCtx)
@@ -246,7 +245,7 @@ func (s *OrchestratorService) startOrchSummary(orchTaskID string) {
 
 	// 构建汇总+决策 prompt（支持多轮上下文）
 	summaryPrompt := BuildSummaryPrompt(orchTask)
-	summaryCtx := s.InjectAgentConfig(orchAgent, "", orchTask.UserID)
+	summaryCtx := s.InjectAgentConfig(orchAgent, "", orchTask.UserID, summaryPrompt)
 
 	msg, err := s.dispatchAndWait(ctx, orchTask.ConversationID, orchTask.UserID, orchAgent, summaryPrompt, summaryCtx)
 	if err != nil {
