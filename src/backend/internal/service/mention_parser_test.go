@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -233,6 +234,54 @@ func TestParseOrchOutputSingleMention(t *testing.T) {
 	}
 	if dispatch.Tasks[0].AgentName != "Agent" {
 		t.Errorf("agent = %q", dispatch.Tasks[0].AgentName)
+	}
+}
+
+func TestParseOrchOutputMentionOnlyLineUsesFollowingParagraph(t *testing.T) {
+	text := "需要多 Agent 协作。第一轮分派如下：\n\n@123\n任务：计算 27 + 38。请只给出答案，并简要说明计算过程。\n\n@1234\n任务：计算 9 × 7。请只给出答案，并简要说明计算过程。\n\n我会在 123 和 1234 都回答后，汇总两边结果并判断是否正确，然后继续出第二轮。"
+	dispatch := ParseOrchestratorOutput(text)
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(dispatch.Tasks))
+	}
+	if dispatch.Tasks[0].AgentName != "123" {
+		t.Fatalf("task[0] agent = %q, want 123", dispatch.Tasks[0].AgentName)
+	}
+	if !strings.Contains(dispatch.Tasks[0].Task, "27 + 38") {
+		t.Fatalf("task[0] = %q, want math assignment", dispatch.Tasks[0].Task)
+	}
+	if dispatch.Tasks[1].AgentName != "1234" {
+		t.Fatalf("task[1] agent = %q, want 1234", dispatch.Tasks[1].AgentName)
+	}
+	if !strings.Contains(dispatch.Tasks[1].Task, "9 × 7") {
+		t.Fatalf("task[1] = %q, want math assignment", dispatch.Tasks[1].Task)
+	}
+	if strings.Contains(dispatch.Tasks[1].Task, "汇总两边结果") {
+		t.Fatalf("task[1] should not include trailing orchestration note: %q", dispatch.Tasks[1].Task)
+	}
+}
+
+func TestParseOrchOutputForAgentsPrefersLongerPrefixName(t *testing.T) {
+	text := "第一轮任务已分配：\n\n@123\n请计算：17 + 28 = ?\n\n@1234\n请计算：9 × 6 = ?\n\n两位完成后我会汇总。"
+	dispatch := ParseOrchestratorOutputForAgents(text, []string{"123", "1234", "Codex"})
+
+	if dispatch == nil {
+		t.Fatal("expected non-nil dispatch")
+	}
+	if len(dispatch.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d: %#v", len(dispatch.Tasks), dispatch.Tasks)
+	}
+	if dispatch.Tasks[0].AgentName != "123" {
+		t.Fatalf("task[0] agent = %q, want 123", dispatch.Tasks[0].AgentName)
+	}
+	if dispatch.Tasks[1].AgentName != "1234" {
+		t.Fatalf("task[1] agent = %q, want 1234", dispatch.Tasks[1].AgentName)
+	}
+	if !strings.Contains(dispatch.Tasks[1].Task, "9 × 6") {
+		t.Fatalf("task[1] = %q, want second math assignment", dispatch.Tasks[1].Task)
 	}
 }
 

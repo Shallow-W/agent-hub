@@ -6,6 +6,11 @@ export async function deployArtifact(rootId: string): Promise<Deployment> {
   return post<Deployment>(`/api/artifacts/${rootId}/deploy`, {});
 }
 
+/** 把产物发布到 GitHub Pages（永久公网地址），返回部署记录（url 为绝对 github.io 地址）。 */
+export async function publishToGitHub(rootId: string): Promise<Deployment> {
+  return post<Deployment>(`/api/artifacts/${rootId}/deploy-github`, {});
+}
+
 /** 把后端返回的相对地址拼成当前来源下的绝对地址（适配二维码扫码 / 局域网 / 生产同源）。 */
 export function absoluteDeployURL(relative?: string): string {
   if (!relative) return '';

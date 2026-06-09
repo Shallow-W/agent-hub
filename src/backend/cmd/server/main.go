@@ -17,6 +17,8 @@ import (
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/internal/ghpages"
+	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
@@ -69,6 +71,21 @@ type Config struct {
 		RPS   float64 `koanf:"rps"`
 		Burst int     `koanf:"burst"`
 	} `koanf:"rate_limit"`
+	GitHub struct {
+		Token     string `koanf:"token"`      // PAT（classic，repo 权限）；建议用环境变量 GITHUB_TOKEN 注入
+		Owner     string `koanf:"owner"`      // 仓库归属账号，如 Shallow-W；可用 GITHUB_PAGES_OWNER 覆盖
+		PagesRepo string `koanf:"pages_repo"` // 专用公开仓库名，如 agent-hub-sites；可用 GITHUB_PAGES_REPO 覆盖
+	} `koanf:"github"`
+}
+
+// firstNonEmpty 返回第一个非空字符串（用于环境变量覆盖配置文件）。
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func parseLogLevel(level string) slog.Level {
@@ -82,6 +99,15 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// isFalsy 判断环境变量是否表示「关闭」（false/0/no/off，忽略大小写与首尾空白）。
+func isFalsy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }
 
 func main() {
@@ -130,6 +156,15 @@ func main() {
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
 	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
 	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
+	// GitHub Pages 永久发布（环境变量优先于 config.yaml）。三项齐全才启用，否则 publisher 为 nil。
+	if pub := ghpages.NewPublisher(
+		firstNonEmpty(os.Getenv("GITHUB_TOKEN"), cfg.GitHub.Token),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner),
+		firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo),
+	); pub != nil {
+		deploymentSvc.SetGitHubPublisher(pub)
+		logger.Info("GitHub Pages 永久发布已启用", "owner", firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner), "repo", firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo))
+	}
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
 
 	// 文件上传服务
@@ -164,6 +199,8 @@ func main() {
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
 	orchSvc.SetTaskSvc(taskSvc)
+	// 服务端抽取消息附件文本时需要定位上传文件。
+	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
 
@@ -345,6 +382,7 @@ func main() {
 			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
 			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
 			artifactRoutes.POST("/:rootId/deploy", deploymentHandler.Deploy)
+			artifactRoutes.POST("/:rootId/deploy-github", deploymentHandler.DeployGitHub)
 		}
 
 		// 部署状态查询（需要鉴权）
@@ -432,6 +470,16 @@ func main() {
 	go hub.Run(ctx)
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
+
+	// 零配置内网穿透：未显式配置 PUBLIC_BASE_URL 且未禁用（AUTO_TUNNEL=false）时，
+	// 自动拉起 cloudflared 快速隧道并把分配到的公网域名回填到部署服务——这样无论在哪台
+	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
+	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
+		cacheDir := filepath.Join("data", "bin")
+		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
+			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
+		}
+	}
 
 	// 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

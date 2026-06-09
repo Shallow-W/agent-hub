@@ -2,6 +2,7 @@ package service
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -29,6 +30,18 @@ type DispatchTask struct {
 type OrchDispatch struct {
 	Preamble string         // text before any @mention (Orch's explanation to the chat)
 	Tasks    []DispatchTask // extracted task assignments
+}
+
+// ParseOrchestratorOutputForAgents parses dispatch output using exact
+// conversation agent names. It prefers longer names first so @1234 is not
+// confused with @123 when both agents exist.
+func ParseOrchestratorOutputForAgents(text string, agentNames []string) *OrchDispatch {
+	if len(agentNames) == 0 {
+		return ParseOrchestratorOutput(text)
+	}
+	return parseOrchestratorOutput(text, func(line string) (string, string, bool) {
+		return parseDispatchLineWithAgentNames(line, agentNames)
+	})
 }
 
 // ParseMentions extracts all @AgentName patterns from text.
@@ -68,6 +81,12 @@ func ParseMentions(text string) []MentionResult {
 // and treats embedded @references in task text as dependencies.
 // Returns nil if no @mentions are found (indicating a regular response, not a dispatch).
 func ParseOrchestratorOutput(text string) *OrchDispatch {
+	return parseOrchestratorOutput(text, parseDispatchLineByRegex)
+}
+
+type dispatchLineParser func(line string) (agentName string, taskText string, sequential bool)
+
+func parseOrchestratorOutput(text string, parseLine dispatchLineParser) *OrchDispatch {
 	type dispatchLine struct {
 		agentName  string
 		taskText   string
@@ -98,24 +117,8 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 			continue
 		}
 
-		// Check if this line starts with optional "→" then @mention
-		withoutArrow := strings.TrimPrefix(trimmed, "→")
-		withoutArrow = strings.TrimSpace(withoutArrow)
-
-		if strings.HasPrefix(withoutArrow, "@") {
-			// Extract agent name after @
-			name := mentionRe.FindStringSubmatch(withoutArrow)
-			if name == nil {
-				continue
-			}
-			agentName := name[1]
-
-			// Task text is everything after @AgentName on this line
-			afterAt := withoutArrow[len("@")+len(agentName):]
-			taskOnLine := strings.TrimSpace(afterAt)
-
-			sequential := strings.HasPrefix(trimmed, "→")
-
+		agentName, taskOnLine, sequential := parseLine(trimmed)
+		if agentName != "" {
 			if dispatchStartIdx == -1 {
 				dispatchStartIdx = i
 			}
@@ -159,11 +162,20 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 			raw := lines[j]
 			trimmed := strings.TrimSpace(raw)
 			if trimmed == "" {
+				if d.taskText == "" && hasTaskText(taskParts) {
+					break
+				}
 				// 空行仍属于 task，保留为空字符串（join 时产生空格分隔）
 				taskParts = append(taskParts, "")
 				continue
 			}
-			// 非空白且不是缩进行 → 属于非 task 文本，停止收集
+			// If the dispatch line was only "@Agent", the following plain
+			// paragraph is the task body. This matches common LLM output where
+			// the mention is on its own line and the assignment starts below it.
+			if d.taskText == "" {
+				taskParts = append(taskParts, trimmed)
+				continue
+			}
 			if raw[0] != ' ' && raw[0] != '\t' {
 				break
 			}
@@ -199,6 +211,60 @@ func ParseOrchestratorOutput(text string) *OrchDispatch {
 		Preamble: preamble,
 		Tasks:    tasks,
 	}
+}
+
+func parseDispatchLineByRegex(line string) (string, string, bool) {
+	withoutArrow := strings.TrimPrefix(line, "→")
+	withoutArrow = strings.TrimSpace(withoutArrow)
+	if !strings.HasPrefix(withoutArrow, "@") {
+		return "", "", false
+	}
+	name := mentionRe.FindStringSubmatch(withoutArrow)
+	if name == nil {
+		return "", "", false
+	}
+	agentName := name[1]
+	afterAt := withoutArrow[len("@")+len(agentName):]
+	return agentName, strings.TrimSpace(afterAt), strings.HasPrefix(line, "→")
+}
+
+func parseDispatchLineWithAgentNames(line string, agentNames []string) (string, string, bool) {
+	withoutArrow := strings.TrimPrefix(line, "→")
+	withoutArrow = strings.TrimSpace(withoutArrow)
+	if !strings.HasPrefix(withoutArrow, "@") {
+		return "", "", false
+	}
+	names := append([]string(nil), agentNames...)
+	sort.SliceStable(names, func(i, j int) bool {
+		return len([]rune(names[i])) > len([]rune(names[j]))
+	})
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		prefix := "@" + name
+		if withoutArrow == prefix {
+			return name, "", strings.HasPrefix(line, "→")
+		}
+		if strings.HasPrefix(withoutArrow, prefix) {
+			rest := withoutArrow[len(prefix):]
+			runes := []rune(rest)
+			if len(runes) == 0 || unicode.IsSpace(runes[0]) {
+				return name, strings.TrimSpace(rest), strings.HasPrefix(line, "→")
+			}
+		}
+	}
+	return "", "", false
+}
+
+func hasTaskText(parts []string) bool {
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // FindMentionedAgentID matches mention AgentNames to actual agent IDs in the conversation.

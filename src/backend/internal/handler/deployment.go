@@ -41,6 +41,22 @@ func (h *DeploymentHandler) Deploy(c *gin.Context) {
 	middleware.CreatedResponse(c, dep)
 }
 
+// DeployGitHub 把某血缘根的最新产物发布到 GitHub Pages（永久公网地址）。
+func (h *DeploymentHandler) DeployGitHub(c *gin.Context) {
+	rootID := c.Param("rootId")
+	if rootID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40800, "缺少产物 ID")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	dep, err := h.svc.PublishGitHub(c.Request.Context(), rootID, userID)
+	if err != nil {
+		h.handleErr(c, err)
+		return
+	}
+	middleware.CreatedResponse(c, dep)
+}
+
 // Get 查询部署状态（需要鉴权）。
 func (h *DeploymentHandler) Get(c *gin.Context) {
 	dep, err := h.svc.Get(c.Request.Context(), c.Param("id"))
@@ -137,6 +153,10 @@ func (h *DeploymentHandler) handleErr(c *gin.Context, err error) {
 		middleware.ErrorResponse(c, http.StatusForbidden, 40803, err.Error())
 	case errors.Is(err, service.ErrDeployEmpty):
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40804, err.Error())
+	case errors.Is(err, service.ErrDeployNoArtifact):
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40805, err.Error())
+	case errors.Is(err, service.ErrGitHubNotConfigured):
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40806, err.Error())
 	default:
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50800, "部署失败")
 	}

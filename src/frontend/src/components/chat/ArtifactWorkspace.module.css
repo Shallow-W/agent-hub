@@ -125,10 +125,16 @@
   margin-bottom: 12px;
 }
 
-.documentArea :global(code) {
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: var(--color-surface-muted);
+.documentCodeText {
+  font: inherit;
+  color: inherit;
+}
+
+.documentPlainText {
+  margin: 8px 0 14px;
+  color: var(--color-text);
+  line-height: 1.75;
+  white-space: pre-wrap;
 }
 
 .documentArea :global(.contains-task-list) {
@@ -150,14 +156,6 @@
   accent-color: var(--color-primary);
   cursor: pointer;
   flex: 0 0 auto;
-}
-
-.documentArea :global(pre) {
-  overflow: auto;
-  padding: 12px;
-  border-radius: 8px;
-  background: #1c2128;
-  color: #e6edf3;
 }
 
 .textDocument {

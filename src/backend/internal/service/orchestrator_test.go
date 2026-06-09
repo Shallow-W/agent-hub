@@ -94,7 +94,7 @@ func TestRouteMention_EmptyContent_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRouteMention_NoMentions_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "hello world no mentions here")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "hello world no mentions here", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRouteMention_UnknownAgent_ReturnsNil(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	result, err := svc.RouteMention(context.Background(), "c1", "u1", "@UnknownAgent please help")
+	result, err := svc.RouteMention(context.Background(), "c1", "u1", "@UnknownAgent please help", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestRouteMention_ConversationNotFound_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.RouteMention(context.Background(), "missing", "u1", "@Agent hello")
+	_, err := svc.RouteMention(context.Background(), "missing", "u1", "@Agent hello", nil)
 	if err == nil {
 		t.Fatal("expected error for missing conversation, got nil")
 	}
@@ -161,7 +161,7 @@ func TestRouteMention_ListAgentsError_ReturnsError(t *testing.T) {
 		&fakeMsgRepo{},
 	)
 
-	_, err := svc.RouteMention(context.Background(), "c1", "u1", "@Agent hello")
+	_, err := svc.RouteMention(context.Background(), "c1", "u1", "@Agent hello", nil)
 	if err == nil {
 		t.Fatal("expected error when ListAgents fails, got nil")
 	}
@@ -239,6 +239,32 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 	if msg.Content != taskResult {
 		t.Fatalf("expected %q, got %s", taskResult, msg.Content)
 	}
+}
+
+func TestBuildDispatchContextIncludesParsedMathAssignment(t *testing.T) {
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{},
+		&fakeMsgRepo{},
+	)
+
+	orchOutput := "需要多 Agent 协作。第一轮分派如下：\n\n@123\n任务：计算 27 + 38。请只给出答案，并简要说明计算过程。\n\n@1234\n任务：计算 9 × 7。请只给出答案，并简要说明计算过程。\n\n我会在 123 和 1234 都回答后，汇总两边结果并判断是否正确，然后继续出第二轮。"
+	dispatch := ParseOrchestratorOutput(orchOutput)
+	if dispatch == nil || len(dispatch.Tasks) != 2 {
+		t.Fatalf("expected 2 parsed worker tasks, got %#v", dispatch)
+	}
+
+	ctx, err := svc.buildDispatchContext(context.Background(), "c1", dispatch.Tasks[0], nil, "Codex")
+	if err != nil {
+		t.Fatalf("buildDispatchContext error: %v", err)
+	}
+	if !strings.Contains(ctx, "27 + 38") {
+		t.Fatalf("dispatch context missing math assignment: %q", ctx)
+	}
+	if strings.Contains(ctx, "任务内容为空") {
+		t.Fatalf("dispatch context should not contain empty-task wording: %q", ctx)
+	}
+
 }
 
 func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {

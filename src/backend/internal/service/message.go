@@ -247,14 +247,14 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
 		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content)
+			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
 		if s.orchSvc != nil {
 			parsedMentions := ParseMentions(content)
 			if len(mentions) > 0 || len(parsedMentions) > 0 {
-				go s.asyncMentionDispatch(convID, userID, content)
+				go s.asyncMentionDispatch(convID, userID, content, msg.Attachments)
 			}
 		}
 	default:
@@ -888,7 +888,7 @@ func (s *MessageService) asyncDeploy(convID, userID string) {
 }
 
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
-func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
+func (s *MessageService) asyncMentionDispatch(convID, userID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncMentionDispatch recovered", "panic", r)
@@ -901,9 +901,10 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content)
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments)
 	if err != nil {
 		slog.Warn("mention routing failed", "convID", convID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
@@ -915,7 +916,7 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, content string) {
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
-func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string) {
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
@@ -930,21 +931,23 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
 
-	// 注入 Agent 系统提示词、工具配置、共享黑板和 KB 上下文（与编排器路径对齐）
+	// Include text extracted from this message's attachments before shared context.
+	if s.orchSvc != nil {
+		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+			contextMessages = attachCtx + contextMessages
+		}
+	}
+
+	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
 	if s.orchSvc != nil {
 		agent, err := s.agentRepo.GetByID(ctx, agentID)
 		if err == nil && agent != nil {
-			blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID)
-			if blackboardCtx != "" {
+			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
 				contextMessages = blackboardCtx + contextMessages
 			}
-			// KB 优先从消息内容中预解析
-			kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-			if kbCtx != "" {
+			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
 				contextMessages = kbCtx + contextMessages
 			}
-			// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
-			// 保持与编排器路径一致：系统指令 → 可用工具 → 黑板/KB上下文 → 对话交接单
 			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
 		}
 	}
@@ -952,9 +955,39 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
 		return
 	}
 	s.postPersist(convID, userID, agentMsg)
+}
+
+func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string) {
+	meta, _ := json.Marshal(map[string]string{"agent_name": "AgentHub"})
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, nil, nil, nil)
+	if err != nil {
+		slog.Warn("create agent failure message failed", "convID", convID, "error", err)
+		return
+	}
+	s.postPersist(convID, userID, msg)
+}
+
+func shortAgentError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	text := err.Error()
+	if strings.Contains(text, "You've hit your usage limit") {
+		return "Codex CLI 当前额度已用尽，请到 Codex 设置查看 usage，或等待额度恢复。"
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+		text = strings.TrimSpace(lines[0])
+	}
+	if len([]rune(text)) > 240 {
+		runes := []rune(text)
+		text = string(runes[:240]) + "..."
+	}
+	return text
 }
 
 func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
