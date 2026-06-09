@@ -98,6 +98,133 @@ WHERE c.id = $1 AND m.user_id = $2
 WHERE c.id = $1 AND m.user_id = $2 AND c.cli_tool = $5
 ```
 
+### Orchestrator Prompt Agent Details
+
+**Scope / Trigger**: Applies when changing group-chat orchestrator prompt construction or the conversation-agent query feeding it.
+
+**Contracts**:
+- `ConversationRepo.ListAgents` is the source of truth for the current group chat's available Agent list in an orchestrator prompt; it must not be replaced by a global Agent list.
+- Prompt construction should keep the group Agent detail lightweight: `name`, `role`, `status`, dispatch-safe `description`, and `tags`.
+- Prompt construction must not expose `cli_tool`, raw `capabilities_json`, discovered skill details, tool descriptions, or full `system_prompt` in the orchestrator Agent detail block.
+- Prompt construction must not invent descriptions or tags. Missing fields should render as an explicit fallback such as `未配置`.
+- Long free-form fields should be truncated before insertion so one Agent config cannot crowd out the user message or recent chat context.
+
+**Tests Required**:
+- Assert the prompt includes real Agent details from the backend query.
+- Assert empty description/tag fields use fallback text rather than generated prose.
+- Assert the prompt does not include `CLI工具`, raw capability/skill JSON, or management-tool instruction text.
+- Assert the prompt tells the orchestrator to only dispatch to Agent names listed in the current group chat.
+
+**Wrong vs Correct**:
+```go
+// Wrong: prompt layer exposes the full system prompt or tool capability JSON.
+detail.Description = truncateString(ca.SystemPrompt, 300)
+
+// Correct: prompt layer only renders a dispatch-safe description field.
+detail.Description = truncateString(ca.Description, 300)
+```
+
+### Agent MCP Toolsets
+
+**Scope / Trigger**: Applies when changing `agents.tools_config`, daemon MCP tool registration, or platform MCP endpoints.
+
+**Contracts**:
+- `agents.tools_config` is the per-Agent MCP tool authorization config. The supported JSON shape is `{"toolset": string, "allowed_tools": string[]}`.
+- `allowed_tools` must only contain known platform tool names. Unknown names are filtered before persistence.
+- Legacy non-JSON `tools_config` text may be preserved for display, but it must not grant extra MCP tools.
+- MCP `tools/list` must only return tools allowed for the current `agent_id`.
+- MCP `tools/call` must reject unauthorized tool names before executing the tool handler.
+- MCP sessions without a resolved `agent_id`, or with an unknown Agent, must fail closed and expose no tools.
+- Explicit JSON `allowed_tools: []` means no tools; it must not fall back to default tools.
+- Hiding tools in prompts or UI is not sufficient; runtime tool calls must enforce the same allowlist.
+
+**Tests Required**:
+- Backend service test for `tools_config` normalization and unknown tool filtering.
+- Daemon MCP test for filtered `tools/list` and unauthorized `tools/call`.
+- End-to-end daemon MCP test where one Agent's config allows tool A and denies tool B.
+
+**Wrong vs Correct**:
+```go
+// Wrong: all MCP tools are always exposed.
+server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
+
+// Correct: server list/call is constrained by the current Agent's tool config.
+server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
+```
+
+### Agent Platform Skills
+
+**Scope / Trigger**: Applies when changing `agents.custom_skills`, Agent dispatch context construction, daemon prompt splitting, or the Agent Skills UI.
+
+**Signatures**:
+- API: `PUT /api/agents/:id/custom-skills`
+- Request: `{"custom_skills": string}` where the string is a JSON array.
+- Skill item fields: `name`, `description`, `trigger`, `detail`.
+- Runtime injection entry point: `OrchestratorService.InjectAgentConfig(agent, contextStr, userID, taskText)`.
+
+**Contracts**:
+- `agents.capabilities_json` stores daemon-scanned native skills and may include local `source_path`; it is read-only user-facing discovery data.
+- `agents.custom_skills` stores user-assigned platform Skills. It must not be overwritten by daemon scans.
+- Custom Skill persistence must keep only platform-safe fields: `name`, `description`, `trigger`, and `detail`. It must drop `source_path`, `auto`, and other local scan metadata.
+- `name` is required; duplicate names collapse to the first valid item.
+- `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.
+- Agent dispatch prompts include a `[平台 Skills]` section with a compact Skill index for the current Agent.
+- Skill `detail` is progressively injected only when the current task text matches the Skill name or trigger tokens.
+- Orchestrator group Agent detail prompts must not expose raw `custom_skills` detail. They should continue using dispatch-safe description/tags only.
+- Daemon prompt splitting must move `[平台 Skills]` into the system prompt area where the target CLI supports it; CLIs without a system prompt flag should receive it before the user prompt.
+
+**Validation & Error Matrix**:
+- Empty `custom_skills` -> saved as empty string, no Skill context injected.
+- Invalid JSON -> `ErrAgentInvalidInput`.
+- Non-array JSON -> `ErrAgentInvalidInput`.
+- Empty Skill names -> skipped.
+- Attempt to update another user's or non-custom Agent Skills -> `ErrAgentNotFound`.
+
+**Good/Base/Bad Cases**:
+- Good: Agent A has `custom_skills` with `trigger: "review, bug"` and task text includes "review"; prompt includes the Skill index and the matched `detail`.
+- Base: Task text does not match any trigger; prompt includes only the Skill index and omits all details.
+- Bad: Prompt injects every Skill detail on every request, causing context bloat.
+- Bad: Saving platform Skills preserves `source_path` from daemon-scanned native Skills.
+
+**Tests Required**:
+- Service test for custom Skill normalization, unsafe field filtering, and `trigger`/`detail` preservation.
+- Service test for progressive prompt injection: index always present, matched detail included, unmatched detail omitted.
+- Dispatch context test asserting `InjectAgentConfig` preserves existing blackboard/group context after the Skill section.
+- Browser E2E verifying UI round-trip and API persistence for `tools_config` plus structured platform Skills.
+
+**Wrong vs Correct**:
+```go
+// Wrong: platform Skills are only treated as display tags.
+out = append(out, DiscoveredSkill{Name: name, Description: description})
+
+// Correct: platform Skills keep trigger/detail for progressive loading,
+// while local scan metadata stays out of persistence.
+out = append(out, DiscoveredSkill{
+    Name: name,
+    Description: description,
+    Trigger: trigger,
+    Detail: detail,
+})
+```
+
+### Conversation Context Blackboard
+
+**Scope / Trigger**: Applies when changing message pin APIs, group-chat prompt context, or Agent dispatch context construction.
+
+**Contracts**:
+- `message_pins` is the source of truth for user-pinned long-term conversation context. Prompt code must query persisted pins rather than reconstructing from frontend state.
+- `conversation_blackboards.manual_context` is the source of truth for user-authored long-term context. Agents must not write it until an explicit product phase adds that ability.
+- Message history responses expose `pinned` so the chat UI can display and toggle pin state without a separate round-trip for each message.
+- Agent prompts must include a `{会话上下文黑板}` block with `{用户 Pin 上下文}` and `{用户手写上下文}` for orchestrator dispatch, worker dispatch, direct Agent dispatch, and Agent one-on-one chats.
+- Pin content must be length-limited and normalized before prompt insertion so a single pinned message cannot crowd out the current user request.
+- Manual context must be length-limited before persistence and before prompt insertion so it cannot crowd out the current user request.
+- Cache invalidation is required after pin/unpin because message history may be served from Redis.
+
+**Tests Required**:
+- Assert orchestrator prompt construction includes the blackboard section.
+- Assert `BuildConversationBlackboardContext` includes persisted pinned messages, user-authored context, and normalizes multi-line pin content.
+- Run backend service/handler/repository tests and frontend build after changing the pin API or message shape.
+
 ---
 
 ## Testing Requirements

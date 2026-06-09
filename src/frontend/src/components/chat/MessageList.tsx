@@ -12,6 +12,7 @@ interface MessageListProps {
   conversationId: string;
   onReply?: (message: Message) => void;
   onForward?: (message: Message) => void;
+  onPinChanged?: () => void;
 }
 
 /** Extract agent_name from artifacts_json, or null */
@@ -68,7 +69,12 @@ function formatDividerTime(dateStr: string): string {
   return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ conversationId, onReply, onForward }) => {
+export const MessageList: React.FC<MessageListProps> = ({
+  conversationId,
+  onReply,
+  onForward,
+  onPinChanged,
+}) => {
   const {
     messages,
     streamingContent,
@@ -83,6 +89,7 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
   const containerRef = useRef<HTMLDivElement>(null);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
+  const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
   const [showNewMsgBtn, setShowNewMsgBtn] = useState(false);
   const [unreadSinceScroll, setUnreadSinceScroll] = useState(0);
   const nearBottomRef = useRef(true);
@@ -117,15 +124,21 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
     setUnreadSinceScroll(0);
   }, []);
 
-  const prevMsgCountRef = useRef(messages.length);
+  const prevMessageSnapshotRef = useRef({
+    count: messages.length,
+    lastId: messages[messages.length - 1]?.id ?? null,
+  });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const msgCountIncreased = messages.length > prevMsgCountRef.current;
-    prevMsgCountRef.current = messages.length;
+    const prev = prevMessageSnapshotRef.current;
+    const lastId = messages[messages.length - 1]?.id ?? null;
+    const msgAppended = messages.length > prev.count && lastId !== prev.lastId;
+    prevMessageSnapshotRef.current = { count: messages.length, lastId };
+    if (!msgAppended && !nearBottomRef.current) return;
     // Always scroll to bottom when a new message is added (user sent or received)
-    if (msgCountIncreased || nearBottomRef.current) {
+    if (msgAppended || nearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' });
     } else {
       setShowNewMsgBtn(true);
@@ -203,6 +216,10 @@ export const MessageList: React.FC<MessageListProps> = ({ conversationId, onRepl
                   isOwn={isOwn}
                   onReply={onReply}
                   onForward={onForward}
+                  onTogglePin={(message) => {
+                    void toggleMessagePin(conversationId, message.id, !!message.pinned)
+                      .finally(() => onPinChanged?.());
+                  }}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
                 />
               </React.Fragment>

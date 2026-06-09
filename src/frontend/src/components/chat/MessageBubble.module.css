@@ -352,12 +352,29 @@
 .bubbleAssistant .chatAvatar { order: 1; }
 .bubbleAssistant .content { order: 2; }
 .bubbleAssistant .replyBtn { order: 3; }
-.bubbleAssistant .recallBtn { order: 4; }
+.bubbleAssistant .pinBtn { order: 4; }
+.bubbleAssistant .recallBtn { order: 5; }
 
 .bubbleUser .chatAvatar { order: 0; }
 .bubbleUser .content { order: 1; }
 .bubbleUser .replyBtn { order: 2; }
-.bubbleUser .recallBtn { order: 3; }
+.bubbleUser .pinBtn { order: 3; }
+.bubbleUser .recallBtn { order: 4; }
+
+.pinBtn {
+  opacity: 0.42;
+  pointer-events: auto;
+}
+
+.pinBtnActive {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+.pinBtn:hover,
+.pinBtnActive:hover {
+  color: var(--color-primary-active);
+}
 
 .bubble:hover .replyBtn {
   opacity: 1;
@@ -458,6 +475,11 @@
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   border-radius: 8px;
   line-height: 1.5;
+}
+
+.pinBadge {
+  color: var(--color-primary);
+  font-size: 12px;
 }
 
 /* ── 暗色模式 ── */

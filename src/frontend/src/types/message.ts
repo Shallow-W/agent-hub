@@ -43,11 +43,33 @@ export interface Message {
   created_at: string;
   sender_id?: string;
   username?: string;
+  pinned?: boolean;
   attachments?: MessageAttachment[];
   artifacts?: Artifact[];
   reply_to?: string | null;
   reply_to_message?: ReplyToPreview | null;
   mentions?: string[];
+}
+
+export interface PinnedMessage {
+  id: string;
+  conversation_id: string;
+  message_id: string;
+  role: MessageRole;
+  content: string;
+  sender_id?: string;
+  username?: string;
+  message_created_at: string;
+  pinned_by: string;
+  pinned_by_name?: string;
+  pinned_at: string;
+}
+
+export interface ConversationBlackboard {
+  conversation_id: string;
+  manual_context: string;
+  updated_by?: string | null;
+  updated_at: string;
 }
 
 export type OptimisticStatus = 'sending' | 'failed';

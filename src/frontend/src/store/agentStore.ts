@@ -4,6 +4,7 @@ import type {
   AgentCandidate,
   AgentRequest,
   AgentStatus,
+  AddCandidateAgentRequest,
   CreateDaemonMachineResponse,
   DaemonMachine,
 } from '@/types/agent';
@@ -24,7 +25,7 @@ interface AgentState {
   deleteDaemonMachine: (id: string) => Promise<void>;
   fetchAgentCandidates: (force?: boolean) => Promise<void>;
   createDaemonMachine: (name: string) => Promise<CreateDaemonMachineResponse>;
-  addAgentCandidate: (id: string, name: string, cliTool: string, systemPrompt?: string) => Promise<Agent>;
+  addAgentCandidate: (id: string, body: AddCandidateAgentRequest) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
   updateAgentAvatar: (id: string, avatar: string) => Promise<Agent>;
@@ -120,9 +121,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   },
 
-  addAgentCandidate: async (id, name, cliTool, systemPrompt) => {
-    const payload = systemPrompt ? { name, cli_tool: cliTool, system_prompt: systemPrompt } : { name, cli_tool: cliTool };
-    const agent = await agentApi.addAgentCandidate(id, payload);
+  addAgentCandidate: async (id, body) => {
+    const agent = await agentApi.addAgentCandidate(id, body);
     set((state) => ({
       agents: sortAgents([...state.agents.filter((item) => item.id !== agent.id), agent]),
     }));

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -77,9 +78,9 @@ type OrchMessageCacher interface {
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
-	convRepo    OrchConvRepo
-	agentRepo   OrchAgentRepo
-	msgRepo     MsgRepo
+	convRepo     OrchConvRepo
+	agentRepo    OrchAgentRepo
+	msgRepo      MsgRepo
 	orchTaskRepo OrchTaskStore
 
 	tokenIssuer *TokenIssuer
@@ -235,15 +236,15 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		}
 
 		// Check conversation agent role (set per group chat, not agent type)
-			var isOrchestrator bool
-			for _, ca := range convAgents {
-				if ca.AgentID == agentID && ca.Role == "orchestrator" {
-					isOrchestrator = true
-					break
-				}
+		var isOrchestrator bool
+		for _, ca := range convAgents {
+			if ca.AgentID == agentID && ca.Role == "orchestrator" {
+				isOrchestrator = true
+				break
 			}
+		}
 
-			if isOrchestrator {
+		if isOrchestrator {
 			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload)
 
 			if err != nil {
@@ -316,7 +317,7 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
-		s.persistArtifacts(ctx, msg, task.Artifacts)
+	s.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
 }
 
@@ -348,9 +349,13 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	if kbCtx == "" {
 		kbCtx = s.injectKBContext(ctx, content, "", userID)
 	}
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	if blackboardCtx != "" {
+		kbCtx = blackboardCtx + kbCtx
+	}
 
 	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID)
+	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID, content)
 
 	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx)
 	if err != nil {
@@ -370,7 +375,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		orchAgent.Name = "Orchestrator"
 	}
 
-	recentSummary, agentNames, err := s.buildRecentSummary(ctx, convID, convAgents)
+	recentSummary, err := s.buildRecentSummary(ctx, convID)
 	if err != nil {
 		slog.Warn("build recent summary failed", "conv_id", convID, "error", err)
 		recentSummary = ""
@@ -382,14 +387,17 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		convTitle = conv.Title
 	}
 
-	fullPrompt := BuildOrchestratorPrompt(convTitle, agentNames, recentSummary, content)
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	agentDetails := buildOrchestratorAgentDetails(convAgents)
+	availableAgentNames := agentNames(agentDetails)
+	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, agentDetails, blackboardCtx, recentSummary, content)
 
 	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
 	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
 	// agent.Type 可能是 "system" 或 "custom"。
 	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
 	orchCtx += kbPreload
-	agentConfig := s.InjectAgentConfig(orchAgent, "", userID)
+	agentConfig := s.InjectAgentConfig(orchAgent, "", userID, content)
 	orchCtx = agentConfig + orchCtx
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
@@ -425,7 +433,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		return nil, fmt.Errorf("orchestrator task failed: %s", orchTask.Error)
 	}
 
-	dispatch := ParseOrchestratorOutputForAgents(orchTask.Result, agentNames)
+	dispatch := ParseOrchestratorOutputForAgents(orchTask.Result, availableAgentNames)
 
 	// Orchestrator responded directly without dispatching
 	if dispatch == nil || len(dispatch.Tasks) == 0 {
@@ -434,7 +442,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			return nil, fmt.Errorf("create orchestrator reply: %w", err)
 		}
-			s.persistArtifacts(ctx, msg, orchTask.Artifacts)
+		s.persistArtifacts(ctx, msg, orchTask.Artifacts)
 		return []*model.Message{msg}, nil
 	}
 
@@ -446,7 +454,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		if err != nil {
 			slog.Warn("create orchestrator dispatch message failed", "error", err)
 		} else {
-				s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
+			s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
 			messages = append(messages, dispatchMsg)
 		}
 	}
@@ -510,7 +518,12 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 
+	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+
 	var sb strings.Builder
+	if blackboardCtx != "" {
+		sb.WriteString(blackboardCtx)
+	}
 	sb.WriteString("[群聊背景]\n")
 	for _, m := range msgs {
 		role := m.Role
@@ -544,7 +557,7 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
 
 	// 总长度保护：超过 4000 字符时从最早的消息开始截断
-	const maxContextLen = 4000
+	const maxContextLen = 6000
 	result := sb.String()
 	runes := []rune(result)
 	if len(runes) > maxContextLen {
@@ -553,15 +566,78 @@ func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID s
 		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
 			result = result[idx+1:]
 		}
+		if blackboardCtx != "" && !strings.Contains(result, "{会话上下文黑板") {
+			result = blackboardCtx + result
+		}
 	}
 	return result, nil
 }
 
-// buildRecentSummary formats the last 10 messages and returns agent names in the conversation.
-func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string, convAgents []model.ConversationAgent) (string, []string, error) {
+const (
+	blackboardPinLimit        = 20
+	blackboardMaxEntryRunes   = 800
+	blackboardMaxContextRunes = 5000
+	blackboardMaxManualRunes  = 3000
+)
+
+// BuildConversationBlackboardContext builds the shared conversation context block
+// injected into orchestrator and worker prompts.
+func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
+	if s == nil || s.msgRepo == nil {
+		return ""
+	}
+	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, blackboardPinLimit)
+	if err != nil {
+		slog.Warn("build blackboard context failed", "conversation_id", convID, "error", err)
+		return ""
+	}
+	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
+	if err != nil {
+		slog.Warn("load manual blackboard context failed", "conversation_id", convID, "error", err)
+		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
+	}
+	var sb strings.Builder
+	sb.WriteString("{会话上下文黑板\n")
+	sb.WriteString("{用户 Pin 上下文\n")
+	if len(items) == 0 {
+		sb.WriteString("无\n")
+	} else {
+		for _, item := range items {
+			author := fallbackText(item.Username)
+			content := normalizePromptLine(truncateString(item.Content, blackboardMaxEntryRunes))
+			fmt.Fprintf(&sb, "- %s: %s\n", author, content)
+		}
+	}
+	sb.WriteString("}\n")
+	sb.WriteString("{用户手写上下文\n")
+	manualContext := ""
+	if blackboard != nil {
+		manualContext = strings.TrimSpace(blackboard.ManualContext)
+	}
+	if manualContext == "" {
+		sb.WriteString("无\n")
+	} else {
+		truncatedManual := truncateString(manualContext, blackboardMaxManualRunes)
+		sb.WriteString(truncatedManual)
+		if !strings.HasSuffix(truncatedManual, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("}\n")
+	sb.WriteString("}\n\n")
+
+	result := sb.String()
+	if len([]rune(result)) > blackboardMaxContextRunes {
+		return truncateString(result, blackboardMaxContextRunes)
+	}
+	return result
+}
+
+// buildRecentSummary formats the last 10 messages in chronological order.
+func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string) (string, error) {
 	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, 10)
 	if err != nil {
-		return "", nil, fmt.Errorf("list messages: %w", err)
+		return "", fmt.Errorf("list messages: %w", err)
 	}
 
 	// Reverse to chronological order
@@ -580,12 +656,21 @@ func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID str
 		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
 	}
 
-	agentNames := make([]string, 0, len(convAgents))
-	for _, ca := range convAgents {
-		agentNames = append(agentNames, ca.Name)
-	}
+	return sb.String(), nil
+}
 
-	return sb.String(), agentNames, nil
+func buildOrchestratorAgentDetails(convAgents []model.ConversationAgent) []OrchestratorAgentDetail {
+	details := make([]OrchestratorAgentDetail, 0, len(convAgents))
+	for _, ca := range convAgents {
+		details = append(details, OrchestratorAgentDetail{
+			Name:        ca.Name,
+			Role:        ca.Role,
+			Status:      ca.Status,
+			Description: "",
+			Tags:        ca.Tags,
+		})
+	}
+	return details
 }
 
 // waitDaemonTask waits for a daemon task to complete via channel-based
@@ -625,7 +710,7 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 
 // InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
 // Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
-func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string) string {
+func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string, taskText string) string {
 	var sb strings.Builder
 	if agent.SystemPrompt != "" {
 		sb.WriteString("[系统指令]\n")
@@ -637,6 +722,13 @@ func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr s
 		sb.WriteString("[可用工具]\n")
 		sb.WriteString(agent.ToolsConfig)
 		sb.WriteString("\n\n")
+	}
+
+	if skillCtx := BuildAgentSkillContext(agent.CustomSkills, taskText); skillCtx != "" {
+		sb.WriteString(skillCtx)
+		if !strings.HasSuffix(skillCtx, "\n\n") {
+			sb.WriteString("\n\n")
+		}
 	}
 
 	sb.WriteString(contextStr)
@@ -751,6 +843,12 @@ func truncateString(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+var promptWhitespaceRE = regexp.MustCompile(`\s+`)
+
+func normalizePromptLine(s string) string {
+	return strings.TrimSpace(promptWhitespaceRE.ReplaceAllString(s, " "))
 }
 
 // agentMetadata serializes the agent identity fields into a JSON string

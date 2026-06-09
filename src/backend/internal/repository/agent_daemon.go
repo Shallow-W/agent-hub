@@ -261,7 +261,7 @@ func (r *AgentRepo) ListAgentCandidates(ctx context.Context, userID string) ([]m
 }
 
 // AddCandidateAgent 将候选 Agent 添加到当前用户的可用 Agent 列表。
-func (r *AgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt string) (*model.Agent, error) {
+func (r *AgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
 		`WITH candidate AS (
@@ -270,13 +270,13 @@ func (r *AgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, 
 		     JOIN daemon_machines m ON m.id = c.machine_id
 		     WHERE c.id = $1 AND m.user_id = $2 AND c.cli_tool = $5
 		 )
-		 INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, capabilities_json, source, status, version, machine_id, machine_name, last_seen_at)
-		 SELECT user_id, $3, 'custom', cli_tool, $4, capabilities_json, 'daemon', 'online', version, machine_id, machine_name, NOW()
+		 INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, capabilities_json, custom_skills, source, status, version, machine_id, machine_name, last_seen_at)
+		 SELECT user_id, $3, 'custom', cli_tool, $4, $6, capabilities_json, $7, 'daemon', 'online', version, machine_id, machine_name, NOW()
 		 FROM candidate
-		 RETURNING id, user_id, name, type, cli_tool, system_prompt, avatar,
-		           capabilities_json, source, status, version, machine_id, machine_name, last_seen_at,
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools, last_seen_at,
 		           created_at, updated_at`,
-		candidateID, userID, displayName, systemPrompt, expectedCLITool,
+		candidateID, userID, displayName, systemPrompt, expectedCLITool, toolsConfig, customSkills,
 	).StructScan(&a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

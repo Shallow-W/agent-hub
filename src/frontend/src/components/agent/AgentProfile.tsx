@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Avatar, Button, Input, Popconfirm, Switch, Tag, message } from 'antd';
+import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Switch, Tag, message } from 'antd';
 import {
   MessageOutlined,
   RobotOutlined,
@@ -28,6 +28,14 @@ import {
   resolveAgentAvatar,
 } from './agentPresentation';
 import type { Skill } from './agentPresentation';
+import {
+  getTemplateTools,
+  parseToolsConfig,
+  toolCatalog,
+  toolsetTemplates,
+  toolsConfigToJSON,
+  toolsetOptions,
+} from './toolAssignments';
 import styles from './AgentProfile.module.css';
 
 interface AgentProfileProps {
@@ -64,6 +72,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [savingSkills, setSavingSkills] = useState(false);
   const [systemPromptValue, setSystemPromptValue] = useState('');
   const [toolsConfigValue, setToolsConfigValue] = useState('');
+  const [selectedToolset, setSelectedToolset] = useState('tasks');
+  const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
   const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
@@ -96,7 +106,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   };
 
   const customSkillsToJSON = (skills: Skill[]): string => {
-    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({ name: s.name, description: s.description }))) : '';
+    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({
+      name: s.name,
+      description: s.description,
+      trigger: s.trigger,
+      detail: s.detail,
+    }))) : '';
   };
 
   useEffect(() => {
@@ -111,7 +126,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setEditingSkillIdx(null);
     setEditingSkillName('');
     setSystemPromptValue(agent.system_prompt ?? '');
-    setToolsConfigValue(agent.tools_config ?? '');
+    const parsedTools = parseToolsConfig(agent.tools_config);
+    setSelectedToolset(parsedTools.toolset);
+    setSelectedTools(parsedTools.allowedTools);
+    setToolsConfigValue(toolsConfigToJSON(parsedTools.toolset, parsedTools.allowedTools));
     setEnableManagementTools(agent.enable_management_tools ?? false);
   }, [agent?.id]);
 
@@ -167,6 +185,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     }
     setCustomSkills((prev) => [...prev, { name: trimmed }]);
     setNewSkillName('');
+  };
+
+  const handleUpdateCustomSkill = (idx: number, patch: Partial<Skill>) => {
+    setCustomSkills((prev) => prev.map((skill, i) => (
+      i === idx ? { ...skill, ...patch } : skill
+    )));
   };
 
   const handleDeleteSkill = (idx: number) => {
@@ -270,17 +294,32 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     }
   };
 
+  const handleToolsetChange = (value: string) => {
+    setSelectedToolset(value);
+    const nextTools = value in toolsetTemplates ? getTemplateTools(value) : selectedTools;
+    setSelectedTools(nextTools);
+    setToolsConfigValue(toolsConfigToJSON(value, nextTools));
+  };
+
+  const handleToolsChange = (values: string[]) => {
+    setSelectedToolset('custom');
+    setSelectedTools(values);
+    setToolsConfigValue(toolsConfigToJSON('custom', values));
+  };
+
   const handleSaveToolsConfig = async () => {
     setSaving(true);
     try {
+      const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
       await updateAgent(agent.id, {
         name: agent.name,
         cli_tool: agent.cli_tool,
         system_prompt: agent.system_prompt ?? '',
-        tools_config: toolsConfigValue.trim() || undefined,
+        tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
         enable_management_tools: enableManagementTools,
       });
+      setToolsConfigValue(nextToolsConfig);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
@@ -294,10 +333,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       <div className={styles.header}>
         <div className={styles.identity}>
           <Avatar
+            className={styles.clickableAvatar}
             size={40}
             src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
             icon={<RobotOutlined />}
-            style={{ cursor: 'pointer' }}
             onClick={() => setAvatarPickerOpen(true)}
           />
           <div className={styles.titleBlock}>
@@ -329,10 +368,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           <>
             <div className={styles.profileTop}>
               <Avatar
+                className={styles.clickableAvatar}
                 size={74}
                 src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
                 icon={<RobotOutlined />}
-                style={{ cursor: 'pointer' }}
                 onClick={() => setAvatarPickerOpen(true)}
               />
               <div className={styles.profileSummary}>
@@ -352,7 +391,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           </div>
           <div className={styles.field}>
             <span className={styles.label}>DESCRIPTION</span>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            <div className={styles.descriptionText}>
               {description}
             </div>
           </div>
@@ -471,7 +510,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               {customSkillsExpanded && (
                 <>
                   <div className={styles.skillsHeader}>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className={styles.skillActions}>
                       <Button
                         size="small"
                         icon={<StarOutlined />}
@@ -494,7 +533,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                       暂无平台 Skills，点击「自动生成」或在下方添加
                     </div>
                   ) : (
-                    <div className={styles.skillGrid}>
+                    <div className={styles.customSkillList}>
                       {customSkills.map((skill, idx) => (
                         <div className={styles.skillCard} key={idx}>
                           <button
@@ -527,17 +566,49 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                           {skill.description && (
                             <div className={styles.skillDesc}>{skill.description}</div>
                           )}
+                          {skill.trigger && (
+                            <div className={styles.skillTrigger}>触发：{skill.trigger}</div>
+                          )}
+                          <div className={styles.skillEditor}>
+                            <label className={styles.skillField}>
+                              <span>描述</span>
+                              <Input.TextArea
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                value={skill.description ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { description: e.target.value })}
+                                placeholder="这个 Skill 解决什么问题"
+                              />
+                            </label>
+                            <label className={styles.skillField}>
+                              <span>触发条件</span>
+                              <Input
+                                value={skill.trigger ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { trigger: e.target.value })}
+                                placeholder="例如：代码审查、修复 bug、写测试时使用"
+                              />
+                            </label>
+                            <label className={styles.skillField}>
+                              <span>详细内容</span>
+                              <Input.TextArea
+                                autoSize={{ minRows: 3, maxRows: 8 }}
+                                value={skill.detail ?? ''}
+                                onChange={(e) => handleUpdateCustomSkill(idx, { detail: e.target.value })}
+                                placeholder="渐进式加载时注入给 Agent 的具体规则、步骤或模板"
+                                className={styles.monospaceTextarea}
+                              />
+                            </label>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                   <div className={styles.skillAddRow}>
                     <Input
+                      className={styles.inputFlex}
                       placeholder="输入新技能名称"
                       value={newSkillName}
                       onChange={(e) => setNewSkillName(e.target.value)}
                       onPressEnter={handleAddSkill}
-                      style={{ flex: 1 }}
                     />
                     <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
                       添加
@@ -557,7 +628,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               value={systemPromptValue}
               onChange={(e) => setSystemPromptValue(e.target.value)}
               placeholder="设定 Agent 的角色、人格、行为准则和工作风格。&#10;&#10;示例：&#10;你是一个资深的 Go 后端工程师，擅长代码审查和架构设计。&#10;- 使用中文回复&#10;- 代码注释使用英文&#10;- 遵循 SOLID 原则"
-              style={{ fontFamily: 'monospace' }}
+              className={styles.monospaceTextarea}
             />
             <div className={styles.actionPanel}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveSystemPrompt}>
@@ -570,23 +641,44 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'tools_config' && (
           <section className={styles.section}>
             <div className={styles.sectionTitle}>工具配置 (Tools Config)</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <div className={styles.toolControlRow}>
               <Switch
                 checked={enableManagementTools}
                 onChange={setEnableManagementTools}
                 checkedChildren="管理工具已启用"
                 unCheckedChildren="管理工具已关闭"
               />
-              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+              <span className={styles.toolHelpText}>
                 启用后 Agent 可自动管理平台上的 Agent 和电脑资源
               </span>
             </div>
+            <div className={styles.toolControlRow}>
+              <span className={styles.label}>工具集模板</span>
+              <Select
+                className={styles.toolsetSelect}
+                value={selectedToolset}
+                options={toolsetOptions}
+                onChange={handleToolsetChange}
+              />
+            </div>
+            <Checkbox.Group value={selectedTools} onChange={(values) => handleToolsChange(values as string[])}>
+              <div className={styles.toolGrid}>
+                {toolCatalog.map((tool) => (
+                  <label className={styles.toolItem} key={tool.name}>
+                    <Checkbox value={tool.name} />
+                    <span>
+                      <span className={styles.toolName}>{tool.label}</span>
+                      <span className={styles.toolMeta}>{tool.name} · {tool.category}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Checkbox.Group>
             <Input.TextArea
-              autoSize={{ minRows: 8, maxRows: 24 }}
+              autoSize={{ minRows: 4, maxRows: 10 }}
               value={toolsConfigValue}
-              onChange={(e) => setToolsConfigValue(e.target.value)}
-              placeholder="以 Markdown 格式描述 Agent 可用的工具和调用方式。&#10;&#10;示例：&#10;## web_search&#10;- 描述：搜索互联网获取最新信息&#10;- 参数：query (string) - 搜索关键词&#10;&#10;## code_run&#10;- 描述：在沙箱中执行代码片段&#10;- 参数：language, code"
-              style={{ fontFamily: 'monospace' }}
+              readOnly
+              className={styles.toolJsonPreview}
             />
             <div className={styles.actionPanel}>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>

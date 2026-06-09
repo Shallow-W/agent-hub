@@ -31,6 +31,7 @@ interface MessageState {
     agentId?: string,
   ) => Promise<void>;
   recall: (conversationId: string, messageId: string) => Promise<void>;
+  toggleMessagePin: (conversationId: string, messageId: string, pinned: boolean) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
     conversationId: string,
@@ -203,6 +204,32 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     } catch (err) {
       console.error('recall failed:', err);
       antdMessage.error('撤回失败，请重试');
+    }
+  },
+
+  toggleMessagePin: async (conversationId, messageId, pinned) => {
+    const applyPinned = (value: boolean) => {
+      set((state) => {
+        const list = (state.messages[conversationId] ?? []).map((m) =>
+          m.id === messageId ? { ...m, pinned: value } : m,
+        );
+        return { messages: { ...state.messages, [conversationId]: list } };
+      });
+    };
+
+    applyPinned(!pinned);
+    try {
+      if (pinned) {
+        await msgApi.unpinMessage(conversationId, messageId);
+        antdMessage.success('已取消 Pin');
+      } else {
+        await msgApi.pinMessage(conversationId, messageId);
+        antdMessage.success('已 Pin 到上下文黑板');
+      }
+    } catch (err) {
+      console.error('toggle message pin failed:', err);
+      applyPinned(pinned);
+      antdMessage.error('Pin 操作失败，请重试');
     }
   },
 

@@ -14,6 +14,7 @@ import (
 )
 
 const maxMessageLen = 10000 // 10KB
+const maxBlackboardManualContextLen = 8000
 
 const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 
@@ -46,6 +47,11 @@ type MsgRepo interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
+	UnpinMessage(ctx context.Context, conversationID, messageID string) error
+	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
+	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
+	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -89,19 +95,20 @@ type AgentRepoForMsg interface {
 }
 
 var (
-	ErrMsgConvNotFound   = errors.New("对话不存在")
-	ErrMsgConvNoPerm     = errors.New("无权操作此对话")
-	ErrMsgTooLong        = errors.New("消息内容过长")
-	ErrMsgNotFound       = errors.New("消息不存在")
-	ErrMsgNotSender      = errors.New("只能撤回自己的消息")
-	ErrMsgRecallExpired  = errors.New("消息已超过2分钟，无法撤回")
-	ErrMsgAlreadyDeleted = errors.New("消息已被撤回")
-	ErrMsgEmptyContent   = errors.New("消息内容不能为空")
-	ErrMsgReplyNotFound  = errors.New("回复的消息不存在")
-	ErrMsgReplyWrongConv = errors.New("回复的消息不属于当前对话")
-	ErrMsgAgentNoPerm    = errors.New("无权使用此 Agent")
-	ErrMsgAgentOffline   = errors.New("Agent 未连接电脑，无法执行真实 CLI")
-	ErrMsgAgentTimeout   = errors.New("Agent 执行超时")
+	ErrMsgConvNotFound      = errors.New("对话不存在")
+	ErrMsgConvNoPerm        = errors.New("无权操作此对话")
+	ErrMsgTooLong           = errors.New("消息内容过长")
+	ErrMsgNotFound          = errors.New("消息不存在")
+	ErrMsgNotSender         = errors.New("只能撤回自己的消息")
+	ErrMsgRecallExpired     = errors.New("消息已超过2分钟，无法撤回")
+	ErrMsgAlreadyDeleted    = errors.New("消息已被撤回")
+	ErrMsgEmptyContent      = errors.New("消息内容不能为空")
+	ErrMsgReplyNotFound     = errors.New("回复的消息不存在")
+	ErrMsgReplyWrongConv    = errors.New("回复的消息不属于当前对话")
+	ErrMsgAgentNoPerm       = errors.New("无权使用此 Agent")
+	ErrMsgAgentOffline      = errors.New("Agent 未连接电脑，无法执行真实 CLI")
+	ErrMsgAgentTimeout      = errors.New("Agent 执行超时")
+	ErrMsgBlackboardTooLong = errors.New("黑板内容过长")
 )
 
 // MessageService 消息业务逻辑
@@ -424,6 +431,127 @@ func (s *MessageService) SearchMessages(ctx context.Context, conversationID, use
 		return nil, err
 	}
 	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+}
+
+// PinMessage pins a message into the shared conversation context blackboard.
+func (s *MessageService) PinMessage(ctx context.Context, convID, messageID, userID string) (*model.MessagePin, error) {
+	if err := s.ensureMessageContextAccess(ctx, convID, messageID, userID); err != nil {
+		return nil, err
+	}
+	pin, err := s.msgRepo.PinMessage(ctx, convID, messageID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("pin message: %w", err)
+	}
+	s.invalidateMessageCache(ctx, convID)
+	return pin, nil
+}
+
+// UnpinMessage removes a message from the shared conversation context blackboard.
+func (s *MessageService) UnpinMessage(ctx context.Context, convID, messageID, userID string) error {
+	if err := s.ensureMessageContextAccess(ctx, convID, messageID, userID); err != nil {
+		return err
+	}
+	if err := s.msgRepo.UnpinMessage(ctx, convID, messageID); err != nil {
+		return fmt.Errorf("unpin message: %w", err)
+	}
+	s.invalidateMessageCache(ctx, convID)
+	return nil
+}
+
+// ListPinnedContext returns the user's readable pinned context entries.
+func (s *MessageService) ListPinnedContext(ctx context.Context, convID, userID string) ([]model.PinnedMessage, error) {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return nil, ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return nil, err
+	}
+	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, 20)
+	if err != nil {
+		return nil, fmt.Errorf("list pinned context: %w", err)
+	}
+	if items == nil {
+		items = []model.PinnedMessage{}
+	}
+	return items, nil
+}
+
+// GetConversationBlackboard returns the user-authored long-term context for a conversation.
+func (s *MessageService) GetConversationBlackboard(ctx context.Context, convID, userID string) (*model.ConversationBlackboard, error) {
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation blackboard: %w", err)
+	}
+	if blackboard == nil {
+		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
+	}
+	return blackboard, nil
+}
+
+// UpdateConversationBlackboard saves user-authored long-term context for a conversation.
+func (s *MessageService) UpdateConversationBlackboard(ctx context.Context, convID, userID, manualContext string) (*model.ConversationBlackboard, error) {
+	if len([]rune(manualContext)) > maxBlackboardManualContextLen {
+		return nil, ErrMsgBlackboardTooLong
+	}
+	if err := s.ensureConversationAccess(ctx, convID, userID); err != nil {
+		return nil, err
+	}
+	blackboard, err := s.msgRepo.UpsertConversationBlackboard(ctx, convID, manualContext, userID)
+	if err != nil {
+		return nil, fmt.Errorf("update conversation blackboard: %w", err)
+	}
+	return blackboard, nil
+}
+
+func (s *MessageService) ensureConversationAccess(ctx context.Context, convID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	return s.checkMembership(ctx, conv, userID)
+}
+
+func (s *MessageService) ensureMessageContextAccess(ctx context.Context, convID, messageID, userID string) error {
+	conv, err := s.convRepo.GetByID(ctx, convID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return ErrMsgConvNotFound
+	}
+	if err := s.checkMembership(ctx, conv, userID); err != nil {
+		return err
+	}
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil || msg.DeletedAt != nil {
+		return ErrMsgNotFound
+	}
+	if msg.ConversationID != convID {
+		return ErrMsgReplyWrongConv
+	}
+	return nil
+}
+
+func (s *MessageService) invalidateMessageCache(ctx context.Context, convID string) {
+	if s.cacher == nil {
+		return
+	}
+	if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
+		slog.Warn("invalidate cache after context pin change failed", "conversation_id", convID, "error", err)
+	}
 }
 
 // ClearUnread 清除未读计数
@@ -803,25 +931,24 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 
 	contextMessages := s.buildAgentHandoffs(ctx, convID)
 
-	// 把本条消息的附件抽取为文本前置注入（与 @mention 编排路径一致）。
+	// Include text extracted from this message's attachments before shared context.
 	if s.orchSvc != nil {
 		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
 			contextMessages = attachCtx + contextMessages
 		}
 	}
 
-	// 注入 Agent 系统提示词、工具配置、管理工具和 KB 上下文（与编排器路径对齐）
+	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
 	if s.orchSvc != nil {
 		agent, err := s.agentRepo.GetByID(ctx, agentID)
 		if err == nil && agent != nil {
-			// KB 优先从消息内容中预解析
-			kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID)
-			if kbCtx != "" {
+			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
+				contextMessages = blackboardCtx + contextMessages
+			}
+			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
 				contextMessages = kbCtx + contextMessages
 			}
-			// InjectAgentConfig 将 SystemPrompt + ToolsConfig 前置到上下文前面，
-			// 保持与编排器路径一致：系统指令 → 可用工具 → KB上下文 → 对话交接单
-			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID)
+			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
 		}
 	}
 

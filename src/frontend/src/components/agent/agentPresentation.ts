@@ -3,6 +3,7 @@ import type { Agent } from '@/types/agent';
 export interface Skill {
   name: string;
   description?: string;
+  trigger?: string;
   detail?: string;
   source_path?: string;
   auto?: boolean;

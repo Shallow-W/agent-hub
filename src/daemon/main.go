@@ -23,11 +23,12 @@ func main() {
 	serverURLFlag := flag.String("server-url", "", "AgentHub server url")
 	machineKeyFlag := flag.String("machine-key", "", "machine api key")
 	apiKeyFlag := flag.String("api-key", "", "machine api key")
+	agentIDFlag := flag.String("agent-id", "", "current agent id for MCP tool authorization")
 	mcpFlag := flag.Bool("mcp", false, "启动 MCP Server 模式（stdio）")
 	flag.Parse()
 
 	if *mcpFlag {
-		runMCP()
+		runMCP(*agentIDFlag)
 		return
 	}
 
@@ -35,7 +36,7 @@ func main() {
 }
 
 // runMCP 启动 MCP Server，通过 stdio 对外提供 tool 能力
-func runMCP() {
+func runMCP(agentID string) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	serverURL := os.Getenv("AGENTHUB_SERVER_URL")
@@ -54,7 +55,8 @@ func runMCP() {
 	api := mcp.NewAPIClient(serverURL, token)
 	handler := mcp.HandleAllTools(api)
 
-	server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
+	allowed := api.AllowedToolsForAgent(firstNonEmpty(agentID, mcp.AgentIDFromEnv()))
+	server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
 
 	ctx := context.Background()
 

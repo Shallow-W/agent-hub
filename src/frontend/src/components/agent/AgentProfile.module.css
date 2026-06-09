@@ -35,6 +35,10 @@
   box-shadow: 0 10px 18px rgba(47, 143, 107, 0.22);
 }
 
+.clickableAvatar {
+  cursor: pointer;
+}
+
 .titleBlock {
   min-width: 0;
 }
@@ -245,6 +249,13 @@
   line-height: 1.6;
 }
 
+.descriptionText {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .infoGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -257,6 +268,65 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+
+.toolControlRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toolsetSelect {
+  min-width: 180px;
+}
+
+.toolGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.toolItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+}
+
+.toolName {
+  display: block;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.toolMeta {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.toolJsonPreview {
+  font-family: Consolas, monospace;
+}
+
+.monospaceTextarea {
+  font-family: Consolas, monospace;
+}
+
+.toolHelpText {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .tagPreview,
 .actionPanel {
   display: flex;
@@ -337,6 +407,11 @@
   margin-bottom: 12px;
 }
 
+.skillActions {
+  display: flex;
+  gap: 8px;
+}
+
 .skillsHeader .sectionTitle {
   margin-bottom: 0;
 }
@@ -351,6 +426,13 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 10px;
+  margin-bottom: 16px;
+}
+
+.customSkillList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
   margin-bottom: 16px;
 }
 
@@ -429,11 +511,38 @@
   line-height: 1.5;
 }
 
+.skillTrigger {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-primary);
+  line-height: 1.5;
+}
+
+.skillEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.skillField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .skillAddRow {
   display: flex;
   gap: 8px;
   align-items: center;
   margin-top: 4px;
+}
+
+.inputFlex {
+  flex: 1;
 }
 
 @media (max-width: 900px) {

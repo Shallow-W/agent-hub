@@ -264,4 +264,66 @@ func TestBuildDispatchContextIncludesParsedMathAssignment(t *testing.T) {
 	if strings.Contains(ctx, "任务内容为空") {
 		t.Fatalf("dispatch context should not contain empty-task wording: %q", ctx)
 	}
+
+}
+
+func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {
+	agent := &model.Agent{
+		ID:           "agent-3",
+		Name:         "SkillAgent",
+		CustomSkills: `[{"name":"权限审查","description":"检查工具权限","trigger":"权限","detail":"确认 MCP 白名单和拒绝路径。"}]`,
+	}
+	svc := NewOrchestratorService(nil, nil, nil)
+	got := svc.InjectAgentConfig(agent, "[群聊背景]\nhello", "u1", "请检查工具权限")
+	if !strings.Contains(got, "[平台 Skills]") {
+		t.Fatalf("expected platform skills section, got %s", got)
+	}
+	if !strings.Contains(got, "权限审查：检查工具权限") {
+		t.Fatalf("expected skill index, got %s", got)
+	}
+	if !strings.Contains(got, "确认 MCP 白名单和拒绝路径。") {
+		t.Fatalf("expected matched skill detail, got %s", got)
+	}
+	if !strings.Contains(got, "[群聊背景]") {
+		t.Fatalf("expected original context preserved, got %s", got)
+	}
+}
+
+func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T) {
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{},
+		&fakeMsgRepo{
+			pinnedMessages: []model.PinnedMessage{
+				{
+					ConversationID: "c1",
+					MessageID:      "m1",
+					Role:           "user",
+					Content:        "第一行\n第二行",
+					Username:       "wjc",
+				},
+			},
+			blackboard: &model.ConversationBlackboard{
+				ConversationID: "c1",
+				ManualContext:  "请始终使用中文回答",
+			},
+		},
+	)
+
+	result := svc.BuildConversationBlackboardContext(context.Background(), "c1")
+	if !strings.Contains(result, "{会话上下文黑板") {
+		t.Fatal("expected blackboard section")
+	}
+	if !strings.Contains(result, "{用户 Pin 上下文") {
+		t.Fatal("expected user pin subsection")
+	}
+	if !strings.Contains(result, "- wjc: 第一行 第二行") {
+		t.Fatalf("expected normalized pinned message, got %q", result)
+	}
+	if !strings.Contains(result, "{用户手写上下文") {
+		t.Fatalf("expected manual context section, got %q", result)
+	}
+	if !strings.Contains(result, "请始终使用中文回答") {
+		t.Fatalf("expected manual context content, got %q", result)
+	}
 }

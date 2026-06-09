@@ -68,21 +68,21 @@ const agentStartQueue = [];
 const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 
 // buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
-// AgentHub task. Passing conversation/user IDs here gives MCP tools a default
+// AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
 // group context, matching Claude Code's per-task injection behavior.
-function buildPlatformMcpServerArgs(conversationId, userId) {
+function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
+  if (agentId) mcpServerArgs.push('--agent-id', agentId);
   return mcpServerArgs;
 }
 
-// buildPlatformMcpArgs 生成 Claude Code 的 MCP 注入参数：把本 daemon 以 --mcp
-// 模式作为 stdio MCP server 挂上，让被派发的 claude 任务能直接调用平台工具。
-function buildPlatformMcpArgs(conversationId, userId) {
-  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId);
+// buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
+function buildPlatformMcpArgs(conversationId, userId, agentId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
   if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
@@ -693,17 +693,24 @@ function buildPromptParts(task) {
   // 从 context_messages 中提取系统指令和工具配置作为 system prompt
   let systemPrompt = '';
   let remainingCtx = ctx;
+  const contextSectionBoundary = '(?=\\n\\n\\[可用工具\\]|\\n\\n\\[平台 Skills\\]|\\n\\n\\[群聊背景\\]|\\n\\n\\[调度指令\\]|\\n\\n\\[依赖输出\\]|\\n\\n\\{|$)';
 
-  const sysSection = remainingCtx.match(/^(\[系统指令\]\n[\s\S]*?)(?=\n\n\[可用工具\]|\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const sysSection = remainingCtx.match(new RegExp(`^(\\[系统指令\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (sysSection) {
     systemPrompt += sysSection[1].replace('[系统指令]\n', '').trim();
-    remainingCtx = remainingCtx.slice(sysSection[0].length);
+    remainingCtx = remainingCtx.slice(sysSection[0].length).replace(/^\s+/, '');
   }
 
-  const toolsSection = remainingCtx.match(/^(\[可用工具\]\n[\s\S]*?)(?=\n\n\[群聊背景\]|\n\n\[调度指令\]|\n\n\[依赖输出\]|$)/);
+  const toolsSection = remainingCtx.match(new RegExp(`^(\\[可用工具\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
   if (toolsSection) {
     systemPrompt += (systemPrompt ? '\n\n' : '') + '# 可用工具\n' + toolsSection[1].replace('[可用工具]\n', '').trim();
-    remainingCtx = remainingCtx.slice(toolsSection[0].length);
+    remainingCtx = remainingCtx.slice(toolsSection[0].length).replace(/^\s+/, '');
+  }
+
+  const skillsSection = remainingCtx.match(new RegExp(`^(\\[平台 Skills\\]\\n[\\s\\S]*?)${contextSectionBoundary}`));
+  if (skillsSection) {
+    systemPrompt += (systemPrompt ? '\n\n' : '') + '# 平台 Skills\n' + skillsSection[1].replace('[平台 Skills]\n', '').trim();
+    remainingCtx = remainingCtx.slice(skillsSection[0].length).replace(/^\s+/, '');
   }
 
   remainingCtx = remainingCtx.trim();
@@ -825,7 +832,7 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
-      ...buildPlatformMcpArgs(task.conversation_id, task.user_id),
+      ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
     ];
     if (persistent) {
       args.push('--dangerously-skip-permissions');
@@ -1369,7 +1376,7 @@ function stopAgentProcess(agent_id) {
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId);
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -1920,8 +1927,38 @@ const MCP_TOOLS = [
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
   },
   {
+    name: 'list_agent_candidates',
+    description: '列出当前用户电脑上扫描到的 Agent 底座候选。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates'),
+  },
+  {
+    name: 'list_conversation_agents',
+    description: '列出指定会话中的智能体，用于了解当前会话可分派的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const convId = args.conversation_id || ctx.conversationId || '';
+      if (!convId) throw new Error('conversation_id is required (no conversation context)');
+      const res = await ctx.callApi('GET', `/api/conversations/${encodeURIComponent(convId)}/agents`);
+      if (!res || !Array.isArray(res.data)) return res;
+      res.data = res.data.map(a => ({
+        name: a.name,
+        role: a.role,
+        status: a.status,
+        tags: a.tags || '',
+      }));
+      return res;
+    },
+  },
+  {
     name: 'list_group_agents',
-    description: '列出指定群聊中的智能体，包括名称(name)、角色(role: orchestrator/worker/robot)、状态(status: online/offline)、CLI工具(cli_tool)、能力描述(system_prompt)等信息。用于 orchestrator 了解群内 agent 的能力并合理分派任务。',
+    description: '列出指定群聊中的智能体，包括名称、角色、状态和标签，用于 orchestrator 了解群内可分派 Agent。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1938,8 +1975,7 @@ const MCP_TOOLS = [
         name: a.name,
         role: a.role,
         status: a.status,
-        cli_tool: a.cli_tool,
-        description: a.system_prompt || '',
+        tags: a.tags || '',
       }));
       return res;
     },
@@ -2087,6 +2123,84 @@ const MCP_TOOLS = [
   },
 ];
 
+const DEFAULT_AGENT_TOOLS = [
+  'list_group_agents',
+  'get_messages',
+  'list_tasks',
+  'create_task',
+  'update_task',
+  'move_task_status',
+];
+const NO_AGENT_TOOLS = [];
+
+const TOOLSET_TEMPLATES = {
+  none: [],
+  basic: ['list_group_agents', 'get_messages'],
+  tasks: DEFAULT_AGENT_TOOLS,
+  orchestrator: [
+    ...DEFAULT_AGENT_TOOLS,
+    'list_conversation_agents',
+    'list_conversations',
+    'get_group_info',
+    'list_group_members',
+  ],
+  agent_builder: [
+    'list_agents',
+    'list_group_agents',
+    'list_agent_candidates',
+    'list_machines',
+  ],
+};
+
+function normalizeToolName(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function uniqueToolNames(values) {
+  return [...new Set(values.map(normalizeToolName).filter(Boolean))];
+}
+
+function parseToolsConfig(raw) {
+  if (!raw || typeof raw !== 'string') return { ok: false, config: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, config: null };
+    }
+    return { ok: true, config: parsed };
+  } catch {
+    return { ok: false, config: null };
+  }
+}
+
+function allowedToolsFromConfig(raw) {
+  const parsed = parseToolsConfig(raw);
+  if (!parsed.ok) return NO_AGENT_TOOLS;
+  const config = parsed.config;
+  if (!config) return NO_AGENT_TOOLS;
+  if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
+  if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
+  if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
+    return TOOLSET_TEMPLATES[config.toolset];
+  }
+  return NO_AGENT_TOOLS;
+}
+
+async function resolveAllowedTools(ctx) {
+  if (!ctx.agentId) return NO_AGENT_TOOLS;
+  if (ctx.allowedTools !== null) return ctx.allowedTools;
+  const res = await ctx.callApi('GET', '/api/agents');
+  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
+  return ctx.allowedTools;
+}
+
+async function isToolAllowed(ctx, toolName) {
+  const allowed = await resolveAllowedTools(ctx);
+  return allowed.includes(toolName);
+}
+
 function writeMcp(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -2120,19 +2234,30 @@ async function handleMcpMessage(line, toolMap, ctx) {
     return;
   }
   if (method === 'tools/list') {
+    const allowed = await resolveAllowedTools(ctx);
+    const tools = MCP_TOOLS
+      .filter((tool) => allowed.includes(tool.name))
+      .map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
     writeMcp({
       jsonrpc: '2.0',
       id,
-      result: {
-        tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
-      },
+      result: { tools },
     });
     return;
   }
   if (method === 'tools/call') {
-    const tool = toolMap.get(params && params.name);
+    const toolName = params && params.name;
+    const tool = toolMap.get(toolName);
     if (!tool) {
-      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${params && params.name}` } });
+      writeMcp({ jsonrpc: '2.0', id, error: { code: -32602, message: `未知工具: ${toolName}` } });
+      return;
+    }
+    if (!(await isToolAllowed(ctx, toolName))) {
+      writeMcp({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: `工具未授权: ${toolName}` }], isError: true },
+      });
       return;
     }
     try {
@@ -2162,6 +2287,8 @@ async function runMcpServer(serverURL, apiKey) {
   const ctx = {
     conversationId: readArg('--conversation-id') || null,
     userId: readArg('--user-id') || null,
+    agentId: readArg('--agent-id') || null,
+    allowedTools: null,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };
