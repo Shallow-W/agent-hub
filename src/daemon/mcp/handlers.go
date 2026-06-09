@@ -159,6 +159,22 @@ func HandleAllTools(api *APIClient, agentID string) ToolHandlerFunc {
 				return nil, fmt.Errorf("group_id is required")
 			}
 			return api.doGet("/mcp/groups/"+groupID+"/members", nil)
+			// Agent 管理
+			case "get_agent_detail":
+				return handleGetAgentDetail(api, args)
+			case "update_agent_prompt":
+				return handleUpdateAgentPrompt(api, args)
+			case "start_agent":
+				return handleStartAgent(api, args)
+			case "stop_agent":
+				return handleStopAgent(api, args)
+			// 知识库
+			case "list_knowledge_bases":
+				return api.doGet("/mcp/knowledge-bases", nil)
+			case "list_knowledge_files":
+				return handleListKnowledgeFiles(api, args)
+			case "search_knowledge":
+				return handleSearchKnowledge(api, args)
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
@@ -341,4 +357,100 @@ func optionalString(args map[string]interface{}, key string, body map[string]int
 	if v, ok := args[key].(string); ok && v != "" {
 		body[key] = v
 	}
+}
+
+func handleGetAgentDetail(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	return api.doGet("/mcp/agents/"+agentID, nil)
+}
+
+func handleUpdateAgentPrompt(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	systemPrompt, _ := args["system_prompt"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if systemPrompt == "" {
+		return nil, fmt.Errorf("system_prompt is required")
+	}
+	// 先获取当前完整信息
+	data, err := api.doGet("/mcp/agents/"+agentID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get agent detail: %w", err)
+	}
+	agent, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected agent response format")
+	}
+	// 构造更新请求，只改 system_prompt，其他字段原样传回
+	body := map[string]interface{}{
+		"name":                    agent["name"],
+		"cli_tool":                agent["cli_tool"],
+		"system_prompt":           systemPrompt,
+		"tools_config":            agent["tools_config"],
+		"capabilities_json":       agent["capabilities_json"],
+		"enable_management_tools": agent["enable_management_tools"],
+	}
+	return api.doPut("/mcp/agents/"+agentID, body)
+}
+
+func handleStartAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	return api.doPost("/mcp/agents/"+agentID+"/start", nil)
+}
+
+func handleStopAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	agentID, _ := args["agent_id"].(string)
+	if agentID == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	return api.doPost("/mcp/agents/"+agentID+"/stop", nil)
+}
+
+func handleListKnowledgeFiles(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	kbID, _ := args["knowledge_base_id"].(string)
+	if kbID == "" {
+		return nil, fmt.Errorf("knowledge_base_id is required")
+	}
+	return api.doGet("/mcp/knowledge-bases/"+kbID+"/files", nil)
+}
+
+func handleSearchKnowledge(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	kbID, _ := args["knowledge_base_id"].(string)
+	keyword, _ := args["keyword"].(string)
+	if kbID == "" {
+		return nil, fmt.Errorf("knowledge_base_id is required")
+	}
+	if keyword == "" {
+		return nil, fmt.Errorf("keyword is required")
+	}
+	// 获取文件列表
+	data, err := api.doGet("/mcp/knowledge-bases/"+kbID+"/files", nil)
+	if err != nil {
+		return nil, err
+	}
+	files, ok := data.([]interface{})
+	if !ok {
+		return data, nil
+	}
+	// 按 keyword 过滤 preview_text
+	keywordLower := strings.ToLower(keyword)
+	filtered := make([]interface{}, 0)
+	for _, item := range files {
+		file, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		previewText, _ := file["preview_text"].(string)
+		if strings.Contains(strings.ToLower(previewText), keywordLower) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered, nil
 }

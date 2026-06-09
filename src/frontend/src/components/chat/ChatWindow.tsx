@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
@@ -72,7 +72,7 @@ export const ChatWindow: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const agents = useAgentStore((s) => s.agents);
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
-  const activeConv = conversations.find((c) => c.id === activeId);
+  const activeConv = useMemo(() => conversations.find((c) => c.id === activeId), [conversations, activeId]);
   const memberPanelOpen = useConversationStore((s) => s.memberPanelOpen);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);

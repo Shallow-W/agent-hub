@@ -295,7 +295,13 @@ const AppLayout: React.FC = () => {
 
       {/* 右侧：聊天区域 / 智能体详情 */}
       <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'knowledge' ? (
+        {/* Chat view: always mounted to preserve state across tab switches */}
+        <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : undefined}>
+          <Outlet />
+        </div>
+
+        {/* Knowledge overlay */}
+        {activeNav === 'knowledge' && (
           selectedKnowledgeFile && selectedKbId ? (
             <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
           ) : (
@@ -305,7 +311,10 @@ const AppLayout: React.FC = () => {
               <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
             </div>
           )
-        ) : activeNav === 'skills' ? (
+        )}
+
+        {/* Skills overlay */}
+        {activeNav === 'skills' && (
           selectedAgent ? (
             <AgentSkillsPanel agent={selectedAgent} />
           ) : (
@@ -314,7 +323,10 @@ const AppLayout: React.FC = () => {
               <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
             </div>
           )
-        ) : activeNav === 'models' ? (
+        )}
+
+        {/* Models overlay */}
+        {activeNav === 'models' && (
           selectedAgent ? (
             <AgentProfile agent={selectedAgent} />
           ) : (
@@ -325,8 +337,6 @@ const AppLayout: React.FC = () => {
               onClearSelection={() => setSelectedMachineId(null)}
             />
           )
-        ) : (
-          <Outlet />
         )}
       </div>
 

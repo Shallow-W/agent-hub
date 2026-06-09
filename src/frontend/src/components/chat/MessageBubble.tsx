@@ -244,6 +244,7 @@ const embeddedDocumentComponents: Components = {
 };
 
 /** Renders markdown content with full GFM support. */
+const REMARK_PLUGINS = [remarkGfm];
 const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
   content,
   codeArtifacts,
@@ -251,7 +252,7 @@ const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }>
   // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
   const components = buildMarkdownComponents(codeArtifacts);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
       {content}
     </ReactMarkdown>
   );

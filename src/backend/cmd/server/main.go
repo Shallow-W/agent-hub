@@ -434,11 +434,19 @@ func main() {
 		}
 
 		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.GET("/agents/:id", agentHandler.MCPGetAgentDetail)
+		mcpGroup.PUT("/agents/:id", agentHandler.Update)
+		mcpGroup.POST("/agents/:id/start", agentHandler.StartAgent)
+		mcpGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
 		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
+
+		// 知识库
+		mcpGroup.GET("/knowledge-bases", knowledgeHandler.List)
+		mcpGroup.GET("/knowledge-bases/:id/files", knowledgeHandler.ListFiles)
 	}
 
 	registerSPARoutes(router, frontendDistDir())
