@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Switch, Tag } from 'antd';
+import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Tag } from 'antd';
 import { message } from '@/utils/message';
 import {
   MessageOutlined,
@@ -64,7 +64,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [systemPromptValue, setSystemPromptValue] = useState('');
   const [selectedToolset, setSelectedToolset] = useState('tasks');
   const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
-  const [enableManagementTools, setEnableManagementTools] = useState(false);
   const [saving, setSaving] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [toolFilter, setToolFilter] = useState<string>('all');
@@ -95,7 +94,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     const parsedTools = parseToolsConfig(agent.tools_config);
     setSelectedToolset(parsedTools.toolset);
     setSelectedTools(parsedTools.allowedTools);
-    setEnableManagementTools(agent.enable_management_tools ?? false);
   }, [agent?.id]);
 
   if (!agent) {
@@ -149,7 +147,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           system_prompt: agent.system_prompt ?? '',
           tools_config: agent.tools_config ?? '',
           capabilities_json: agent.capabilities_json ?? '',
-          enable_management_tools: enableManagementTools,
+          enable_management_tools: false,
         });
       }
       message.success('Agent Profile 已保存');
@@ -238,7 +236,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: agent.system_prompt ?? '',
         tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
-        enable_management_tools: enableManagementTools,
       });
       message.success('工具配置已保存');
     } catch {
@@ -464,17 +461,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         {activeTab === 'tools_config' && (
           <section className={styles.section}>
             <div className={styles.sectionTitle}>工具配置 (Tools Config)</div>
-            <div className={styles.toolControlRow}>
-              <Switch
-                checked={enableManagementTools}
-                onChange={setEnableManagementTools}
-                checkedChildren="管理工具已启用"
-                unCheckedChildren="管理工具已关闭"
-              />
-              <span className={styles.toolHelpText}>
-                启用后 Agent 可自动管理平台上的 Agent 和电脑资源
-              </span>
-            </div>
             <div className={styles.toolControlRow}>
               <span className={styles.label}>工具集模板</span>
               <Select
