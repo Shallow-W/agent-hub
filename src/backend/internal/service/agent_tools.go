@@ -86,7 +86,7 @@ func GenerateKBReadTool(serverURL, token string) string {
 
 用户消息引用了知识库，部分文件无法直接内联到上下文中（非文本格式或文件过大）。你可以使用以下工具按需读取。
 
-## kb_read_file
+## read_knowledge_file
 读取知识库中指定文件的内容。返回文件的原始内容（文本文件返回文本，二进制文件返回 Base64 编码）。
 参数:
 - kb_id (string, 必填): 知识库 ID
@@ -101,7 +101,7 @@ curl -s %s/api/knowledge-bases/{kb_id}/files -H "Authorization: Bearer %s"
 
 ### 读取文件内容（文本文件）
 `+"```bash"+`
-curl -s %s/api/knowledge-bases/{kb_id}/files/{file_id}/content -H "Authorization: Bearer %s"
+curl -s %s/api/knowledge-bases/{kb_id}/files/{file_id}/text -H "Authorization: Bearer %s"
 `+"```"+`
 
 注意：token 已嵌入上方命令中，直接复制替换 {kb_id} 和 {file_id} 即可执行。

@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	middleware "github.com/agent-hub/backend/internal/middleware"
@@ -200,6 +201,42 @@ func (h *KnowledgeHandler) ListFiles(c *gin.Context) {
 	middleware.SuccessResponse(c, files)
 }
 
+func (h *KnowledgeHandler) SearchFiles(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	kbID := c.Param("id")
+	if kbID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40074, "缺少知识库 ID")
+		return
+	}
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40075, "缺少搜索关键词")
+		return
+	}
+	limit := 20
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil {
+			limit = parsed
+		}
+	}
+	results, err := h.svc.SearchFiles(c.Request.Context(), userID, kbID, keyword, limit)
+	if err != nil {
+		if err == service.ErrKBNotFound || err == service.ErrKBNoPermission {
+			status := http.StatusNotFound
+			code := 40468
+			if err == service.ErrKBNoPermission {
+				status = http.StatusForbidden
+				code = 40366
+			}
+			middleware.ErrorResponse(c, status, code, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50070, "搜索知识库文件失败")
+		return
+	}
+	middleware.SuccessResponse(c, results)
+}
+
 // DeleteFile 删除知识库文件
 func (h *KnowledgeHandler) DeleteFile(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -280,6 +317,35 @@ func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 	c.Header("Content-Type", f.MimeType)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.File(absPath)
+}
+
+func (h *KnowledgeHandler) GetFileText(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	kbID := c.Param("id")
+	fileID := c.Param("fileId")
+	if kbID == "" || fileID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40076, "缺少知识库 ID 或文件 ID")
+		return
+	}
+	result, err := h.svc.GetFileText(c.Request.Context(), userID, kbID, fileID)
+	if err != nil {
+		if err == service.ErrKBNotFound || err == service.ErrKBFileNotFound {
+			status := http.StatusNotFound
+			code := 40469
+			if err == service.ErrKBFileNotFound {
+				code = 40471
+			}
+			middleware.ErrorResponse(c, status, code, err.Error())
+			return
+		}
+		if err == service.ErrKBNoPermission {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40367, err.Error())
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50071, "读取知识库文件文本失败")
+		return
+	}
+	middleware.SuccessResponse(c, result)
 }
 
 // isPreviewMIME 判断MIME类型是否支持浏览器内预览

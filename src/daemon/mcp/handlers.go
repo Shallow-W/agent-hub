@@ -159,22 +159,24 @@ func HandleAllTools(api *APIClient, agentID string) ToolHandlerFunc {
 				return nil, fmt.Errorf("group_id is required")
 			}
 			return api.doGet("/mcp/groups/"+groupID+"/members", nil)
-			// Agent 管理
-			case "get_agent_detail":
-				return handleGetAgentDetail(api, args)
-			case "update_agent_prompt":
-				return handleUpdateAgentPrompt(api, args)
-			case "start_agent":
-				return handleStartAgent(api, args)
-			case "stop_agent":
-				return handleStopAgent(api, args)
-			// 知识库
-			case "list_knowledge_bases":
-				return api.doGet("/mcp/knowledge-bases", nil)
-			case "list_knowledge_files":
-				return handleListKnowledgeFiles(api, args)
-			case "search_knowledge":
-				return handleSearchKnowledge(api, args)
+		// Agent 管理
+		case "get_agent_detail":
+			return handleGetAgentDetail(api, args)
+		case "update_agent_prompt":
+			return handleUpdateAgentPrompt(api, args)
+		case "start_agent":
+			return handleStartAgent(api, args)
+		case "stop_agent":
+			return handleStopAgent(api, args)
+		// 知识库
+		case "list_knowledge_bases":
+			return api.doGet("/mcp/knowledge-bases", nil)
+		case "list_knowledge_files":
+			return handleListKnowledgeFiles(api, args)
+		case "search_knowledge":
+			return handleSearchKnowledge(api, args)
+		case "read_knowledge_file":
+			return handleReadKnowledgeFile(api, args)
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", toolName)
 		}
@@ -430,27 +432,28 @@ func handleSearchKnowledge(api *APIClient, args map[string]interface{}) (interfa
 	if keyword == "" {
 		return nil, fmt.Errorf("keyword is required")
 	}
-	// 获取文件列表
-	data, err := api.doGet("/mcp/knowledge-bases/"+kbID+"/files", nil)
-	if err != nil {
-		return nil, err
-	}
-	files, ok := data.([]interface{})
-	if !ok {
-		return data, nil
-	}
-	// 按 keyword 过滤 preview_text
-	keywordLower := strings.ToLower(keyword)
-	filtered := make([]interface{}, 0)
-	for _, item := range files {
-		file, ok := item.(map[string]interface{})
-		if !ok {
-			continue
+	query := map[string]string{"keyword": keyword}
+	switch v := args["limit"].(type) {
+	case float64:
+		if v > 0 {
+			query["limit"] = fmt.Sprintf("%d", int(v))
 		}
-		previewText, _ := file["preview_text"].(string)
-		if strings.Contains(strings.ToLower(previewText), keywordLower) {
-			filtered = append(filtered, file)
+	case int:
+		if v > 0 {
+			query["limit"] = fmt.Sprintf("%d", v)
 		}
 	}
-	return filtered, nil
+	return api.doGet("/mcp/knowledge-bases/"+kbID+"/search", query)
+}
+
+func handleReadKnowledgeFile(api *APIClient, args map[string]interface{}) (interface{}, error) {
+	kbID, _ := args["knowledge_base_id"].(string)
+	fileID, _ := args["file_id"].(string)
+	if kbID == "" {
+		return nil, fmt.Errorf("knowledge_base_id is required")
+	}
+	if fileID == "" {
+		return nil, fmt.Errorf("file_id is required")
+	}
+	return api.doGet("/mcp/knowledge-bases/"+kbID+"/files/"+fileID+"/text", nil)
 }

@@ -29,6 +29,7 @@ export const toolCatalog: ToolCatalogItem[] = [
   { name: 'list_knowledge_bases', label: '知识库列表', category: 'knowledge', description: '列出用户的知识库' },
   { name: 'list_knowledge_files', label: '知识库文件', category: 'knowledge', description: '列出知识库中的文件' },
   { name: 'search_knowledge', label: '搜索知识库', category: 'knowledge', description: '在知识库中按关键词搜索文件' },
+  { name: 'read_knowledge_file', label: '读取知识库文件', category: 'knowledge', description: '读取知识库文件的抽取文本' },
 ];
 
 export const toolsetTemplates: Record<string, string[]> = {
@@ -48,11 +49,13 @@ export const toolsetTemplates: Record<string, string[]> = {
     'get_group_info',
     'list_group_members',
     'list_knowledge_bases',
+    'list_knowledge_files',
     'search_knowledge',
+    'read_knowledge_file',
   ],
   agent_builder: ['list_agents', 'list_group_agents', 'get_agent_skill', 'list_agent_candidates', 'list_machines', 'get_agent_detail'],
   agent_manager: ['list_agents', 'get_agent_detail', 'update_agent_prompt', 'start_agent', 'stop_agent', 'get_agent_skill'],
-  knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge'],
+  knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge', 'read_knowledge_file'],
 };
 
 export const toolsetOptions = [

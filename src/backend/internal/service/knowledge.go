@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agent-hub/backend/internal/docextract"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/repository"
 )
@@ -174,7 +175,7 @@ func (s *KnowledgeService) UploadFile(ctx context.Context, userID, kbID string, 
 	mimeType := detectFileMIME(fileHeader.Filename, fileContent)
 
 	// 上传时预处理：提取文本内容或标记文件类型
-	previewText, previewType := extractPreview(fileHeader.Filename, mimeType, fileContent)
+	previewText, previewType := extractKnowledgePreview(ctx, storedPath, fileHeader.Filename, mimeType, int64(len(fileContent)))
 
 	_, err = s.kbRepo.AddFile(ctx, kbID, safeName, dbPath, fileHeader.Size, mimeType, hashHex, previewText, previewType)
 	return err
@@ -205,6 +206,7 @@ func (s *KnowledgeService) GetFile(ctx context.Context, userID, kbID, fileID str
 	if f == nil {
 		return nil, ErrKBFileNotFound
 	}
+	s.ensureFilePreview(ctx, f)
 	s.enrichKnowledgeFile(f)
 	return f, nil
 }
@@ -225,6 +227,7 @@ func (s *KnowledgeService) ListFiles(ctx context.Context, userID, kbID string) (
 	if err != nil {
 		return nil, err
 	}
+	s.ensureFilesPreview(ctx, files)
 	s.enrichKnowledgeFiles(files)
 	return files, nil
 }
@@ -321,6 +324,7 @@ func (s *KnowledgeService) ResolveKnowledgeRef(ctx context.Context, currentUserI
 		if err != nil {
 			return nil, nil, err
 		}
+		s.ensureFilesPreview(ctx, files)
 		s.enrichKnowledgeFiles(files)
 		return kb, files, nil
 	}
@@ -337,8 +341,91 @@ func (s *KnowledgeService) ResolveKnowledgeRef(ctx context.Context, currentUserI
 	if err != nil {
 		return nil, nil, err
 	}
+	s.ensureFilesPreview(ctx, files)
 	s.enrichKnowledgeFiles(files)
 	return kb, files, nil
+}
+
+type KnowledgeFileText struct {
+	FileID      string `json:"file_id"`
+	Filename    string `json:"filename"`
+	MimeType    string `json:"mime_type"`
+	PreviewType string `json:"preview_type"`
+	Text        string `json:"text"`
+	Truncated   bool   `json:"truncated"`
+}
+
+type KnowledgeSearchResult struct {
+	ID              string `json:"id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Filename        string `json:"filename"`
+	FileSize        int64  `json:"size"`
+	MimeType        string `json:"mime_type"`
+	PreviewType     string `json:"preview_type"`
+	PreviewText     string `json:"preview_text,omitempty"`
+	Snippet         string `json:"snippet"`
+	URL             string `json:"url,omitempty"`
+}
+
+func (s *KnowledgeService) GetFileText(ctx context.Context, userID, kbID, fileID string) (*KnowledgeFileText, error) {
+	f, err := s.GetFile(ctx, userID, kbID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	text := f.PreviewText
+	truncated := false
+	if f.PreviewType != "text" {
+		text = ""
+	}
+	if len([]rune(text)) > kbMaxInlineChars {
+		text = truncateString(text, kbMaxInlineChars)
+		truncated = true
+	}
+	return &KnowledgeFileText{
+		FileID:      f.ID,
+		Filename:    f.Filename,
+		MimeType:    f.MimeType,
+		PreviewType: f.PreviewType,
+		Text:        text,
+		Truncated:   truncated,
+	}, nil
+}
+
+func (s *KnowledgeService) SearchFiles(ctx context.Context, userID, kbID, keyword string, limit int) ([]KnowledgeSearchResult, error) {
+	files, err := s.ListFiles(ctx, userID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []KnowledgeSearchResult{}, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	lower := strings.ToLower(keyword)
+	results := make([]KnowledgeSearchResult, 0)
+	for _, f := range files {
+		haystack := strings.ToLower(f.Filename + "\n" + f.PreviewText)
+		if !strings.Contains(haystack, lower) {
+			continue
+		}
+		results = append(results, KnowledgeSearchResult{
+			ID:              f.ID,
+			KnowledgeBaseID: f.KnowledgeBaseID,
+			Filename:        f.Filename,
+			FileSize:        f.FileSize,
+			MimeType:        f.MimeType,
+			PreviewType:     f.PreviewType,
+			PreviewText:     f.PreviewText,
+			Snippet:         buildKnowledgeSnippet(f.Filename, f.PreviewText, keyword, 240),
+			URL:             f.URL,
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }
 
 func (s *KnowledgeService) enrichKnowledgeFiles(files []model.KnowledgeFile) {
@@ -352,6 +439,34 @@ func (s *KnowledgeService) enrichKnowledgeFile(file *model.KnowledgeFile) {
 		return
 	}
 	file.URL = s.fileURLs.KnowledgeFileURL(file.KnowledgeBaseID, file.ID)
+}
+
+func (s *KnowledgeService) ensureFilesPreview(ctx context.Context, files []model.KnowledgeFile) {
+	for i := range files {
+		s.ensureFilePreview(ctx, &files[i])
+	}
+}
+
+func (s *KnowledgeService) ensureFilePreview(ctx context.Context, file *model.KnowledgeFile) {
+	if file == nil || file.PreviewType == "text" || file.PreviewType == "image" || file.FilePath == "" {
+		return
+	}
+	absPath, err := SafeJoinUploadPath(s.uploadDir, file.FilePath)
+	if err != nil {
+		return
+	}
+	previewText, previewType := extractKnowledgePreview(ctx, absPath, file.Filename, file.MimeType, file.FileSize)
+	if previewType == file.PreviewType && previewText == file.PreviewText {
+		return
+	}
+	if previewType == "binary" && strings.TrimSpace(previewText) == "" {
+		return
+	}
+	if err := s.kbRepo.UpdateFilePreview(ctx, file.KnowledgeBaseID, file.ID, previewText, previewType); err != nil {
+		return
+	}
+	file.PreviewText = previewText
+	file.PreviewType = previewType
 }
 
 // detectFileMIME 根据文件扩展名和内容检测MIME类型
@@ -368,8 +483,16 @@ func detectFileMIME(filename string, content []byte) string {
 		return "application/json"
 	case ".csv":
 		return "text/csv"
+	case ".tsv":
+		return "text/tab-separated-values"
 	case ".html", ".htm":
 		return "text/html"
+	case ".yaml", ".yml":
+		return "application/yaml"
+	case ".xml":
+		return "application/xml"
+	case ".svg":
+		return "image/svg+xml"
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
 	case ".png":
@@ -382,6 +505,22 @@ func detectFileMIME(filename string, content []byte) string {
 		return "application/msword"
 	case ".docx":
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".rtf":
+		return "application/rtf"
+	case ".odt":
+		return "application/vnd.oasis.opendocument.text"
+	case ".ods":
+		return "application/vnd.oasis.opendocument.spreadsheet"
+	case ".odp":
+		return "application/vnd.oasis.opendocument.presentation"
 	default:
 		return "application/octet-stream"
 	}
@@ -392,7 +531,7 @@ const previewTextMaxSize = 200 * 1024
 
 // previewableTextExts 可以提取文本内容的文件扩展名
 var previewableTextExts = map[string]bool{
-	".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true,
+	".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true, ".tsv": true,
 	".html": true, ".htm": true, ".xml": true, ".yaml": true, ".yml": true,
 	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".log": true,
 	".sh": true, ".bat": true, ".ps1": true, ".py": true, ".js": true,
@@ -409,32 +548,56 @@ var imageExts = map[string]bool{
 	".bmp": true, ".svg": true, ".ico": true,
 }
 
-// extractPreview 上传时预处理文件内容，返回 (previewText, previewType)。
+// extractKnowledgePreview 上传时预处理文件内容，返回 (previewText, previewType)。
 // - 文本文件（<200KB）: previewType="text", previewText=文件内容
 // - 超大文本文件: previewType="too_large", previewText=""
 // - 图片文件: previewType="image", previewText=文件名+尺寸描述
 // - 其他二进制: previewType="binary", previewText=""
-func extractPreview(filename string, mimeType string, content []byte) (string, string) {
+func extractKnowledgePreview(ctx context.Context, filePath string, filename string, mimeType string, fileSize int64) (string, string) {
 	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
 
-	// 1. 文本文件
-	if previewableTextExts[ext] || strings.HasPrefix(mimeType, "text/") {
-		if len(content) > previewTextMaxSize {
-			return "", "too_large"
-		}
-		return string(content), "text"
-	}
-
-	// 2. 图片文件：生成描述信息供 Agent 理解图片用途
+	// 图片文件：生成描述信息供 Agent 理解图片用途
 	if imageExts[ext] || strings.HasPrefix(mimeType, "image/") {
-		// SVG 是文本格式，直接提取内容
-		if ext == ".svg" && len(content) <= previewTextMaxSize {
-			return string(content), "text"
+		if ext == ".svg" {
+			if text, ok := docextract.Extract(ctx, filePath, filename, previewTextMaxSize); ok {
+				return text, "text"
+			}
 		}
-		desc := fmt.Sprintf("[图片: %s, %s, %s]", filename, formatFileSize(int64(len(content))), mimeType)
+		desc := fmt.Sprintf("[图片: %s, %s, %s]", filename, formatFileSize(fileSize), mimeType)
 		return desc, "image"
 	}
 
-	// 3. PDF 等文档：标记为 binary（未来可扩展文本提取）
+	if text, ok := docextract.Extract(ctx, filePath, filename, previewTextMaxSize); ok {
+		return text, "text"
+	}
+	if previewableTextExts[ext] || strings.HasPrefix(mimeType, "text/") {
+		return "", "too_large"
+	}
 	return "", "binary"
+}
+
+func buildKnowledgeSnippet(filename, previewText, keyword string, maxRunes int) string {
+	source := previewText
+	if strings.TrimSpace(source) == "" {
+		source = filename
+	}
+	lowerSource := strings.ToLower(source)
+	lowerKeyword := strings.ToLower(keyword)
+	idx := strings.Index(lowerSource, lowerKeyword)
+	if idx < 0 {
+		return truncateString(source, maxRunes)
+	}
+	start := idx - maxRunes/3
+	if start < 0 {
+		start = 0
+	}
+	runes := []rune(source[start:])
+	if len(runes) > maxRunes {
+		runes = runes[:maxRunes]
+	}
+	prefix := ""
+	if start > 0 {
+		prefix = "..."
+	}
+	return prefix + string(runes)
 }

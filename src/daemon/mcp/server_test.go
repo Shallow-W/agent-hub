@@ -128,6 +128,51 @@ func TestAllowedToolsFromConfig_TasksIncludesSkillLookup(t *testing.T) {
 	}
 }
 
+func TestAllowedToolsFromConfig_KnowledgeToolsetsIncludeReadAndSearch(t *testing.T) {
+	for _, toolset := range []string{"orchestrator", "knowledge"} {
+		allowed := allowedToolsFromConfig(`{"toolset":"` + toolset + `"}`)
+		for _, tool := range []string{"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"} {
+			if !allowed[tool] {
+				t.Fatalf("expected %s toolset to include %s, got %#v", toolset, tool, allowed)
+			}
+		}
+	}
+}
+
+func TestKnowledgeToolHandlersUseBackendSearchAndTextEndpoints(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.String())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/mcp/knowledge-bases/kb-1/search":
+			if r.URL.Query().Get("keyword") != "Agent" {
+				t.Fatalf("unexpected keyword query: %s", r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("limit") != "5" {
+				t.Fatalf("unexpected limit query: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"id":"file-1","filename":"guide.md"}]}`))
+		case "/mcp/knowledge-bases/kb-1/files/file-1/text":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"file_id":"file-1","text":"Agent knowledge"}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handler := HandleAllTools(NewAPIClient(server.URL, "token-1"), "agent-1")
+	if _, err := handler("search_knowledge", map[string]interface{}{"knowledge_base_id": "kb-1", "keyword": "Agent", "limit": float64(5)}); err != nil {
+		t.Fatalf("search_knowledge failed: %v", err)
+	}
+	if _, err := handler("read_knowledge_file", map[string]interface{}{"knowledge_base_id": "kb-1", "file_id": "file-1"}); err != nil {
+		t.Fatalf("read_knowledge_file failed: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 backend calls, got %#v", seen)
+	}
+}
+
 func TestNoAgentToolSet_IsEmpty(t *testing.T) {
 	allowed := noAgentToolSet()
 	if len(allowed) != 0 {
