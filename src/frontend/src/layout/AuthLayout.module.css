@@ -1,11 +1,18 @@
 .container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   background: linear-gradient(145deg, #dbeafe 0%, #e8f3ff 25%, #f0f2f5 50%, #ede9fe 75%, #fae8ff 100%);
   position: relative;
   overflow: hidden;
+  border-radius: 12px;
+}
+
+/* 最大化时去掉外框圆角 */
+:global(body.ah-maximized) .container {
+  border-radius: 0;
 }
 
 .container::before {

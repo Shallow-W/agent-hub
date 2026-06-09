@@ -1,5 +1,6 @@
 import React from 'react';
 import { RobotOutlined } from '@ant-design/icons';
+import TitleBar from '@/components/common/TitleBar';
 import styles from './AuthLayout.module.css';
 
 interface AuthLayoutProps {
@@ -9,6 +10,7 @@ interface AuthLayoutProps {
 const AuthLayout: React.FC<AuthLayoutProps> = ({ children }) => {
   return (
     <div className={styles.container}>
+      <TitleBar />
       <div className={styles.card}>
         <div className={styles.logo}>
           <div className={styles.logoIcon}>

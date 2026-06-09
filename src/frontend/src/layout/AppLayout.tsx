@@ -32,6 +32,7 @@ import { AgentProfile } from '@/components/agent/AgentProfile';
 import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import KnowledgeFilePreview from '@/components/knowledge/KnowledgeFilePreview';
+import TitleBar from '@/components/common/TitleBar';
 import type { Agent } from '@/types/agent';
 import type { KnowledgeFile } from '@/types/knowledge';
 import styles from './AppLayout.module.css';
@@ -236,98 +237,102 @@ const AppLayout: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      {showDisconnectAlert && (
-        <Alert
-          message="连接已断开，正在重连..."
-          type="warning"
-          showIcon
-          banner
-          className={styles.disconnectAlert}
-        />
-      )}
+      <TitleBar />
 
-      <div
-        className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
-      >
-        <SettingsPanel
-          username={user?.username ?? ''}
-          onLogout={handleLogout}
-          wsStatus={status}
-          onNavChange={handleNavChange}
-          activeKey={activeNav}
-          onCreate={handleCreate}
-          collapsed={settingsCollapsed}
-        />
-      </div>
-
-      <button
-        className={`${styles.toggleBtn} ${
-          settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
-        }`}
-        onClick={() => setSettingsCollapsed((c) => !c)}
-        aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
-      >
-        {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
-      </button>
-
-      <div className={styles.convPanel}>
-        <MiddlePanel
-          activeNav={activeNav}
-          conversations={conversations}
-          onCreate={handleCreate}
-          onCreateGroup={() => setGroupModalOpen(true)}
-          onRefresh={() => fetchConversations()}
-          onUpload={handleUpload}
-          onStartChat={handleStartChat}
-          onStartAgentChat={handleStartAgentChat}
-          onSwitchChat={() => setActiveNav('chat')}
-          onSwitchContacts={() => setActiveNav('contacts')}
-          onRefreshContacts={handleRefreshContacts}
-          selectedAgentId={selectedAgentId}
-          selectedMachineId={selectedMachineId}
-          onSelectAgent={handleSelectAgent}
-          onSelectMachine={handleSelectMachine}
-          onKnowledgeFileSelect={handleKnowledgeFileSelect}
-          selectedFileId={selectedKnowledgeFile?.id ?? null}
-          selectedKbId={selectedKbId}
-        />
-      </div>
-
-      {/* 右侧：聊天区域 / 智能体详情 */}
-      <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'knowledge' ? (
-          selectedKnowledgeFile && selectedKbId ? (
-            <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
-          ) : (
-            <div className={styles.emptyRightPanel}>
-              <div className={styles.emptyRightIcon}>📚</div>
-              <div className={styles.emptyRightTitle}>知识库管理</div>
-              <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
-            </div>
-          )
-        ) : activeNav === 'skills' ? (
-          selectedAgent ? (
-            <AgentSkillsPanel agent={selectedAgent} />
-          ) : (
-            <div className={styles.skillsEmptyPanel}>
-              <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
-              <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
-            </div>
-          )
-        ) : activeNav === 'models' ? (
-          selectedAgent ? (
-            <AgentProfile agent={selectedAgent} />
-          ) : (
-            <ComputerProfile
-              machineId={selectedMachineId}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={handleSelectAgent}
-              onClearSelection={() => setSelectedMachineId(null)}
-            />
-          )
-        ) : (
-          <Outlet />
+      <div className={styles.contentRow}>
+        {showDisconnectAlert && (
+          <Alert
+            message="连接已断开，正在重连..."
+            type="warning"
+            showIcon
+            banner
+            className={styles.disconnectAlert}
+          />
         )}
+
+        <div
+          className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
+        >
+          <SettingsPanel
+            username={user?.username ?? ''}
+            onLogout={handleLogout}
+            wsStatus={status}
+            onNavChange={handleNavChange}
+            activeKey={activeNav}
+            onCreate={handleCreate}
+            collapsed={settingsCollapsed}
+          />
+        </div>
+
+        <button
+          className={`${styles.toggleBtn} ${
+            settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
+          }`}
+          onClick={() => setSettingsCollapsed((c) => !c)}
+          aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
+        >
+          {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
+        </button>
+
+        <div className={styles.convPanel}>
+          <MiddlePanel
+            activeNav={activeNav}
+            conversations={conversations}
+            onCreate={handleCreate}
+            onCreateGroup={() => setGroupModalOpen(true)}
+            onRefresh={() => fetchConversations()}
+            onUpload={handleUpload}
+            onStartChat={handleStartChat}
+            onStartAgentChat={handleStartAgentChat}
+            onSwitchChat={() => setActiveNav('chat')}
+            onSwitchContacts={() => setActiveNav('contacts')}
+            onRefreshContacts={handleRefreshContacts}
+            selectedAgentId={selectedAgentId}
+            selectedMachineId={selectedMachineId}
+            onSelectAgent={handleSelectAgent}
+            onSelectMachine={handleSelectMachine}
+            onKnowledgeFileSelect={handleKnowledgeFileSelect}
+            selectedFileId={selectedKnowledgeFile?.id ?? null}
+            selectedKbId={selectedKbId}
+          />
+        </div>
+
+        {/* 右侧：聊天区域 / 智能体详情 */}
+        <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
+          {activeNav === 'knowledge' ? (
+            selectedKnowledgeFile && selectedKbId ? (
+              <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
+            ) : (
+              <div className={styles.emptyRightPanel}>
+                <div className={styles.emptyRightIcon}>📚</div>
+                <div className={styles.emptyRightTitle}>知识库管理</div>
+                <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+              </div>
+            )
+          ) : activeNav === 'skills' ? (
+            selectedAgent ? (
+              <AgentSkillsPanel agent={selectedAgent} />
+            ) : (
+              <div className={styles.skillsEmptyPanel}>
+                <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
+                <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
+              </div>
+            )
+          ) : activeNav === 'models' ? (
+            selectedAgent ? (
+              <AgentProfile agent={selectedAgent} />
+            ) : (
+              <ComputerProfile
+                machineId={selectedMachineId}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={handleSelectAgent}
+                onClearSelection={() => setSelectedMachineId(null)}
+              />
+            )
+          ) : (
+            <Outlet />
+          )}
+        </div>
       </div>
 
       <GroupCreateModal

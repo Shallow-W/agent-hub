@@ -1,15 +1,30 @@
 .container {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
   position: relative;
-  padding: 14px;
-  gap: 12px;
   background: var(--color-bg-app);
   background-image:
     radial-gradient(circle at 16% 8%, rgba(47, 143, 107, 0.12), transparent 40%),
     radial-gradient(circle at 85% 90%, rgba(245, 158, 11, 0.12), transparent 45%);
+  /* 桌面端窗口外框圆角 */
+  border-radius: 12px;
+}
+
+/* 最大化时去掉外框圆角 */
+:global(body.ah-maximized) .container {
+  border-radius: 0;
+}
+
+/* 内容区域：包含三个面板 */
+.contentRow {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 14px 14px 14px;
+  gap: 12px;
 }
 
 .settingsPanel {
@@ -41,7 +56,7 @@
 
 .toggleBtn {
   position: absolute;
-  top: 34px;
+  top: 48px;
   width: 20px;
   height: 20px;
   border-radius: 50%;
