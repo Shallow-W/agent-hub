@@ -244,6 +244,20 @@ func AgentTools() []Tool {
 			},
 		},
 		{
+			Name:        "get_agent_skill",
+			Description: "查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "平台 Skill 名称（必填，必须属于当前 Agent）",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
 			Name:        "list_agent_candidates",
 			Description: "查询本机已发现的 Agent 候选列表（来自 daemon 扫描），包含 CLI 路径、版本、能力（skills）等信息。尚未添加到平台的 Agent 会出现在这里",
 			InputSchema: map[string]interface{}{

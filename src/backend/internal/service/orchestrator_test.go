@@ -281,8 +281,11 @@ func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {
 	if !strings.Contains(got, "权限审查：检查工具权限") {
 		t.Fatalf("expected skill index, got %s", got)
 	}
-	if !strings.Contains(got, "确认 MCP 白名单和拒绝路径。") {
-		t.Fatalf("expected matched skill detail, got %s", got)
+	if !strings.Contains(got, "get_agent_skill") {
+		t.Fatalf("expected skill lookup tool instruction, got %s", got)
+	}
+	if strings.Contains(got, "确认 MCP 白名单和拒绝路径。") {
+		t.Fatalf("expected skill detail to stay out of prompt, got %s", got)
 	}
 	if !strings.Contains(got, "[群聊背景]") {
 		t.Fatalf("expected original context preserved, got %s", got)

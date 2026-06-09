@@ -1,7 +1,7 @@
 export interface ToolCatalogItem {
   name: string;
   label: string;
-  category: 'conversation' | 'task' | 'agent' | 'machine' | 'group';
+  category: 'conversation' | 'task' | 'agent' | 'machine' | 'group' | 'skill';
   description: string;
 }
 
@@ -10,6 +10,7 @@ export const toolCatalog: ToolCatalogItem[] = [
   { name: 'list_conversation_agents', label: '会话 Agent', category: 'conversation', description: '读取指定会话内的 Agent' },
   { name: 'list_group_agents', label: '群 Agent', category: 'conversation', description: '读取群聊可用 Agent' },
   { name: 'get_messages', label: '读取消息', category: 'conversation', description: '读取指定会话历史消息' },
+  { name: 'get_agent_skill', label: '查看 Skill', category: 'skill', description: '读取当前 Agent 已分配平台 Skill 的详细内容' },
   { name: 'create_group', label: '创建群聊', category: 'group', description: '创建新的群聊会话' },
   { name: 'get_group_info', label: '群信息', category: 'group', description: '读取群聊详情' },
   { name: 'list_group_members', label: '群成员', category: 'group', description: '读取群聊成员列表' },
@@ -25,12 +26,13 @@ export const toolCatalog: ToolCatalogItem[] = [
 
 export const toolsetTemplates: Record<string, string[]> = {
   none: [],
-  basic: ['list_group_agents', 'get_messages'],
-  tasks: ['list_group_agents', 'get_messages', 'list_tasks', 'create_task', 'update_task', 'move_task_status'],
+  basic: ['list_group_agents', 'get_messages', 'get_agent_skill'],
+  tasks: ['list_group_agents', 'get_messages', 'get_agent_skill', 'list_tasks', 'create_task', 'update_task', 'move_task_status'],
   orchestrator: [
     'list_group_agents',
     'list_conversation_agents',
     'get_messages',
+    'get_agent_skill',
     'list_tasks',
     'create_task',
     'update_task',
@@ -39,7 +41,7 @@ export const toolsetTemplates: Record<string, string[]> = {
     'get_group_info',
     'list_group_members',
   ],
-  agent_builder: ['list_agents', 'list_group_agents', 'list_agent_candidates', 'list_machines'],
+  agent_builder: ['list_agents', 'list_group_agents', 'get_agent_skill', 'list_agent_candidates', 'list_machines'],
 };
 
 export const toolsetOptions = [

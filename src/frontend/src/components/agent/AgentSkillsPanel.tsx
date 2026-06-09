@@ -6,10 +6,12 @@ import {
   SaveOutlined,
   EditOutlined,
   FolderOpenOutlined,
+  PlusOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { parseSkills } from './agentPresentation';
+import { autoGenerateSkills, parseSkills, skillsToPlatformJSON } from './agentPresentation';
 import type { Skill } from './agentPresentation';
 import styles from './AgentSkillsPanel.module.css';
 
@@ -18,41 +20,82 @@ interface AgentSkillsPanelProps {
 }
 
 export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => {
-  const updateAgent = useAgentStore((s) => s.updateAgent);
+  const updateCustomSkills = useAgentStore((s) => s.updateCustomSkills);
   const openSkillLocation = useAgentStore((s) => s.openSkillLocation);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [baseSkills, setBaseSkills] = useState<Skill[]>([]);
   const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
   const [editingSkillName, setEditingSkillName] = useState('');
   const [selectedSkillIdx, setSelectedSkillIdx] = useState<number | null>(null);
+  const [newSkillName, setNewSkillName] = useState('');
   const [saving, setSaving] = useState(false);
   const [openingPath, setOpeningPath] = useState(false);
 
   useEffect(() => {
-    const nextSkills = parseSkills(agent.capabilities_json);
+    const nextSkills = parseSkills(agent.custom_skills);
+    setBaseSkills(parseSkills(agent.capabilities_json));
     setSkills(nextSkills);
     setEditingSkillIdx(null);
     setEditingSkillName('');
+    setNewSkillName('');
     setSelectedSkillIdx(nextSkills.length > 0 ? 0 : null);
-  }, [agent.id, agent.capabilities_json]);
+  }, [agent.id, agent.capabilities_json, agent.custom_skills]);
 
   const selectedSkill = selectedSkillIdx === null ? null : skills[selectedSkillIdx] ?? null;
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateAgent(agent.id, {
-        name: agent.name,
-        cli_tool: agent.cli_tool,
-        avatar: agent.avatar ?? undefined,
-        system_prompt: agent.system_prompt ?? undefined,
-        capabilities_json: JSON.stringify(skills),
-      });
-      message.success('技能已保存');
+      await updateCustomSkills(agent.id, skillsToPlatformJSON(skills));
+      message.success('平台 Skills 已保存');
     } catch {
       message.error('保存失败');
     } finally {
       setSaving(false);
     }
+  };
+
+  const addSkill = (skill: Skill) => {
+    const name = skill.name.trim();
+    if (!name) return;
+    if (skills.some((item) => item.name === name)) {
+      message.warning('该技能已分配给当前 Agent');
+      return;
+    }
+    const nextSkill: Skill = {
+      name,
+      description: skill.description,
+      trigger: skill.trigger || skill.description,
+      detail: skill.detail,
+    };
+    setSkills((prev) => {
+      const next = [...prev, nextSkill];
+      setSelectedSkillIdx(next.length - 1);
+      return next;
+    });
+  };
+
+  const handleAddSkill = () => {
+    addSkill({ name: newSkillName });
+    setNewSkillName('');
+  };
+
+  const handleAutoGenerate = () => {
+    const generated = autoGenerateSkills(agent);
+    const existing = new Set(skills.map((skill) => skill.name));
+    const additions = generated.filter((skill) => !existing.has(skill.name));
+    if (additions.length === 0) {
+      message.info('当前 Agent 已包含自动生成的平台 Skills');
+      return;
+    }
+    setSkills((prev) => [...prev, ...additions.map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      trigger: skill.description,
+      detail: skill.detail,
+    }))]);
+    setSelectedSkillIdx(skills.length);
+    message.success('已生成平台 Skills');
   };
 
   const handleDeleteSkill = (idx: number) => {
@@ -121,13 +164,18 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
 
       <div className={styles.body}>
         <div className={styles.skillsHeader}>
-          <span className={styles.sectionTitle}>SKILLS ({skills.length})</span>
+          <span className={styles.sectionTitle}>平台 Skills ({skills.length})</span>
+          <div className={styles.headerActions}>
+            <Button size="small" icon={<StarOutlined />} onClick={handleAutoGenerate}>
+              自动生成
+            </Button>
+          </div>
         </div>
 
         <div className={styles.workspace}>
           <div className={styles.skillList}>
             {skills.length === 0 && (
-              <div className={styles.empty}>暂无技能</div>
+              <div className={styles.empty}>暂无平台 Skills</div>
             )}
             {skills.map((skill, idx) => {
               const isSelected = selectedSkillIdx === idx;
@@ -161,7 +209,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                       </span>
                     )}
                     <span className={styles.skillSummary}>
-                      {skill.description || skill.detail || '暂无详细内容'}
+                      {skill.description || skill.trigger || '暂无描述'}
                     </span>
                   </div>
                   <span className={styles.skillActions}>
@@ -220,6 +268,14 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                   />
                 </label>
                 <label className={styles.field}>
+                  <span className={styles.fieldLabel}>触发条件</span>
+                  <Input
+                    value={selectedSkill.trigger ?? ''}
+                    onChange={(e) => updateSelectedSkill({ trigger: e.target.value })}
+                    placeholder="例如：代码审查、权限检查、写测试时使用"
+                  />
+                </label>
+                <label className={styles.field}>
                   <span className={styles.fieldLabel}>详细内容 / 代码</span>
                   <Input.TextArea
                     autoSize={{ minRows: 12, maxRows: 20 }}
@@ -231,13 +287,47 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                 </label>
               </>
             ) : (
-              <div className={styles.detailEmpty}>选择左侧技能后，在这里查看和编辑详细内容</div>
+              <div className={styles.detailEmpty}>选择左侧平台 Skill 后，在这里查看和编辑详细内容</div>
             )}
           </div>
         </div>
       </div>
 
+      <div className={styles.baseSkills}>
+        <div className={styles.skillsHeader}>
+          <span className={styles.sectionTitle}>底座 Skills 只读 ({baseSkills.length})</span>
+        </div>
+        {baseSkills.length === 0 ? (
+          <div className={styles.empty}>当前 Agent 底座没有上报本地 Skills</div>
+        ) : (
+          <div className={styles.baseSkillGrid}>
+            {baseSkills.map((skill, idx) => (
+              <div className={styles.baseSkillCard} key={`${skill.name}-${idx}`}>
+                <div className={styles.baseSkillInfo}>
+                  <span className={styles.skillName}>{skill.name}</span>
+                  <span className={styles.skillSummary}>{skill.description || '暂无描述'}</span>
+                </div>
+                <Button size="small" onClick={() => addSkill(skill)}>
+                  分配
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className={styles.footer}>
+        <div className={styles.addRow}>
+          <Input
+            placeholder="输入新平台 Skill 名称"
+            value={newSkillName}
+            onChange={(e) => setNewSkillName(e.target.value)}
+            onPressEnter={handleAddSkill}
+          />
+          <Button icon={<PlusOutlined />} onClick={handleAddSkill}>
+            添加
+          </Button>
+        </div>
         <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
           保存
         </Button>

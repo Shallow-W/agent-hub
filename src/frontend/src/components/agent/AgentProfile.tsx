@@ -26,6 +26,7 @@ import {
   parseSkills,
   autoGenerateSkills,
   resolveAgentAvatar,
+  skillsToPlatformJSON,
 } from './agentPresentation';
 import type { Skill } from './agentPresentation';
 import {
@@ -103,15 +104,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     } catch {
       return [];
     }
-  };
-
-  const customSkillsToJSON = (skills: Skill[]): string => {
-    return skills.length > 0 ? JSON.stringify(skills.map((s) => ({
-      name: s.name,
-      description: s.description,
-      trigger: s.trigger,
-      detail: s.detail,
-    }))) : '';
   };
 
   useEffect(() => {
@@ -228,7 +220,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const handleSaveCustomSkills = async () => {
     setSavingSkills(true);
     try {
-      await updateCustomSkills(agent.id, customSkillsToJSON(customSkills));
+      await updateCustomSkills(agent.id, skillsToPlatformJSON(customSkills));
       message.success('平台 Skills 已保存');
     } catch {
       message.error('保存平台 Skills 失败');

@@ -96,6 +96,38 @@ func TestAllowedToolsForAgent_UsesBackendAgentConfig(t *testing.T) {
 	}
 }
 
+func TestHandleGetAgentSkillScopesToCurrentAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/agents" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"data":[{"id":"agent-1","custom_skills":"[{\"name\":\"代码审查\",\"description\":\"找 bug\",\"trigger\":\"review\",\"detail\":\"逐项检查权限和测试\"}]"},{"id":"agent-2","custom_skills":"[{\"name\":\"代码审查\",\"detail\":\"不应返回\"}]"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "token-1")
+	handler := HandleAllTools(client, "agent-1")
+	got, err := handler("get_agent_skill", map[string]interface{}{"name": "代码审查"})
+	if err != nil {
+		t.Fatalf("get_agent_skill failed: %v", err)
+	}
+	skill, ok := got.(platformSkill)
+	if !ok {
+		t.Fatalf("unexpected skill type: %#v", got)
+	}
+	if skill.Detail != "逐项检查权限和测试" {
+		t.Fatalf("expected current agent skill detail, got %#v", skill)
+	}
+}
+
+func TestAllowedToolsFromConfig_TasksIncludesSkillLookup(t *testing.T) {
+	allowed := allowedToolsFromConfig(`{"toolset":"tasks"}`)
+	if !allowed["get_agent_skill"] {
+		t.Fatalf("expected tasks toolset to include get_agent_skill, got %#v", allowed)
+	}
+}
+
 func TestNoAgentToolSet_IsEmpty(t *testing.T) {
 	allowed := noAgentToolSet()
 	if len(allowed) != 0 {

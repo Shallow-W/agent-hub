@@ -1927,6 +1927,28 @@ const MCP_TOOLS = [
     run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
   },
   {
+    name: 'get_agent_skill',
+    description: '查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '平台 Skill 名称，必须属于当前 Agent' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!name) throw new Error('name is required');
+      const agent = await resolveCurrentAgent(ctx);
+      if (!agent) throw new Error('current agent not found');
+      const skills = parsePlatformSkills(agent.custom_skills);
+      const skill = skills.find((item) => item.name.toLowerCase() === name.toLowerCase());
+      if (!skill) throw new Error(`skill not found for current agent: ${name}`);
+      return skill;
+    },
+  },
+  {
     name: 'list_agent_candidates',
     description: '列出当前用户电脑上扫描到的 Agent 底座候选。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -2126,6 +2148,7 @@ const MCP_TOOLS = [
 const DEFAULT_AGENT_TOOLS = [
   'list_group_agents',
   'get_messages',
+  'get_agent_skill',
   'list_tasks',
   'create_task',
   'update_task',
@@ -2135,7 +2158,7 @@ const NO_AGENT_TOOLS = [];
 
 const TOOLSET_TEMPLATES = {
   none: [],
-  basic: ['list_group_agents', 'get_messages'],
+  basic: ['list_group_agents', 'get_messages', 'get_agent_skill'],
   tasks: DEFAULT_AGENT_TOOLS,
   orchestrator: [
     ...DEFAULT_AGENT_TOOLS,
@@ -2147,6 +2170,7 @@ const TOOLSET_TEMPLATES = {
   agent_builder: [
     'list_agents',
     'list_group_agents',
+    'get_agent_skill',
     'list_agent_candidates',
     'list_machines',
   ],
@@ -2186,12 +2210,37 @@ function allowedToolsFromConfig(raw) {
   return NO_AGENT_TOOLS;
 }
 
+async function resolveCurrentAgent(ctx) {
+  if (!ctx.agentId) return null;
+  if (ctx.currentAgent !== undefined) return ctx.currentAgent;
+  const res = await ctx.callApi('GET', '/api/agents');
+  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+  ctx.currentAgent = agents.find((item) => item && item.id === ctx.agentId) || null;
+  return ctx.currentAgent;
+}
+
+function parsePlatformSkills(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === 'object' && typeof item.name === 'string' && item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        description: typeof item.description === 'string' ? item.description : '',
+        trigger: typeof item.trigger === 'string' ? item.trigger : '',
+        detail: typeof item.detail === 'string' ? item.detail : '',
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function resolveAllowedTools(ctx) {
   if (!ctx.agentId) return NO_AGENT_TOOLS;
   if (ctx.allowedTools !== null) return ctx.allowedTools;
-  const res = await ctx.callApi('GET', '/api/agents');
-  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
-  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  const agent = await resolveCurrentAgent(ctx);
   ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
   return ctx.allowedTools;
 }
@@ -2289,6 +2338,7 @@ async function runMcpServer(serverURL, apiKey) {
     userId: readArg('--user-id') || null,
     agentId: readArg('--agent-id') || null,
     allowedTools: null,
+    currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };

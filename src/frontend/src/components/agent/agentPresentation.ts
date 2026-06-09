@@ -49,6 +49,18 @@ export function parseSkills(value?: string): Skill[] {
   return [];
 }
 
+export function skillsToPlatformJSON(skills: Skill[]): string {
+  const cleaned = skills
+    .map((skill) => ({
+      name: skill.name.trim(),
+      description: skill.description?.trim() || undefined,
+      trigger: skill.trigger?.trim() || undefined,
+      detail: skill.detail?.trim() || undefined,
+    }))
+    .filter((skill) => skill.name.length > 0);
+  return cleaned.length > 0 ? JSON.stringify(cleaned) : '';
+}
+
 /** 命名头像 key（与 public/avatars 下的文件名对应）。 */
 export const NAMED_AVATAR_KEYS = ['Chatgpt', 'Claudecode', 'OpenClaw'] as const;
 /** 通用「其它」头像 key（Agent1 ~ Agent14）。 */

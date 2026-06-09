@@ -469,6 +469,7 @@ null
 
 更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力索引和渐进式加载内容，不会被 daemon 底座扫描覆盖。
 仅允许更新当前用户拥有的自建 Agent；保存前会校验为 JSON 数组并只保留 `name`、`description`、`trigger`、`detail` 字段，过滤 `source_path` 等本机扫描字段。
+运行时 prompt 只注入 Skill 索引和触发说明；完整 `detail` 保留在服务端，由当前 Agent 在需要时通过已授权的 MCP 工具 `get_agent_skill` 按名称读取。
 
 **请求体**
 ```json

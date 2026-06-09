@@ -157,7 +157,11 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
 
   const normalized = query.trim().toLowerCase();
   const filtered = normalized
-    ? agents.filter((a) => a.name.toLowerCase().includes(normalized))
+    ? agents.filter((agent) => {
+        const platformSkills = parseSkills(agent.custom_skills);
+        return agent.name.toLowerCase().includes(normalized)
+          || platformSkills.some((skill) => skill.name.toLowerCase().includes(normalized));
+      })
     : agents;
 
   return (
@@ -182,7 +186,8 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
               <div className={skillStyles.empty}>{normalized ? '无匹配结果' : '暂无 Agent'}</div>
             )}
             {filtered.map((agent) => {
-              const skillCount = parseSkills(agent.capabilities_json).length;
+              const skillCount = parseSkills(agent.custom_skills).length;
+              const baseSkillCount = parseSkills(agent.capabilities_json).length;
               const isSelected = agent.id === selectedAgentId;
               return (
                 <button
@@ -194,7 +199,7 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
                   <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
                   <div className={skillStyles.info}>
                     <span className={skillStyles.name}>{agent.name}</span>
-                    <span className={skillStyles.meta}>{skillCount} skills</span>
+                    <span className={skillStyles.meta}>{skillCount} 平台 · {baseSkillCount} 底座</span>
                   </div>
                 </button>
               );

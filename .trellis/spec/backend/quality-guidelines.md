@@ -169,7 +169,8 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).Wi
 - `name` is required; duplicate names collapse to the first valid item.
 - `description`, `trigger`, and `detail` must be trimmed and length-limited before persistence and prompt injection.
 - Agent dispatch prompts include a `[平台 Skills]` section with a compact Skill index for the current Agent.
-- Skill `detail` is progressively injected only when the current task text matches the Skill name or trigger tokens.
+- Skill `detail` is not injected into every prompt. It stays server-side and is progressively loaded through the read-only `get_agent_skill` MCP tool when the Agent needs the full instructions.
+- `get_agent_skill` must be authorized by the current Agent's `tools_config` allowlist and must only return Skills from that same Agent's `custom_skills`.
 - Orchestrator group Agent detail prompts must not expose raw `custom_skills` detail. They should continue using dispatch-safe description/tags only.
 - Daemon prompt splitting must move `[平台 Skills]` into the system prompt area where the target CLI supports it; CLIs without a system prompt flag should receive it before the user prompt.
 
@@ -181,14 +182,15 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).Wi
 - Attempt to update another user's or non-custom Agent Skills -> `ErrAgentNotFound`.
 
 **Good/Base/Bad Cases**:
-- Good: Agent A has `custom_skills` with `trigger: "review, bug"` and task text includes "review"; prompt includes the Skill index and the matched `detail`.
-- Base: Task text does not match any trigger; prompt includes only the Skill index and omits all details.
+- Good: Agent A has `custom_skills` with `trigger: "review, bug"`; prompt includes the Skill index and tells the Agent to call `get_agent_skill` for the detail when needed.
+- Base: `get_agent_skill` is not authorized; prompt still includes the compact Skill index and the Agent works from that summary only.
 - Bad: Prompt injects every Skill detail on every request, causing context bloat.
 - Bad: Saving platform Skills preserves `source_path` from daemon-scanned native Skills.
 
 **Tests Required**:
 - Service test for custom Skill normalization, unsafe field filtering, and `trigger`/`detail` preservation.
-- Service test for progressive prompt injection: index always present, matched detail included, unmatched detail omitted.
+- Service test for progressive prompt loading: index always present, lookup tool instruction present, raw detail omitted.
+- Daemon MCP test for `get_agent_skill` scoping and authorization.
 - Dispatch context test asserting `InjectAgentConfig` preserves existing blackboard/group context after the Skill section.
 - Browser E2E verifying UI round-trip and API persistence for `tools_config` plus structured platform Skills.
 
