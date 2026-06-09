@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, Modal, Select } from 'antd';
+import { SettingOutlined } from '@ant-design/icons';
 import { message } from '@/utils/message';
 import type { AgentCandidate, PlatformSkill } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
@@ -23,12 +24,31 @@ interface AgentCreateModalProps {
   onCreate: (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => Promise<void>;
 }
 
-const skillTemplates = [
+const quickTemplates = [
   { key: 'pm', label: '产品经理', toolset: 'tasks', skillCategories: ['产品经理'] },
   { key: 'dev', label: '开发人员', toolset: 'full', skillCategories: ['开发人员'] },
   { key: 'manager', label: '管理助手', toolset: 'full', skillCategories: [] },
   { key: 'empty', label: '空白', toolset: 'none', skillCategories: [] },
 ];
+
+interface SavedCreateTemplate {
+  id: string;
+  name: string;
+  tools: string[];
+  skillIds: string[];
+  createdAt: number;
+}
+
+const STORAGE_KEY = 'agenthub-create-templates';
+
+function loadSaved(): SavedCreateTemplate[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function persistSaved(list: SavedCreateTemplate[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
 
 export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   open,
@@ -47,6 +67,10 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const [skillFilter, setSkillFilter] = useState<string>('all');
+  const [skillTemplate, setSkillTemplate] = useState('none');
+  const [manageOpen, setManageOpen] = useState(false);
+  const [savedTemplates, setSavedTemplates] = useState<SavedCreateTemplate[]>(loadSaved);
+  const [newTplName, setNewTplName] = useState('');
 
   const options = useMemo(
     () => candidates.map((candidate) => ({
@@ -67,6 +91,9 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setToolFilter('all');
     setSelectedSkillIds(new Set());
     setSkillFilter('all');
+    setSkillTemplate('none');
+    setNewTplName('');
+    setSavedTemplates(loadSaved());
     getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, [open, candidates]);
 
@@ -89,6 +116,12 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     return list;
   }, [librarySkills, skillFilter]);
 
+  const skillTemplateOptions = useMemo(() => [
+    { value: 'none', label: '无' },
+    ...skillCategories.map((cat) => ({ value: `cat:${cat}`, label: cat })),
+    { value: 'custom', label: '自定义' },
+  ], [skillCategories]);
+
   const handleCandidateChange = (value: string) => {
     setCandidateId(value);
     const selected = candidates.find((candidate) => candidate.id === value);
@@ -109,6 +142,19 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setSelectedTools(values);
   };
 
+  const handleSkillTemplateChange = (value: string) => {
+    setSkillTemplate(value);
+    if (value === 'none') {
+      setSelectedSkillIds(new Set());
+    } else if (value.startsWith('cat:')) {
+      const cat = value.slice(4);
+      const matched = librarySkills
+        .filter((s) => (s.category?.trim() || '未分类') === cat)
+        .map((s) => s.id);
+      setSelectedSkillIds(new Set(matched));
+    }
+  };
+
   const toggleSkill = (id: string) => {
     setSelectedSkillIds((prev) => {
       const next = new Set(prev);
@@ -116,10 +162,11 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       else next.add(id);
       return next;
     });
+    setSkillTemplate('custom');
   };
 
-  const handleApplyTemplate = (key: string) => {
-    const tpl = skillTemplates.find((t) => t.key === key);
+  const handleApplyQuickTemplate = (key: string) => {
+    const tpl = quickTemplates.find((t) => t.key === key);
     if (!tpl) return;
     setToolset(tpl.toolset);
     if (tpl.toolset !== 'custom') {
@@ -130,9 +177,45 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         .filter((s) => tpl.skillCategories.includes(s.category?.trim() || '未分类'))
         .map((s) => s.id);
       setSelectedSkillIds(new Set(matched));
+      setSkillTemplate(`cat:${tpl.skillCategories[0]}`);
     } else {
       setSelectedSkillIds(new Set());
+      setSkillTemplate('none');
     }
+  };
+
+  const handleSaveTemplate = () => {
+    if (!newTplName.trim()) {
+      message.warning('请输入模板名称');
+      return;
+    }
+    const tpl: SavedCreateTemplate = {
+      id: `tpl_${Date.now()}`,
+      name: newTplName.trim(),
+      tools: [...selectedTools],
+      skillIds: Array.from(selectedSkillIds),
+      createdAt: Date.now(),
+    };
+    const next = [...savedTemplates, tpl];
+    setSavedTemplates(next);
+    persistSaved(next);
+    setNewTplName('');
+    message.success('模板已保存');
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    const next = savedTemplates.filter((t) => t.id !== id);
+    setSavedTemplates(next);
+    persistSaved(next);
+  };
+
+  const handleApplySaved = (tpl: SavedCreateTemplate) => {
+    setSelectedTools(tpl.tools);
+    setToolset(tpl.tools.length > 0 ? 'custom' : 'none');
+    setSelectedSkillIds(new Set(tpl.skillIds));
+    setSkillTemplate(tpl.skillIds.length > 0 ? 'custom' : 'none');
+    setManageOpen(false);
+    message.success(`已应用模板「${tpl.name}」`);
   };
 
   const handleSubmit = async () => {
@@ -183,12 +266,12 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         <div className={styles.field}>
           <span className={styles.label}>快速模板</span>
           <div className={styles.templateRow}>
-            {skillTemplates.map((tpl) => (
+            {quickTemplates.map((tpl) => (
               <button
                 key={tpl.key}
                 className={styles.templatePill}
                 type="button"
-                onClick={() => handleApplyTemplate(tpl.key)}
+                onClick={() => handleApplyQuickTemplate(tpl.key)}
               >
                 {tpl.label}
               </button>
@@ -240,6 +323,14 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
               options={toolsetOptions}
               onChange={handleToolsetChange}
             />
+            <Button
+              className={styles.manageBtn}
+              icon={<SettingOutlined />}
+              size="small"
+              onClick={() => setManageOpen(true)}
+            >
+              管理
+            </Button>
           </div>
           <div className={styles.filterBar}>
             <button
@@ -300,6 +391,23 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
           </div>
           {librarySkills.length > 0 && (
             <>
+              <div className={styles.controlRow}>
+                <span className={styles.subLabel}>模板</span>
+                <Select
+                  className={styles.toolsetSelect}
+                  value={skillTemplate}
+                  options={skillTemplateOptions}
+                  onChange={handleSkillTemplateChange}
+                />
+                <Button
+                  className={styles.manageBtn}
+                  icon={<SettingOutlined />}
+                  size="small"
+                  onClick={() => setManageOpen(true)}
+                >
+                  管理
+                </Button>
+              </div>
               <div className={styles.filterBar}>
                 <button
                   className={`${styles.filterPill} ${skillFilter === 'all' ? styles.filterPillActive : ''}`}
@@ -360,6 +468,47 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
           </Button>
         </div>
       </div>
+
+      {/* Template management modal */}
+      <Modal
+        open={manageOpen}
+        onCancel={() => setManageOpen(false)}
+        footer={null}
+        title="管理模板"
+        width={520}
+        centered
+      >
+        <div className={styles.manageContent}>
+          <div className={styles.saveRow}>
+            <Input
+              className={styles.saveInput}
+              placeholder="模板名称"
+              value={newTplName}
+              maxLength={50}
+              onChange={(e) => setNewTplName(e.target.value)}
+              onPressEnter={handleSaveTemplate}
+            />
+            <Button type="primary" onClick={handleSaveTemplate}>保存当前配置</Button>
+          </div>
+          <div className={styles.savedList}>
+            {savedTemplates.map((tpl) => (
+              <div className={styles.savedItem} key={tpl.id}>
+                <div className={styles.savedInfo}>
+                  <span className={styles.savedName}>{tpl.name}</span>
+                  <span className={styles.savedMeta}>{tpl.tools.length} 工具 · {tpl.skillIds.length} Skills</span>
+                </div>
+                <div className={styles.savedActions}>
+                  <Button size="small" onClick={() => handleApplySaved(tpl)}>应用</Button>
+                  <Button size="small" danger onClick={() => handleDeleteTemplate(tpl.id)}>删除</Button>
+                </div>
+              </div>
+            ))}
+            {savedTemplates.length === 0 && (
+              <div className={styles.emptyHint}>暂无自定义模板，保存当前工具和技能配置以便复用</div>
+            )}
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 };
