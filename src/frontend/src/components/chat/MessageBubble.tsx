@@ -166,6 +166,7 @@ function markdownDocumentContent(content: string): string {
 function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
   // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
   const contentRootMap = buildContentRootMap(codeArtifacts);
+  let codeBlockIndex = 0;
   return {
     code({ className, children, node, ...rest }) {
       const isBlock = className?.startsWith('language-');
@@ -181,7 +182,9 @@ function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
             </div>
           );
         }
-        const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
+        const fallbackRootId = codeArtifacts[codeBlockIndex]?.root_id;
+        codeBlockIndex += 1;
+        const rootId = contentRootMap.get(ct.replace(/\n$/, '')) ?? fallbackRootId;
         return (
           <CodeBlock className={className} expandable artifactRootId={rootId}>
             {children}
