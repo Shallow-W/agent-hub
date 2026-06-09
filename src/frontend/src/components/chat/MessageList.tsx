@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useMessageStore } from '@/store/messageStore';
 import { MessageBubble } from './MessageBubble';
 import type { Message } from '@/types/message';
+import type { ConversationAgent } from '@/types/conversation';
 import styles from './MessageList.module.css';
 
 interface MessageListProps {
@@ -13,6 +14,7 @@ interface MessageListProps {
   onReply?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onPinChanged?: () => void;
+  conversationAgents?: ConversationAgent[];
 }
 
 /** Extract agent_name from artifacts_json, or null */
@@ -74,6 +76,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   onReply,
   onForward,
   onPinChanged,
+  conversationAgents = [],
 }) => {
   const {
     messages,
@@ -221,6 +224,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                       .finally(() => onPinChanged?.());
                   }}
                   onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
+                  conversationAgents={conversationAgents}
                 />
               </React.Fragment>
             );

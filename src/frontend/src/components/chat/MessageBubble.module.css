@@ -362,12 +362,10 @@
 .bubbleUser .recallBtn { order: 4; }
 
 .pinBtn {
-  opacity: 0.42;
-  pointer-events: auto;
+  color: var(--color-text-secondary);
 }
 
 .pinBtnActive {
-  opacity: 1;
   color: var(--color-primary);
 }
 
@@ -376,7 +374,8 @@
   color: var(--color-primary-active);
 }
 
-.bubble:hover .replyBtn {
+.bubble:hover .replyBtn,
+.bubble:focus-within .replyBtn {
   opacity: 1;
   pointer-events: auto;
 }

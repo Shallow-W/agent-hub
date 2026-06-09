@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import {
@@ -32,8 +34,10 @@ import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { getConversationBlackboard, getPinnedContext, updateConversationBlackboard } from '@/api/message';
+import { getConversationAgents } from '@/api/conversation';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
+import type { ConversationAgent } from '@/types/conversation';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { useAgentStore } from '@/store/agentStore';
 import { modal as appModal } from '@/utils/modal';
@@ -49,6 +53,14 @@ const { Text } = Typography;
 function getPinnedMessageAuthor(item: PinnedMessage): string {
   const username = item.username?.trim();
   if (username) return username;
+  if (item.role === 'assistant' && item.artifacts_json) {
+    try {
+      const meta = JSON.parse(item.artifacts_json) as { agent_name?: string };
+      if (meta.agent_name?.trim()) return meta.agent_name.trim();
+    } catch {
+      // ignore invalid legacy metadata
+    }
+  }
   if (item.role === 'assistant') return '助手';
   if (item.role === 'system') return '系统';
   return '用户';
@@ -79,6 +91,7 @@ export const ChatWindow: React.FC = () => {
   const [blackboardPinned, setBlackboardPinned] = useState<PinnedMessage[]>([]);
   const [blackboardLoading, setBlackboardLoading] = useState(false);
   const [blackboardSaving, setBlackboardSaving] = useState(false);
+  const [conversationAgents, setConversationAgents] = useState<ConversationAgent[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
@@ -92,6 +105,29 @@ export const ChatWindow: React.FC = () => {
   useEffect(() => {
     activeIdRef.current = activeId ?? null;
   }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId || activeConv?.type !== 'group') {
+      setConversationAgents([]);
+      return;
+    }
+    const conversationId = activeId;
+    let cancelled = false;
+    getConversationAgents(conversationId)
+      .then((items) => {
+        if (!cancelled && activeIdRef.current === conversationId) {
+          setConversationAgents(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && activeIdRef.current === conversationId) {
+          setConversationAgents([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, activeConv?.type]);
 
   const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
     const pinned = await getPinnedContext(conversationId);
@@ -553,6 +589,7 @@ export const ChatWindow: React.FC = () => {
         onReply={setReplyTo}
         onForward={setForwardMessage}
         onPinChanged={handlePinnedMessageChange}
+        conversationAgents={conversationAgents}
       />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
@@ -623,25 +660,33 @@ export const ChatWindow: React.FC = () => {
               ) : (
                 blackboardPinned.map((item) => (
                   <div key={item.id} className={styles.pinnedItem}>
-                    <div className={styles.pinnedItemBody}>
+                    <div className={styles.pinnedItemHeader}>
                       <div className={styles.pinnedItemMeta}>
                         <Text strong>{getPinnedMessageAuthor(item)}</Text>
                         <Text type="secondary">
                           {new Date(item.message_created_at).toLocaleString()}
                         </Text>
                       </div>
-                      <div className={styles.pinnedItemContent}>
-                        {item.content || '空消息'}
-                      </div>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PushpinOutlined />}
+                        onClick={() => handleUnpinFromBlackboard(item.message_id)}
+                      >
+                        取消 Pin
+                      </Button>
                     </div>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<PushpinOutlined />}
-                      onClick={() => handleUnpinFromBlackboard(item.message_id)}
-                    >
-                      取消 Pin
-                    </Button>
+                    <div className={styles.pinnedItemBubble}>
+                      {item.content ? (
+                        <div className={styles.pinnedMarkdown}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {item.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <Text type="secondary">空消息</Text>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

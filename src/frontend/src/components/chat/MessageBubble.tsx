@@ -20,6 +20,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
+import type { ConversationAgent } from '@/types/conversation';
 import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
@@ -269,6 +270,7 @@ interface MessageBubbleProps {
   onRecall?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
+  conversationAgents?: ConversationAgent[];
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -309,6 +311,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onRecall,
   onForward,
   onTogglePin,
+  conversationAgents = [],
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -322,6 +325,15 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   }, [message.role, message.artifacts_json]);
   const agentName = agentMeta.agent_name ?? null;
   const deployment = agentMeta.deployment ?? null;
+  const conversationAgentRole = useMemo(() => {
+    if (!agentMeta.agent_id) return null;
+    return conversationAgents.find((agent) => agent.agent_id === agentMeta.agent_id)?.role ?? null;
+  }, [agentMeta.agent_id, conversationAgents]);
+  const agentBadgeLabel = conversationAgentRole === 'orchestrator'
+    ? 'Orchestrator agent'
+    : conversationAgentRole === 'worker'
+      ? 'Worker agent'
+      : 'Agent';
 
   // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
   // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
@@ -531,7 +543,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             <div className={styles.meta}>
               <Text className={styles.agentLabel}>{displayName}</Text>
               {agentName && (
-                <span className={styles.agentBadge}>Agent</span>
+                <span className={styles.agentBadge}>{agentBadgeLabel}</span>
               )}
               {message.pinned && (
                 <Tooltip title="已 Pin 到上下文黑板">
@@ -569,7 +581,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <span className={styles.replyQuoteSender}>
-                  {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
+                  {escapeHtml(message.reply_to_message.username || (message.reply_to_message.sender_id ? '用户' : '助手'))}
                 </span>
                 {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
