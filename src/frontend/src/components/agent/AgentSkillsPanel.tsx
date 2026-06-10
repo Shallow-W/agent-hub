@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Drawer, Input, Modal, Popconfirm } from 'antd';
+import { Avatar, Button, Drawer, Input, Modal, Popconfirm, Select } from 'antd';
 import { message } from '@/utils/message';
 import {
   RobotOutlined,
@@ -51,6 +51,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [detailOpen, setDetailOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [skillManageOpen, setSkillManageOpen] = useState(false);
+  const [skillTemplate, setSkillTemplate] = useState('none');
   const [createForm, setCreateForm] = useState({ name: '', category: '', description: '', trigger: '', detail: '' });
 
   useEffect(() => {
@@ -111,6 +112,29 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     librarySkills.forEach((s) => cats.add(s.category?.trim() || '未分类'));
     return Array.from(cats);
   }, [librarySkills]);
+
+  const skillTemplateOptions = useMemo(() => [
+    { value: 'none', label: '无' },
+    ...categories.map((cat) => ({ value: `cat:${cat}`, label: `按分类: ${cat}` })),
+  ], [categories]);
+
+  const handleSkillTemplateChange = (value: string) => {
+    setSkillTemplate(value);
+    if (value === 'none') return;
+    if (value.startsWith('cat:')) {
+      const cat = value.slice(4);
+      const matched = librarySkills
+        .filter((s) => (s.category?.trim() || '未分类') === cat)
+        .map(toAssignedSkill)
+        .filter((newSkill) => !skills.some((s) => s.name.trim() === newSkill.name.trim()));
+      if (matched.length > 0) {
+        setSkills((prev) => [...prev, ...matched]);
+        message.success(`已按分类「${cat}」导入 ${matched.length} 个 Skill`);
+      } else {
+        message.info(`分类「${cat}」的 Skills 已在已分配列表中`);
+      }
+    }
+  };
 
   const filteredLibrarySkills = useMemo(() => {
     let list = librarySkills;
@@ -410,6 +434,18 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
           <strong className={styles.overviewValue}>{baseSkills.length}</strong>
         </div>
       </div>
+
+      {librarySkills.length > 0 && (
+        <div className={styles.templateToolbar}>
+          <Select
+            className={styles.templateSelect}
+            value={skillTemplate}
+            options={skillTemplateOptions}
+            onChange={handleSkillTemplateChange}
+            placeholder="按分类快速导入"
+          />
+        </div>
+      )}
 
       <div className={styles.subTabs}>
         <button

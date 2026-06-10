@@ -103,6 +103,18 @@
   color: var(--color-text-secondary);
 }
 
+/* ── Template toolbar ── */
+
+.templateToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.templateSelect {
+  min-width: 180px;
+}
+
 /* ── Sub-tabs ── */
 
 .subTabs {
