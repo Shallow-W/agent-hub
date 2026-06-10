@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/agent-hub/backend/internal/middleware"
+	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +33,41 @@ func (h *DeploymentHandler) Capabilities(c *gin.Context) {
 	middleware.SuccessResponse(c, DeploymentCapabilities{
 		GitHubEnabled: h.svc.GitHubEnabled(),
 	})
+}
+
+// DeployByConversationRequest 按 conversation_id 部署产物的请求体。
+type DeployByConversationRequest struct {
+	ConversationID string `json:"conversation_id" binding:"required"`
+	ArtifactName   string `json:"artifact_name"`
+	Mode           string `json:"mode"` // "preview"(default) | "github"
+}
+
+// DeployByConversation 按 conversation_id + artifact_name 查找并部署产物。
+// MCP 工具和聊天指令统一走此端点，不依赖 URL 中的 rootId。
+func (h *DeploymentHandler) DeployByConversation(c *gin.Context) {
+	var req DeployByConversationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40800, "invalid request: "+err.Error())
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if req.Mode == "" {
+		req.Mode = "preview"
+	}
+
+	var dep *model.Deployment
+	var err error
+	switch req.Mode {
+	case "github":
+		dep, err = h.svc.PublishGitHubByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
+	default:
+		dep, err = h.svc.DeployByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
+	}
+	if err != nil {
+		h.handleErr(c, err)
+		return
+	}
+	middleware.CreatedResponse(c, dep)
 }
 
 func (h *DeploymentHandler) Deploy(c *gin.Context) {

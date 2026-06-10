@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +25,32 @@ import (
 	"github.com/gin-gonic/gin"
 	goredis "github.com/redis/go-redis/v9"
 )
+
+// detectLANIP 返回第一个非回环 IPv4 地址；检测失败返回空串。
+func detectLANIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			return ipNet.IP.String()
+		}
+	}
+	return ""
+}
+
+// resolveExternalURL 确定 server 的外部可达 URL（供 daemon 连接、CORS 等）。
+// 优先级：SERVER_EXTERNAL_URL 环境变量 > config server.external_url > 自动检测 LAN IP > 127.0.0.1。
+func resolveExternalURL(cfg *Config) string {
+	if u := firstNonEmpty(os.Getenv("SERVER_EXTERNAL_URL"), cfg.Server.ExternalURL); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	if ip := detectLANIP(); ip != "" {
+		return fmt.Sprintf("http://%s:%d", ip, cfg.Server.Port)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
+}
 
 func main() {
 	// 加载配置
@@ -116,10 +143,13 @@ func main() {
 	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
 	toolDefSvc := service.NewToolDefinitionService(toolDefRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
-	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
+	externalURL := resolveExternalURL(cfg)
+	agentSvc.SetServerURL(externalURL)
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
 	orchSvc.SetTokenIssuer(tokenIssuer)
-	orchSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
+	orchSvc.SetServerURL(externalURL)
+	// 将外部 URL 加入 CORS 白名单，方便局域网前端访问
+	cfg.CORS.AllowedOrigins = append(cfg.CORS.AllowedOrigins, externalURL)
 	orchSvc.SetKBResolver(knowledgeSvc)
 	orchSvc.SetArtifactRepo(artifactRepo)
 	orchSvc.SetOrchTaskRepo(orchTaskRepo)
@@ -127,7 +157,6 @@ func main() {
 	// 服务端抽取消息附件文本时需要定位上传文件。
 	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
-	msgSvc.SetDeploymentService(deploymentSvc)
 	msgSvc.SetFileURLBuilder(fileURLs)
 
 	hub := ws.NewHub(logger)
@@ -377,6 +406,7 @@ func main() {
 		// 部署状态查询（需要鉴权）
 		apiGroup.GET("/deployments/capabilities", deploymentHandler.Capabilities)
 		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
+		apiGroup.POST("/deployments/deploy", deploymentHandler.DeployByConversation)
 	}
 
 	// 部署产物的公开访问（凭 deployment id 作能力令牌，无需鉴权，便于二维码/分享/直链下载）

@@ -599,7 +599,7 @@ function isAgentHubWorkspace(root) {
   if (!fs.existsSync(daemonPackage) || !fs.existsSync(frontendPackage)) return false;
   try {
     const pkg = JSON.parse(fs.readFileSync(daemonPackage, 'utf8'));
-    return pkg.name === '@agenthub/daemon';
+    return pkg.name === '@hust-agenthub/daemon';
   } catch {
     return false;
   }
@@ -3062,6 +3062,52 @@ const MCP_TOOLS = [
       { name: 'knowledge', label: '知识库', description: '知识库列表、文件列表和关键词搜索' },
     ],
   },
+  {
+    name: 'deploy_artifact',
+    description: '将当前会话中的 artifact（代码/网页/文档）部署为可公开访问的预览页面。通过内网穿透(tunnel)生成临时公网 URL。不指定 artifact_name 时部署最新 artifact。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        artifact_name: {
+          type: 'string',
+          description: '要部署的 artifact 名称（匹配 filename 或 title），不指定则部署最新',
+        },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      return ctx.callApi('POST', '/api/deployments/deploy', {
+        body: {
+          conversation_id: ctx.conversationId,
+          artifact_name: args.artifact_name || '',
+          mode: 'preview',
+        },
+      });
+    },
+  },
+  {
+    name: 'deploy_artifact_github',
+    description: '将 artifact 永久发布到 GitHub Pages。需要后端配置 GitHub Token。不指定 artifact_name 时部署最新 artifact。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        artifact_name: {
+          type: 'string',
+          description: '要发布的 artifact 名称（匹配 filename 或 title），不指定则发布最新',
+        },
+      },
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      return ctx.callApi('POST', '/api/deployments/deploy', {
+        body: {
+          conversation_id: ctx.conversationId,
+          artifact_name: args.artifact_name || '',
+          mode: 'github',
+        },
+      });
+    },
+  },
 ];
 
 const DEFAULT_AGENT_TOOLS = [
@@ -3282,7 +3328,7 @@ async function main() {
   const serverURL = readArg('--server-url');
   const apiKey = readArg('--api-key');
   if (!serverURL || !apiKey) {
-    logFlow('error', 'cli.usage_error', { usage: 'npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]' });
+    logFlow('error', 'cli.usage_error', { usage: 'npx @hust-agenthub/daemon --server-url <url> --api-key <key> [--mcp]' });
     process.exit(2);
   }
 

@@ -37,6 +37,7 @@ type DeployArtifactRepo interface {
 	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
 	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
 	GetLatestRootByConversation(ctx context.Context, convID string) (string, error)
+	GetLatestByConversationAndName(ctx context.Context, convID, name string) (*model.Artifact, error)
 }
 
 // DeployConvRepo 部署服务用于鉴权的对话仓库能力。
@@ -201,6 +202,30 @@ func (s *DeploymentService) DeployLatestInConversation(ctx context.Context, conv
 		return nil, fmt.Errorf("latest artifact in conversation: %w", err)
 	}
 	return s.Deploy(ctx, rootID, userID)
+}
+
+// DeployByConversation 按对话 ID 和可选名称查找产物并部署预览。
+func (s *DeploymentService) DeployByConversation(ctx context.Context, convID, userID, artifactName string) (*model.Deployment, error) {
+	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)
+	if err != nil {
+		return nil, fmt.Errorf("find artifact by conversation: %w", err)
+	}
+	if art == nil {
+		return nil, ErrDeployNoArtifact
+	}
+	return s.Deploy(ctx, art.RootID, userID)
+}
+
+// PublishGitHubByConversation 按对话 ID 和可选名称查找产物并发布到 GitHub Pages。
+func (s *DeploymentService) PublishGitHubByConversation(ctx context.Context, convID, userID, artifactName string) (*model.Deployment, error) {
+	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)
+	if err != nil {
+		return nil, fmt.Errorf("find artifact by conversation: %w", err)
+	}
+	if art == nil {
+		return nil, ErrDeployNoArtifact
+	}
+	return s.PublishGitHub(ctx, art.RootID, userID)
 }
 
 // Get 查询部署状态。

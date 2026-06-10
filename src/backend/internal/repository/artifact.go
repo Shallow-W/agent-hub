@@ -237,6 +237,32 @@ func (r *ArtifactRepo) GetLatestRootByConversation(ctx context.Context, convID s
 	return rootID, nil
 }
 
+// GetLatestByConversationAndName 根据对话 ID 和名称（匹配 filename 或 title）查找最新的产物。
+// name 为空时不按名称过滤，返回对话中最新的产物。未找到返回 nil, nil。
+func (r *ArtifactRepo) GetLatestByConversationAndName(ctx context.Context, convID, name string) (*model.Artifact, error) {
+	query := `SELECT ` + artifactCols + `
+		FROM artifacts a JOIN messages m ON m.id = a.message_id
+		WHERE m.conversation_id = $1`
+	var args []interface{}
+	args = append(args, convID)
+
+	if name != "" {
+		query += ` AND (a.filename ILIKE '%' || $2 || '%' OR a.title ILIKE '%' || $2 || '%')`
+		args = append(args, name)
+	}
+	query += ` ORDER BY a.created_at DESC, a.version DESC LIMIT 1`
+
+	var a model.Artifact
+	err := r.db.QueryRowxContext(ctx, query, args...).StructScan(&a)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get latest artifact by conversation and name: %w", err)
+	}
+	return &a, nil
+}
+
 // GetConversationIDByRoot 通过血缘根回溯所属对话（用于鉴权）。
 func (r *ArtifactRepo) GetConversationIDByRoot(ctx context.Context, rootID string) (string, error) {
 	var convID string
