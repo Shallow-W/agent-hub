@@ -14,6 +14,7 @@ import {
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
 import { getPlatformSkills } from '@/api/platformSkill';
+import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import {
@@ -40,6 +41,7 @@ import styles from './AgentProfile.module.css';
 interface AgentProfileProps {
   agent: Agent | null;
   defaultTab?: string;
+  onMessage?: (agent: Agent) => void;
 }
 
 const tabItems = [
@@ -49,11 +51,17 @@ const tabItems = [
   { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
 
+const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+
+function hasManagementTools(tools: string[]): boolean {
+  return tools.some((tool) => managementTools.has(tool));
+}
+
 function getStatusText(agent: Agent): string {
   return agent.status === 'online' ? 'Online' : agent.status;
 }
 
-export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile' }) => {
+export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile', onMessage }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
   const updateAgentTags = useAgentStore((s) => s.updateAgentTags);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
@@ -70,6 +78,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [toolManageOpen, setToolManageOpen] = useState(false);
   const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
+  const [dbToolTemplates, setDbToolTemplates] = useState<UserTemplate[]>([]);
 
   const filteredTools = useMemo(() => {
     if (toolFilter === 'all') return toolCatalog;
@@ -94,6 +103,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   useEffect(() => {
     if (!agent) return;
     setActiveTab(defaultTab);
+  }, [agent?.id, defaultTab]);
+
+  useEffect(() => {
+    if (!agent) return;
     setName(agent.name);
     setAvatar(agent.avatar ?? '');
     setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
@@ -102,11 +115,42 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     const parsedTools = parseToolsConfig(agent.tools_config);
     setSelectedToolset(parsedTools.toolset);
     setSelectedTools(parsedTools.allowedTools);
-  }, [agent?.id]);
+  }, [
+    agent?.id,
+    agent?.name,
+    agent?.avatar,
+    agent?.tags,
+    agent?.custom_skills,
+    agent?.system_prompt,
+    agent?.tools_config,
+  ]);
 
   useEffect(() => {
     getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    listUserTemplates('tools').then(setDbToolTemplates).catch(() => {});
+  }, []);
+
+  const loadDbToolTemplates = async () => {
+    try { setDbToolTemplates(await listUserTemplates('tools')); } catch { /* keep current */ }
+  };
+
+  interface ToolsetOption {
+    value: string;
+    label: string;
+    tools?: string[];
+  }
+
+  const allToolsetOptions = useMemo<ToolsetOption[]>(() => [
+    ...toolsetOptions.filter((o) => o.value !== 'custom'),
+    ...dbToolTemplates.map((t) => {
+      const tools = Array.isArray((t.content as Record<string, unknown>)?.tools)
+        ? (t.content as Record<string, unknown>).tools as string[] : [];
+      return { value: `db-${t.id}`, label: `★ ${t.name}`, tools };
+    }),
+  ], [dbToolTemplates]);
 
   if (!agent) {
     return (
@@ -155,7 +199,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           system_prompt: agent.system_prompt ?? '',
           tools_config: agent.tools_config ?? '',
           capabilities_json: agent.capabilities_json ?? '',
-          enable_management_tools: false,
+          enable_management_tools: agent.enable_management_tools ?? false,
         });
       }
       message.success('Agent Profile 已保存');
@@ -211,6 +255,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       await updateAgent(agent.id, {
         name: agent.name,
         cli_tool: agent.cli_tool,
+        avatar: agent.avatar || undefined,
         system_prompt: systemPromptValue.trim() || undefined,
         tools_config: agent.tools_config ?? '',
         capabilities_json: agent.capabilities_json ?? '',
@@ -225,18 +270,22 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
 
   const handleToolsetChange = (value: string) => {
     setSelectedToolset(value);
-    const nextTools = value in toolsetTemplates ? getTemplateTools(value) : selectedTools;
-    setSelectedTools(nextTools);
+    if (value in toolsetTemplates) {
+      setSelectedTools(getTemplateTools(value));
+    } else if (value.startsWith('db-')) {
+      const opt = allToolsetOptions.find((o) => o.value === value);
+      setSelectedTools(opt?.tools ?? selectedTools);
+    } else {
+      setSelectedTools(selectedTools);
+    }
   };
 
   const handleToolsChange = (values: string[]) => {
-    setSelectedToolset('custom');
     setSelectedTools(values);
   };
 
   const handleToolManageApply = (tools: string[], _skillIds: string[]) => {
     setSelectedTools(tools);
-    setSelectedToolset('custom');
     setToolManageOpen(false);
   };
 
@@ -247,9 +296,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       await updateAgent(agent.id, {
         name: agent.name,
         cli_tool: agent.cli_tool,
+        avatar: agent.avatar || undefined,
         system_prompt: agent.system_prompt ?? '',
         tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
+        enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementTools(selectedTools),
       });
       message.success('工具配置已保存');
     } catch {
@@ -276,7 +327,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           </div>
         </div>
         <div className={styles.actions}>
-          <Button icon={<MessageOutlined />}>Message</Button>
+          <Button icon={<MessageOutlined />} onClick={() => onMessage?.(agent)}>Message</Button>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
         </div>
       </div>
@@ -478,10 +529,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               <Select
                 className={styles.toolsetSelect}
                 value={selectedToolset}
-                options={toolsetOptions}
+                options={allToolsetOptions}
                 onChange={handleToolsetChange}
+                getPopupContainer={(trigger) => trigger.parentElement || document.body}
               />
               <Button icon={<SettingOutlined />} onClick={() => setToolManageOpen(true)}>管理</Button>
+              <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>保存</Button>
               <span className={styles.toolCountLabel}>
                 已选 {selectedToolCount}/{toolCatalog.length}
               </span>
@@ -539,11 +592,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 })}
               </div>
             </Checkbox.Group>
-            <div className={styles.actionPanel}>
-              <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>
-                保存工具配置
-              </Button>
-            </div>
           </section>
         )}
       </div>
@@ -559,7 +607,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         currentSkillIds={new Set()}
         librarySkills={librarySkills}
         onApply={handleToolManageApply}
-        onClose={() => setToolManageOpen(false)}
+        onClose={() => { setToolManageOpen(false); loadDbToolTemplates(); }}
       />
     </div>
   );

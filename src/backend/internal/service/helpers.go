@@ -44,10 +44,10 @@ func optionalStringPtr(value string) *string {
 	return &value
 }
 
-// waitDaemonTask 轮询等待 daemon 任务完成（600ms 间隔，120s 超时）
+// waitDaemonTask 轮询等待 daemon 任务完成（600ms 间隔，400s 超时）
 // 供 OrchestratorService 和 MessageService 共享使用
 func waitDaemonTask(ctx context.Context, repo daemonTaskGetter, taskID string) (*model.DaemonTask, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(600 * time.Millisecond)

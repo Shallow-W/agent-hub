@@ -448,7 +448,10 @@ func (s *KnowledgeService) ensureFilesPreview(ctx context.Context, files []model
 }
 
 func (s *KnowledgeService) ensureFilePreview(ctx context.Context, file *model.KnowledgeFile) {
-	if file == nil || file.PreviewType == "text" || file.PreviewType == "image" || file.FilePath == "" {
+	if file == nil || file.PreviewType == "image" || file.FilePath == "" {
+		return
+	}
+	if file.PreviewType == "text" && file.PreviewText != "" {
 		return
 	}
 	absPath, err := SafeJoinUploadPath(s.uploadDir, file.FilePath)

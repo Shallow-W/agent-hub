@@ -25,16 +25,16 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *A
 	return &MessageRepo{db: db, attachmentRepo: attachmentRepo, artifactRepo: artifactRepo}
 }
 
-// messageCols 通用消息查询列（含 JOIN users 获取 username）
+// messageCols 通用消息查询列（含 JOIN users + agents 获取 username）
 const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
-COALESCE(u.username, '') AS username,
+COALESCE(a.name, u.username, '') AS username,
 EXISTS (
 	SELECT 1 FROM message_pins mp
 	WHERE mp.message_id = m.id AND mp.conversation_id = m.conversation_id AND mp.enabled = TRUE
 ) AS pinned`
 
 // messageFrom 通用 FROM 子句
-const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
+const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id LEFT JOIN agents a ON a.id = m.sender_id`
 
 // Create 创建新消息并刷新对话时间戳（事务保证原子性，附件在同一事务内写入）
 func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error) {
@@ -341,7 +341,7 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 			m.content,
 			COALESCE(m.artifacts_json, '') AS artifacts_json,
 			m.sender_id,
-			COALESCE(sender.username, '') AS username,
+			COALESCE(agent_sender.name, sender.username, '') AS username,
 			m.created_at AS message_created_at,
 			mp.created_by AS pinned_by,
 			COALESCE(pinner.username, '') AS pinned_by_name,
@@ -349,6 +349,7 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 		 FROM message_pins mp
 		 JOIN messages m ON m.id = mp.message_id AND m.conversation_id = mp.conversation_id
 		 LEFT JOIN users sender ON sender.id = m.sender_id
+			 LEFT JOIN agents agent_sender ON agent_sender.id = m.sender_id
 		 LEFT JOIN users pinner ON pinner.id = mp.created_by
 		 WHERE mp.conversation_id = $1 AND mp.enabled = TRUE AND m.deleted_at IS NULL
 		 ORDER BY mp.created_at ASC
@@ -520,11 +521,12 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	// 不能回退到 conversations.user_id，否则 worker 回复 Orch 消息时会显示成群主/用户。
 	query, args, err := sqlx.In(`SELECT m.id, m.content, m.deleted_at,
 	          COALESCE(m.sender_id::text, '') AS sender_id,
-	          COALESCE(u.username, '') AS username,
+	          COALESCE(a.name, u.username, '') AS username,
 	          m.role,
 	          COALESCE(m.artifacts_json, '') AS artifacts_json
 	          FROM messages m
 	          LEFT JOIN users u ON u.id = m.sender_id
+		          LEFT JOIN agents a ON a.id = m.sender_id
 	          WHERE m.id IN (?)`, replyIDs)
 	if err != nil {
 		return nil, fmt.Errorf("build reply query: %w", err)
@@ -591,6 +593,11 @@ func replyPreviewUsername(role, username, artifactsJSON string) string {
 	if role != "assistant" {
 		return username
 	}
+	// username 已通过 COALESCE(a.name, u.username) 取到实时名字，优先使用
+	if username != "" {
+		return username
+	}
+	// 兜底：从 artifacts_json.agent_name 取
 	var meta struct {
 		AgentName string `json:"agent_name"`
 	}

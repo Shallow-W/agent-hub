@@ -1,27 +1,34 @@
 import React, { Suspense, lazy, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { MessageAttachment } from '@/types/attachment';
-import { isImageAttachment, isPDFAttachment, isPptxAttachment, formatFileSize } from '@/types/attachment';
 import {
-  FilePdfOutlined,
-  FileOutlined,
-  FilePptOutlined,
+  formatFileSize,
+  isImageAttachment,
+  isPDFAttachment,
+  isPptxAttachment,
+  isWordAttachment,
+} from '@/types/attachment';
+import {
   DownloadOutlined,
   EyeOutlined,
+  FileOutlined,
+  FilePdfOutlined,
+  FilePptOutlined,
+  FileWordOutlined,
 } from '@ant-design/icons';
 import { Modal } from 'antd';
 import { getToken } from '@/api/client';
 import styles from './MessageAttachmentView.module.css';
 
-// pptx-preview 较重，仅在用户点击“预览幻灯片”打开 Modal 时动态加载，避免进入首屏 bundle。
+// 预览库体积较大，只有用户打开弹窗时再加载，避免拉高首屏成本。
 const PptxPreview = lazy(() => import('./PptxPreview'));
+const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
-/** 将路径标准化为 URL 安全的正斜杠格式 */
 function toUrlPath(p: string): string {
   const normalized = p.replace(/\\/g, '/');
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
-/** 构建带鉴权 token 的 API URL（用于 <img>/<a> 等无法带 header 的场景） */
 function authUrl(path: string): string {
   const token = getToken();
   const sep = path.includes('?') ? '&' : '?';
@@ -53,9 +60,16 @@ function attachmentName(attachment: Pick<MessageAttachment, 'file_name' | 'file_
   return decodeURIComponent(normalized.split('/').pop() || '未命名文件');
 }
 
+function previewRelativePath(attachment: MessageAttachment): string {
+  return toUrlPath(attachment.file_path).replace(/^\/?uploads\//, '');
+}
+
 function pptPreviewUrl(attachment: MessageAttachment): string {
-  const relativePath = toUrlPath(attachment.file_path).replace(/^\/?uploads\//, '');
-  return authUrl(`${attachmentAPIPrefix(attachment)}/api/ppt-preview/${relativePath}`);
+  return authUrl(`${attachmentAPIPrefix(attachment)}/api/ppt-preview/${previewRelativePath(attachment)}`);
+}
+
+function documentPreviewUrl(attachment: MessageAttachment): string {
+  return authUrl(`${attachmentAPIPrefix(attachment)}/api/file-preview/${previewRelativePath(attachment)}`);
 }
 
 interface Props {
@@ -67,17 +81,14 @@ export const MessageAttachmentView: React.FC<Props> = ({ attachments }) => {
 
   return (
     <div className={styles.container}>
-      {attachments.map((att) =>
-        isImageAttachment(att.mime_type) ? (
-          <ImageAttachment key={att.id} attachment={att} />
-        ) : isPDFAttachment(att.mime_type) ? (
-          <PDFAttachment key={att.id} attachment={att} />
-        ) : isPptxAttachment(att.mime_type, att.file_name) ? (
-          <PptxAttachment key={att.id} attachment={att} />
-        ) : (
-          <GenericFileAttachment key={att.id} attachment={att} />
-        ),
-      )}
+      {attachments.map((att) => {
+        const typeName = att.file_name || att.file_path;
+        if (isImageAttachment(att.mime_type)) return <ImageAttachment key={att.id} attachment={att} />;
+        if (isPDFAttachment(att.mime_type)) return <PDFAttachment key={att.id} attachment={att} />;
+        if (isWordAttachment(att.mime_type, typeName)) return <WordAttachment key={att.id} attachment={att} />;
+        if (isPptxAttachment(att.mime_type, typeName)) return <PptxAttachment key={att.id} attachment={att} />;
+        return <GenericFileAttachment key={att.id} attachment={att} />;
+      })}
     </div>
   );
 };
@@ -105,43 +116,104 @@ const ImageAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachme
   );
 };
 
-const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => (
-  <a
-    href={authUrl(attachmentFileUrl(attachment))}
-    target="_blank"
-    rel="noopener noreferrer"
-    download={attachmentName(attachment)}
-    className={styles.pdfCard}
-  >
-    <FilePdfOutlined className={styles.pdfIcon} />
-    <div className={styles.pdfInfo}>
-      <span className={styles.pdfName} title={attachmentName(attachment)}>
-        {attachmentName(attachment)}
-      </span>
-      <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
-    </div>
-  </a>
-);
+const PDFAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
+  const fileUrl = authUrl(attachmentFileUrl(attachment));
+  const fileName = attachmentName(attachment);
+  const previewUrl = documentPreviewUrl(attachment);
+
+  return (
+    <PreviewableFileAttachment
+      attachment={attachment}
+      fileName={fileName}
+      fileUrl={fileUrl}
+      icon={<FilePdfOutlined className={styles.pdfIcon} />}
+      titleIcon={<FilePdfOutlined className={styles.pdfIcon} />}
+      previewTitle="预览 PDF"
+      previewUrl={previewUrl}
+      renderPreview={() => (
+        <DocumentPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
+      )}
+    />
+  );
+};
+
+const WordAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
+  const fileUrl = authUrl(attachmentFileUrl(attachment));
+  const fileName = attachmentName(attachment);
+  const previewUrl = documentPreviewUrl(attachment);
+
+  return (
+    <PreviewableFileAttachment
+      attachment={attachment}
+      fileName={fileName}
+      fileUrl={fileUrl}
+      icon={<FileWordOutlined className={styles.wordIcon} />}
+      titleIcon={<FileWordOutlined className={styles.wordIcon} />}
+      previewTitle="预览 Word"
+      previewUrl={previewUrl}
+      renderPreview={() => (
+        <DocumentPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
+      )}
+    />
+  );
+};
 
 const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
-  const [open, setOpen] = useState(false);
   const fileUrl = authUrl(attachmentFileUrl(attachment));
   const fileName = attachmentName(attachment);
   const previewUrl = pptPreviewUrl(attachment);
 
   return (
+    <PreviewableFileAttachment
+      attachment={attachment}
+      fileName={fileName}
+      fileUrl={fileUrl}
+      icon={<FilePptOutlined className={styles.pptIcon} />}
+      titleIcon={<FilePptOutlined className={styles.pptIcon} />}
+      previewTitle="预览幻灯片"
+      previewUrl={previewUrl}
+      renderPreview={() => (
+        <PptxPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
+      )}
+    />
+  );
+};
+
+interface PreviewableFileAttachmentProps {
+  attachment: MessageAttachment;
+  fileName: string;
+  fileUrl: string;
+  icon: ReactNode;
+  titleIcon: ReactNode;
+  previewTitle: string;
+  previewUrl: string;
+  renderPreview: () => ReactNode;
+}
+
+const PreviewableFileAttachment: React.FC<PreviewableFileAttachmentProps> = ({
+  attachment,
+  fileName,
+  fileUrl,
+  icon,
+  titleIcon,
+  previewTitle,
+  renderPreview,
+}) => {
+  const [open, setOpen] = useState(false);
+
+  return (
     <>
-      <div className={styles.pptCard}>
-        <FilePptOutlined className={styles.pptIcon} />
-        <div className={styles.pdfInfo}>
-          <span className={styles.pdfName} title={fileName}>{fileName}</span>
-          <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
+      <div className={styles.previewCard}>
+        {icon}
+        <div className={styles.fileInfo}>
+          <span className={styles.fileName} title={fileName}>{fileName}</span>
+          <span className={styles.fileSize}>{formatFileSize(attachment.file_size)}</span>
         </div>
-        <div className={styles.pptActions}>
+        <div className={styles.previewActions}>
           <button
             type="button"
-            className={styles.pptPreviewBtn}
-            title="预览幻灯片"
+            className={styles.previewButton}
+            title={previewTitle}
             onClick={() => setOpen(true)}
           >
             <EyeOutlined />
@@ -150,7 +222,7 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
           <a
             href={fileUrl}
             download={fileName}
-            className={styles.pptDownload}
+            className={styles.downloadButton}
             title="下载文件"
           >
             <DownloadOutlined />
@@ -165,15 +237,15 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
         style={{ top: 16, maxWidth: 'none' }}
         title={
           <span className={styles.modalTitle}>
-            <FilePptOutlined className={styles.pptIcon} />
+            {titleIcon}
             <span className={styles.modalTitleName}>{fileName}</span>
           </span>
         }
         destroyOnHidden
       >
         {open && (
-          <Suspense fallback={<div className={styles.pptModalLoading}>加载预览组件…</div>}>
-            <PptxPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
+          <Suspense fallback={<div className={styles.previewModalLoading}>加载预览组件...</div>}>
+            {renderPreview()}
           </Suspense>
         )}
       </Modal>
@@ -181,19 +253,23 @@ const PptxAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachmen
   );
 };
 
-const GenericFileAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => (
-  <a
-    href={authUrl(attachmentFileUrl(attachment))}
-    download={attachmentName(attachment)}
-    className={styles.pdfCard}
-  >
-    <FileOutlined className={styles.pdfIcon} />
-    <div className={styles.pdfInfo}>
-      <span className={styles.pdfName} title={attachmentName(attachment)}>
-        {attachmentName(attachment)}
-      </span>
-      <span className={styles.pdfSize}>{formatFileSize(attachment.file_size)}</span>
-    </div>
-    <DownloadOutlined className={styles.downloadIcon} />
-  </a>
-);
+const GenericFileAttachment: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
+  const fileName = attachmentName(attachment);
+
+  return (
+    <a
+      href={authUrl(attachmentFileUrl(attachment))}
+      download={fileName}
+      className={styles.fileCard}
+    >
+      <FileOutlined className={styles.genericIcon} />
+      <div className={styles.fileInfo}>
+        <span className={styles.fileName} title={fileName}>
+          {fileName}
+        </span>
+        <span className={styles.fileSize}>{formatFileSize(attachment.file_size)}</span>
+      </div>
+      <DownloadOutlined className={styles.downloadIcon} />
+    </a>
+  );
+};

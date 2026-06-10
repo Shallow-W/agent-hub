@@ -123,6 +123,7 @@ func (r *fakeMsgRepo) ListReplies(ctx context.Context, messageID string) ([]mode
 
 type fakeConvRepoForMsg struct {
 	conv      *model.Conversation
+	agents    []model.ConversationAgent
 	timestamp bool
 }
 
@@ -150,7 +151,7 @@ func (r *fakeConvRepoForMsg) ListMemberIDs(ctx context.Context, conversationID s
 }
 
 func (r *fakeConvRepoForMsg) ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error) {
-	return nil, nil
+	return r.agents, nil
 }
 
 type fakeAgentRepoForMsg struct {
@@ -273,6 +274,50 @@ func TestSendMessageWithAgentCreatesAssistantReply(t *testing.T) {
 	if agentMessage.ArtifactsJSON == "" {
 		t.Fatalf("expected agent metadata in artifacts")
 	}
+}
+
+func TestSendMessageAgentChatFallsBackToConversationAgent(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{}
+	convRepo := &fakeConvRepoForMsg{
+		conv:   &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
+		agents: []model.ConversationAgent{{AgentID: "agent-1"}},
+	}
+	agentRepo := &fakeAgentRepoForMsg{
+		agent:          &model.Agent{ID: "agent-1", UserID: &userID, Name: "OpenCode", CLITool: "opencode", MachineID: stringPtr("machine-1")},
+		inConversation: true,
+	}
+	svc := NewMessageService(msgRepo, convRepo, agentRepo)
+
+	hub := ws.NewDaemonHub(slog.Default())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	defer hubCancel()
+	go hub.Run(hubCtx)
+	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(hub)
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-1", &ws.TaskResult{
+			TaskID: "task-1",
+			Result: "fallback agent result",
+		})
+	}()
+
+	_, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "", nil)
+	if err != nil {
+		t.Fatalf("send message failed: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		for _, msg := range msgRepo.messages {
+			if msg.Role == "assistant" && msg.Content == "fallback agent result" {
+				return
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	t.Fatalf("expected fallback assistant reply, got %#v", msgRepo.messages)
 }
 
 func stringPtr(value string) *string {

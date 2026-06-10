@@ -495,10 +495,9 @@ export const ChatWindow: React.FC = () => {
               <Avatar
                 className={styles.conversationAvatar}
                 size={26}
-                src={resolveAgentAvatar(
-                  agents.find((a) => a.id === activeConv.peer_id)
-                    || { id: activeConv.peer_id || '', name: displayName },
-                )}
+                src={agents.find((a) => a.id === activeConv.peer_id)
+                  ? resolveAgentAvatar(agents.find((a) => a.id === activeConv.peer_id)!)
+                  : undefined}
                 icon={<RobotOutlined />}
               />
             ) : isGroup ? (

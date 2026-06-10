@@ -291,8 +291,13 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	switch conv.Type {
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
-		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments, &msg.ID)
+		resolvedAgentID := strings.TrimSpace(agentID)
+		if resolvedAgentID == "" {
+			resolvedAgentID = s.resolveAgentConversationAgentID(ctx, convID, userID)
+		}
+		slog.Info("agent chat dispatch resolved", "conversation_id", convID, "agent_id", resolvedAgentID, "provided_agent_id", strings.TrimSpace(agentID) != "")
+		if resolvedAgentID != "" {
+			go s.asyncAgentReply(convID, userID, resolvedAgentID, content, msg.Attachments, &msg.ID)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
@@ -874,7 +879,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
 
 	var result *ws.TaskResult
@@ -1022,7 +1027,10 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	contextMessages := s.buildAgentHandoffs(ctx, convID)
+	// 单聊 Agent 不需要群聊风格的 handoff 上下文：
+	// Claude Code 通过 --session-id/--resume 自行维护对话历史，
+	// 无需服务端额外发送历史摘要。
+	contextMessages := ""
 
 	// Include text extracted from this message's attachments before shared context.
 	if s.orchSvc != nil {
@@ -1103,4 +1111,15 @@ func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
 	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
 		"conversation_id": convID,
 	})
+}
+
+func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, convID, userID string) string {
+	agents, err := s.convRepo.ListAgents(ctx, convID, userID)
+	if err != nil || len(agents) == 0 {
+		if err != nil {
+			slog.Warn("resolve agent conversation agent failed", "conversation_id", convID, "error", err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(agents[0].AgentID)
 }

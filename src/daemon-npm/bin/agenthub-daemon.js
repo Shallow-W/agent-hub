@@ -7,7 +7,7 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
-const EXEC_TIMEOUT_MS = 120000;
+const EXEC_TIMEOUT_MS = 400000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -130,6 +130,8 @@ const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, s
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
 const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
 let currentDaemonWs = null;
+const activeTaskIDs = new Set();
+const completedTaskIDs = new Set();
 const pendingTaskCompletions = new Map(); // taskID → task.complete data, flushed after WS reconnect
 
 // Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
@@ -190,6 +192,19 @@ function buildPlatformMcpArgs(conversationId, userId, agentId) {
   return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
 }
 
+function buildAgentHubContextEnv(conversationId, userId, agentId) {
+  const env = {};
+  if (conversationId) env.AGENTHUB_CONVERSATION_ID = conversationId;
+  if (userId) env.AGENTHUB_USER_ID = userId;
+  if (agentId) env.AGENTHUB_AGENT_ID = agentId;
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+function opencodeContextChanged(task, savedSessionId) {
+  if (!savedSessionId) return false;
+  return Boolean(task && task.agent_id && task.conversation_id);
+}
+
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
 // 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
@@ -197,6 +212,7 @@ function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
   registerOpenClawMcp(mcpArgs);
+  registerOpenCodeMcp(mcpArgs);
   registerCodexMcp(mcpArgs);
 }
 
@@ -213,6 +229,44 @@ function registerOpenClawMcp(mcpArgs) {
   } else {
     logFlow('warn', 'mcp_config.openclaw_failed', { error: firstLine(result.stderr || result.stdout) });
   }
+}
+
+function registerOpenCodeMcp(mcpArgs) {
+  const command = resolveCommand('opencode');
+  if (commandVersion(command) === null) return;
+  try {
+    const configPath = ensureOpenCodeMcpConfig(['node', ...mcpArgs]);
+    logFlow('info', 'mcp_config.opencode_configured', { server: 'agenthub-platform', file: configPath });
+  } catch (err) {
+    logFlow('warn', 'mcp_config.opencode_failed', { error: errorMessage(err) });
+  }
+}
+
+function openCodeConfigPath() {
+  if (process.env.AGENTHUB_OPENCODE_CONFIG) return process.env.AGENTHUB_OPENCODE_CONFIG;
+  return path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
+}
+
+function ensureOpenCodeMcpConfig(command) {
+  const configPath = openCodeConfigPath();
+  let config = {};
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    config = raw.trim() ? JSON.parse(raw) : {};
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('OpenCode config root must be a JSON object');
+    }
+  }
+  if (!config.$schema) config.$schema = 'https://opencode.ai/config.json';
+  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) config.mcp = {};
+  config.mcp['agenthub-platform'] = {
+    type: 'local',
+    command,
+    enabled: true,
+  };
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return configPath;
 }
 
 function registerCodexMcp(mcpArgs) {
@@ -346,6 +400,10 @@ function makeSessionId(conversationID, agentID) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+function sessionKeyForTask(task) {
+  return task && task.agent_id && task.conversation_id ? `${task.agent_id}:${task.conversation_id}` : '';
+}
+
 function commandOutput(command, args, timeout = 5000) {
   try {
     const spec = processSpec(command, args);
@@ -440,9 +498,26 @@ function resolveCodexCommand() {
   return 'codex';
 }
 
+function resolveOpenCodeCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_OPENCODE_COMMAND),
+    existingFile(process.platform === 'win32' && process.env.APPDATA
+      ? path.join(process.env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+      : null),
+    'opencode',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'opencode';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
     return resolveCodexCommand();
+  }
+  if (cliTool === 'opencode') {
+    return resolveOpenCodeCommand();
   }
   return cliTool;
 }
@@ -880,31 +955,55 @@ function ensureAgentHubCodexHome() {
   return dir;
 }
 
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function tomlArray(values) {
+  return `[${values.map(tomlString).join(', ')}]`;
+}
+
+function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId) {
+  const configFile = path.join(codexHome, 'config.toml');
+  let content = fs.existsSync(configFile) ? fs.readFileSync(configFile, 'utf8') : '';
+  const sectionPattern = /\n?\[mcp_servers\.agenthub-platform\]\n[\s\S]*?(?=\n\[[^\]]+\]|\s*$)/;
+  content = content.replace(sectionPattern, '').trimEnd();
+  const args = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  if (args.length === 0) return configFile;
+  const section = [
+    '',
+    '[mcp_servers.agenthub-platform]',
+    'command = "node"',
+    `args = ${tomlArray(args)}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(configFile, `${content}${section}`, 'utf8');
+  return configFile;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
+    const codexHome = ensureAgentHubCodexHome();
+    ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id);
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
     const codexMcpFallback = [
       '[Codex MCP 适配]',
       '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
       '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
-      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
-      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '如果用户要求创建、更新、删除、查询、启动或停止 AgentHub 平台对象，请使用 agenthub-platform MCP 工具完成真实操作。',
+      '如果 agenthub-platform MCP 工具不可用，请明确说明不可用的具体工具名和原因，不要声称只有临时子代理工具。',
       '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
       '',
     ].join('\n');
     const effectivePrompt = systemPrompt
       ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
       : `${codexMcpFallback}${userPrompt}`;
-    const globalArgs = [
-      '--ask-for-approval',
-      'never',
-    ];
     const execArgs = [
       '--skip-git-repo-check',
-      '--sandbox',
-      'read-only',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--ephemeral',
       '--color',
       'never',
       '--output-last-message',
@@ -912,10 +1011,42 @@ function commandForTask(task) {
     ];
     return {
       command,
-      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
+      args: ['exec', ...execArgs, effectivePrompt],
       outputFile,
       cwd: ensureTaskWorkdir(task),
-      env: { CODEX_HOME: ensureAgentHubCodexHome() },
+      env: {
+        CODEX_HOME: codexHome,
+        ...buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
+      },
+    };
+  }
+  if (task.cli_tool === 'opencode') {
+    const sessionKey = sessionKeyForTask(task);
+    const savedSessionId = sessionKey ? conversationSessions.get(sessionKey) : '';
+    const effectivePrompt = systemPrompt
+      ? `[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : userPrompt;
+    const args = [
+      'run',
+      '--format',
+      'json',
+      '--no-replay',
+      '--dangerously-skip-permissions',
+    ];
+    if (savedSessionId) {
+      args.push('--session', savedSessionId);
+      if (opencodeContextChanged(task, savedSessionId)) {
+        // OpenCode caches available tools in a session; fork so AgentHub tool changes take effect.
+        args.push('--fork');
+      }
+    }
+    args.push(effectivePrompt);
+    return {
+      command,
+      args,
+      resultFormat: 'opencode-json',
+      persistSessionKey: sessionKey,
+      env: buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
     };
   }
   if (task.cli_tool === 'claude') {
@@ -928,6 +1059,8 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
+      '--thinking',
+      'off',
       ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
     ];
     if (persistent) {
@@ -1066,9 +1199,49 @@ async function executeTask(task) {
     logFlow('info', 'task.result_ready', { ...taskMeta, source: 'openclaw_json', result_len: parsed.length });
     return parsed;
   }
+  if (spec.resultFormat === 'opencode-json') {
+    const parsed = parseOpenCodeOutput(stdout);
+    if (spec.persistSessionKey && parsed.sessionId) {
+      conversationSessions.set(spec.persistSessionKey, parsed.sessionId);
+      saveSessionMap();
+    }
+    logFlow('info', 'task.result_ready', {
+      ...taskMeta,
+      source: 'opencode_json',
+      result_len: parsed.text.length,
+      session_id: parsed.sessionId,
+      session_persisted: Boolean(spec.persistSessionKey && parsed.sessionId),
+    });
+    return parsed.text;
+  }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   logFlow('info', 'task.result_ready', { ...taskMeta, source: 'stdio', result_len: text.length });
   return text || '(Agent CLI 没有返回内容)';
+}
+
+async function executeTaskOnce(task) {
+  const taskID = task && task.id;
+  if (!taskID) return executeTask(task);
+  if (activeTaskIDs.has(taskID) || completedTaskIDs.has(taskID)) {
+    logFlow('warn', 'task.dispatch_duplicate_ignored', {
+      task_id: taskID,
+      cli_tool: task.cli_tool,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+    });
+    return null;
+  }
+  activeTaskIDs.add(taskID);
+  try {
+    const result = await executeTask(task);
+    completedTaskIDs.add(taskID);
+    if (completedTaskIDs.size > 1000) {
+      completedTaskIDs.delete(completedTaskIDs.values().next().value);
+    }
+    return result;
+  } finally {
+    activeTaskIDs.delete(taskID);
+  }
 }
 
 function openSkillLocation(prompt) {
@@ -1192,6 +1365,108 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function extractOpenCodeSessionId(value) {
+  if (!value || typeof value !== 'object') return '';
+  for (const key of ['sessionID', 'sessionId', 'session_id']) {
+    if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+  }
+  if (value.session && typeof value.session === 'object') {
+    for (const key of ['id', 'sessionID', 'sessionId', 'session_id']) {
+      if (typeof value.session[key] === 'string' && value.session[key].trim()) return value.session[key].trim();
+    }
+  }
+  if (value.message && typeof value.message === 'object') {
+    return extractOpenCodeSessionId(value.message);
+  }
+  return '';
+}
+
+function textFromOpenCodeContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => textFromOpenCodeContent(part))
+      .filter(Boolean)
+      .join('');
+  }
+  if (!content || typeof content !== 'object') return '';
+  if (typeof content.text === 'string') return content.text;
+  if (typeof content.content === 'string') return content.content;
+  if (Array.isArray(content.parts)) return textFromOpenCodeContent(content.parts);
+  return '';
+}
+
+function collectOpenCodeText(value, directMessages, partChunks, partUpdates) {
+  if (!value || typeof value !== 'object') return;
+
+  const message = value.message && typeof value.message === 'object' ? value.message : value;
+  if (message.role === 'assistant') {
+    const messageText = textFromOpenCodeContent(message.content || message.parts || message.text);
+    if (messageText.trim()) directMessages.push(messageText);
+  }
+
+  const part = value.part && typeof value.part === 'object' ? value.part : null;
+  if (part && (part.type === 'text' || typeof part.text === 'string')) {
+    const text = textFromOpenCodeContent(part);
+    if (text.trim()) {
+      const partID = String(part.id || value.id || '');
+      if (partID && /updated|delta/i.test(String(value.type || ''))) {
+        partUpdates.set(partID, text);
+      } else {
+        partChunks.push(text);
+      }
+    }
+  }
+
+  for (const key of ['response', 'result', 'output', 'text']) {
+    if (typeof value[key] === 'string' && value[key].trim() && /assistant|result|complete|response|text/i.test(String(value.type || key))) {
+      partChunks.push(value[key]);
+    }
+  }
+}
+
+function parseOpenCodeOutput(stdout) {
+  const text = stdout.trim();
+  if (!text) return { text: '(OpenCode CLI 没有返回内容)', sessionId: '' };
+
+  const events = [];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // OpenCode may fall back to formatted output when JSON is unavailable.
+    }
+  }
+  if (events.length === 0) {
+    try {
+      events.push(JSON.parse(text));
+    } catch {
+      return { text, sessionId: '' };
+    }
+  }
+
+  let sessionId = '';
+  const directMessages = [];
+  const partChunks = [];
+  const partUpdates = new Map();
+  for (const event of events) {
+    sessionId = sessionId || extractOpenCodeSessionId(event);
+    collectOpenCodeText(event, directMessages, partChunks, partUpdates);
+  }
+
+  const directText = directMessages.join('\n').trim();
+  if (directText) return { text: directText, sessionId };
+
+  const updatedText = Array.from(partUpdates.values()).join('').trim();
+  if (updatedText) return { text: updatedText, sessionId };
+
+  const chunkText = partChunks.join('').trim();
+  if (chunkText) return { text: chunkText, sessionId };
+
+  return { text, sessionId };
+}
+
 function lineEndIndex(text, start) {
   const nl = text.indexOf('\n', start);
   return nl === -1 ? text.length : nl + 1;
@@ -1524,7 +1799,11 @@ async function pollTasks(serverURL, apiKey) {
       });
       const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
       try {
-        const result = await executeTask(task);
+        const result = await executeTaskOnce(task);
+        if (result === null) {
+          stopHeartbeat();
+          continue;
+        }
         stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
         logFlow('info', 'poll.task_completed', {
@@ -1706,7 +1985,7 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
           session_id: effectiveSessionId,
           timeout_ms: EXEC_TIMEOUT_MS,
         });
-        reject(new Error('Agent task timed out (120s)'));
+        reject(new Error('Agent task timed out (400s)'));
       }
     }, EXEC_TIMEOUT_MS);
     timer.unref(); // Don't keep event loop alive for timeout timer
@@ -2109,7 +2388,8 @@ async function connectWS(serverURL, apiKey) {
               conversation_id: task.conversation_id,
               mode: 'legacy_spawn',
             });
-            result = await executeTask(task);
+            result = await executeTaskOnce(task);
+            if (result === null) return;
           }
           const artifacts = parseArtifacts(result);
           sendTaskComplete({ task_id: task.id, result, artifacts });
@@ -2281,7 +2561,7 @@ const MCP_TOOLS = [
       required: ['name'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('POST', '/api/groups', {
+    run: (args, ctx) => ctx.callMcpApi('POST', '/mcp/groups', {
       body: { name: args.name, member_ids: args.member_ids || [] },
     }),
   },
@@ -2289,7 +2569,7 @@ const MCP_TOOLS = [
     name: 'list_agents',
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/agents'),
   },
   {
     name: 'get_agent_skill',
@@ -2520,7 +2800,7 @@ const MCP_TOOLS = [
       required: ['agent_id'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('GET', `/api/agents/${encodeURIComponent(args.agent_id)}`),
+    run: (args, ctx) => ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(args.agent_id)}`),
   },
   {
     name: 'update_agent_prompt',
@@ -2540,18 +2820,19 @@ const MCP_TOOLS = [
       const systemPrompt = args.system_prompt;
       if (!systemPrompt) throw new Error('system_prompt is required');
       // 先获取当前完整信息
-      const res = await ctx.callApi('GET', `/api/agents`);
+      const res = await ctx.callMcpApi('GET', `/mcp/agents`);
       const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
       const agent = agents.find((a) => a && a.id === agentId);
       if (!agent) throw new Error(`agent not found: ${agentId}`);
       // 只改 system_prompt，其他字段原样传回
-      return ctx.callApi('PUT', `/api/agents/${encodeURIComponent(agentId)}`, {
+      return ctx.callMcpApi('PUT', `/mcp/agents/${encodeURIComponent(agentId)}`, {
         body: {
           name: agent.name,
           cli_tool: agent.cli_tool,
           system_prompt: systemPrompt,
           tools_config: agent.tools_config,
           capabilities_json: agent.capabilities_json,
+          custom_skills: agent.custom_skills,
           enable_management_tools: agent.enable_management_tools,
         },
       });
@@ -2568,7 +2849,7 @@ const MCP_TOOLS = [
       required: ['agent_id'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('POST', `/api/agents/${encodeURIComponent(args.agent_id)}/start`),
+    run: (args, ctx) => ctx.callMcpApi('POST', `/mcp/agents/${encodeURIComponent(args.agent_id)}/start`),
   },
   {
     name: 'stop_agent',
@@ -2581,14 +2862,14 @@ const MCP_TOOLS = [
       required: ['agent_id'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('POST', `/api/agents/${encodeURIComponent(args.agent_id)}/stop`),
+    run: (args, ctx) => ctx.callMcpApi('POST', `/mcp/agents/${encodeURIComponent(args.agent_id)}/stop`),
   },
   // ── 知识库 ──
   {
     name: 'list_knowledge_bases',
     description: '列出当前用户的知识库，包含 ID、名称、描述、可见性、文件数量等信息。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    run: (args, ctx) => ctx.callApi('GET', '/api/knowledge-bases'),
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/knowledge-bases'),
   },
   {
     name: 'list_knowledge_files',
@@ -2601,7 +2882,7 @@ const MCP_TOOLS = [
       required: ['knowledge_base_id'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('GET', `/api/knowledge-bases/${encodeURIComponent(args.knowledge_base_id)}/files`),
+    run: (args, ctx) => ctx.callMcpApi('GET', `/mcp/knowledge-bases/${encodeURIComponent(args.knowledge_base_id)}/files`),
   },
   {
     name: 'search_knowledge',
@@ -2620,13 +2901,24 @@ const MCP_TOOLS = [
       const keyword = args.keyword;
       if (!kbId) throw new Error('knowledge_base_id is required');
       if (!keyword) throw new Error('keyword is required');
-      const res = await ctx.callApi('GET', `/api/knowledge-bases/${encodeURIComponent(kbId)}/files`);
+      const res = await ctx.callMcpApi('GET', `/mcp/knowledge-bases/${encodeURIComponent(kbId)}/files`);
       const files = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
       const keywordLower = keyword.toLowerCase();
       return files.filter((f) => {
         const preview = typeof f.preview_text === 'string' ? f.preview_text : '';
         return preview.toLowerCase().includes(keywordLower);
       });
+    },
+  },
+  // ── 平台 Skills ──
+  {
+    name: 'list_platform_skills',
+    description: '列出所有平台 Skill，包含名称、分类、描述和触发场景，用于为 Agent 分配 Skill。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: async (args, ctx) => {
+      const res = await ctx.callMcpApi('GET', '/mcp/platform-skills');
+      const skills = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      return skills.map((s) => ({ name: s.name, category: s.category, description: s.description, trigger: s.trigger }));
     },
   },
   // ── Agent 自建 ──
@@ -2656,12 +2948,18 @@ const MCP_TOOLS = [
       const toolsConfig = JSON.stringify({ toolset, allowed_tools: tpl });
       const body = { name, cli_tool: cliTool, system_prompt: systemPrompt, tools_config: toolsConfig };
       if (args.tags) body.tags = args.tags;
-      return ctx.callApi('POST', '/api/agents', { body });
+      const candidatesRes = await ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates');
+      const candidates = candidatesRes && Array.isArray(candidatesRes.data) ? candidatesRes.data : Array.isArray(candidatesRes) ? candidatesRes : [];
+      const candidate = candidates.find((item) => item && item.cli_tool === cliTool);
+      if (candidate && candidate.id) {
+        return ctx.callMcpApi('POST', `/mcp/daemon/agent-candidates/${encodeURIComponent(candidate.id)}/add`, { body });
+      }
+      return ctx.callMcpApi('POST', '/mcp/agents', { body });
     },
   },
   {
     name: 'update_agent',
-    description: '更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表和标签。',
+    description: '更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表、平台 Skill 分配和标签。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2670,6 +2968,7 @@ const MCP_TOOLS = [
         system_prompt: { type: 'string', description: '新系统提示词' },
         toolset: { type: 'string', description: '切换工具模板' },
         allowed_tools: { type: 'array', items: { type: 'string' }, description: '自定义工具列表' },
+        skills: { type: 'array', items: { type: 'string' }, description: '平台 Skill 名称列表，传入后覆盖当前 Agent 的 Skill 分配。传空数组清空所有 Skill' },
         tags: { type: 'string', description: '新标签' },
       },
       required: ['agent_id'],
@@ -2679,7 +2978,7 @@ const MCP_TOOLS = [
       const agentId = args.agent_id;
       if (!agentId) throw new Error('agent_id is required');
       // Fetch current agent
-      const res = await ctx.callApi('GET', `/api/agents/${encodeURIComponent(agentId)}`);
+      const res = await ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(agentId)}`);
       const agent = res && res.data ? res.data : res;
       if (!agent || typeof agent !== 'object') throw new Error(`agent not found: ${agentId}`);
       const body = {
@@ -2688,6 +2987,7 @@ const MCP_TOOLS = [
         system_prompt: agent.system_prompt,
         tools_config: agent.tools_config,
         capabilities_json: agent.capabilities_json,
+        custom_skills: agent.custom_skills,
         enable_management_tools: agent.enable_management_tools,
       };
       // Override only provided fields
@@ -2704,7 +3004,15 @@ const MCP_TOOLS = [
           body.tools_config = JSON.stringify({ toolset: '', allowed_tools: tools });
         }
       }
-      return ctx.callApi('PUT', `/api/agents/${encodeURIComponent(agentId)}`, { body });
+      // Skills: fetch platform skills, filter by name, build custom_skills
+      if (Array.isArray(args.skills)) {
+        const skillNames = new Set(args.skills.filter((s) => typeof s === 'string' && s));
+        const psRes = await ctx.callMcpApi('GET', '/mcp/platform-skills');
+        const allSkills = psRes && Array.isArray(psRes.data) ? psRes.data : Array.isArray(psRes) ? psRes : [];
+        const matched = allSkills.filter((s) => skillNames.has(s.name));
+        body.custom_skills = JSON.stringify(matched);
+      }
+      return ctx.callMcpApi('PUT', `/mcp/agents/${encodeURIComponent(agentId)}`, { body });
     },
   },
   {
@@ -2718,7 +3026,7 @@ const MCP_TOOLS = [
       required: ['agent_id'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('DELETE', `/api/agents/${encodeURIComponent(args.agent_id)}`),
+    run: (args, ctx) => ctx.callMcpApi('DELETE', `/mcp/agents/${encodeURIComponent(args.agent_id)}`),
   },
   {
     name: 'list_toolsets',
@@ -2729,8 +3037,8 @@ const MCP_TOOLS = [
       { name: 'basic', label: '基础群聊', description: '包含群 Agent 列表、消息读取、Skill 查看等基础工具' },
       { name: 'tasks', label: '任务协作', description: '包含任务看板的完整增删改查能力' },
       { name: 'orchestrator', label: 'Orchestrator', description: '编排器模板，包含会话、任务、群组管理和知识库搜索' },
-      { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 发现和详情查询工具' },
-      { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 详情、提示词更新、启停控制' },
+      { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 发现、详情查询、创建和更新工具' },
+      { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 详情、配置更新、提示词修改、启停和删除' },
       { name: 'knowledge', label: '知识库', description: '知识库列表、文件列表和关键词搜索' },
     ],
   },
@@ -2767,8 +3075,12 @@ const TOOLSET_TEMPLATES = {
     'list_agent_candidates',
     'list_machines',
     'get_agent_detail',
+    'create_agent',
+    'update_agent',
+    'update_agent_prompt',
+    'list_platform_skills',
   ],
-  agent_manager: ['list_agents', 'get_agent_detail', 'update_agent_prompt', 'start_agent', 'stop_agent', 'get_agent_skill'],
+  agent_manager: ['list_agents', 'get_agent_detail', 'update_agent', 'update_agent_prompt', 'start_agent', 'stop_agent', 'delete_agent', 'get_agent_skill', 'list_platform_skills'],
   knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge'],
 };
 
@@ -2798,8 +3110,8 @@ function allowedToolsFromConfig(raw) {
   if (!parsed.ok) return NO_AGENT_TOOLS;
   const config = parsed.config;
   if (!config) return NO_AGENT_TOOLS;
-  if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
-  if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
+  if (Array.isArray(config.allowed_tools) && config.allowed_tools.length > 0) return uniqueToolNames(config.allowed_tools);
+  if (Array.isArray(config.tools) && config.tools.length > 0) return uniqueToolNames(config.tools);
   if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
     return TOOLSET_TEMPLATES[config.toolset];
   }
@@ -2809,9 +3121,9 @@ function allowedToolsFromConfig(raw) {
 async function resolveCurrentAgent(ctx) {
   if (!ctx.agentId) return null;
   if (ctx.currentAgent !== undefined) return ctx.currentAgent;
-  const res = await ctx.callApi('GET', '/api/agents');
-  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
-  ctx.currentAgent = agents.find((item) => item && item.id === ctx.agentId) || null;
+  const res = await ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(ctx.agentId)}`);
+  const agent = res && res.data ? res.data : (res && typeof res === 'object' && !Array.isArray(res) ? res : null);
+  ctx.currentAgent = (agent && agent.id === ctx.agentId) ? agent : null;
   return ctx.currentAgent;
 }
 
@@ -2930,9 +3242,9 @@ async function handleMcpMessage(line, toolMap, ctx) {
 async function runMcpServer(serverURL, apiKey) {
   const daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   const ctx = {
-    conversationId: readArg('--conversation-id') || null,
-    userId: readArg('--user-id') || null,
-    agentId: readArg('--agent-id') || null,
+    conversationId: readArg('--conversation-id') || process.env.AGENTHUB_CONVERSATION_ID || null,
+    userId: readArg('--user-id') || process.env.AGENTHUB_USER_ID || null,
+    agentId: readArg('--agent-id') || process.env.AGENTHUB_AGENT_ID || null,
     allowedTools: null,
     currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
@@ -2986,5 +3298,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  commandForTask,
+  conversationSessions,
+  executeTaskOnce,
+  ensureOpenCodeMcpConfig,
   onWebSocket,
+  parseOpenCodeOutput,
 };

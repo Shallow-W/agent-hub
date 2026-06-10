@@ -331,7 +331,6 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     if (message.role !== 'assistant' || !message.artifacts_json) return {};
     try { return JSON.parse(message.artifacts_json) as MessageArtifacts; } catch { return {}; }
   }, [message.role, message.artifacts_json]);
-  const agentName = agentMeta.agent_name ?? null;
   const deployment = agentMeta.deployment ?? null;
   const conversationAgentRole = useMemo(() => {
     if (!agentMeta.agent_id) return null;
@@ -351,28 +350,34 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     [agents, agentMeta.agent_id],
   );
 
-  const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+  // 优先使用 store 中的最新 agent name（agent 重命名后 artifacts_json 中存储的是旧名）
+  const resolvedAgentName = storeAgent?.name || agentMeta.agent_name || null;
+
+  const displayName = message.username || resolvedAgentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
 
   // 头像来源优先级：
-  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)（honors agent.avatar）
-  //   2. assistant + 未找到（历史消息/列表未加载）→ resolveAgentAvatar({id: agent_id, name: agent_name}) 哈希兜底
+  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)
+  //   2. assistant + store 未加载 → undefined（避免 hash 兜底导致闪烁）
   //   3. 自己（当前登录用户，含 avatar）
   //   4. 其他用户（按 sender_id/username 稳定哈希默认）
   const avatarSrc = useMemo((): string | undefined => {
-    if (message.role === 'assistant' && agentName) {
+    if (message.role === 'assistant' && resolvedAgentName) {
       if (storeAgent) return resolveAgentAvatar(storeAgent);
-      return resolveAgentAvatar({ id: agentMeta.agent_id ?? agentName, name: agentName });
+      return undefined;
     }
     if (message.role === 'assistant') return undefined;
     if (isOwn) {
       const me = useAuthStore.getState().user;
       return me ? resolveUserAvatar(me) : undefined;
     }
+    // Check if sender is an agent (sender_id matches agent ID in store)
+    const senderAgent = message.sender_id ? agents.find((a) => a.id === message.sender_id) : undefined;
+    if (senderAgent) return resolveAgentAvatar(senderAgent);
     return resolveUserAvatar({ id: message.sender_id, username: message.username });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message.role, message.sender_id, message.username, agentName, agentMeta.agent_id, storeAgent, isOwn]);
+  }, [message.role, message.sender_id, message.username, resolvedAgentName, agentMeta.agent_id, storeAgent, isOwn, agents]);
 
-  const avatarLetter = agentName
+  const avatarLetter = resolvedAgentName
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
@@ -550,7 +555,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           {showAvatar && (
             <div className={styles.meta}>
               <Text className={styles.agentLabel}>{displayName}</Text>
-              {agentName && (
+              {resolvedAgentName && (
                 <span className={styles.agentBadge}>{agentBadgeLabel}</span>
               )}
               {message.pinned && (
@@ -603,7 +608,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               </div>
             )}
             {cardArtifacts.length > 0 && (
-              <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
+              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} />
             )}
             {deployment && (
               <div className={styles.deployCard}>

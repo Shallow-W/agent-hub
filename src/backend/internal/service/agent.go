@@ -35,9 +35,9 @@ type AgentRepo interface {
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
-	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error)
-	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
-	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error)
+	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)
+	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
+	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
 	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)
@@ -314,7 +314,7 @@ func (s *AgentService) ListAgentCandidates(ctx context.Context, userID string) (
 }
 
 // AddCandidateAgent 将候选 Agent 添加成可用 Agent。
-func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
+func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	displayName = strings.TrimSpace(displayName)
 	expectedCLITool = strings.TrimSpace(expectedCLITool)
 	systemPrompt = strings.TrimSpace(systemPrompt)
@@ -329,7 +329,7 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills)
+	agent, err := s.repo.AddCandidateAgent(ctx, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("add candidate agent: %w", err)
 	}
@@ -340,7 +340,7 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 }
 
 // CreateCustom 创建自建 Agent
-func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	name = strings.TrimSpace(name)
 	cliTool = strings.TrimSpace(cliTool)
 	if name == "" || cliTool == "" {
@@ -350,7 +350,11 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
+	customSkills, err = normalizeCustomSkills(customSkills)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.CreateCustom(ctx, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("create custom agent: %w", err)
 	}
@@ -358,7 +362,7 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 }
 
 // UpdateCustom 更新自建 Agent
-func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	name = strings.TrimSpace(name)
 	cliTool = strings.TrimSpace(cliTool)
 	if id == "" || name == "" || cliTool == "" {
@@ -368,14 +372,21 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if err != nil {
 		return nil, fmt.Errorf("get agent: %w", err)
 	}
-	if current == nil || current.UserID == nil || *current.UserID != userID || current.Type != "custom" {
+	if current == nil || current.Type != "custom" {
+		return nil, ErrAgentNotFound
+	}
+	if userID != "" && (current.UserID == nil || *current.UserID != userID) {
 		return nil, ErrAgentNotFound
 	}
 	toolsConfig, err = normalizeToolsConfig(toolsConfig)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
-	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools)
+	customSkills, err = normalizeCustomSkills(customSkills)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
 	}
@@ -400,9 +411,9 @@ func (s *AgentService) UpdateAvatar(ctx context.Context, id, userID, avatar stri
 	return agent, nil
 }
 
-// DeleteOwned 删除当前用户拥有的 Agent。
+// DeleteOwned 删除 Agent。userID 为空时跳过归属校验（MCP 模式）。
 func (s *AgentService) DeleteOwned(ctx context.Context, id, userID string) error {
-	if id == "" || userID == "" {
+	if id == "" {
 		return ErrAgentInvalidInput
 	}
 	deleted, err := s.repo.DeleteOwned(ctx, id, userID)

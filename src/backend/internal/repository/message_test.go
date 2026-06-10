@@ -25,10 +25,19 @@ func TestTruncateRunesKeepsShortText(t *testing.T) {
 	}
 }
 
-func TestReplyPreviewUsernameUsesAssistantAgentName(t *testing.T) {
-	got := replyPreviewUsername("assistant", "wjc", `{"agent_name":"员工2"}`)
+func TestReplyPreviewUsernameUsesLiveUsernameForAssistant(t *testing.T) {
+	// username from COALESCE(a.name, u.username) takes priority over artifacts_json snapshot
+	got := replyPreviewUsername("assistant", "new-agent-name", `{"agent_name":"old-agent-name"}`)
+	if got != "new-agent-name" {
+		t.Fatalf("expected live username, got %q", got)
+	}
+}
+
+func TestReplyPreviewUsernameFallsBackToArtifactsJSON(t *testing.T) {
+	// when username is empty (no user/agent row), fall back to artifacts_json
+	got := replyPreviewUsername("assistant", "", `{"agent_name":"员工2"}`)
 	if got != "员工2" {
-		t.Fatalf("expected assistant agent name, got %q", got)
+		t.Fatalf("expected artifacts agent_name fallback, got %q", got)
 	}
 }
 
