@@ -108,28 +108,28 @@ export const ChatWindow: React.FC = () => {
     activeIdRef.current = activeId ?? null;
   }, [activeId]);
 
-  useEffect(() => {
-    if (!activeId || activeConv?.type !== 'group') {
+  const fetchConversationAgents = useCallback((conversationId?: string) => {
+    const targetId = conversationId ?? activeId;
+    if (!targetId || activeConv?.type !== 'group') {
       setConversationAgents([]);
       return;
     }
-    const conversationId = activeId;
-    let cancelled = false;
-    getConversationAgents(conversationId)
+    getConversationAgents(targetId)
       .then((items) => {
-        if (!cancelled && activeIdRef.current === conversationId) {
+        if (activeIdRef.current === targetId) {
           setConversationAgents(items);
         }
       })
       .catch(() => {
-        if (!cancelled && activeIdRef.current === conversationId) {
+        if (activeIdRef.current === targetId) {
           setConversationAgents([]);
         }
       });
-    return () => {
-      cancelled = true;
-    };
   }, [activeId, activeConv?.type]);
+
+  useEffect(() => {
+    fetchConversationAgents();
+  }, [fetchConversationAgents]);
 
   const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
     const pinned = await getPinnedContext(conversationId);
@@ -620,6 +620,7 @@ export const ChatWindow: React.FC = () => {
           conversationId={activeId}
           currentUserId={user?.id ?? ''}
           onGroupLeft={() => fetchConversations()}
+          onAgentsChanged={fetchConversationAgents}
         />
       )}
       {isGroup && activeId && (

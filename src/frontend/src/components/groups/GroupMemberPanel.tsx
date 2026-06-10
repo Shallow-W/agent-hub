@@ -40,6 +40,7 @@ interface GroupMemberPanelProps {
   conversationId: string;
   currentUserId: string;
   onGroupLeft?: () => void;
+  onAgentsChanged?: () => void;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -60,6 +61,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   conversationId,
   currentUserId,
   onGroupLeft,
+  onAgentsChanged,
 }) => {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(false);
@@ -377,6 +379,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                         await setConversationAgentRole(conversationId, agent.agent_id, 'orchestrator');
                                         message.success('已设为 Orchestrator');
                                         await fetchMembers();
+                                        onAgentsChanged?.();
                                       } catch {
                                         message.error('设置角色失败');
                                       } finally {
@@ -394,6 +397,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                         await setConversationAgentRole(conversationId, agent.agent_id, 'worker');
                                         message.success('已取消 Orchestrator');
                                         await fetchMembers();
+                                        onAgentsChanged?.();
                                       } catch {
                                         message.error('设置角色失败');
                                       } finally {
@@ -412,6 +416,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                     await removeConversationAgent(conversationId, agent.agent_id);
                                     message.success('已移除智能体');
                                     await fetchMembers();
+                                    onAgentsChanged?.();
                                   } catch {
                                     message.error('移除智能体失败');
                                   } finally {
@@ -614,6 +619,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                 await addConversationAgent(conversationId, agent.id);
                                 message.success('已添加智能体');
                                 await fetchMembers();
+                                onAgentsChanged?.();
                               } catch {
                                 message.error('添加智能体失败');
                               } finally {
