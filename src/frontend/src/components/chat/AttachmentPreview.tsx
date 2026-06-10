@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import type { AttachmentPayload } from '@/types/attachment';
-import { isImageAttachment, formatFileSize } from '@/types/attachment';
-import { CloseCircleFilled, FilePdfOutlined } from '@ant-design/icons';
+import { formatFileSize, isImageAttachment, isPDFAttachment, isPptxAttachment, isWordAttachment } from '@/types/attachment';
+import {
+  CloseCircleFilled,
+  FileOutlined,
+  FilePdfOutlined,
+  FilePptOutlined,
+  FileWordOutlined,
+} from '@ant-design/icons';
 import { Spin } from 'antd';
 import styles from './AttachmentPreview.module.css';
 
@@ -66,8 +72,15 @@ const PreviewContent: React.FC<{ item: PendingAttachment }> = ({ item }) => {
 
   return (
     <div className={styles.fileIcon}>
-      <FilePdfOutlined style={{ fontSize: 24, color: '#cf1322' }} />
+      <UploadFileIcon file={item.file} />
       <span className={styles.fileSize}>{formatFileSize(item.file.size)}</span>
     </div>
   );
+};
+
+const UploadFileIcon: React.FC<{ file: File }> = ({ file }) => {
+  if (isPDFAttachment(file.type)) return <FilePdfOutlined className={styles.pdfIcon} />;
+  if (isWordAttachment(file.type, file.name)) return <FileWordOutlined className={styles.wordIcon} />;
+  if (isPptxAttachment(file.type, file.name)) return <FilePptOutlined className={styles.pptIcon} />;
+  return <FileOutlined className={styles.genericIcon} />;
 };

@@ -264,6 +264,7 @@ func main() {
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
 		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
+		apiGroup.GET("/file-preview/*filepath", pptPreviewHandler.FilePreview)
 
 		// 知识库路由（需要鉴权）
 		kbRoutes := apiGroup.Group("/knowledge-bases")

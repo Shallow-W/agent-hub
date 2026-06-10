@@ -33,6 +33,15 @@ export function isPDFAttachment(mimeType: string): boolean {
   return mimeType === 'application/pdf';
 }
 
+export function isWordAttachment(mimeType: string, fileName: string): boolean {
+  const wordMimes = new Set([
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ]);
+  if (wordMimes.has(mimeType)) return true;
+  return /\.docx?$/i.test(fileName);
+}
+
 /**
  * 判断是否为 PowerPoint 演示文稿（.pptx / .ppt）。
  * mime 优先（pptx / ppt 的官方 mime），但上传链路 mime 可能不准，故用文件名后缀兜底。
