@@ -58,6 +58,7 @@ func main() {
 	taskRepo := repository.NewTaskRepo(db)
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
 	userTemplateRepo := repository.NewUserTemplateRepo(db)
+	toolDefRepo := repository.NewToolDefinitionRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -113,6 +114,7 @@ func main() {
 	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
 	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
+	toolDefSvc := service.NewToolDefinitionService(toolDefRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
@@ -156,6 +158,7 @@ func main() {
 	platformSkillHandler := handler.NewPlatformSkillHandler(platformSkillSvc)
 	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
 	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
+	toolDefHandler := handler.NewToolDefinitionHandler(toolDefSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
@@ -468,6 +471,10 @@ func main() {
 		mcpGroup.GET("/platform-skills", platformSkillHandler.List)
 		mcpGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
 	}
+
+	// 工具定义和内置模板（公开元数据，无需鉴权）
+	router.GET("/api/tools/definitions", toolDefHandler.ListDefinitions)
+	router.GET("/api/tools/builtin-templates", toolDefHandler.ListBuiltinTemplates)
 
 	registerSPARoutes(router, frontendDistDir())
 

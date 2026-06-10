@@ -3055,34 +3055,8 @@ const DEFAULT_AGENT_TOOLS = [
 ];
 const NO_AGENT_TOOLS = [];
 
-const TOOLSET_TEMPLATES = {
-  none: [],
-  basic: ['list_group_agents', 'get_messages', 'get_agent_skill'],
-  tasks: DEFAULT_AGENT_TOOLS,
-  orchestrator: [
-    ...DEFAULT_AGENT_TOOLS,
-    'list_conversation_agents',
-    'list_conversations',
-    'get_group_info',
-    'list_group_members',
-    'list_knowledge_bases',
-    'search_knowledge',
-  ],
-  agent_builder: [
-    'list_agents',
-    'list_group_agents',
-    'get_agent_skill',
-    'list_agent_candidates',
-    'list_machines',
-    'get_agent_detail',
-    'create_agent',
-    'update_agent',
-    'update_agent_prompt',
-    'list_platform_skills',
-  ],
-  agent_manager: ['list_agents', 'get_agent_detail', 'update_agent', 'update_agent_prompt', 'start_agent', 'stop_agent', 'delete_agent', 'get_agent_skill', 'list_platform_skills'],
-  knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge'],
-};
+// TOOLSET_TEMPLATES is populated from the backend API at startup (see fetch below).
+const TOOLSET_TEMPLATES = {};
 
 function normalizeToolName(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -3251,6 +3225,22 @@ async function runMcpServer(serverURL, apiKey) {
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };
   const toolMap = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
+
+  // 从后端拉取工具集模板到 TOOLSET_TEMPLATES，失败时保持为空对象（工具集解析将回退到 NO_AGENT_TOOLS）
+  try {
+    const templatesRes = await callMcpApi(serverURL, daemonToken, 'GET', '/api/tools/builtin-templates', {}, ctx.userId);
+    const data = templatesRes && templatesRes.data ? templatesRes.data : templatesRes;
+    if (data && Array.isArray(data)) {
+      for (const tpl of data) {
+        if (tpl && typeof tpl.name === 'string' && Array.isArray(tpl.tool_names)) {
+          TOOLSET_TEMPLATES[tpl.name] = tpl.tool_names;
+        }
+      }
+      logFlow('info', 'mcp.templates_fetched', { count: data.length });
+    }
+  } catch (err) {
+    logFlow('warn', 'mcp.templates_fetch_failed', { error: errorMessage(err), fallback: 'hardcoded' });
+  }
 
   let buffer = '';
   process.stdin.setEncoding('utf8');

@@ -9,9 +9,10 @@ import {
   categoryMeta,
   categoryOrder,
   getTemplateTools,
-  toolCatalog,
+  getToolCatalogSync,
+  getToolsetOptions,
   toolsConfigToJSON,
-  toolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
 import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
@@ -67,20 +68,25 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setCandidateId(first?.id ?? '');
     setName(first ? getDefaultAgentName(first.name, first.cli_tool) : '');
     setSystemPrompt('');
-    setToolset('tasks');
-    setSelectedTools(getTemplateTools('tasks'));
     setToolFilter('all');
     setSelectedSkillIds(new Set());
     setSkillFilter('all');
     setSkillTemplate('none');
     setToolManageOpen(false);
     setSkillManageOpen(false);
+    fetchToolCatalog()
+      .then(() => {
+        setToolset('tasks');
+        setSelectedTools(getTemplateTools('tasks'));
+      })
+      .catch(() => {});
     getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, [open, candidates]);
 
   const filteredTools = useMemo(() => {
-    if (toolFilter === 'all') return toolCatalog;
-    return toolCatalog.filter((t) => t.category === toolFilter);
+    const catalog = getToolCatalogSync();
+    if (toolFilter === 'all') return catalog;
+    return catalog.filter((t) => t.category === toolFilter);
   }, [toolFilter]);
 
   const skillCategories = useMemo(() => {
@@ -272,13 +278,13 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         <div className={styles.field}>
           <div className={styles.fieldHeader}>
             <span className={styles.label}>工具集</span>
-            <span className={styles.countLabel}>已选 {selectedToolCount}/{toolCatalog.length}</span>
+            <span className={styles.countLabel}>已选 {selectedToolCount}/{getToolCatalogSync().length}</span>
           </div>
           <div className={styles.toolbar}>
             <Select
               className={styles.toolbarSelect}
               value={toolset}
-              options={toolsetOptions}
+              options={getToolsetOptions()}
               onChange={handleToolsetChange}
             />
             <Button
@@ -294,13 +300,13 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
               type="button"
               onClick={() => setToolFilter('all')}
             >
-              全部 {toolCatalog.length}
+              全部 {getToolCatalogSync().length}
             </button>
             {categoryOrder.map((cat) => {
               const meta = categoryMeta[cat];
               if (!meta) return null;
-              const count = toolCatalog.filter((t) => t.category === cat).length;
-              const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+              const count = getToolCatalogSync().filter((t) => t.category === cat).length;
+              const selected = selectedTools.filter((n) => getToolCatalogSync().find((t) => t.name === n && t.category === cat)).length;
               return (
                 <button
                   className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}

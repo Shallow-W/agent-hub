@@ -14,8 +14,9 @@ import {
   categoryMeta,
   categoryOrder,
   getTemplateTools,
-  toolCatalog,
-  toolsetOptions,
+  getToolCatalogSync,
+  getToolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
 import styles from './CreateTemplateManagerModal.module.css';
 
@@ -71,7 +72,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
 
   const builtInTemplates: BuiltInTemplate[] = useMemo(() => {
     if (mode === 'tools') {
-      return toolsetOptions
+      return getToolsetOptions()
         .filter((opt) => opt.value !== 'custom')
         .map((opt) => {
           const tools = getTemplateTools(opt.value);
@@ -128,10 +129,10 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     setSkillSearch('');
     setToolFilter('all');
     setSkillFilter('all');
-    listUserTemplates(mode)
+    fetchToolCatalog()
+      .then(() => listUserTemplates(mode))
       .then((list) => {
         setDbTemplates(list);
-        // Build first selection from builtins + freshly fetched db templates
         const all = [
           ...builtInTemplates.map((t) => {
             const skillIds = t.skillCategories.length > 0
@@ -151,7 +152,6 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
         else handleNew();
       })
       .catch(() => {
-        // Fallback: just select first builtin or handle new
         const first = builtInTemplates[0];
         if (first) {
           const skillIds = first.skillCategories.length > 0
@@ -159,7 +159,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             : [];
           applyTemplateToDraft({ id: first.key, name: first.name, tools: first.tools, skillIds } as TemplateItem);
         } else handleNew();
-      });
+      })
   }, [open, mode]);
 
   const applyTemplateToDraft = (tpl: TemplateItem) => {
@@ -236,7 +236,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   };
 
   const filteredEditorTools = useMemo(() => {
-    let list = toolCatalog;
+    let list = getToolCatalogSync();
     if (toolFilter !== 'all') list = list.filter((t) => t.category === toolFilter);
     if (toolSearch) list = list.filter((t) => t.label.includes(toolSearch) || t.name.includes(toolSearch) || t.description.includes(toolSearch));
     return list;
@@ -304,7 +304,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             <div className={styles.selectionSection}>
               <div className={styles.sectionHeader}>
                 工具集
-                <span className={styles.sectionCount}>{draftTools.length}/{toolCatalog.length}</span>
+                <span className={styles.sectionCount}>{draftTools.length}/{getToolCatalogSync().length}</span>
               </div>
               <div className={styles.searchRow}>
                 <Input

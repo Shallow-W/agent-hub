@@ -31,10 +31,11 @@ import {
   categoryOrder,
   getTemplateTools,
   parseToolsConfig,
-  toolCatalog,
-  toolsetTemplates,
+  getToolCatalogSync,
+  getToolsetTemplatesSync,
   toolsConfigToJSON,
-  toolsetOptions,
+  getToolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
 import styles from './AgentProfile.module.css';
 
@@ -81,8 +82,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [dbToolTemplates, setDbToolTemplates] = useState<UserTemplate[]>([]);
 
   const filteredTools = useMemo(() => {
-    if (toolFilter === 'all') return toolCatalog;
-    return toolCatalog.filter((t) => t.category === toolFilter);
+    if (toolFilter === 'all') return getToolCatalogSync();
+    return getToolCatalogSync().filter((t) => t.category === toolFilter);
   }, [toolFilter]);
 
   const parseTagsFromJSON = (raw: string): string => {
@@ -126,6 +127,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   ]);
 
   useEffect(() => {
+    fetchToolCatalog().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, []);
 
@@ -144,7 +149,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   }
 
   const allToolsetOptions = useMemo<ToolsetOption[]>(() => [
-    ...toolsetOptions.filter((o) => o.value !== 'custom'),
+    ...getToolsetOptions().filter((o) => o.value !== 'custom'),
     ...dbToolTemplates.map((t) => {
       const tools = Array.isArray((t.content as Record<string, unknown>)?.tools)
         ? (t.content as Record<string, unknown>).tools as string[] : [];
@@ -270,7 +275,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
 
   const handleToolsetChange = (value: string) => {
     setSelectedToolset(value);
-    if (value in toolsetTemplates) {
+    if (value in getToolsetTemplatesSync()) {
       setSelectedTools(getTemplateTools(value));
     } else if (value.startsWith('db-')) {
       const opt = allToolsetOptions.find((o) => o.value === value);
@@ -536,7 +541,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               <Button icon={<SettingOutlined />} onClick={() => setToolManageOpen(true)}>管理</Button>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>保存</Button>
               <span className={styles.toolCountLabel}>
-                已选 {selectedToolCount}/{toolCatalog.length}
+                已选 {selectedToolCount}/{getToolCatalogSync().length}
               </span>
             </div>
             <div className={styles.toolFilterBar}>
@@ -545,13 +550,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 type="button"
                 onClick={() => setToolFilter('all')}
               >
-                全部 {toolCatalog.length}
+                全部 {getToolCatalogSync().length}
               </button>
               {categoryOrder.map((cat) => {
                 const meta = categoryMeta[cat];
                 if (!meta) return null;
-                const count = toolCatalog.filter((t) => t.category === cat).length;
-                const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+                const count = getToolCatalogSync().filter((t) => t.category === cat).length;
+                const selected = selectedTools.filter((n) => getToolCatalogSync().find((t) => t.name === n && t.category === cat)).length;
                 return (
                   <button
                     className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}
