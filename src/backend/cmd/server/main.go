@@ -158,6 +158,7 @@ func main() {
 	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetFileURLBuilder(fileURLs)
+	msgSvc.SetDeploymentService(deploymentSvc)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
