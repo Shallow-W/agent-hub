@@ -1,4 +1,5 @@
 import type { StreamMessage } from '@/types/message';
+import { wsURL } from './runtime';
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -37,9 +38,8 @@ export class WebSocketClient {
   }
 
   connect(connectToken: string): void {
-    // 开发环境通过 Vite 代理，生产环境直接连
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.url = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(connectToken)}`;
+    // 桌面端加载本地前端文件，但 WebSocket 必须连接远程后端。
+    this.url = wsURL(`/ws?token=${encodeURIComponent(connectToken)}`);
     this.doConnect();
   }
 

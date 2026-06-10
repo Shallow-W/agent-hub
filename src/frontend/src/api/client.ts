@@ -1,5 +1,6 @@
 import { message } from '@/utils/message';
 import type { ApiResponse } from '@/types/api';
+import { apiURL, loginURL } from './runtime';
 
 const TOKEN_KEY = 'agenthub_token';
 
@@ -56,7 +57,7 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetch(apiURL(path), {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -80,7 +81,7 @@ async function request<T>(
         handling401 = true;
         clearToken();
         message.warning('登录已过期，请重新登录', 2, () => {
-          window.location.href = '/login';
+          window.location.href = loginURL();
         });
       }
       throw new ApiError(res.status, json.code, json.message);

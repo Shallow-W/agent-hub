@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import { Modal } from 'antd';
 import { getToken } from '@/api/client';
+import { apiURL } from '@/api/runtime';
 import styles from './MessageAttachmentView.module.css';
 
 // 预览库体积较大，只有用户打开弹窗时再加载，避免拉高首屏成本。
@@ -31,8 +32,9 @@ function toUrlPath(p: string): string {
 
 function authUrl(path: string): string {
   const token = getToken();
-  const sep = path.includes('?') ? '&' : '?';
-  return token ? `${path}${sep}token=${encodeURIComponent(token)}` : path;
+  const url = apiURL(path);
+  const sep = url.includes('?') ? '&' : '?';
+  return token ? `${url}${sep}token=${encodeURIComponent(token)}` : url;
 }
 
 function attachmentFileUrl(attachment: MessageAttachment): string {

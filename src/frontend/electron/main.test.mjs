@@ -1,14 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
-  buildBackendEnv,
   backendReadyURL,
-  resolveBackendBinary,
-  resolveConfigPath,
+  resolveBackendBaseURL,
+  resolvePreloadConfig,
   resolveFrontendURL,
   waitForHTTP,
-  shouldLaunchBackend,
 } from './runtime.mjs';
 
 describe('Electron runtime helpers', () => {
@@ -19,67 +18,46 @@ describe('Electron runtime helpers', () => {
     };
 
     assert.equal(resolveFrontendURL({ env, appPath: '/app', resourcesPath: '/resources' }), 'http://127.0.0.1:5173');
-    assert.equal(shouldLaunchBackend(env), false);
   });
 
-  it('loads the bundled backend origin in production by default', () => {
+  it('loads the packaged frontend and does not launch a local backend in production', () => {
     const env = {};
+    const resourcesPath = path.join('C:', 'AgentHub', 'resources');
 
-    assert.equal(resolveFrontendURL({ env, appPath: '/app', resourcesPath: '/resources' }), 'http://127.0.0.1:8080');
-    assert.equal(shouldLaunchBackend(env), true);
+    assert.equal(
+      resolveFrontendURL({ env, appPath: '/app', resourcesPath }),
+      pathToFileURL(path.join(resourcesPath, 'frontend-dist', 'index.html')).href,
+    );
   });
 
-  it('honors explicit backend URL and disables bundled backend launch', () => {
+  it('uses explicit backend URL as the desktop API base without launching backend', () => {
     const env = {
       AGENTHUB_BACKEND_URL: 'http://10.0.0.5:8080',
-      AGENTHUB_DESKTOP_LAUNCH_BACKEND: 'false',
     };
 
-    assert.equal(resolveFrontendURL({ env, appPath: '/app', resourcesPath: '/resources' }), 'http://10.0.0.5:8080');
-    assert.equal(shouldLaunchBackend(env), false);
-  });
-
-  it('resolves packaged resources for backend binary and config', () => {
-    const resourcesPath = path.join('C:', 'AgentHub', 'resources');
-
+    assert.equal(resolveBackendBaseURL(env), 'http://10.0.0.5:8080');
     assert.equal(
-      resolveBackendBinary({
-        resourcesPath,
-        platform: 'win32',
-        exists: (candidate) => candidate.endsWith('server.exe'),
-      }),
-      path.join(resourcesPath, 'bin', 'server.exe'),
-    );
-    assert.equal(resolveConfigPath({ resourcesPath }), path.join(resourcesPath, 'config', 'config.yaml'));
-  });
-
-  it('falls back to extensionless backend binary for current build output', () => {
-    const resourcesPath = path.join('C:', 'AgentHub', 'resources');
-
-    assert.equal(
-      resolveBackendBinary({
-        resourcesPath,
-        platform: 'win32',
-        exists: (candidate) => candidate.endsWith('server'),
-      }),
-      path.join(resourcesPath, 'bin', 'server'),
+      resolveFrontendURL({ env, appPath: '/app', resourcesPath: '/resources' }),
+      pathToFileURL(path.join('/resources', 'frontend-dist', 'index.html')).href,
     );
   });
 
-  it('builds backend environment without clobbering existing variables', () => {
-    const env = buildBackendEnv({
-      baseEnv: { PATH: 'x', AGENTHUB_CONFIG: 'custom.yaml' },
-      configPath: 'default.yaml',
-      frontendDist: 'dist',
+  it('uses the remote backend by default', () => {
+    assert.equal(resolveBackendBaseURL({}), 'http://10.11.221.79:8080');
+  });
+
+  it('passes the backend API base to the preload bridge', () => {
+    const env = {
+      AGENTHUB_BACKEND_URL: 'https://agenthub.example.com/',
+    };
+
+    assert.deepEqual(resolvePreloadConfig(env), {
+      backendBaseURL: 'https://agenthub.example.com',
     });
-
-    assert.equal(env.PATH, 'x');
-    assert.equal(env.AGENTHUB_CONFIG, 'custom.yaml');
-    assert.equal(env.AGENTHUB_FRONTEND_DIST, 'dist');
   });
 
-  it('waits for the backend ready endpoint before opening the packaged desktop window', () => {
-    assert.equal(backendReadyURL(), 'http://127.0.0.1:8080/health/ready');
+  it('uses the remote backend ready endpoint for diagnostics', () => {
+    assert.equal(backendReadyURL(), 'http://10.11.221.79:8080/health/ready');
   });
 
   it('waits until an HTTP endpoint becomes available', async () => {

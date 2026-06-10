@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { useWsStore } from '@/store/wsStore';
+import { loginURL } from '@/api/runtime';
 
 export function useAuth() {
   const user = useAuthStore((s) => s.user);
@@ -23,7 +24,7 @@ export function useAuth() {
     localStorage.removeItem('agenthub_active_conv');
     localStorage.removeItem('agenthub_direct_agent_chats');
     // 强制刷新页面，彻底清空所有 zustand 内存状态
-    window.location.href = '/login';
+    window.location.href = loginURL();
   };
 
   return {

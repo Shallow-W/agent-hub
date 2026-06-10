@@ -1,11 +1,12 @@
 import type { AttachmentPayload } from '@/types/attachment';
 import { getAuthHeaders, ApiError } from './client';
+import { apiURL } from './runtime';
 
 export async function uploadFile(file: File): Promise<AttachmentPayload> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch('/api/upload', {
+  const res = await fetch(apiURL('/api/upload'), {
     method: 'POST',
     headers: getAuthHeaders(),
     body: formData,

@@ -1,4 +1,5 @@
 import { get, post } from './client';
+import { publicURL } from './runtime';
 import type { Deployment } from '@/types/deployment';
 
 export interface DeploymentCapabilities {
@@ -23,11 +24,11 @@ export async function publishToGitHub(rootId: string): Promise<Deployment> {
 export function absoluteDeployURL(relative?: string): string {
   if (!relative) return '';
   if (/^https?:\/\//.test(relative)) return relative;
-  return `${window.location.origin}${relative}`;
+  return publicURL(relative);
 }
 
 /** 部署产物的打包下载直链（公开，凭 deployment id 访问）。
  *  末段带 .zip 文件名，确保浏览器（含跨域下载）存成正确的 zip 而非无扩展名裸 UUID。 */
 export function deploymentDownloadURL(id: string): string {
-  return `${window.location.origin}/api/deployments/${id}/download/deployment-${id}.zip`;
+  return publicURL(`/api/deployments/${id}/download/deployment-${id}.zip`);
 }

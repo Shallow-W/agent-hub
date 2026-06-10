@@ -1,4 +1,5 @@
 import { get, post, put, del, getAuthHeaders } from './client';
+import { apiURL } from './runtime';
 import type {
   KnowledgeBase,
   KnowledgeFile,
@@ -38,7 +39,7 @@ export async function uploadKnowledgeFile(kbId: string, file: File): Promise<voi
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${BASE}/${kbId}/files`, {
+  const res = await fetch(apiURL(`${BASE}/${kbId}/files`), {
     method: 'POST',
     headers: getAuthHeaders(),
     body: formData,
@@ -57,9 +58,9 @@ export async function deleteKnowledgeFile(kbId: string, fileId: string): Promise
 
 /** 获取知识库文件预览/下载 URL */
 export function getKnowledgeFileUrl(kbId: string, file: Pick<KnowledgeFile, 'id' | 'url'> | string): string {
-  if (typeof file !== 'string' && file.url) return file.url;
+  if (typeof file !== 'string' && file.url) return apiURL(file.url);
   const fileId = typeof file === 'string' ? file : file.id;
-  return `${BASE}/${kbId}/files/${fileId}/content`;
+  return apiURL(`${BASE}/${kbId}/files/${fileId}/content`);
 }
 
 /** 读取服务端抽取出的知识库文件文本 */

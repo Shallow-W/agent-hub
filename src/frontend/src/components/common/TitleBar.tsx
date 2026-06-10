@@ -7,19 +7,6 @@ import {
 } from '@ant-design/icons';
 import styles from './TitleBar.module.css';
 
-declare global {
-  interface Window {
-    agentHubDesktop?: {
-      platform: string;
-      isDesktop: boolean;
-      minimize: () => void;
-      maximize: () => void;
-      close: () => void;
-      onMaximizeChange: (cb: (maximized: boolean) => void) => () => void;
-    };
-  }
-}
-
 /* 复用 favicon.svg 的设计，缩放为标题栏尺寸 */
 const AppLogo: React.FC = () => (
   <div className={styles.logoIcon}>

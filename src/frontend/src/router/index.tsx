@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   createBrowserRouter,
+  createHashRouter,
   Navigate,
   type RouteObject,
 } from 'react-router-dom';
@@ -68,4 +69,6 @@ const routes: RouteObject[] = [
   },
 ];
 
-export const router = createBrowserRouter(routes);
+export const router = window.agentHubDesktop?.isDesktop
+  ? createHashRouter(routes)
+  : createBrowserRouter(routes);
