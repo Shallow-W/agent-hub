@@ -15,17 +15,41 @@
   min-height: 0;
 }
 
-.webpageModal :global(.ant-modal-content) {
-  height: calc(100vh - 32px);
-}
-
 .webpageModal :global(.ant-modal-body) {
   padding: 16px;
 }
 
 .webpageModalBody {
-  height: calc(100vh - 64px);
   min-height: 0;
+  position: relative;
+  transition: height var(--transition-fast);
+}
+
+.webpageModalBodyCompact {
+  height: calc(min(76vh, 760px) - 32px);
+}
+
+.webpageModalBodyExpanded {
+  height: calc(100vh - 64px);
+}
+
+.webpageControls {
+  position: absolute;
+  top: 12px;
+  right: 48px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
+.webpageControlButton {
+  color: #1f2937;
 }
 
 .documentModalBody {

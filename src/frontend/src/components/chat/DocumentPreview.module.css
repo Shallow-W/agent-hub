@@ -1,21 +1,23 @@
 .measure {
   position: relative;
   width: 100%;
-  min-height: calc(100vh - 120px);
+  height: 100%;
+  min-height: 0;
   background: var(--color-bg-white);
 }
 
 .pdfFrame {
   display: block;
   width: 100%;
-  height: calc(100vh - 120px);
+  height: 100%;
   border: 0;
   border-radius: 8px;
   background: var(--color-bg-white);
 }
 
 .overlay {
-  min-height: calc(100vh - 120px);
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;

@@ -1,6 +1,13 @@
 import React, { useState, type ReactNode } from 'react';
-import { Modal, Tabs } from 'antd';
-import { CodeOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button, Modal, Tabs, Tooltip } from 'antd';
+import {
+  CodeOutlined,
+  EyeOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  InfoCircleOutlined,
+  RobotOutlined,
+} from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -239,6 +246,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
     ? 'preview'
     : 'code';
   const [activeKey, setActiveKey] = useState(defaultTab);
+  const [webpageExpanded, setWebpageExpanded] = useState(false);
 
   React.useEffect(() => {
     setActiveKey(
@@ -246,22 +254,37 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
         ? 'preview'
         : 'code',
     );
+    setWebpageExpanded(false);
   }, [artifact?.id, artifact?.type, artifact?.language, artifact?.filename]);
 
   if (!artifact) return null;
 
   if (artifact.type === 'webpage') {
+    const bodySizeClass = webpageExpanded ? styles.webpageModalBodyExpanded : styles.webpageModalBodyCompact;
+
     return (
       <Modal
         open={open}
         onCancel={onClose}
         footer={null}
-        width="94vw"
-        style={{ top: 16, maxWidth: 'none' }}
+        width={webpageExpanded ? '94vw' : 'min(76vw, 980px)'}
+        style={{ top: webpageExpanded ? 16 : 48, maxWidth: 'none' }}
         className={`${styles.workspaceModal} ${styles.webpageModal}`}
         destroyOnHidden
       >
-        <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
+        <div className={`${styles.modalBody} ${styles.webpageModalBody} ${bodySizeClass}`}>
+          <div className={styles.webpageControls}>
+            <Tooltip title={webpageExpanded ? '还原' : '全屏'}>
+              <Button
+                type="text"
+                size="small"
+                icon={webpageExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                aria-label={webpageExpanded ? '还原预览大小' : '全屏预览'}
+                className={styles.webpageControlButton}
+                onClick={() => setWebpageExpanded((value) => !value)}
+              />
+            </Tooltip>
+          </div>
           <PreviewView artifact={artifact} />
         </div>
       </Modal>
