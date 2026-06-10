@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
-	"net/http"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 
 	"github.com/agent-hub/backend/internal/ghpages"
@@ -340,23 +339,21 @@ func (s *DeploymentService) PublishGitHub(ctx context.Context, rootID, userID st
 	return s.decorate(updated), nil
 }
 
-// fetchURLContent 尝试从 URL 获取 HTML 内容，超时 5 秒。成功返回 HTML 字符串，失败返回空串。
-func fetchURLContent(rawURL string) string {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(rawURL)
+// isLocalhostURL 判断 URL 是否指向 localhost 或私有/回环地址。
+func isLocalhostURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
 	if err != nil {
-		return ""
+		return false
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
 	}
-	// 限制读取大小为 10MB，防止读取过大内容
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return ""
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return true
 	}
-	return string(body)
+	return false
 }
 
 // renderIndexHTML 生成站点首页：
@@ -370,12 +367,11 @@ func renderIndexHTML(art *model.Artifact) string {
 			return art.Content
 		}
 		if art.URL != "" {
-			// 尝试从 URL 拉取实际 HTML 内容，避免将隧道用户重定向到不可达的 localhost
-			if fetched := fetchURLContent(art.URL); fetched != "" {
-				return fetched
+			if isLocalhostURL(art.URL) {
+				return unavailablePreviewPage(art.URL)
 			}
-			// 拉取失败：生成友好的错误页面，而不是 meta refresh 到不可达地址
-			return unavailablePreviewPage(art.URL)
+			return `<!DOCTYPE html><meta charset="utf-8"><title>preview</title>` +
+				`<meta http-equiv="refresh" content="0;url=` + html.EscapeString(art.URL) + `">`
 		}
 	}
 
