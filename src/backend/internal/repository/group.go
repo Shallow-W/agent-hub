@@ -99,8 +99,10 @@ func (r *GroupRepo) ListMembers(ctx context.Context, conversationID string) ([]*
 	var list []*model.ConversationMember
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT cm.id, cm.conversation_id, cm.user_id, cm.role, cm.joined_at,
-		        u.username
-		 FROM conversation_members cm JOIN users u ON u.id = cm.user_id
+		        COALESCE(a.name, u.username) AS username
+		 FROM conversation_members cm
+		 LEFT JOIN users u ON u.id = cm.user_id
+		 LEFT JOIN agents a ON a.id = cm.user_id
 		 WHERE cm.conversation_id = $1
 		 ORDER BY cm.joined_at ASC`,
 		conversationID,
@@ -116,8 +118,10 @@ func (r *GroupRepo) GetMember(ctx context.Context, conversationID, userID string
 	var m model.ConversationMember
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT cm.id, cm.conversation_id, cm.user_id, cm.role, cm.joined_at,
-		        u.username
-		 FROM conversation_members cm JOIN users u ON u.id = cm.user_id
+		        COALESCE(a.name, u.username) AS username
+		 FROM conversation_members cm
+		 LEFT JOIN users u ON u.id = cm.user_id
+		 LEFT JOIN agents a ON a.id = cm.user_id
 		 WHERE cm.conversation_id = $1 AND cm.user_id = $2`,
 		conversationID, userID,
 	).StructScan(&m)

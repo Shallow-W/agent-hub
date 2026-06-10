@@ -769,7 +769,7 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	}
 	defer s.daemonHub.RemoveTaskPromise(taskID)
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
 
 	select {

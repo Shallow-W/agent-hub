@@ -6,7 +6,6 @@ import {
   EditOutlined,
   InboxOutlined,
   PushpinOutlined,
-  RobotOutlined,
   TeamOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
@@ -185,8 +184,12 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           <Avatar
             style={{ backgroundColor: '#2f9d74', flexShrink: 0 }}
             size={32}
-            src={resolveAgentAvatar(agents.find((a) => a.id === conversation.peer_id) || { id: conversation.peer_id || '', name: conversation.peer_name || conversation.title })}
-            icon={<RobotOutlined />}
+            src={(() => {
+              const a = agents.find((x) => x.id === conversation.peer_id);
+              return a
+                ? resolveAgentAvatar(a)
+                : resolveAgentAvatar({ id: conversation.peer_id || conversation.id, name: conversation.peer_name || conversation.title });
+            })()}
           />
         ) : isGroup ? (
           <Avatar

@@ -123,11 +123,11 @@ func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidate
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom", EnableManagementTools: enableManagementTools}, nil
 }
 
-func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: name, CLITool: cliTool, Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	return r.updateResult, nil
 }
 
@@ -180,7 +180,7 @@ func (r *fakeAgentRepo) GetAgentsByMachine(ctx context.Context, machineID string
 
 func TestCreateCustomRejectsEmptyName(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", false)
+	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
@@ -303,7 +303,7 @@ func TestOpenDaemonSkillLocationRejectsUnknownSourcePath(t *testing.T) {
 
 func TestUpdateCustomReturnsNotFound(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", false)
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}

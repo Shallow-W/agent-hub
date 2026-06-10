@@ -145,7 +145,11 @@ export const ThreadDrawer: React.FC<ThreadDrawerProps> = ({
 function resolveName(message: Message): string {
   if (message.role === 'assistant' && message.artifacts_json) {
     try {
-      const meta = JSON.parse(message.artifacts_json) as { agent_name?: string };
+      const meta = JSON.parse(message.artifacts_json) as { agent_name?: string; agent_id?: string };
+      if (meta.agent_id) {
+        const storeAgent = useAgentStore.getState().agents.find((a) => a.id === meta.agent_id);
+        if (storeAgent) return storeAgent.name;
+      }
       if (meta.agent_name) return meta.agent_name;
     } catch { /* ignore */ }
   }
@@ -174,6 +178,10 @@ function resolveAvatar(message: Message, isOwn: boolean): { src?: string; letter
   }
 
   if (message.sender_id) {
+    const senderAgent = agents.find((a) => a.id === message.sender_id);
+    if (senderAgent) {
+      return { src: resolveAgentAvatar(senderAgent), letter: senderAgent.name.charAt(0).toUpperCase(), icon: <RobotOutlined /> };
+    }
     const src = resolveUserAvatar({ id: message.sender_id, username: message.username });
     return { src, letter: (message.username || '用').charAt(0).toUpperCase(), icon: <UserOutlined /> };
   }
