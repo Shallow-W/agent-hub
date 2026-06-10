@@ -57,6 +57,7 @@
   "build": {
     "appId": "com.agenthub.desktop",
     "productName": "AgentHub",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "../../.tmp/electron-release"
     },
