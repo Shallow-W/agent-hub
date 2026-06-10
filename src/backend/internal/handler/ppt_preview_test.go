@@ -68,3 +68,31 @@ func TestPptPreview_RejectsNonPowerPointFile(t *testing.T) {
 		t.Fatalf("expected 415, got %d", w.Code)
 	}
 }
+
+func TestFilePreview_ServesPDFInline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "originals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "originals", "report.pdf"), []byte("%PDF-1.7"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := NewPptPreviewHandler(dir)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "filepath", Value: "/originals/report.pdf"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/file-preview/originals/report.pdf", nil)
+
+	h.FilePreview(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("expected application/pdf, got %q", got)
+	}
+	if got := w.Header().Get("Content-Disposition"); got != `inline; filename="report.pdf"` {
+		t.Fatalf("expected inline disposition, got %q", got)
+	}
+}
