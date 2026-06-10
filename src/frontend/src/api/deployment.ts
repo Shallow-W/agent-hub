@@ -1,5 +1,13 @@
-import { post } from './client';
+import { get, post } from './client';
 import type { Deployment } from '@/types/deployment';
+
+export interface DeploymentCapabilities {
+  github_enabled: boolean;
+}
+
+export async function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {
+  return get<DeploymentCapabilities>('/api/deployments/capabilities');
+}
 
 /** 部署某血缘根的最新产物，返回部署记录（url 为相对路径）。 */
 export async function deployArtifact(rootId: string): Promise<Deployment> {

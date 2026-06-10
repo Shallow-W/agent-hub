@@ -570,6 +570,9 @@ func extractKnowledgePreview(ctx context.Context, filePath string, filename stri
 	if text, ok := docextract.Extract(ctx, filePath, filename, previewTextMaxSize); ok {
 		return text, "text"
 	}
+	if ext == ".pdf" && docextract.SofficeAvailable() {
+		return "", "text"
+	}
 	if previewableTextExts[ext] || strings.HasPrefix(mimeType, "text/") {
 		return "", "too_large"
 	}

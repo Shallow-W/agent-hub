@@ -212,8 +212,9 @@ func (dh *DaemonHub) shutdown() {
 			client := value.(*DaemonClient)
 			client.closed.Store(true)
 			client.closeOnce.Do(func() { close(client.sendCh) })
-			client.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
-			dh.wg.Done()
+			if client.Conn != nil {
+				client.Conn.Close(websocket.StatusNormalClosure, "server shutdown")
+			}
 			return true
 		})
 

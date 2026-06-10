@@ -27,6 +27,7 @@ export const DeployStatusCard: React.FC<Props> = ({ deployment }) => {
   const meta = STATUS_META[deployment.status] ?? STATUS_META.pending;
   const isGitHub = deployment.mode === 'github';
   const previewUrl = absoluteDeployURL(deployment.url);
+  const isTunnelPreview = !isGitHub && previewUrl.includes('.trycloudflare.com/');
   // 优先用后端给的 download_url（配置公网基址时为绝对地址），否则按当前来源兜底拼接。
   const downloadUrl = deployment.download_url
     ? absoluteDeployURL(deployment.download_url)
@@ -72,6 +73,9 @@ export const DeployStatusCard: React.FC<Props> = ({ deployment }) => {
                 <Button size="small" type="text" icon={<CopyOutlined />} onClick={copy} />
               </Tooltip>
             </div>
+            {isTunnelPreview && (
+              <div className={styles.hint}>内网穿透公网预览地址，手机扫码和打开预览使用同一个链接。</div>
+            )}
             <div className={styles.actions}>
               <Button
                 type="primary"

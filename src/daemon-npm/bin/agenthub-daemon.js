@@ -130,6 +130,8 @@ const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, s
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
 const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
 let currentDaemonWs = null;
+const activeTaskIDs = new Set();
+const completedTaskIDs = new Set();
 const pendingTaskCompletions = new Map(); // taskID → task.complete data, flushed after WS reconnect
 
 // Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
@@ -190,6 +192,19 @@ function buildPlatformMcpArgs(conversationId, userId, agentId) {
   return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
 }
 
+function buildAgentHubContextEnv(conversationId, userId, agentId) {
+  const env = {};
+  if (conversationId) env.AGENTHUB_CONVERSATION_ID = conversationId;
+  if (userId) env.AGENTHUB_USER_ID = userId;
+  if (agentId) env.AGENTHUB_AGENT_ID = agentId;
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+function opencodeContextChanged(task, savedSessionId) {
+  if (!savedSessionId) return false;
+  return Boolean(task && task.agent_id && task.conversation_id);
+}
+
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
 // 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
@@ -197,6 +212,7 @@ function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
   registerOpenClawMcp(mcpArgs);
+  registerOpenCodeMcp(mcpArgs);
   registerCodexMcp(mcpArgs);
 }
 
@@ -213,6 +229,44 @@ function registerOpenClawMcp(mcpArgs) {
   } else {
     logFlow('warn', 'mcp_config.openclaw_failed', { error: firstLine(result.stderr || result.stdout) });
   }
+}
+
+function registerOpenCodeMcp(mcpArgs) {
+  const command = resolveCommand('opencode');
+  if (commandVersion(command) === null) return;
+  try {
+    const configPath = ensureOpenCodeMcpConfig(['node', ...mcpArgs]);
+    logFlow('info', 'mcp_config.opencode_configured', { server: 'agenthub-platform', file: configPath });
+  } catch (err) {
+    logFlow('warn', 'mcp_config.opencode_failed', { error: errorMessage(err) });
+  }
+}
+
+function openCodeConfigPath() {
+  if (process.env.AGENTHUB_OPENCODE_CONFIG) return process.env.AGENTHUB_OPENCODE_CONFIG;
+  return path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
+}
+
+function ensureOpenCodeMcpConfig(command) {
+  const configPath = openCodeConfigPath();
+  let config = {};
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    config = raw.trim() ? JSON.parse(raw) : {};
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('OpenCode config root must be a JSON object');
+    }
+  }
+  if (!config.$schema) config.$schema = 'https://opencode.ai/config.json';
+  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) config.mcp = {};
+  config.mcp['agenthub-platform'] = {
+    type: 'local',
+    command,
+    enabled: true,
+  };
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return configPath;
 }
 
 function registerCodexMcp(mcpArgs) {
@@ -346,6 +400,10 @@ function makeSessionId(conversationID, agentID) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+function sessionKeyForTask(task) {
+  return task && task.agent_id && task.conversation_id ? `${task.agent_id}:${task.conversation_id}` : '';
+}
+
 function commandOutput(command, args, timeout = 5000) {
   try {
     const spec = processSpec(command, args);
@@ -440,9 +498,26 @@ function resolveCodexCommand() {
   return 'codex';
 }
 
+function resolveOpenCodeCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_OPENCODE_COMMAND),
+    existingFile(process.platform === 'win32' && process.env.APPDATA
+      ? path.join(process.env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+      : null),
+    'opencode',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'opencode';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
     return resolveCodexCommand();
+  }
+  if (cliTool === 'opencode') {
+    return resolveOpenCodeCommand();
   }
   return cliTool;
 }
@@ -880,31 +955,55 @@ function ensureAgentHubCodexHome() {
   return dir;
 }
 
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function tomlArray(values) {
+  return `[${values.map(tomlString).join(', ')}]`;
+}
+
+function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId) {
+  const configFile = path.join(codexHome, 'config.toml');
+  let content = fs.existsSync(configFile) ? fs.readFileSync(configFile, 'utf8') : '';
+  const sectionPattern = /\n?\[mcp_servers\.agenthub-platform\]\n[\s\S]*?(?=\n\[[^\]]+\]|\s*$)/;
+  content = content.replace(sectionPattern, '').trimEnd();
+  const args = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  if (args.length === 0) return configFile;
+  const section = [
+    '',
+    '[mcp_servers.agenthub-platform]',
+    'command = "node"',
+    `args = ${tomlArray(args)}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(configFile, `${content}${section}`, 'utf8');
+  return configFile;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
+    const codexHome = ensureAgentHubCodexHome();
+    ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id);
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
     const codexMcpFallback = [
       '[Codex MCP 适配]',
       '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
       '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
-      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
-      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '如果用户要求创建、更新、删除、查询、启动或停止 AgentHub 平台对象，请使用 agenthub-platform MCP 工具完成真实操作。',
+      '如果 agenthub-platform MCP 工具不可用，请明确说明不可用的具体工具名和原因，不要声称只有临时子代理工具。',
       '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
       '',
     ].join('\n');
     const effectivePrompt = systemPrompt
       ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
       : `${codexMcpFallback}${userPrompt}`;
-    const globalArgs = [
-      '--ask-for-approval',
-      'never',
-    ];
     const execArgs = [
       '--skip-git-repo-check',
-      '--sandbox',
-      'read-only',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--ephemeral',
       '--color',
       'never',
       '--output-last-message',
@@ -912,10 +1011,42 @@ function commandForTask(task) {
     ];
     return {
       command,
-      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
+      args: ['exec', ...execArgs, effectivePrompt],
       outputFile,
       cwd: ensureTaskWorkdir(task),
-      env: { CODEX_HOME: ensureAgentHubCodexHome() },
+      env: {
+        CODEX_HOME: codexHome,
+        ...buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
+      },
+    };
+  }
+  if (task.cli_tool === 'opencode') {
+    const sessionKey = sessionKeyForTask(task);
+    const savedSessionId = sessionKey ? conversationSessions.get(sessionKey) : '';
+    const effectivePrompt = systemPrompt
+      ? `[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : userPrompt;
+    const args = [
+      'run',
+      '--format',
+      'json',
+      '--no-replay',
+      '--dangerously-skip-permissions',
+    ];
+    if (savedSessionId) {
+      args.push('--session', savedSessionId);
+      if (opencodeContextChanged(task, savedSessionId)) {
+        // OpenCode caches available tools in a session; fork so AgentHub tool changes take effect.
+        args.push('--fork');
+      }
+    }
+    args.push(effectivePrompt);
+    return {
+      command,
+      args,
+      resultFormat: 'opencode-json',
+      persistSessionKey: sessionKey,
+      env: buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
     };
   }
   if (task.cli_tool === 'claude') {
@@ -1066,9 +1197,49 @@ async function executeTask(task) {
     logFlow('info', 'task.result_ready', { ...taskMeta, source: 'openclaw_json', result_len: parsed.length });
     return parsed;
   }
+  if (spec.resultFormat === 'opencode-json') {
+    const parsed = parseOpenCodeOutput(stdout);
+    if (spec.persistSessionKey && parsed.sessionId) {
+      conversationSessions.set(spec.persistSessionKey, parsed.sessionId);
+      saveSessionMap();
+    }
+    logFlow('info', 'task.result_ready', {
+      ...taskMeta,
+      source: 'opencode_json',
+      result_len: parsed.text.length,
+      session_id: parsed.sessionId,
+      session_persisted: Boolean(spec.persistSessionKey && parsed.sessionId),
+    });
+    return parsed.text;
+  }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   logFlow('info', 'task.result_ready', { ...taskMeta, source: 'stdio', result_len: text.length });
   return text || '(Agent CLI 没有返回内容)';
+}
+
+async function executeTaskOnce(task) {
+  const taskID = task && task.id;
+  if (!taskID) return executeTask(task);
+  if (activeTaskIDs.has(taskID) || completedTaskIDs.has(taskID)) {
+    logFlow('warn', 'task.dispatch_duplicate_ignored', {
+      task_id: taskID,
+      cli_tool: task.cli_tool,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+    });
+    return null;
+  }
+  activeTaskIDs.add(taskID);
+  try {
+    const result = await executeTask(task);
+    completedTaskIDs.add(taskID);
+    if (completedTaskIDs.size > 1000) {
+      completedTaskIDs.delete(completedTaskIDs.values().next().value);
+    }
+    return result;
+  } finally {
+    activeTaskIDs.delete(taskID);
+  }
 }
 
 function openSkillLocation(prompt) {
@@ -1192,6 +1363,108 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function extractOpenCodeSessionId(value) {
+  if (!value || typeof value !== 'object') return '';
+  for (const key of ['sessionID', 'sessionId', 'session_id']) {
+    if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+  }
+  if (value.session && typeof value.session === 'object') {
+    for (const key of ['id', 'sessionID', 'sessionId', 'session_id']) {
+      if (typeof value.session[key] === 'string' && value.session[key].trim()) return value.session[key].trim();
+    }
+  }
+  if (value.message && typeof value.message === 'object') {
+    return extractOpenCodeSessionId(value.message);
+  }
+  return '';
+}
+
+function textFromOpenCodeContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => textFromOpenCodeContent(part))
+      .filter(Boolean)
+      .join('');
+  }
+  if (!content || typeof content !== 'object') return '';
+  if (typeof content.text === 'string') return content.text;
+  if (typeof content.content === 'string') return content.content;
+  if (Array.isArray(content.parts)) return textFromOpenCodeContent(content.parts);
+  return '';
+}
+
+function collectOpenCodeText(value, directMessages, partChunks, partUpdates) {
+  if (!value || typeof value !== 'object') return;
+
+  const message = value.message && typeof value.message === 'object' ? value.message : value;
+  if (message.role === 'assistant') {
+    const messageText = textFromOpenCodeContent(message.content || message.parts || message.text);
+    if (messageText.trim()) directMessages.push(messageText);
+  }
+
+  const part = value.part && typeof value.part === 'object' ? value.part : null;
+  if (part && (part.type === 'text' || typeof part.text === 'string')) {
+    const text = textFromOpenCodeContent(part);
+    if (text.trim()) {
+      const partID = String(part.id || value.id || '');
+      if (partID && /updated|delta/i.test(String(value.type || ''))) {
+        partUpdates.set(partID, text);
+      } else {
+        partChunks.push(text);
+      }
+    }
+  }
+
+  for (const key of ['response', 'result', 'output', 'text']) {
+    if (typeof value[key] === 'string' && value[key].trim() && /assistant|result|complete|response|text/i.test(String(value.type || key))) {
+      partChunks.push(value[key]);
+    }
+  }
+}
+
+function parseOpenCodeOutput(stdout) {
+  const text = stdout.trim();
+  if (!text) return { text: '(OpenCode CLI 没有返回内容)', sessionId: '' };
+
+  const events = [];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // OpenCode may fall back to formatted output when JSON is unavailable.
+    }
+  }
+  if (events.length === 0) {
+    try {
+      events.push(JSON.parse(text));
+    } catch {
+      return { text, sessionId: '' };
+    }
+  }
+
+  let sessionId = '';
+  const directMessages = [];
+  const partChunks = [];
+  const partUpdates = new Map();
+  for (const event of events) {
+    sessionId = sessionId || extractOpenCodeSessionId(event);
+    collectOpenCodeText(event, directMessages, partChunks, partUpdates);
+  }
+
+  const directText = directMessages.join('\n').trim();
+  if (directText) return { text: directText, sessionId };
+
+  const updatedText = Array.from(partUpdates.values()).join('').trim();
+  if (updatedText) return { text: updatedText, sessionId };
+
+  const chunkText = partChunks.join('').trim();
+  if (chunkText) return { text: chunkText, sessionId };
+
+  return { text, sessionId };
+}
+
 function lineEndIndex(text, start) {
   const nl = text.indexOf('\n', start);
   return nl === -1 ? text.length : nl + 1;
@@ -1524,7 +1797,11 @@ async function pollTasks(serverURL, apiKey) {
       });
       const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
       try {
-        const result = await executeTask(task);
+        const result = await executeTaskOnce(task);
+        if (result === null) {
+          stopHeartbeat();
+          continue;
+        }
         stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
         logFlow('info', 'poll.task_completed', {
@@ -2109,7 +2386,8 @@ async function connectWS(serverURL, apiKey) {
               conversation_id: task.conversation_id,
               mode: 'legacy_spawn',
             });
-            result = await executeTask(task);
+            result = await executeTaskOnce(task);
+            if (result === null) return;
           }
           const artifacts = parseArtifacts(result);
           sendTaskComplete({ task_id: task.id, result, artifacts });
@@ -2656,6 +2934,12 @@ const MCP_TOOLS = [
       const toolsConfig = JSON.stringify({ toolset, allowed_tools: tpl });
       const body = { name, cli_tool: cliTool, system_prompt: systemPrompt, tools_config: toolsConfig };
       if (args.tags) body.tags = args.tags;
+      const candidatesRes = await ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates');
+      const candidates = candidatesRes && Array.isArray(candidatesRes.data) ? candidatesRes.data : Array.isArray(candidatesRes) ? candidatesRes : [];
+      const candidate = candidates.find((item) => item && item.cli_tool === cliTool);
+      if (candidate && candidate.id) {
+        return ctx.callMcpApi('POST', `/mcp/daemon/agent-candidates/${encodeURIComponent(candidate.id)}/add`, { body });
+      }
       return ctx.callApi('POST', '/api/agents', { body });
     },
   },
@@ -2930,9 +3214,9 @@ async function handleMcpMessage(line, toolMap, ctx) {
 async function runMcpServer(serverURL, apiKey) {
   const daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   const ctx = {
-    conversationId: readArg('--conversation-id') || null,
-    userId: readArg('--user-id') || null,
-    agentId: readArg('--agent-id') || null,
+    conversationId: readArg('--conversation-id') || process.env.AGENTHUB_CONVERSATION_ID || null,
+    userId: readArg('--user-id') || process.env.AGENTHUB_USER_ID || null,
+    agentId: readArg('--agent-id') || process.env.AGENTHUB_AGENT_ID || null,
     allowedTools: null,
     currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
@@ -2986,5 +3270,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  commandForTask,
+  conversationSessions,
+  executeTaskOnce,
+  ensureOpenCodeMcpConfig,
   onWebSocket,
+  parseOpenCodeOutput,
 };

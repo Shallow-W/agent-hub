@@ -291,8 +291,13 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	switch conv.Type {
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
-		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments, &msg.ID)
+		resolvedAgentID := strings.TrimSpace(agentID)
+		if resolvedAgentID == "" {
+			resolvedAgentID = s.resolveAgentConversationAgentID(ctx, convID, userID)
+		}
+		slog.Info("agent chat dispatch resolved", "conversation_id", convID, "agent_id", resolvedAgentID, "provided_agent_id", strings.TrimSpace(agentID) != "")
+		if resolvedAgentID != "" {
+			go s.asyncAgentReply(convID, userID, resolvedAgentID, content, msg.Attachments, &msg.ID)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
@@ -1103,4 +1108,15 @@ func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
 	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
 		"conversation_id": convID,
 	})
+}
+
+func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, convID, userID string) string {
+	agents, err := s.convRepo.ListAgents(ctx, convID, userID)
+	if err != nil || len(agents) == 0 {
+		if err != nil {
+			slog.Warn("resolve agent conversation agent failed", "conversation_id", convID, "error", err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(agents[0].AgentID)
 }

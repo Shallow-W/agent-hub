@@ -352,7 +352,7 @@ const AppLayout: React.FC = () => {
           {/* Models overlay */}
           {activeNav === 'models' && (
             selectedAgent ? (
-              <AgentProfile agent={selectedAgent} />
+              <AgentProfile agent={selectedAgent} onMessage={handleStartAgentChat} />
             ) : (
               <ComputerProfile
                 machineId={selectedMachineId}
