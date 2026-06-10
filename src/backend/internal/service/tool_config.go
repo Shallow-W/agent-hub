@@ -9,9 +9,9 @@ var platformToolsets = map[string][]string{
 	"none":          {},
 	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
 	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
-	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
-	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
+	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file", "create_agent", "update_agent", "delete_agent", "list_toolsets", "list_platform_skills"},
+	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail", "create_agent", "update_agent", "update_agent_prompt", "list_platform_skills"},
+	"agent_manager": {"list_agents", "get_agent_detail", "update_agent", "update_agent_prompt", "start_agent", "stop_agent", "delete_agent", "get_agent_skill", "list_platform_skills"},
 	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
 }
 
@@ -43,7 +43,8 @@ var platformToolCatalog = map[string]bool{
 	"create_agent":             true,
 	"update_agent":             true,
 	"delete_agent":             true,
-	"list_toolsets":            true,
+		"list_toolsets":            true,
+		"list_platform_skills":    true,
 }
 
 type agentToolsConfig struct {

@@ -2910,6 +2910,26 @@ const MCP_TOOLS = [
       });
     },
   },
+  {
+    name: 'read_knowledge_file',
+    description: '读取知识库文件的抽取文本内容。适合在搜索命中文件后按 file_id 获取完整可用上下文。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: '知识库 ID' },
+        file_id: { type: 'string', description: '文件 ID' },
+      },
+      required: ['knowledge_base_id', 'file_id'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const kbId = args.knowledge_base_id;
+      const fileId = args.file_id;
+      if (!kbId) throw new Error('knowledge_base_id is required');
+      if (!fileId) throw new Error('file_id is required');
+      return ctx.callMcpApi('GET', `/mcp/knowledge-bases/${encodeURIComponent(kbId)}/files/${encodeURIComponent(fileId)}/text`);
+    },
+  },
   // ── 平台 Skills ──
   {
     name: 'list_platform_skills',
