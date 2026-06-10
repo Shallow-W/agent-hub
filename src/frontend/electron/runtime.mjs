@@ -1,56 +1,42 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8080';
+const DEFAULT_BACKEND_URL = 'http://10.11.221.79:8080';
+
+function normalizeBaseURL(value) {
+  return value ? value.replace(/\/+$/, '') : '';
+}
 
 export function resolveFrontendURL({ env, appPath, resourcesPath }) {
   if (env.VITE_DEV_SERVER_URL) {
     return env.VITE_DEV_SERVER_URL;
   }
-  if (env.AGENTHUB_BACKEND_URL) {
-    return env.AGENTHUB_BACKEND_URL;
+  if (resourcesPath) {
+    return pathToFileURL(resolveFrontendDistIndex({ resourcesPath })).href;
   }
-  if (appPath || resourcesPath) {
-    return DEFAULT_BACKEND_URL;
-  }
-  return DEFAULT_BACKEND_URL;
+  return pathToFileURL(path.join(appPath, 'dist', 'index.html')).href;
 }
 
-export function shouldLaunchBackend(env) {
-  if (env.VITE_DEV_SERVER_URL) {
-    return false;
-  }
-  if (env.AGENTHUB_DESKTOP_LAUNCH_BACKEND === 'false') {
-    return false;
-  }
-  return !env.AGENTHUB_BACKEND_URL;
+export function resolveBackendBaseURL(env) {
+  return normalizeBaseURL(env.AGENTHUB_BACKEND_URL || DEFAULT_BACKEND_URL);
 }
 
-export function resolveBackendBinary({ resourcesPath, platform, exists = existsSync }) {
-  const names = platform === 'win32' ? ['server.exe', 'server'] : ['server'];
-  for (const name of names) {
-    const candidate = path.join(resourcesPath, 'bin', name);
-    if (exists(candidate)) {
-      return candidate;
-    }
-  }
-  return path.join(resourcesPath, 'bin', names[0]);
-}
-
-export function resolveConfigPath({ resourcesPath }) {
-  return path.join(resourcesPath, 'config', 'config.yaml');
+export function resolvePreloadConfig(env) {
+  return {
+    backendBaseURL: resolveBackendBaseURL(env),
+  };
 }
 
 export function resolveFrontendDist({ resourcesPath }) {
   return path.join(resourcesPath, 'frontend-dist');
 }
 
-export function buildBackendEnv({ baseEnv, configPath, frontendDist }) {
-  return {
-    ...baseEnv,
-    AGENTHUB_CONFIG: baseEnv.AGENTHUB_CONFIG || configPath,
-    AGENTHUB_FRONTEND_DIST: frontendDist,
-  };
+export function resolveFrontendDistIndex({ resourcesPath }) {
+  return path.join(resolveFrontendDist({ resourcesPath }), 'index.html');
+}
+
+export function backendReadyURL() {
+  return `${resolveBackendBaseURL({})}/health/ready`;
 }
 
 export async function waitForHTTP(url, {

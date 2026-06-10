@@ -1,8 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+const DEFAULT_BACKEND_URL = 'http://10.11.221.79:8080';
+const backendBaseURL = (process.env.AGENTHUB_BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
+
 contextBridge.exposeInMainWorld('agentHubDesktop', {
   platform: process.platform,
   isDesktop: true,
+  backendBaseURL,
   // 窗口控制
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),

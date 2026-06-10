@@ -25,6 +25,51 @@ interface AuthState {
 const TOKEN_KEY = 'agenthub_token';
 const USER_KEY = 'agenthub_user';
 
+function clearPersistedAuth() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+function saveSessionUser(user: User) {
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function clearSessionAuth() {
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
+}
+
+function parseSessionUser(raw: string | null): User | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const user = value as Record<string, unknown>;
+    if (
+      typeof user.id === 'string'
+      && typeof user.username === 'string'
+      && typeof user.created_at === 'string'
+      && (user.avatar === undefined || typeof user.avatar === 'string')
+    ) {
+      return {
+        id: user.id,
+        username: user.username,
+        avatar: user.avatar,
+        created_at: user.created_at,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
@@ -36,10 +81,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.login(username, password);
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      clearPersistedAuth();
       localStorage.removeItem('agenthub_active_conv');
       setToken(data.token);
+      saveSessionUser(data.user);
       resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
@@ -55,10 +100,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.register(username, password);
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      clearPersistedAuth();
       localStorage.removeItem('agenthub_active_conv');
       setToken(data.token);
+      saveSessionUser(data.user);
       resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
     } catch (err) {
@@ -73,9 +118,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   updateAvatar: async (avatar: string) => {
     const updated = await userApi.updateUserAvatar(avatar);
     const current = get().user;
-    // 合并：以服务端返回为准，兜底保留本地已有字段。
     const next: User = { ...(current ?? {} as User), ...updated };
-    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    saveSessionUser(next);
     set({ user: next });
   },
 
@@ -83,13 +127,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = await userApi.updateUsername(username);
     const current = get().user;
     const next: User = { ...(current ?? {} as User), ...updated };
-    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    saveSessionUser(next);
     set({ user: next });
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    clearPersistedAuth();
+    clearSessionAuth();
     localStorage.removeItem('agenthub_active_conv');
     clearToken();
     resetConversationStore();
@@ -100,18 +144,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loadFromStorage: () => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const userJson = localStorage.getItem(USER_KEY);
-    if (token && userJson) {
-      try {
-        const user: User = JSON.parse(userJson);
-        setToken(token);
-        set({ user, token, isAuthenticated: true });
-      } catch {
-        // 数据损坏则清除
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
-      }
+    clearPersistedAuth();
+    const token = sessionStorage.getItem(TOKEN_KEY);
+    const user = parseSessionUser(sessionStorage.getItem(USER_KEY));
+    if (!token || !user) {
+      clearSessionAuth();
+      clearToken();
+      set({ user: null, token: null, isAuthenticated: false });
+      return;
     }
+    setToken(token);
+    set({ user, token, isAuthenticated: true });
   },
 }));

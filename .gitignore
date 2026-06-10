@@ -121,3 +121,6 @@ src/backend/data/
 
 # === 本地临时运行文件 ===
 .tmp/
+
+# === 桌面端打包资源（包含本地运行配置） ===
+desktop-resources/

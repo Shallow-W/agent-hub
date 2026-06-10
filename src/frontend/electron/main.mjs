@@ -1,20 +1,10 @@
 import { app, BrowserWindow, shell, Menu, ipcMain } from 'electron';
-import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  buildBackendEnv,
-  resolveBackendBinary,
-  resolveConfigPath,
-  resolveFrontendDist,
-  resolveFrontendURL,
-  shouldLaunchBackend,
-  waitForHTTP,
-} from './runtime.mjs';
+import { resolveFrontendURL } from './runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-let backendProcess = null;
 
 function writeDesktopLog(message) {
   try {
@@ -72,48 +62,6 @@ function createWindow() {
   }));
 }
 
-function startBackendIfNeeded() {
-  if (!shouldLaunchBackend(process.env)) {
-    return;
-  }
-
-  const binary = resolveBackendBinary({
-    resourcesPath: process.resourcesPath,
-    platform: process.platform,
-  });
-  const configPath = resolveConfigPath({ resourcesPath: process.resourcesPath });
-  const frontendDist = resolveFrontendDist({ resourcesPath: process.resourcesPath });
-  writeDesktopLog(`starting backend binary=${binary} config=${configPath} frontendDist=${frontendDist}`);
-  backendProcess = spawn(binary, [], {
-    cwd: process.resourcesPath,
-    env: buildBackendEnv({
-      baseEnv: process.env,
-      configPath,
-      frontendDist,
-    }),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-
-  backendProcess.stdout?.on('data', (chunk) => {
-    writeDesktopLog(`backend stdout: ${chunk.toString().trim()}`);
-  });
-
-  backendProcess.stderr?.on('data', (chunk) => {
-    writeDesktopLog(`backend stderr: ${chunk.toString().trim()}`);
-  });
-
-  backendProcess.on('error', (error) => {
-    writeDesktopLog(`backend spawn error: ${error.message}`);
-    backendProcess = null;
-  });
-
-  backendProcess.on('exit', (code, signal) => {
-    writeDesktopLog(`backend exited code=${code ?? ''} signal=${signal ?? ''}`);
-    backendProcess = null;
-  });
-}
-
 app.whenReady().then(async () => {
   // 注册窗口控制 IPC
   ipcMain.on('window:minimize', (event) => {
@@ -132,15 +80,7 @@ app.whenReady().then(async () => {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
 
-  startBackendIfNeeded();
-  if (backendProcess) {
-    try {
-      await waitForHTTP('http://127.0.0.1:8080/health');
-    } catch (error) {
-      // 后端启动失败时仍打开窗口，让用户看到前端的网络错误与登录状态。
-      writeDesktopLog(`backend health wait failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  writeDesktopLog('desktop frontend only mode');
   createWindow();
 
   app.on('activate', () => {
@@ -153,12 +93,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
-  }
-});
-
-app.on('before-quit', () => {
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
   }
 });
