@@ -668,7 +668,7 @@ function skillRoots(cliTool) {
 function parseSkillFile(fallbackName, sourcePath, content) {
   const skill = {
     name: fallbackName,
-    detail: content,
+    detail: content.length > 500 ? content.slice(0, 500) + "..." : content,
     source_path: sourcePath,
     auto: true,
   };

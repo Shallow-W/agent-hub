@@ -153,6 +153,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "添加候选 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.CreatedResponse(c, agent)
 }
 
@@ -214,6 +215,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "创建 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.CreatedResponse(c, agent)
 }
 
@@ -244,6 +246,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "更新 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.SuccessResponse(c, agent)
 }
 
