@@ -4,6 +4,13 @@ import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import { message } from '@/utils/message';
 import type { PlatformSkill } from '@/types/agent';
 import {
+  listUserTemplates,
+  createUserTemplate,
+  updateUserTemplate,
+  deleteUserTemplate,
+  type UserTemplate,
+} from '@/api/userTemplate';
+import {
   categoryMeta,
   categoryOrder,
   getTemplateTools,
@@ -11,14 +18,6 @@ import {
   toolsetOptions,
 } from './toolAssignments';
 import styles from './CreateTemplateManagerModal.module.css';
-
-interface SavedCreateTemplate {
-  id: string;
-  name: string;
-  tools: string[];
-  skillIds: string[];
-  createdAt: number;
-}
 
 interface BuiltInTemplate {
   key: string;
@@ -37,19 +36,7 @@ interface TemplateItem {
   tools: string[];
   skillIds: string[];
   builtin: boolean;
-}
-
-const STORAGE_KEY_TOOLS = 'agenthub-create-templates-tools';
-const STORAGE_KEY_SKILLS = 'agenthub-create-templates-skills';
-
-function loadSaved(mode: 'tools' | 'skills'): SavedCreateTemplate[] {
-  try {
-    return JSON.parse(localStorage.getItem(mode === 'tools' ? STORAGE_KEY_TOOLS : STORAGE_KEY_SKILLS) || '[]');
-  } catch { return []; }
-}
-
-function persistSaved(mode: 'tools' | 'skills', list: SavedCreateTemplate[]) {
-  localStorage.setItem(mode === 'tools' ? STORAGE_KEY_TOOLS : STORAGE_KEY_SKILLS, JSON.stringify(list));
+  dbId?: string;
 }
 
 interface CreateTemplateManagerModalProps {
@@ -71,7 +58,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   onApply,
   onClose,
 }) => {
-  const [saved, setSaved] = useState<SavedCreateTemplate[]>(() => loadSaved(mode));
+  const [dbTemplates, setDbTemplates] = useState<UserTemplate[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftTools, setDraftTools] = useState<string[]>([]);
@@ -80,6 +67,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   const [skillSearch, setSkillSearch] = useState('');
   const [toolFilter, setToolFilter] = useState('all');
   const [skillFilter, setSkillFilter] = useState('all');
+  const [saving, setSaving] = useState(false);
 
   const builtInTemplates: BuiltInTemplate[] = useMemo(() => {
     if (mode === 'tools') {
@@ -104,8 +92,14 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
         : [];
       return { id: t.key, name: t.name, category: t.category, description: t.description, tools: t.tools, skillIds, builtin: true };
     }),
-    ...saved.map((t) => ({ id: t.id, name: t.name, category: '自定义', description: mode === 'tools' ? `${t.tools.length} 个工具` : `${t.skillIds.length} 个 Skill`, tools: t.tools, skillIds: t.skillIds, builtin: false })),
-  ], [builtInTemplates, saved, librarySkills, mode]);
+    ...dbTemplates.map((t) => {
+      const content = t.content ?? {};
+      const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
+      const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+      const desc = mode === 'tools' ? `${tools.length} 个工具` : `${skillIds.length} 个 Skill`;
+      return { id: `db-${t.id}`, dbId: t.id, name: t.name, category: '自定义', description: desc, tools, skillIds, builtin: false };
+    }),
+  ], [builtInTemplates, dbTemplates, librarySkills, mode]);
 
   const groups = useMemo(() => {
     const map = new Map<string, TemplateItem[]>();
@@ -119,19 +113,53 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
 
   const selected = selectedId ? templates.find((t) => t.id === selectedId) ?? null : null;
 
+  const loadTemplates = async () => {
+    try {
+      const list = await listUserTemplates(mode);
+      setDbTemplates(list);
+    } catch {
+      message.error('加载模板失败');
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
-    setSaved(loadSaved(mode));
     setToolSearch('');
     setSkillSearch('');
     setToolFilter('all');
     setSkillFilter('all');
-    const first = templates[0];
-    if (first) {
-      applyTemplateToDraft(first);
-    } else {
-      handleNew();
-    }
+    listUserTemplates(mode)
+      .then((list) => {
+        setDbTemplates(list);
+        // Build first selection from builtins + freshly fetched db templates
+        const all = [
+          ...builtInTemplates.map((t) => {
+            const skillIds = t.skillCategories.length > 0
+              ? librarySkills.filter((s) => t.skillCategories.includes(s.category?.trim() || '未分类')).map((s) => s.id)
+              : [];
+            return { id: t.key, name: t.name, tools: t.tools, skillIds } as TemplateItem;
+          }),
+          ...list.map((t) => {
+            const content = t.content ?? {};
+            const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
+            const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+            return { id: `db-${t.id}`, dbId: t.id, name: t.name, tools, skillIds } as TemplateItem;
+          }),
+        ];
+        const first = all[0];
+        if (first) applyTemplateToDraft(first);
+        else handleNew();
+      })
+      .catch(() => {
+        // Fallback: just select first builtin or handle new
+        const first = builtInTemplates[0];
+        if (first) {
+          const skillIds = first.skillCategories.length > 0
+            ? librarySkills.filter((s) => first.skillCategories.includes(s.category?.trim() || '未分类')).map((s) => s.id)
+            : [];
+          applyTemplateToDraft({ id: first.key, name: first.name, tools: first.tools, skillIds } as TemplateItem);
+        } else handleNew();
+      });
   }, [open, mode]);
 
   const applyTemplateToDraft = (tpl: TemplateItem) => {
@@ -148,40 +176,47 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     setDraftSkillIds(new Set(currentSkillIds));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const name = draftName.trim();
     if (!name) { message.warning('请输入模板名称'); return; }
 
-    if (selected && !selected.builtin) {
-      const next = saved.map((t) => t.id === selected.id ? { ...t, name, tools: [...draftTools], skillIds: Array.from(draftSkillIds) } : t);
-      setSaved(next);
-      persistSaved(mode, next);
-      message.success('模板已更新');
-    } else {
-      const tpl: SavedCreateTemplate = {
-        id: `tpl_${Date.now()}`,
-        name,
-        tools: [...draftTools],
-        skillIds: Array.from(draftSkillIds),
-        createdAt: Date.now(),
-      };
-      const next = [...saved, tpl];
-      setSaved(next);
-      persistSaved(mode, next);
-      setSelectedId(tpl.id);
-      message.success('模板已保存');
+    setSaving(true);
+    try {
+      const content = mode === 'tools'
+        ? { tools: [...draftTools] }
+        : { skill_ids: Array.from(draftSkillIds) };
+
+      if (selected?.dbId) {
+        await updateUserTemplate(selected.dbId, { type: mode, name, content });
+        message.success('模板已更新');
+      } else {
+        const created = await createUserTemplate({ type: mode, name, content });
+        setSelectedId(`db-${created.id}`);
+        message.success('模板已保存');
+      }
+      await loadTemplates();
+    } catch {
+      message.error('保存模板失败');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = () => {
-    if (!selected || selected.builtin) return;
-    const next = saved.filter((t) => t.id !== selected.id);
-    setSaved(next);
-    persistSaved(mode, next);
-    const first = next[0] ? templates.find((t) => t.id === next[0]!.id) ?? null : templates[0];
-    if (first) applyTemplateToDraft(first);
-    else handleNew();
-    message.success('模板已删除');
+  const handleDelete = async () => {
+    if (!selected?.dbId) return;
+    setSaving(true);
+    try {
+      await deleteUserTemplate(selected.dbId);
+      await loadTemplates();
+      const first = templates[0];
+      if (first) applyTemplateToDraft(first);
+      else handleNew();
+      message.success('模板已删除');
+    } catch {
+      message.error('删除模板失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleApply = () => {
@@ -240,8 +275,8 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
                     type="button"
                     onClick={() => applyTemplateToDraft(tpl)}
                   >
-                    <div className={styles.templateCardName}>{tpl.name}</div>
-                    <div className={styles.templateCardDesc}>{tpl.description}</div>
+                    <span className={styles.templateCardName}>{tpl.name}</span>
+                    <span className={styles.templateCardDesc}>{tpl.description}</span>
                   </button>
                 ))}
               </div>
@@ -358,15 +393,15 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
 
           <div className={styles.editorActions}>
             <div>
-              {selected && !selected.builtin && (
+              {selected?.dbId && (
                 <Popconfirm title="确定删除该模板？" onConfirm={handleDelete} okText="删除" cancelText="取消">
-                  <Button danger icon={<DeleteOutlined />} size="small">删除</Button>
+                  <Button danger icon={<DeleteOutlined />} size="small" loading={saving}>删除</Button>
                 </Popconfirm>
               )}
             </div>
             <div className={styles.rightActions}>
               <Button size="small" onClick={onClose}>关闭</Button>
-              <Button size="small" icon={<SaveOutlined />} onClick={handleSave}>保存</Button>
+              <Button size="small" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>保存</Button>
               <Button size="small" type="primary" onClick={handleApply}>应用</Button>
             </div>
           </div>

@@ -1,15 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Drawer, Input, Modal, Popconfirm, Select } from 'antd';
+import { Button, Drawer, Input, Modal, Popconfirm, Select } from 'antd';
 import { message } from '@/utils/message';
 import {
-  RobotOutlined,
-  SaveOutlined,
   FolderOpenOutlined,
   PlusOutlined,
   DownOutlined,
   RightOutlined,
   SearchOutlined,
   CloseOutlined,
+  SaveOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
@@ -21,9 +20,10 @@ import {
   importDefaultPlatformSkills,
   updatePlatformSkill,
 } from '@/api/platformSkill';
-import { parseSkills, resolveAgentAvatar, skillsToPlatformJSON } from './agentPresentation';
+import { parseSkills, skillsToPlatformJSON } from './agentPresentation';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import type { Skill } from './agentPresentation';
+import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import styles from './AgentSkillsPanel.module.css';
 
 interface AgentSkillsPanelProps {
@@ -53,6 +53,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [skillManageOpen, setSkillManageOpen] = useState(false);
   const [skillTemplate, setSkillTemplate] = useState('none');
   const [createForm, setCreateForm] = useState({ name: '', category: '', description: '', trigger: '', detail: '' });
+  const [dbTemplates, setDbTemplates] = useState<UserTemplate[]>([]);
 
   useEffect(() => {
     const nextSkills = parseSkills(agent.custom_skills);
@@ -78,6 +79,16 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    listUserTemplates('skills')
+      .then((list) => setDbTemplates(list))
+      .catch(() => {});
+  }, []);
+
+  const loadDbTemplates = async () => {
+    try { setDbTemplates(await listUserTemplates('skills')); } catch { /* keep current */ }
+  };
 
   const selectedSkill = selectedSkillIdx !== null ? skills[selectedSkillIdx] ?? null : null;
   const selectedLibrarySkill = selectedLibrarySkillID
@@ -114,25 +125,43 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   }, [librarySkills]);
 
   const skillTemplateOptions = useMemo(() => [
-    { value: 'none', label: '无' },
-    ...categories.map((cat) => ({ value: `cat:${cat}`, label: `按分类: ${cat}` })),
-  ], [categories]);
+    { value: 'none', label: '无 Skills' },
+    { value: 'cat:产品经理', label: '产品经理' },
+    { value: 'cat:开发人员', label: '开发人员' },
+    ...categories
+      .filter((cat) => cat !== '产品经理' && cat !== '开发人员')
+      .map((cat) => ({ value: `cat:${cat}`, label: cat })),
+    ...dbTemplates.map((t) => {
+      const ids = Array.isArray((t.content as Record<string, unknown>)?.skill_ids) ? (t.content as Record<string, unknown>).skill_ids as string[] : [];
+      return { value: `saved:${t.id}`, label: `★ ${t.name}`, skillIds: ids };
+    }),
+  ], [categories, dbTemplates]);
 
   const handleSkillTemplateChange = (value: string) => {
     setSkillTemplate(value);
-    if (value === 'none') return;
+    if (value === 'none') {
+      setSkills([]);
+      message.success('已清空已分配 Skills');
+      return;
+    }
+    if (value.startsWith('saved:')) {
+      const opt = skillTemplateOptions.find((o) => o.value === value);
+      const tplName = opt?.label?.replace('★ ', '') ?? '';
+      const skillIds = (opt as { skillIds?: string[] })?.skillIds ?? [];
+      const matched = librarySkills
+        .filter((s) => skillIds.includes(s.id))
+        .map(toAssignedSkill);
+      setSkills(matched);
+      message.success(`已应用模板「${tplName}」(${matched.length} 个 Skill)`);
+      return;
+    }
     if (value.startsWith('cat:')) {
       const cat = value.slice(4);
       const matched = librarySkills
         .filter((s) => (s.category?.trim() || '未分类') === cat)
-        .map(toAssignedSkill)
-        .filter((newSkill) => !skills.some((s) => s.name.trim() === newSkill.name.trim()));
-      if (matched.length > 0) {
-        setSkills((prev) => [...prev, ...matched]);
-        message.success(`已按分类「${cat}」导入 ${matched.length} 个 Skill`);
-      } else {
-        message.info(`分类「${cat}」的 Skills 已在已分配列表中`);
-      }
+        .map(toAssignedSkill);
+      setSkills(matched);
+      message.success(`已应用分类「${cat}」(${matched.length} 个 Skill)`);
     }
   };
 
@@ -163,7 +192,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setSaving(true);
     try {
       await updateCustomSkills(agent.id, skillsToPlatformJSON(skills));
-      message.success('平台 Skills 已保存');
+      message.success('Skills 已保存');
     } catch {
       message.error('保存失败');
     } finally {
@@ -398,28 +427,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <Avatar size={40} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={styles.avatar} />
-        <div className={styles.headerInfo}>
-          <span className={styles.name}>{agent.name}</span>
-          <span className={styles.cliTool}>@{agent.cli_tool}</span>
-        </div>
-        <div className={styles.headerActions}>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => { setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' }); setCreateModalOpen(true); }}>
-            创建 Skill
-          </Button>
-          <Button size="small" onClick={handleImportDefaults} loading={importingDefaults}>
-            导入默认
-          </Button>
-          <Button size="small" icon={<SettingOutlined />} onClick={() => setSkillManageOpen(true)}>
-            管理
-          </Button>
-          <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
-            保存分配
-          </Button>
-        </div>
-      </div>
-
       <div className={styles.overviewStrip}>
         <div className={styles.overviewItem}>
           <span className={styles.overviewLabel}>已分配</span>
@@ -435,25 +442,38 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
         </div>
       </div>
 
-      {librarySkills.length > 0 && (
-        <div className={styles.templateToolbar}>
-          <Select
-            className={styles.templateSelect}
-            value={skillTemplate}
-            options={skillTemplateOptions}
-            onChange={handleSkillTemplateChange}
-            placeholder="按分类快速导入"
-          />
-        </div>
-      )}
+      <div className={styles.templateToolbar}>
+        <span className={styles.templateLabel}>技能模板</span>
+        <Select
+          className={styles.templateSelect}
+          value={skillTemplate}
+          options={skillTemplateOptions}
+          onChange={handleSkillTemplateChange}
+          placeholder="按分类快速导入"
+          getPopupContainer={(trigger) => trigger.parentElement || document.body}
+        />
+        <Button icon={<SettingOutlined />} onClick={() => setSkillManageOpen(true)}>
+          管理
+        </Button>
+        <Button icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
+          保存
+        </Button>
+        <Button icon={<PlusOutlined />} onClick={() => { setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' }); setCreateModalOpen(true); }}>
+          新建技能
+        </Button>
+        <span className={styles.templateCount}>
+          已选 {skills.length}/{librarySkills.length}
+        </span>
+      </div>
 
-      <div className={styles.subTabs}>
-        <button
-          className={`${styles.subTab} ${activeTab === 'assigned' ? styles.subTabActive : ''}`}
-          type="button"
-          onClick={() => setActiveTab('assigned')}
-        >
-          已分配 Skills <span className={styles.subTabCount}>{skills.length}</span>
+      <div className={styles.subTabsRow}>
+        <div className={styles.subTabs}>
+          <button
+            className={`${styles.subTab} ${activeTab === 'assigned' ? styles.subTabActive : ''}`}
+            type="button"
+            onClick={() => setActiveTab('assigned')}
+          >
+            已分配 Skills <span className={styles.subTabCount}>{skills.length}</span>
         </button>
         <button
           className={`${styles.subTab} ${activeTab === 'library' ? styles.subTabActive : ''}`}
@@ -462,6 +482,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
         >
           平台库 <span className={styles.subTabCount}>{librarySkills.length}</span>
         </button>
+        </div>
       </div>
 
       {activeTab === 'assigned' && (
@@ -481,18 +502,21 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                 type="button"
                 onClick={() => setCategoryFilter('all')}
               >
-                全部
+                全部 {skills.length}
               </button>
-              {assignedCategories.map((cat) => (
-                <button
-                  className={`${styles.filterPill} ${categoryFilter === cat ? styles.filterPillActive : ''}`}
-                  key={cat}
-                  type="button"
-                  onClick={() => setCategoryFilter(cat)}
-                >
-                  {cat}
-                </button>
-              ))}
+              {assignedCategories.map((cat) => {
+                const catCount = skills.filter((s) => (s.category?.trim() || '未分类') === cat).length;
+                return (
+                  <button
+                    className={`${styles.filterPill} ${categoryFilter === cat ? styles.filterPillActive : ''}`}
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategoryFilter(cat)}
+                  >
+                    {cat} {catCount}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className={styles.cardGrid}>
@@ -569,18 +593,21 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
                 type="button"
                 onClick={() => setCategoryFilter('all')}
               >
-                全部
+                全部 {librarySkills.length}
               </button>
-              {categories.map((cat) => (
-                <button
-                  className={`${styles.filterPill} ${categoryFilter === cat ? styles.filterPillActive : ''}`}
-                  key={cat}
-                  type="button"
-                  onClick={() => setCategoryFilter(cat)}
-                >
-                  {cat}
-                </button>
-              ))}
+              {categories.map((cat) => {
+                const catCount = librarySkills.filter((s) => (s.category?.trim() || '未分类') === cat).length;
+                return (
+                  <button
+                    className={`${styles.filterPill} ${categoryFilter === cat ? styles.filterPillActive : ''}`}
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategoryFilter(cat)}
+                  >
+                    {cat} {catCount}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className={styles.cardGrid}>
@@ -854,7 +881,10 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
         currentSkillIds={assignedSkillIds}
         librarySkills={librarySkills}
         onApply={handleSkillManageApply}
-        onClose={() => setSkillManageOpen(false)}
+        onClose={() => {
+          setSkillManageOpen(false);
+          loadDbTemplates();
+        }}
       />
     </div>
   );
