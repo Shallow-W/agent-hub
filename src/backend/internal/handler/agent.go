@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
@@ -33,6 +34,7 @@ type AgentRequest struct {
 	ToolsConfig           string `json:"tools_config"`
 	Avatar                string `json:"avatar"`
 	CapabilitiesJSON      string `json:"capabilities_json"`
+	CustomSkills          string `json:"custom_skills"`
 	EnableManagementTools bool   `json:"enable_management_tools"`
 }
 
@@ -81,24 +83,21 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":            a.ID,
-			"name":          a.Name,
-			"type":          a.Type,
-			"status":        a.Status,
-			"machine_id":    a.MachineID,
-			"machine_name":  a.MachineName,
-			"version":       a.Version,
-			"cli_tool":      a.CLITool,
-			"system_prompt": a.SystemPrompt,
-			"tools_config":  a.ToolsConfig,
-			"tags":          a.Tags,
-			"custom_skills": a.CustomSkills,
+			"id":           a.ID,
+			"name":         a.Name,
+			"type":         a.Type,
+			"status":       a.Status,
+			"machine_id":   a.MachineID,
+			"machine_name": a.MachineName,
+			"version":      a.Version,
+			"cli_tool":     a.CLITool,
+			"tags":         a.Tags,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
 }
 
-// MCPGetAgentDetail MCP 端点：查询单个 Agent 完整详情
+// MCPGetAgentDetail MCP 端点：查询单个 Agent 详情（skill/tool 仅返回简介）。
 func (h *AgentHandler) MCPGetAgentDetail(c *gin.Context) {
 	agentID := c.Param("id")
 	if agentID == "" {
@@ -114,6 +113,7 @@ func (h *AgentHandler) MCPGetAgentDetail(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusNotFound, 40430, "Agent 不存在")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.SuccessResponse(c, agent)
 }
 
@@ -207,6 +207,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
+		req.CustomSkills,
 		req.EnableManagementTools,
 	)
 	if err != nil {
@@ -236,6 +237,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		req.ToolsConfig,
 		req.Avatar,
 		req.CapabilitiesJSON,
+		req.CustomSkills,
 		req.EnableManagementTools,
 	)
 	if err != nil {

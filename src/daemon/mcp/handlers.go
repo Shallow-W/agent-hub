@@ -522,7 +522,7 @@ func handleCreateAgent(api *APIClient, args map[string]interface{}) (interface{}
 	if tags, ok := args["tags"].(string); ok && tags != "" {
 		body["tags"] = tags
 	}
-	return api.doPost("/api/agents", body)
+	return api.doPost("/mcp/agents", body)
 }
 
 func handleUpdateAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -532,7 +532,7 @@ func handleUpdateAgent(api *APIClient, args map[string]interface{}) (interface{}
 	}
 
 	// Fetch current agent to preserve unchanged fields
-	data, err := api.doGet("/api/agents/"+agentID, nil)
+	data, err := api.doGet("/mcp/agents/"+agentID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get agent detail: %w", err)
 	}
@@ -575,7 +575,7 @@ func handleUpdateAgent(api *APIClient, args map[string]interface{}) (interface{}
 		}
 	}
 
-	return api.doPut("/api/agents/"+agentID, body)
+	return api.doPut("/mcp/agents/"+agentID, body)
 }
 
 func handleDeleteAgent(api *APIClient, args map[string]interface{}) (interface{}, error) {
@@ -583,7 +583,7 @@ func handleDeleteAgent(api *APIClient, args map[string]interface{}) (interface{}
 	if agentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
 	}
-	return api.doDelete("/api/agents/" + agentID)
+	return api.doDelete("/mcp/agents/" + agentID)
 }
 
 var toolsetDescriptions = []map[string]interface{}{

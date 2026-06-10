@@ -879,7 +879,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
 
 	var result *ws.TaskResult
@@ -1027,7 +1027,10 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	contextMessages := s.buildAgentHandoffs(ctx, convID)
+	// 单聊 Agent 不需要群聊风格的 handoff 上下文：
+	// Claude Code 通过 --session-id/--resume 自行维护对话历史，
+	// 无需服务端额外发送历史摘要。
+	contextMessages := ""
 
 	// Include text extracted from this message's attachments before shared context.
 	if s.orchSvc != nil {

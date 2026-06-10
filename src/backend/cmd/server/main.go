@@ -57,6 +57,7 @@ func main() {
 	agentPromptTemplateRepo := repository.NewAgentPromptTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
+	userTemplateRepo := repository.NewUserTemplateRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -111,6 +112,7 @@ func main() {
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
 	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
 	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
+	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
@@ -153,6 +155,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentSvc, hub)
 	platformSkillHandler := handler.NewPlatformSkillHandler(platformSkillSvc)
 	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
+	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
@@ -336,6 +339,10 @@ func main() {
 		apiGroup.POST("/agent-prompt-templates/import-defaults", agentPromptTemplateHandler.ImportDefaults)
 		apiGroup.PUT("/agent-prompt-templates/:id", agentPromptTemplateHandler.Update)
 		apiGroup.DELETE("/agent-prompt-templates/:id", agentPromptTemplateHandler.Delete)
+		apiGroup.GET("/user-templates", userTemplateHandler.List)
+		apiGroup.POST("/user-templates", userTemplateHandler.Create)
+		apiGroup.PUT("/user-templates/:id", userTemplateHandler.Update)
+		apiGroup.DELETE("/user-templates/:id", userTemplateHandler.Delete)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
@@ -438,8 +445,10 @@ func main() {
 		}
 
 		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.POST("/agents", agentHandler.Create)
 		mcpGroup.GET("/agents/:id", agentHandler.MCPGetAgentDetail)
 		mcpGroup.PUT("/agents/:id", agentHandler.Update)
+		mcpGroup.DELETE("/agents/:id", agentHandler.Delete)
 		mcpGroup.POST("/agents/:id/start", agentHandler.StartAgent)
 		mcpGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
@@ -454,6 +463,10 @@ func main() {
 		mcpGroup.GET("/knowledge-bases/:id/files", knowledgeHandler.ListFiles)
 		mcpGroup.GET("/knowledge-bases/:id/search", knowledgeHandler.SearchFiles)
 		mcpGroup.GET("/knowledge-bases/:id/files/:fileId/text", knowledgeHandler.GetFileText)
+
+		// 平台 Skills（只读）
+		mcpGroup.GET("/platform-skills", platformSkillHandler.List)
+		mcpGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
 	}
 
 	registerSPARoutes(router, frontendDistDir())

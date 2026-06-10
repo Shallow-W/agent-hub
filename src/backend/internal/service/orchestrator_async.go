@@ -21,7 +21,7 @@ type OrchSender struct {
 // Runs in a goroutine: synchronously waits for the WS result, creates message, pushes to user,
 // then updates OrchTask worker state and triggers summary if all workers are done.
 func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task DispatchTask, agentID, orchestratorName, kbPreload, orchTaskID string, orchSender OrchSender, replyTo *string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Second)
 	defer cancel()
 
 	slog.Info(orchFlowLog, "stage", "worker.dispatch_start", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "worker_id", agentID, "reply_to", stringValue(replyTo), "task_len", len(task.Task), "task_preview", orchPreview(task.Task))
@@ -253,7 +253,7 @@ func (s *OrchestratorService) goStartOrchSummary(orchTaskID string, replyTo *str
 
 // startOrchSummary 执行 Orch 汇总阶段：收集所有 worker 结果，调 Orch 生成汇总。
 func (s *OrchestratorService) startOrchSummary(orchTaskID string, replyTo *string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Second)
 	defer cancel()
 
 	// CAS guard: only one goroutine can transition workers_running → summarizing
