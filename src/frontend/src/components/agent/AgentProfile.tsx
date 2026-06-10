@@ -216,6 +216,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           system_prompt: agent.system_prompt ?? '',
           tools_config: agent.tools_config ?? '',
           capabilities_json: agent.capabilities_json ?? '',
+          custom_skills: agent.custom_skills ?? '',
           enable_management_tools: agent.enable_management_tools ?? false,
         });
       }
@@ -276,6 +277,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: systemPromptValue.trim() || undefined,
         tools_config: agent.tools_config ?? '',
         capabilities_json: agent.capabilities_json ?? '',
+        custom_skills: agent.custom_skills ?? '',
+        enable_management_tools: agent.enable_management_tools ?? false,
       });
       message.success('系统提示词已保存');
     } catch {
@@ -317,6 +320,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: agent.system_prompt ?? '',
         tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
+        custom_skills: agent.custom_skills ?? '',
         enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementTools(selectedTools),
       });
       message.success('工具配置已保存');

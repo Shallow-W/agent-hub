@@ -158,9 +158,11 @@ export function getToolsByCategory(): Record<string, ToolCatalogItem[]> {
 }
 
 export function toolsConfigToJSON(toolset: string, allowedTools: string[]): string {
-  const validTools = allowedTools.filter((name) => _toolCatalog.some((tool) => tool.name === name));
+  // Do NOT filter against _toolCatalog here — the catalog may be empty due to
+  // a failed/late fetch, which would silently discard all tools on save.
+  // The backend normalizeToolNames already validates against platformToolCatalog.
   return JSON.stringify({
     toolset: toolset === 'custom' ? '' : toolset,
-    allowed_tools: validTools,
+    allowed_tools: allowedTools,
   });
 }

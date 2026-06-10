@@ -69,6 +69,7 @@ export interface AgentRequest {
   tools_config?: string;
   avatar?: string;
   capabilities_json?: string;
+  custom_skills?: string;
   enable_management_tools?: boolean;
 }
 
