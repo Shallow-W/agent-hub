@@ -106,6 +106,17 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setActiveTab(defaultTab);
   }, [agent?.id, defaultTab]);
 
+  // Load tool catalog eagerly; once loaded, re-apply tools_config from the agent
+  // so that tool names are properly recognised.
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  useEffect(() => {
+    fetchToolCatalog()
+      .then(() => setCatalogReady(true))
+      .catch(() => {});
+  }, []);
+
+  // Restore component state from the current agent data.
   useEffect(() => {
     if (!agent) return;
     setName(agent.name);
@@ -113,9 +124,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
     setCustomSkillCount(parseSkills(agent.custom_skills).length);
     setSystemPromptValue(agent.system_prompt ?? '');
-    const parsedTools = parseToolsConfig(agent.tools_config);
-    setSelectedToolset(parsedTools.toolset);
-    setSelectedTools(parsedTools.allowedTools);
   }, [
     agent?.id,
     agent?.name,
@@ -123,12 +131,16 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     agent?.tags,
     agent?.custom_skills,
     agent?.system_prompt,
-    agent?.tools_config,
   ]);
 
+  // Parse tools_config — runs both when the agent changes and when the catalog
+  // finishes loading, so tool names are never lost due to a race.
   useEffect(() => {
-    fetchToolCatalog().catch(() => {});
-  }, []);
+    if (!agent) return;
+    const parsedTools = parseToolsConfig(agent.tools_config);
+    setSelectedToolset(parsedTools.toolset);
+    setSelectedTools(parsedTools.allowedTools);
+  }, [agent?.id, agent?.tools_config, catalogReady]);
 
   useEffect(() => {
     getPlatformSkills().then(setLibrarySkills).catch(() => {});

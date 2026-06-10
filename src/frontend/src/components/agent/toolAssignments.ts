@@ -101,14 +101,17 @@ export function parseToolsConfig(raw?: string): { toolset: string; allowedTools:
       return { toolset: 'none', allowedTools: [] };
     }
     const record = cfg as Record<string, unknown>;
-    const toolset = typeof record.toolset === 'string' && record.toolset in _toolsetTemplates
+    // Trust the toolset name from the backend directly; do not require it to exist in
+    // _toolsetTemplates because the catalog fetch may not have completed yet.
+    const toolset = typeof record.toolset === 'string' && record.toolset !== ''
       ? record.toolset
       : 'custom';
+    // Trust tool names from the backend directly — do not filter against _toolCatalog,
+    // because _toolCatalog may still be empty (async fetch not yet completed) when this
+    // function runs during component mount, which would incorrectly discard all tools.
     const allowedTools = Array.isArray(record.allowed_tools)
-      ? record.allowed_tools.filter((name: unknown): name is string => (
-          typeof name === 'string' && _toolCatalog.some((tool) => tool.name === name)
-        ))
-        : toolset !== 'custom' ? getTemplateTools(toolset) : [];
+      ? record.allowed_tools.filter((name: unknown): name is string => typeof name === 'string')
+      : toolset !== 'custom' ? getTemplateTools(toolset) : [];
     return { toolset, allowedTools };
   } catch {
     return { toolset: 'none', allowedTools: [] };
