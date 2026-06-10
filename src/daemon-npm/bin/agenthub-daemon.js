@@ -3120,6 +3120,7 @@ const DEFAULT_AGENT_TOOLS = [
   'move_task_status',
 ];
 const NO_AGENT_TOOLS = [];
+const MANAGEMENT_TOOL_NAMES = ['create_agent', 'update_agent', 'delete_agent'];
 
 // TOOLSET_TEMPLATES is populated from the backend API at startup (see fetch below).
 const TOOLSET_TEMPLATES = {};
@@ -3189,7 +3190,20 @@ async function resolveAllowedTools(ctx) {
   if (!ctx.agentId) return NO_AGENT_TOOLS;
   if (ctx.allowedTools !== null) return ctx.allowedTools;
   const agent = await resolveCurrentAgent(ctx);
-  ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
+  if (!agent) {
+    ctx.allowedTools = NO_AGENT_TOOLS;
+    return ctx.allowedTools;
+  }
+  let tools = allowedToolsFromConfig(agent.tools_config);
+  // enable_management_tools 为 true 时自动追加管理类工具
+  if (agent.enable_management_tools) {
+    const toolSet = new Set(tools);
+    for (const mt of MANAGEMENT_TOOL_NAMES) {
+      toolSet.add(mt);
+    }
+    tools = [...toolSet];
+  }
+  ctx.allowedTools = tools;
   return ctx.allowedTools;
 }
 
