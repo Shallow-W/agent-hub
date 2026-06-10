@@ -6,7 +6,9 @@ import type { PlatformSkill } from '@/types/agent';
 import {
   categoryMeta,
   categoryOrder,
+  getTemplateTools,
   toolCatalog,
+  toolsetOptions,
 } from './toolAssignments';
 import styles from './CreateTemplateManagerModal.module.css';
 
@@ -81,11 +83,12 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
 
   const builtInTemplates: BuiltInTemplate[] = useMemo(() => {
     if (mode === 'tools') {
-      return [
-        { key: 'tpl-tools-full', name: '全量工具', category: '快速', description: `全部 ${toolCatalog.length} 个工具`, tools: toolCatalog.map((t) => t.name), skillCategories: [] },
-        { key: 'tpl-tools-tasks', name: '任务协作', category: '快速', description: '任务相关工具集', tools: ['list_group_agents', 'get_messages', 'get_agent_skill', 'list_tasks', 'create_task', 'update_task', 'move_task_status'], skillCategories: [] },
-        { key: 'tpl-tools-none', name: '空工具集', category: '快速', description: '不分配任何工具', tools: [], skillCategories: [] },
-      ];
+      return toolsetOptions
+        .filter((opt) => opt.value !== 'custom')
+        .map((opt) => {
+          const tools = getTemplateTools(opt.value);
+          return { key: `tpl-tools-${opt.value}`, name: opt.label, category: '内置', description: `${tools.length} 个工具`, tools, skillCategories: [] };
+        });
     }
     return [
       { key: 'tpl-skills-pm', name: '产品经理', category: '快速', description: '产品经理分类 Skills', tools: [], skillCategories: ['产品经理'] },
