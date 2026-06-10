@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/agent-hub/backend/internal/ghpages"
@@ -337,8 +340,27 @@ func (s *DeploymentService) PublishGitHub(ctx context.Context, rootID, userID st
 	return s.decorate(updated), nil
 }
 
+// fetchURLContent 尝试从 URL 获取 HTML 内容，超时 5 秒。成功返回 HTML 字符串，失败返回空串。
+func fetchURLContent(rawURL string) string {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	// 限制读取大小为 10MB，防止读取过大内容
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
 // renderIndexHTML 生成站点首页：
-//   - webpage：内容本身即 HTML，直接作为站点首页（或外链跳转）
+//   - webpage：内容本身即 HTML，直接作为站点首页（或从 URL 拉取内容）
 //   - document / markdown：服务端用 goldmark 渲染成干净的浅色文档页（自包含，离线可看）
 //   - code：深色等宽代码页
 //   - 其它 file：浅色纯文本页
@@ -348,8 +370,12 @@ func renderIndexHTML(art *model.Artifact) string {
 			return art.Content
 		}
 		if art.URL != "" {
-			return `<!DOCTYPE html><meta charset="utf-8"><title>preview</title>` +
-				`<meta http-equiv="refresh" content="0;url=` + html.EscapeString(art.URL) + `">`
+			// 尝试从 URL 拉取实际 HTML 内容，避免将隧道用户重定向到不可达的 localhost
+			if fetched := fetchURLContent(art.URL); fetched != "" {
+				return fetched
+			}
+			// 拉取失败：生成友好的错误页面，而不是 meta refresh 到不可达地址
+			return unavailablePreviewPage(art.URL)
 		}
 	}
 
@@ -649,6 +675,24 @@ const docCSS = `body{margin:0;background:#f6f8fa;color:#1f2328;` +
 const codeCSS = `body{margin:0;background:#1e1e1e;color:#d4d4d4;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace}` +
 	`.bar{position:sticky;top:0;background:#252526;color:#9da5b4;padding:10px 16px;border-bottom:1px solid #333;font-size:13px}` +
 	`.code{margin:0;padding:16px;white-space:pre;overflow:auto}`
+
+// unavailablePreviewPage 生成一个友好的错误页面，告知用户预览内容不可用。
+func unavailablePreviewPage(url string) string {
+	return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width, initial-scale=1">` +
+		`<title>预览不可用</title><style>` +
+		`body{margin:0;background:#f6f8fa;color:#1f2328;display:flex;align-items:center;justify-content:center;min-height:100vh;` +
+		`font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}` +
+		`.card{max-width:520px;padding:32px;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1)}` +
+		`h1{margin:0 0 .5em;font-size:1.4em;color:#cf222e}` +
+		`p{margin:.4em 0;color:#656d76}` +
+		`code{background:#eff1f3;padding:.15em .4em;border-radius:4px;font-size:14px}` +
+		`</style></head><body><div class="card">` +
+		`<h1>预览内容不可用</h1>` +
+		`<p>该 artifact 仅包含一个本地 URL（<code>` + html.EscapeString(url) + `</code>），无法通过公网访问。</p>` +
+		`<p>请确保 artifact 包含完整的 HTML 内容（content 字段），而非仅引用本地服务地址。</p>` +
+		`</div></body></html>`
+}
 
 // checkAccess 校验 rootId 对应产物所属对话，且当前用户为成员（或对话创建者），返回 convID。
 func (s *DeploymentService) checkAccess(ctx context.Context, rootID, userID string) (string, error) {

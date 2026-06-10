@@ -3064,7 +3064,7 @@ const MCP_TOOLS = [
   },
   {
     name: 'deploy_artifact',
-    description: '将当前会话中的 artifact（代码/网页/文档）部署为可公开访问的预览页面。通过内网穿透(tunnel)生成临时公网 URL。不指定 artifact_name 时部署最新 artifact。',
+    description: '将当前会话中的 artifact（代码/网页/文档）部署为可公开访问的预览页面。通过内网穿透(tunnel)生成临时公网 URL。不指定 artifact_name 时部署最新 artifact。注意：webpage 类型的 artifact 需要包含完整的 HTML 内容（content 字段）才能正确部署预览，仅包含 localhost URL 的产物无法通过公网访问。',
     inputSchema: {
       type: 'object',
       properties: {
