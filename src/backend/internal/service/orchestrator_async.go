@@ -88,14 +88,22 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		}
 	}
 
-	// 构建 dispatch 上下文
-	dispatchCtx := fmt.Sprintf("[群聊背景]\n- Orchestrator: %s\n\n[调度指令]\nOrch @你，分配了以下任务：\n%s\n\n请完成这个任务并在回复末尾 @%s 表示完成。",
-		orchestratorName, truncateString(task.Task, 2000), orchestratorName)
-
-	if kbPreload != "" {
-		dispatchCtx = kbPreload + dispatchCtx
-	}
-	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID, task.Task)
+	// 通过 fanout chain 构建上下文：[Frame, KB, AgentConfig]
+	// 最终输出顺序：agentConfig + kbPreload + frame（与重构前内联拼装完全一致）。
+	// frame 由 FanoutFrameBuilder 从 ContextInput.Extra[fanoutFrameExtraKey] 读取。
+	dispatchCtx := s.FanoutChain().Build(ctx, ContextInput{
+		ConvID:    convID,
+		UserID:    userID,
+		Agent:     agent,
+		Content:   task.Task,
+		KBPreload: kbPreload,
+		Extra: map[string]any{
+			fanoutFrameExtraKey: FanoutFrameInput{
+				OrchestratorName: orchestratorName,
+				Task:             task.Task,
+			},
+		},
+	})
 
 	// 统一路径：创建 daemon task → WS dispatch → channel wait → 创建消息
 	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, task.Task, dispatchCtx, replyTo)
@@ -285,7 +293,14 @@ func (s *OrchestratorService) startOrchSummary(orchTaskID string, replyTo *strin
 
 	// 构建汇总+决策 prompt（支持多轮上下文）
 	summaryPrompt := BuildSummaryPrompt(orchTask)
-	summaryCtx := s.InjectAgentConfig(orchAgent, "", orchTask.UserID, summaryPrompt)
+	// 通过 summary chain 构建 contextMessages：仅 [AgentConfig]。
+	// 输出 = agentConfig + ""（summary prompt 已自带 OrchestratorSummarySystemPrompt，不叠加 OrchestratorSystemPrompt）。
+	summaryCtx := s.SummaryChain().Build(ctx, ContextInput{
+		ConvID:  orchTask.ConversationID,
+		UserID:  orchTask.UserID,
+		Agent:   orchAgent,
+		Content: summaryPrompt,
+	})
 
 	if replyTo == nil {
 		replyTo = optionalStringPtr(orchTask.DispatchMessageID)

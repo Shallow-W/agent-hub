@@ -21,7 +21,7 @@ func (b *AgentConfigInjector) Build(ctx context.Context, in ContextInput, curren
 }
 
 // BuildAgentConfigText 把 agent 的系统提示词 / 工具配置 / 平台 Skills 拼到 contextStr 前面。
-// 逻辑与 OrchestratorService.InjectAgentConfig 等价（供 façade 复用）。
+// 供 AgentConfigInjector（chain 内）与 summary/fanout 等场景的调用方直接复用。
 // 注意：Orchestrator 系统指令由 OrchestratorPromptBuilder 单独注入，此处只处理 agent 自定义配置。
 func BuildAgentConfigText(agent *model.Agent, contextStr string, taskText string) string {
 	var sb strings.Builder

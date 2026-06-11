@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -102,8 +101,28 @@ type OrchestratorService struct {
 	workerChain      *ContextChain // 路径 C：dispatchSingleAgent
 	orchChain        *ContextChain // 路径 D：handleOrchestratedDispatch
 
+	// fanoutChain 对应路径 C 的异步 fanout 变体（startWorkersAndWait → dispatchOrchWorker）。
+	// 与 workerChain 共享 KB / AgentConfig，但额外前置一个「群聊背景 + 调度指令」框架段。
+	// 输出顺序：agentConfig + kbPreload + frame（与重构前内联拼装完全一致）。
+	fanoutChain *ContextChain
+
+	// summaryChain 对应路径 D 的 summary 阶段（startOrchSummary）。
+	// 仅一个 AgentConfig builder：输出 = agentConfig + ""。
+	// 不叠加 OrchestratorSystemPrompt（summary prompt 已自带 OrchestratorSummarySystemPrompt）。
+	summaryChain *ContextChain
+
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
-	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
+	// 历史实现是 agentQueues sync.Map[agentID]chan struct{}，P5 抽成 AgentQueue 类型。
+	agentQueue *AgentQueue
+
+	// router 把「消息 + 群聊 agent + @mention」解析成 []DispatchTarget。
+	// 历史路径：RouteMention 内联循环做解析；P5b 抽成独立类型便于未来拓展广播/轮询策略。
+	router *Router
+
+	// dispatcher 封装 dispatchAndWait 的派发动作（task 创建 + WS + 等待 + 落库）。
+	// 当前作为可注入扩展点存在；现有调用方仍直接调 dispatchAndWait 以保持零行为变更，
+	// 后续清理（P6+）会把 dispatchSingleAgent / fanout / summary 迁移到走 Dispatcher。
+	dispatcher *Dispatcher
 }
 
 // SetTokenIssuer sets the token issuer for generating management tool tokens.
@@ -189,10 +208,13 @@ func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
 // Deprecated: use NewOrchestratorServiceWithDeps for explicit dependency injection.
 func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
 	svc := &OrchestratorService{
-		convRepo:  convRepo,
-		agentRepo: agentRepo,
-		msgRepo:   msgRepo,
+		convRepo:   convRepo,
+		agentRepo:  agentRepo,
+		msgRepo:    msgRepo,
+		agentQueue: NewAgentQueue(),
+		router:     NewRouter(),
 	}
+	svc.dispatcher = NewDispatcher(svc)
 	// 装配默认链（依赖项未注入时 builder 会做 nil 防护，不影响构造）
 	svc.buildDefaultChains()
 	return svc
@@ -219,6 +241,17 @@ type OrchestratorDeps struct {
 	DirectReplyChain *ContextChain
 	WorkerChain      *ContextChain
 	OrchChain        *ContextChain
+	FanoutChain      *ContextChain // 路径 C 异步 fanout 变体
+	SummaryChain     *ContextChain // 路径 D summary 阶段
+
+	// 可选：注入自定义派发并发护栏。nil 时使用默认 AgentQueue。
+	AgentQueue *AgentQueue
+
+	// 可选：注入自定义路由器。nil 时使用默认 Router。
+	Router *Router
+
+	// 可选：注入自定义派发器。nil 时使用默认 Dispatcher（绑定到构造完成的 svc）。
+	Dispatcher *Dispatcher
 }
 
 // NewOrchestratorServiceWithDeps creates a fully-initialized OrchestratorService.
@@ -250,11 +283,25 @@ func NewOrchestratorServiceWithDeps(deps OrchestratorDeps) *OrchestratorService 
 		notifier:     deps.Notifier,
 		delivery:     deps.Delivery,
 		taskSvc:      deps.TaskSvc,
+		agentQueue:   deps.AgentQueue,
+		router:       deps.Router,
+		dispatcher:   deps.Dispatcher,
+	}
+	if svc.agentQueue == nil {
+		svc.agentQueue = NewAgentQueue()
+	}
+	if svc.router == nil {
+		svc.router = NewRouter()
+	}
+	if svc.dispatcher == nil {
+		svc.dispatcher = NewDispatcher(svc)
 	}
 	svc.directReplyChain = deps.DirectReplyChain
 	svc.workerChain = deps.WorkerChain
 	svc.orchChain = deps.OrchChain
-	if svc.directReplyChain == nil || svc.workerChain == nil || svc.orchChain == nil {
+	svc.fanoutChain = deps.FanoutChain
+	svc.summaryChain = deps.SummaryChain
+	if svc.directReplyChain == nil || svc.workerChain == nil || svc.orchChain == nil || svc.fanoutChain == nil || svc.summaryChain == nil {
 		svc.buildDefaultChains()
 	}
 	return svc
@@ -274,6 +321,7 @@ func (s *OrchestratorService) buildDefaultChains() {
 	kb := &KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}
 	agentCfg := &AgentConfigInjector{}
 	orchPrompt := &OrchestratorPromptBuilder{}
+	fanoutFrame := &FanoutFrameBuilder{}
 
 	if s.directReplyChain == nil {
 		// 路径 A：最终输出 agentConfig + kb + blackboard + attach
@@ -287,6 +335,16 @@ func (s *OrchestratorService) buildDefaultChains() {
 		// 路径 D：最终输出 agentConfig + orchPrompt + kbPreload
 		s.orchChain = NewContextChain(kb, orchPrompt, agentCfg)
 	}
+	if s.fanoutChain == nil {
+		// 路径 C 异步 fanout 变体：[Frame, KB, AgentConfig]
+		// 最终输出 agentConfig + kbPreload + frame（与 orchestrator_async 原内联拼装一致）
+		s.fanoutChain = NewContextChain(fanoutFrame, kb, agentCfg)
+	}
+	if s.summaryChain == nil {
+		// 路径 D summary 阶段：仅 [AgentConfig]
+		// 最终输出 agentConfig + ""（summary prompt 已自带 summary system prompt）
+		s.summaryChain = NewContextChain(agentCfg)
+	}
 }
 
 // DirectReplyChain 返回单聊直接回复路径的上下文链（路径 A）。
@@ -297,6 +355,23 @@ func (s *OrchestratorService) WorkerChain() *ContextChain { return s.workerChain
 
 // OrchChain 返回 orchestrator 派发路径的上下文链（路径 D）。
 func (s *OrchestratorService) OrchChain() *ContextChain { return s.orchChain }
+
+// FanoutChain 返回 worker 异步 fanout 路径的上下文链（路径 C 变体）。
+// 与 WorkerChain 共享 KB / AgentConfig，额外前置「群聊背景 + 调度指令」框架段。
+func (s *OrchestratorService) FanoutChain() *ContextChain { return s.fanoutChain }
+
+// SummaryChain 返回 orchestrator summary 阶段的上下文链（路径 D summary）。
+// 仅一个 AgentConfig builder，不叠加 OrchestratorSystemPrompt。
+func (s *OrchestratorService) SummaryChain() *ContextChain { return s.summaryChain }
+
+// Router 返回路由器实例（解析 @mention → DispatchTarget）。
+func (s *OrchestratorService) Router() *Router { return s.router }
+
+// Dispatcher 返回派发器实例（封装 dispatchAndWait）。
+func (s *OrchestratorService) Dispatcher() *Dispatcher { return s.dispatcher }
+
+// AgentQueue 返回并发护栏实例（串行化同一 agent 的派发）。
+func (s *OrchestratorService) AgentQueue() *AgentQueue { return s.agentQueue }
 
 // RouteMention is the main entry point called when a message contains @mentions.
 func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment, sourceMessageID *string) (*RouteResult, error) {
@@ -335,30 +410,23 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		kbPreload = attachCtx + kbPreload
 	}
 
+	// 通过 Router 解析派发目标：mention → agent + role + task。
+	// Router 只负责路由决策，不触碰上下文工程（kbPreload / attachments）。
+	targets := s.router.Resolve(ctx, RouterInput{
+		Content:    content,
+		ConvAgents: convAgents,
+		Mentions:   mentions,
+		MentionMap: mentionMap,
+		AgentRepo:  s.agentRepo.GetByID,
+	})
+
 	result := &RouteResult{}
 
-	for _, m := range mentions {
-		agentID, ok := mentionMap[m.AgentName]
-		if !ok {
-			continue
-		}
-
-		agent, err := s.agentRepo.GetByID(ctx, agentID)
-		if err != nil {
-			slog.Warn("orch get agent failed", "agent_id", agentID, "error", err)
-			continue
-		}
-		if agent == nil {
-			continue
-		}
-
-		// Check conversation agent role (set per group chat, not agent type)
-		ca, _ := model.ConversationAgents(convAgents).FindByAgentID(agentID)
-		isOrchestrator := ca != nil && ca.IsOrchestrator()
-
-		if isOrchestrator {
-			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name)
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload, sourceMessageID)
+	for _, t := range targets {
+		agentID := t.Agent.ID
+		if t.Role == DispatchRoleOrchestrator {
+			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", t.Agent.Name)
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, t.Agent, content, convAgents, kbPreload, sourceMessageID)
 			if err != nil {
 				slog.Warn(orchFlowLog, "stage", "route.orchestrator_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
@@ -367,12 +435,12 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			result.AgentMessages = append(result.AgentMessages, msgs...)
 			result.Dispatches = append(result.Dispatches, DispatchInfo{
 				AgentID:   agentID,
-				AgentName: m.AgentName,
+				AgentName: t.MentionName,
 				Task:      content,
 			})
 		} else {
-			slog.Info(orchFlowLog, "stage", "route.to_worker_direct", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name, "reply_to", stringValue(sourceMessageID))
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload, sourceMessageID)
+			slog.Info(orchFlowLog, "stage", "route.to_worker_direct", "conversation_id", convID, "agent_id", agentID, "agent_name", t.Agent.Name, "reply_to", stringValue(sourceMessageID))
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, t.Agent, t.Task, kbPreload, sourceMessageID)
 			if err != nil {
 				slog.Warn(orchFlowLog, "stage", "route.worker_direct_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
@@ -380,7 +448,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			result.AgentMessages = append(result.AgentMessages, msg)
 			result.Dispatches = append(result.Dispatches, DispatchInfo{
 				AgentID:   agentID,
-				AgentName: m.AgentName,
+				AgentName: t.MentionName,
 				Task:      content,
 				Parallel:  true,
 			})
@@ -457,25 +525,24 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
-	newSem := make(chan struct{}, 1)
-	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
-	sem := actual.(chan struct{})
-	sem <- struct{}{} // blocks until slot available
-	defer func() { <-sem }()
+	// Dispatch guard：通过 AgentQueue 串行化同一 agent 的派发（buffered-1 semaphore）。
+	// 行为与原 sync.Map + `sem <- struct{}{}` 完全一致。
+	var msg *model.Message
+	err = s.agentQueue.Run(ctx, agent.ID, func() error {
+		// 通过 worker chain 构建上下文：[KB, Blackboard, AgentConfig]
+		// KB 优先使用预加载（来自 RouteMention 入口），为空时实时解析 content 中的 {{user/KB}}。
+		// 最终输出顺序：agentConfig + blackboardCtx + kbCtx（与重构前完全一致）。
+		agentCtx := s.WorkerChain().Build(ctx, ContextInput{
+			ConvID:    convID,
+			UserID:    userID,
+			Agent:     agent,
+			Content:   content,
+			KBPreload: kbPreload,
+		})
 
-	// 通过 worker chain 构建上下文：[KB, Blackboard, AgentConfig]
-	// KB 优先使用预加载（来自 RouteMention 入口），为空时实时解析 content 中的 {{user/KB}}。
-	// 最终输出顺序：agentConfig + blackboardCtx + kbCtx（与重构前完全一致）。
-	agentCtx := s.WorkerChain().Build(ctx, ContextInput{
-		ConvID:    convID,
-		UserID:    userID,
-		Agent:     agent,
-		Content:   content,
-		KBPreload: kbPreload,
+		msg, err = s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
+		return err
 	})
-
-	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
 	if err != nil {
 		return nil, err
 	}
@@ -850,15 +917,6 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 	case <-ctx.Done():
 		return nil, ErrMsgAgentTimeout
 	}
-}
-
-// InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
-// Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
-//
-// Façade：委托给 BuildAgentConfigText（与 AgentConfigInjector 共享同一实现）。
-func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string, taskText string) string {
-	_ = userID // 历史签名保留，agent 配置注入不依赖 userID
-	return BuildAgentConfigText(agent, contextStr, taskText)
 }
 
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）

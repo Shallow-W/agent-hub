@@ -185,52 +185,52 @@ func (s *OrchestratorService) connectedAgentByID(ctx context.Context, agentID st
 
 // runDaemonEdit 复用 dispatchWorker 的派发机制执行一次 daemon 任务，返回结果文本（含产物时优先取 code 产物 content）。
 func (s *OrchestratorService) runDaemonEdit(ctx context.Context, convID, userID string, agent *model.Agent, prompt string) (string, error) {
-	// 派发护栏：与 dispatchWorker 一致，串行化同一 agent 的派发
-	newSem := make(chan struct{}, 1)
-	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
-	sem := actual.(chan struct{})
-	sem <- struct{}{}
-	defer func() { <-sem }()
-
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, "")
-	if err != nil {
-		return "", fmt.Errorf("create edit daemon task: %w", err)
-	}
-
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-		return "", ErrArtifactEditNoAgent
-	}
-	s.daemonHub.RegisterTaskPromise(task.ID)
-	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          task.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           prompt,
-			"context_messages": "",
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
-	}); err != nil {
-		return "", fmt.Errorf("dispatch edit to daemon: %w", err)
-	}
-
-	task, err = s.waitDaemonTask(ctx, task.ID)
-	if err != nil {
-		return "", err
-	}
-	if task.Status == "failed" {
-		return "", fmt.Errorf("edit daemon task failed: %s", task.Error)
-	}
-
-	// 优先取产物里第一个 code 产物的 content
-	for i := range task.Artifacts {
-		if task.Artifacts[i].Type == "code" && task.Artifacts[i].Content != "" {
-			return task.Artifacts[i].Content, nil
+	// 派发护栏：通过 AgentQueue 串行化同一 agent 的派发（与 dispatchSingleAgent 一致）。
+	var result string
+	err := s.agentQueue.Run(ctx, agent.ID, func() error {
+		task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, "")
+		if err != nil {
+			return fmt.Errorf("create edit daemon task: %w", err)
 		}
-	}
-	return task.Result, nil
+
+		if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+			return ErrArtifactEditNoAgent
+		}
+		s.daemonHub.RegisterTaskPromise(task.ID)
+		if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+			Type: "task.dispatch",
+			Data: map[string]interface{}{
+				"task_id":          task.ID,
+				"cli_tool":         agent.CLITool,
+				"prompt":           prompt,
+				"context_messages": "",
+				"agent_id":         agent.ID,
+				"conversation_id":  convID,
+				"user_id":          userID,
+			},
+		}); err != nil {
+			return fmt.Errorf("dispatch edit to daemon: %w", err)
+		}
+
+		task, err = s.waitDaemonTask(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		if task.Status == "failed" {
+			return fmt.Errorf("edit daemon task failed: %s", task.Error)
+		}
+
+		// 优先取产物里第一个 code 产物的 content
+		for i := range task.Artifacts {
+			if task.Artifacts[i].Type == "code" && task.Artifacts[i].Content != "" {
+				result = task.Artifacts[i].Content
+				return nil
+			}
+		}
+		result = task.Result
+		return nil
+	})
+	return result, err
 }
 
 // buildArtifactEditPrompt 构造代码编辑 prompt：要求只返回完整修改后代码、用代码块包裹。

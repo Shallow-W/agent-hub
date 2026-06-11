@@ -16,6 +16,12 @@ type ContextInput struct {
 	Attachments    []model.MessageAttachment
 	KBPreload      string // 已预加载的 KB 上下文（避免重复解析）
 	IsOrchestrator bool   // 是否用于 orch 角色（影响是否叠加 OrchestratorSystemPrompt）
+
+	// Extra 是 builder 专用原料的逃生舱。每个 builder 自行约定 key 与类型，
+	// 避免每加一个 builder 都要扩张 ContextInput 主字段。读不到对应 key 时
+	// builder 应返回 current 不变。
+	// 例如：FanoutFrameBuilder 读取 "fanout_frame" → FanoutFrameInput。
+	Extra map[string]any
 }
 
 // ContextBuilder 构建一段上下文，追加/前置到 current 上。
