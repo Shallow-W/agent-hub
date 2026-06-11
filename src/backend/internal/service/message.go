@@ -35,7 +35,8 @@ type MessageDeliveryState interface {
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
 }
 
-// MsgRepo 消息服务所需的仓库接口
+// MsgRepo 消息服务所需的仓库接口。
+// Deprecated: migrate to repository.MessageStore for canonical interface.
 type MsgRepo interface {
 	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
@@ -107,7 +108,8 @@ func codeArtifactsFromMarkdown(content string) []model.Artifact {
 	return codeArtifacts
 }
 
-// ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
+// ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）。
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type ConvRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	UpdateTimestamp(ctx context.Context, id string) error
@@ -117,6 +119,7 @@ type ConvRepoForMsg interface {
 }
 
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
+// Deprecated: migrate to repository.AgentStore for canonical interface.
 type AgentRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
@@ -969,26 +972,24 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	// 单聊 Agent 不需要群聊风格的 handoff 上下文：
 	// Claude Code 通过 --session-id/--resume 自行维护对话历史，
 	// 无需服务端额外发送历史摘要。
-	contextMessages := ""
-
-	// Include text extracted from this message's attachments before shared context.
-	if s.orchSvc != nil {
-		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
-			contextMessages = attachCtx + contextMessages
-		}
-	}
-
-	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
+	//
+	// 通过 direct reply chain 构建上下文：[Attachment, Blackboard, KB, AgentConfig]
+	// 最终输出顺序：agentConfig + kb + blackboard + attach（与重构前完全一致）。
+	// 仅当 orchSvc 可用且 agent 解析成功时才走完整链；否则只走 attachment 段。
+	var contextMessages string
 	if s.orchSvc != nil {
 		agent, err := s.agentRepo.GetByID(ctx, agentID)
 		if err == nil && agent != nil {
-			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
-				contextMessages = blackboardCtx + contextMessages
-			}
-			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
-				contextMessages = kbCtx + contextMessages
-			}
-			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
+			contextMessages = s.orchSvc.DirectReplyChain().Build(ctx, ContextInput{
+				ConvID:      convID,
+				UserID:      userID,
+				Agent:       agent,
+				Content:     content,
+				Attachments: attachments,
+			})
+		} else {
+			// agent 解析失败时仅注入附件段（保持原降级行为，不注入 agent config / blackboard / kb）
+			contextMessages = s.orchSvc.BuildAttachmentContext(ctx, attachments, userID)
 		}
 	}
 

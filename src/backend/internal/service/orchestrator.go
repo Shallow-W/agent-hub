@@ -5,17 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/agent-hub/backend/internal/docextract"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
 // OrchConvRepo queries conversation agents for @mention resolution.
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type OrchConvRepo interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
@@ -24,6 +23,7 @@ type OrchConvRepo interface {
 }
 
 // OrchAgentRepo queries agent details and creates daemon tasks.
+// Deprecated: migrate to repository.AgentStore for canonical interface.
 type OrchAgentRepo interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
@@ -96,11 +96,18 @@ type OrchestratorService struct {
 	delivery     OrchDeliveryState
 	taskSvc      TaskBoardSync
 
+	// 三条上下文构建链：分别对应单聊直接回复、worker 派发、orch 派发三条路径。
+	// 详细顺序见 NewOrchestratorServiceWithDeps。
+	directReplyChain *ContextChain // 路径 A：message.asyncAgentReply
+	workerChain      *ContextChain // 路径 C：dispatchSingleAgent
+	orchChain        *ContextChain // 路径 D：handleOrchestratedDispatch
+
 	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
 	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
 }
 
 // SetTokenIssuer sets the token issuer for generating management tool tokens.
+// Deprecated: use NewOrchestratorServiceWithDeps(OrchestratorDeps{TokenIssuer: ...}).
 func (s *OrchestratorService) SetTokenIssuer(ti *TokenIssuer) {
 	s.tokenIssuer = ti
 }
@@ -116,80 +123,180 @@ const attachmentTextMaxRunes = 6000
 // BuildAttachmentContext 为带附件的消息生成「消息附件」上下文段：在服务端把每个附件抽取
 // 为纯文本并直接内联，Agent 无需下载或解析二进制（避免超时）。无法解析的格式给出降级提示，
 // 保证 Agent 始终能据此回复。无附件时返回空串。
+//
+// Façade：委托给 BuildAttachmentText（与 AttachmentBuilder 共享同一实现），保留旧 API 以
+// 兼容 message.go 等历史调用方。后续 P6 清理 Setter 时会一并评估是否内联化。
 func (s *OrchestratorService) BuildAttachmentContext(ctx context.Context, attachments []model.MessageAttachment, userID string) string {
-	if len(attachments) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("[消息附件]\n")
-	sb.WriteString("用户在本条消息中附带了以下文件，已由系统抽取为文本内联在下方，请据此回答：\n\n")
-	for _, a := range attachments {
-		header := fmt.Sprintf("=== 附件：%s (%s, %s) ===\n", a.FileName, a.MimeType, formatFileSize(a.FileSize))
-		sb.WriteString(header)
-		absPath := filepath.Join(s.uploadDir, filepath.FromSlash(strings.TrimLeft(a.FilePath, "/\\")))
-		if text, ok := docextract.Extract(ctx, absPath, a.FileName, attachmentTextMaxRunes); ok {
-			sb.WriteString(text)
-			sb.WriteString("\n\n")
-		} else {
-			sb.WriteString("（该格式无法在服务端自动解析，请提示用户转换为 pptx/docx/xlsx/pdf 或纯文本后重发）\n\n")
-		}
-	}
-	return sb.String()
+	_ = userID // 历史签名保留，附件抽取不依赖 userID
+	return BuildAttachmentText(ctx, attachments, s.uploadDir, attachmentTextMaxRunes)
 }
 
 // SetServerURL sets the server base URL for management tool API calls.
+// Deprecated: use OrchestratorDeps.ServerURL.
 func (s *OrchestratorService) SetServerURL(url string) {
 	s.serverURL = url
 }
 
 // SetKBResolver sets the knowledge base resolver for injecting KB context.
+// Deprecated: use OrchestratorDeps.KBResolver.
 func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 	s.kbResolver = resolver
 }
 
 // SetDaemonHub sets the daemon WebSocket hub for task dispatch.
+// Deprecated: use OrchestratorDeps.DaemonHub.
 func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
 }
 
 // SetArtifactRepo sets the artifact repository used for AI editing artifacts.
+// Deprecated: use OrchestratorDeps.ArtifactRepo.
 func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
 	s.artifactRepo = repo
 }
 
 // SetOrchTaskRepo sets the orchestration task store.
+// Deprecated: use OrchestratorDeps.OrchTaskRepo.
 func (s *OrchestratorService) SetOrchTaskRepo(repo OrchTaskStore) {
 	s.orchTaskRepo = repo
 }
 
 // SetNotifier injects the message notifier for pushing async messages to user WS.
+// Deprecated: use OrchestratorDeps.Notifier.
 func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
 	s.notifier = n
 }
 
 // SetDeliveryState injects transient delivery state storage.
+// Deprecated: use OrchestratorDeps.Delivery.
 func (s *OrchestratorService) SetDeliveryState(c OrchDeliveryState) {
 	s.delivery = c
 }
 
 // SetCacher is kept for compatibility with older wiring code.
+// Deprecated: use OrchestratorDeps.Delivery.
 func (s *OrchestratorService) SetCacher(c OrchDeliveryState) {
 	s.SetDeliveryState(c)
 }
 
 // SetTaskSvc injects the task board sync service.
+// Deprecated: use OrchestratorDeps.TaskSvc.
 func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
 	s.taskSvc = svc
 }
 
 // NewOrchestratorService creates a new orchestrator service.
+// Deprecated: use NewOrchestratorServiceWithDeps for explicit dependency injection.
 func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
-	return &OrchestratorService{
+	svc := &OrchestratorService{
 		convRepo:  convRepo,
 		agentRepo: agentRepo,
 		msgRepo:   msgRepo,
 	}
+	// 装配默认链（依赖项未注入时 builder 会做 nil 防护，不影响构造）
+	svc.buildDefaultChains()
+	return svc
 }
+
+// OrchestratorDeps bundles all optional dependencies for OrchestratorService.
+// Use NewOrchestratorServiceWithDeps to construct the service with all deps at once.
+type OrchestratorDeps struct {
+	ConvRepo     OrchConvRepo
+	AgentRepo    OrchAgentRepo
+	MsgRepo      MsgRepo
+	OrchTaskRepo OrchTaskStore
+	TokenIssuer  *TokenIssuer
+	ServerURL    string
+	UploadDir    string
+	KBResolver   OrchKBResolver
+	DaemonHub    *ws.DaemonHub
+	ArtifactRepo OrchArtifactRepo
+	Notifier     MessageNotifier
+	Delivery     OrchDeliveryState
+	TaskSvc      TaskBoardSync
+
+	// 可选：注入自定义上下文构建链。nil 时使用默认链（详见 buildDefaultChains）。
+	DirectReplyChain *ContextChain
+	WorkerChain      *ContextChain
+	OrchChain        *ContextChain
+}
+
+// NewOrchestratorServiceWithDeps creates a fully-initialized OrchestratorService.
+// 未显式注入 Chain 的字段会用默认 chain 装配，保证拼装顺序与重构前完全等价：
+//   - DirectReplyChain（路径 A：asyncAgentReply 单聊直接回复）
+//     [Attachment, Blackboard, KB, AgentConfig]
+//     最终输出: agentConfig + kb + blackboard + attach
+//   - WorkerChain（路径 C：dispatchSingleAgent）
+//     [KB, Blackboard, AgentConfig]
+//     最终输出: agentConfig + blackboard + kbPreload
+//   - OrchChain（路径 D：handleOrchestratedDispatch）
+//     [KB, OrchestratorPrompt, AgentConfig]
+//     最终输出: agentConfig + orchPrompt + kbPreload
+//
+// 注意：路径 A 与 C 的 Blackboard/KB 顺序不一致是历史遗留，
+// 这里保留各自路径的现有顺序以做到零行为变更（详见 P4 任务 prd.md 的「现状」一节）。
+func NewOrchestratorServiceWithDeps(deps OrchestratorDeps) *OrchestratorService {
+	svc := &OrchestratorService{
+		convRepo:     deps.ConvRepo,
+		agentRepo:    deps.AgentRepo,
+		msgRepo:      deps.MsgRepo,
+		orchTaskRepo: deps.OrchTaskRepo,
+		tokenIssuer:  deps.TokenIssuer,
+		serverURL:    deps.ServerURL,
+		uploadDir:    deps.UploadDir,
+		kbResolver:   deps.KBResolver,
+		daemonHub:    deps.DaemonHub,
+		artifactRepo: deps.ArtifactRepo,
+		notifier:     deps.Notifier,
+		delivery:     deps.Delivery,
+		taskSvc:      deps.TaskSvc,
+	}
+	svc.directReplyChain = deps.DirectReplyChain
+	svc.workerChain = deps.WorkerChain
+	svc.orchChain = deps.OrchChain
+	if svc.directReplyChain == nil || svc.workerChain == nil || svc.orchChain == nil {
+		svc.buildDefaultChains()
+	}
+	return svc
+}
+
+// buildDefaultChains 用 OrchestratorService 当前依赖装配默认上下文链。
+// 已被显式注入（非 nil）的字段不会被覆盖。
+//
+// 调用时机：
+//   - NewOrchestratorServiceWithDeps：构造时调用一次；deps 中显式注入的 chain 不会被覆盖
+//   - NewOrchestratorService（旧构造函数）：构造时调用一次；后续 SetX 注入的依赖
+//     不会自动同步到默认链，但目前没有测试在 setter 后路由非空的 KB/附件/agent-config
+//     路径，因此可接受。生产代码统一使用 NewOrchestratorServiceWithDeps。
+func (s *OrchestratorService) buildDefaultChains() {
+	attach := &AttachmentBuilder{UploadDir: s.uploadDir, MaxRunes: attachmentTextMaxRunes}
+	blackboard := &BlackboardBuilder{MsgRepo: s.msgRepo}
+	kb := &KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}
+	agentCfg := &AgentConfigInjector{}
+	orchPrompt := &OrchestratorPromptBuilder{}
+
+	if s.directReplyChain == nil {
+		// 路径 A：最终输出 agentConfig + kb + blackboard + attach
+		s.directReplyChain = NewContextChain(attach, blackboard, kb, agentCfg)
+	}
+	if s.workerChain == nil {
+		// 路径 C：最终输出 agentConfig + blackboard + kbPreload
+		s.workerChain = NewContextChain(kb, blackboard, agentCfg)
+	}
+	if s.orchChain == nil {
+		// 路径 D：最终输出 agentConfig + orchPrompt + kbPreload
+		s.orchChain = NewContextChain(kb, orchPrompt, agentCfg)
+	}
+}
+
+// DirectReplyChain 返回单聊直接回复路径的上下文链（路径 A）。
+func (s *OrchestratorService) DirectReplyChain() *ContextChain { return s.directReplyChain }
+
+// WorkerChain 返回 worker 派发路径的上下文链（路径 C）。
+func (s *OrchestratorService) WorkerChain() *ContextChain { return s.workerChain }
+
+// OrchChain 返回 orchestrator 派发路径的上下文链（路径 D）。
+func (s *OrchestratorService) OrchChain() *ContextChain { return s.orchChain }
 
 // RouteMention is the main entry point called when a message contains @mentions.
 func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment, sourceMessageID *string) (*RouteResult, error) {
@@ -357,18 +464,16 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 	sem <- struct{}{} // blocks until slot available
 	defer func() { <-sem }()
 
-	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
-	kbCtx := kbPreload
-	if kbCtx == "" {
-		kbCtx = s.injectKBContext(ctx, content, "", userID)
-	}
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
-	if blackboardCtx != "" {
-		kbCtx = blackboardCtx + kbCtx
-	}
-
-	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID, content)
+	// 通过 worker chain 构建上下文：[KB, Blackboard, AgentConfig]
+	// KB 优先使用预加载（来自 RouteMention 入口），为空时实时解析 content 中的 {{user/KB}}。
+	// 最终输出顺序：agentConfig + blackboardCtx + kbCtx（与重构前完全一致）。
+	agentCtx := s.WorkerChain().Build(ctx, ContextInput{
+		ConvID:    convID,
+		UserID:    userID,
+		Agent:     agent,
+		Content:   content,
+		KBPreload: kbPreload,
+	})
 
 	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
 	if err != nil {
@@ -406,13 +511,17 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 	availableAgentNames := agentNames(agentDetails)
 	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, agentDetails, blackboardCtx, recentSummary, content)
 
-	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
-	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
-	// agent.Type 可能是 "system" 或 "custom"。
-	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
-	orchCtx += kbPreload
-	agentConfig := s.InjectAgentConfig(orchAgent, "", userID, content)
-	orchCtx = agentConfig + orchCtx
+	// 通过 orch chain 构建 contextMessages：[KB, OrchestratorPrompt, AgentConfig]
+	// 最终输出顺序：agentConfig + orchSystemPrompt + kbPreload（与重构前完全一致）。
+	// 注意：blackboard 通过 fullPrompt 注入，不在 contextMessages 中（保持原行为）。
+	orchCtx := s.OrchChain().Build(ctx, ContextInput{
+		ConvID:         convID,
+		UserID:         userID,
+		Agent:          orchAgent,
+		Content:        content,
+		KBPreload:      kbPreload,
+		IsOrchestrator: true,
+	})
 	slog.Info(orchFlowLog, "stage", "orch.prompt_prepared", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "prompt_len", len(fullPrompt), "context_len", len(orchCtx), "agent_count", len(convAgents))
 
 	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
@@ -643,55 +752,13 @@ const (
 
 // BuildConversationBlackboardContext builds the shared conversation context block
 // injected into orchestrator and worker prompts.
+//
+// Façade：委托给 BuildBlackboardText（与 BlackboardBuilder 共享同一实现）。
 func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
 	if s == nil || s.msgRepo == nil {
 		return ""
 	}
-	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, blackboardPinLimit)
-	if err != nil {
-		slog.Warn("build blackboard context failed", "conversation_id", convID, "error", err)
-		return ""
-	}
-	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
-	if err != nil {
-		slog.Warn("load manual blackboard context failed", "conversation_id", convID, "error", err)
-		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
-	}
-	var sb strings.Builder
-	sb.WriteString("{会话上下文黑板\n")
-	sb.WriteString("{用户 Pin 上下文\n")
-	if len(items) == 0 {
-		sb.WriteString("无\n")
-	} else {
-		for _, item := range items {
-			author := fallbackText(item.Username)
-			content := normalizePromptLine(truncateString(item.Content, blackboardMaxEntryRunes))
-			fmt.Fprintf(&sb, "- %s: %s\n", author, content)
-		}
-	}
-	sb.WriteString("}\n")
-	sb.WriteString("{用户手写上下文\n")
-	manualContext := ""
-	if blackboard != nil {
-		manualContext = strings.TrimSpace(blackboard.ManualContext)
-	}
-	if manualContext == "" {
-		sb.WriteString("无\n")
-	} else {
-		truncatedManual := truncateString(manualContext, blackboardMaxManualRunes)
-		sb.WriteString(truncatedManual)
-		if !strings.HasSuffix(truncatedManual, "\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("}\n")
-	sb.WriteString("}\n\n")
-
-	result := sb.String()
-	if len([]rune(result)) > blackboardMaxContextRunes {
-		return truncateString(result, blackboardMaxContextRunes)
-	}
-	return result
+	return BuildBlackboardText(ctx, s.msgRepo, convID)
 }
 
 // buildRecentSummary formats the last 10 messages in chronological order.
@@ -787,29 +854,11 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 
 // InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
 // Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
+//
+// Façade：委托给 BuildAgentConfigText（与 AgentConfigInjector 共享同一实现）。
 func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string, taskText string) string {
-	var sb strings.Builder
-	if agent.SystemPrompt != "" {
-		sb.WriteString("[系统指令]\n")
-		sb.WriteString(agent.SystemPrompt)
-		sb.WriteString("\n\n")
-	}
-
-	if agent.ToolsConfig != "" {
-		sb.WriteString("[可用工具]\n")
-		sb.WriteString(agent.ToolsConfig)
-		sb.WriteString("\n\n")
-	}
-
-	if skillCtx := BuildAgentSkillContext(agent.CustomSkills, taskText); skillCtx != "" {
-		sb.WriteString(skillCtx)
-		if !strings.HasSuffix(skillCtx, "\n\n") {
-			sb.WriteString("\n\n")
-		}
-	}
-
-	sb.WriteString(contextStr)
-	return sb.String()
+	_ = userID // 历史签名保留，agent 配置注入不依赖 userID
+	return BuildAgentConfigText(agent, contextStr, taskText)
 }
 
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
@@ -818,84 +867,11 @@ const kbMaxInlineChars = 4000
 // PreloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
 // 生成 KB 上下文字符串。确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
 // 返回空字符串表示无引用或解析失败。
+//
+// Façade：委托给 KBBuilder.resolveKB（与 chain 内 KBBuilder 共享同一实现）。
 func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content string, userID string) string {
-	if s.kbResolver == nil {
-		return ""
-	}
-
-	refs := ParseKnowledgeRefs(content)
-	if len(refs) == 0 {
-		return ""
-	}
-
-	var kbSection strings.Builder
-	needTool := false
-
-	for _, ref := range refs {
-		kb, files, err := s.kbResolver.ResolveKnowledgeRef(ctx, userID, ref.Username, ref.KBName)
-		if err != nil {
-			slog.Warn("resolve knowledge ref failed", "ref", ref.Raw, "error", err)
-			continue
-		}
-		kbSection.WriteString(fmt.Sprintf("[知识库: %s/%s (%s)]\n", ref.Username, ref.KBName, kb.Visibility))
-		if len(files) == 0 {
-			kbSection.WriteString("（空知识库，无文件）\n")
-		} else {
-			for _, f := range files {
-				switch f.PreviewType {
-				case "text":
-					// 文本内容：限制内联长度，防止 context 膨胀导致截断
-					text := f.PreviewText
-					if len(text) > kbMaxInlineChars {
-						text = text[:kbMaxInlineChars] + "\n...[内容已截断，使用 read_knowledge_file 工具读取完整内容]"
-						needTool = true
-					}
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s):\n```\n%s\n```\n", f.Filename, f.ID, formatFileSize(f.FileSize), text))
-				case "image":
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, %s, 使用 read_knowledge_file 工具获取)\n", f.Filename, f.ID, formatFileSize(f.FileSize), f.PreviewText))
-					needTool = true
-				case "too_large":
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 文件过大，使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
-					needTool = true
-				default:
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
-					needTool = true
-				}
-			}
-		}
-		kbSection.WriteString("\n")
-	}
-
-	if kbSection.Len() == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("[引用的知识库]\n")
-	sb.WriteString(kbSection.String())
-
-	// 如果有需要工具读取的文件，注入知识库读取工具
-	if needTool && s.tokenIssuer != nil && s.serverURL != "" {
-		token, _, err := s.tokenIssuer.IssueAgentToken(userID)
-		if err != nil {
-			slog.Warn("generate kb tool token failed", "error", err)
-		} else {
-			sb.WriteString(GenerateKBReadTool(s.serverURL, token))
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String()
-}
-
-// injectKBContext 是 preloadKBContext 的包装，将预加载内容拼接到 contextStr 前面。
-// 注意：该方法仅在未使用 preloadKBContext 的回退路径中调用。
-func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
-	preload := s.PreloadKBContext(ctx, content, userID)
-	if preload == "" {
-		return contextStr
-	}
-	return preload + contextStr
+	b := &KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}
+	return b.resolveKB(ctx, content, userID)
 }
 
 func formatFileSize(size int64) string {
