@@ -21,6 +21,7 @@ import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
 import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
@@ -336,9 +337,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     if (!agentMeta.agent_id) return null;
     return conversationAgents.find((agent) => agent.agent_id === agentMeta.agent_id)?.role ?? null;
   }, [agentMeta.agent_id, conversationAgents]);
-  const agentBadgeLabel = conversationAgentRole === 'orchestrator'
+  const agentBadgeLabel = conversationAgentRole === ROLE_ORCHESTRATOR
     ? 'Orchestrator agent'
-    : conversationAgentRole === 'worker'
+    : conversationAgentRole === ROLE_WORKER
       ? 'Worker agent'
       : 'Agent';
 

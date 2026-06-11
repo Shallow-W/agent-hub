@@ -246,13 +246,8 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 		}
 
 		// Check conversation agent role (set per group chat, not agent type)
-		var isOrchestrator bool
-		for _, ca := range convAgents {
-			if ca.AgentID == agentID && ca.Role == "orchestrator" {
-				isOrchestrator = true
-				break
-			}
-		}
+		ca, _ := model.ConversationAgents(convAgents).FindByAgentID(agentID)
+		isOrchestrator := ca != nil && ca.IsOrchestrator()
 
 		if isOrchestrator {
 			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name)

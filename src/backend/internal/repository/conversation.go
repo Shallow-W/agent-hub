@@ -572,6 +572,7 @@ func (r *ConversationRepo) GetOrchestrator(ctx context.Context, conversationID s
 		 COALESCE(a.tags, '') AS tags
 		 FROM conversation_agents ca
 		 JOIN agents a ON a.id = ca.agent_id
+		 -- 注意：保持字面量与 domain.RoleOrchestrator 同步
 		 WHERE ca.conversation_id = $1 AND ca.role = 'orchestrator'`,
 		conversationID,
 	).StructScan(&item)

@@ -1,3 +1,5 @@
+import type { ConversationAgentRole } from '@/types/role';
+
 export type ConversationType = 'single' | 'group' | 'agent';
 
 export interface Conversation {
@@ -21,7 +23,7 @@ export interface ConversationAgent {
   conversation_id: string;
   agent_id: string;
   added_by: string;
-  role: 'robot' | 'orchestrator' | 'worker';
+  role: ConversationAgentRole;
   joined_at: string;
   name: string;
   type: string;

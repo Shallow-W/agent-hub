@@ -34,6 +34,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { CreateTaskPayload, OrchTaskCard, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
 import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR } from '@/types/role';
 import styles from './TaskBoardView.module.css';
 
 interface TaskFormValues {
@@ -182,7 +183,7 @@ const TaskBoardView: React.FC = () => {
     getConversationAgents(activeConversationId)
       .then((list) => {
         if (cancelled) return;
-        const orch = (list ?? []).find((a) => a.role === 'orchestrator');
+        const orch = (list ?? []).find((a) => a.role === ROLE_ORCHESTRATOR);
         setOrchAgent(orch ?? null);
       })
       .catch(() => {});

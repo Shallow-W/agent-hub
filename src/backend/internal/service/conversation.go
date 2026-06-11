@@ -8,6 +8,7 @@ import (
 
 	"log/slog"
 
+	"github.com/agent-hub/backend/internal/domain"
 	"github.com/agent-hub/backend/internal/model"
 )
 
@@ -443,14 +444,14 @@ func (s *ConversationService) RemoveConversationAgent(ctx context.Context, userI
 		return fmt.Errorf("remove conversation agent: %w", err)
 	}
 	if !ok {
-			return ErrConvNotFound
-		}
-		return nil
+		return ErrConvNotFound
 	}
+	return nil
+}
 
 // SetConversationAgentRole 设置会话中 Agent 的角色（Orchestrator/Worker）
 func (s *ConversationService) SetConversationAgentRole(ctx context.Context, userID, convID, agentID, role string) error {
-	if role != "orchestrator" && role != "worker" {
+	if !domain.IsAssignableRole(domain.Role(role)) {
 		return ErrConvInvalidRole
 	}
 	conv, err := s.repo.GetByID(ctx, convID)
@@ -464,13 +465,13 @@ func (s *ConversationService) SetConversationAgentRole(ctx context.Context, user
 		return err
 	}
 	// 设为 Orch 时，先将现有 Orch 降级
-	if role == "orchestrator" {
+	if domain.Role(role) == domain.RoleOrchestrator {
 		current, err := s.repo.GetOrchestrator(ctx, convID)
 		if err != nil {
 			return fmt.Errorf("get current orchestrator: %w", err)
 		}
 		if current != nil && current.AgentID != agentID {
-			if err := s.repo.UpdateAgentRole(ctx, convID, current.AgentID, "worker"); err != nil {
+			if err := s.repo.UpdateAgentRole(ctx, convID, current.AgentID, string(domain.RoleWorker)); err != nil {
 				return fmt.Errorf("demote old orchestrator: %w", err)
 			}
 		}

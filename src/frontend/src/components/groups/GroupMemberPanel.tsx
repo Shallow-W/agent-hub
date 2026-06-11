@@ -28,6 +28,7 @@ import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember, changeM
 import { getConversationAgents, addConversationAgent, removeConversationAgent, setConversationAgentRole } from '@/api/conversation';
 import type { GroupMember } from '@/types/group';
 import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
 import { searchUsers as searchUsersApi } from '@/api/friend';
@@ -368,7 +369,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                           key="agent-actions"
                           menu={{
                             items: [
-                              ...(agent.role !== 'orchestrator'
+                              ...(agent.role !== ROLE_ORCHESTRATOR
                                 ? [{
                                     key: 'set-orch',
                                     icon: <TeamOutlined />,
@@ -376,7 +377,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                     onClick: async () => {
                                       setActionLoading(agent.agent_id);
                                       try {
-                                        await setConversationAgentRole(conversationId, agent.agent_id, 'orchestrator');
+                                        await setConversationAgentRole(conversationId, agent.agent_id, ROLE_ORCHESTRATOR);
                                         message.success('已设为 Orchestrator');
                                         await fetchMembers();
                                         onAgentsChanged?.();
@@ -394,7 +395,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                     onClick: async () => {
                                       setActionLoading(agent.agent_id);
                                       try {
-                                        await setConversationAgentRole(conversationId, agent.agent_id, 'worker');
+                                        await setConversationAgentRole(conversationId, agent.agent_id, ROLE_WORKER);
                                         message.success('已取消 Orchestrator');
                                         await fetchMembers();
                                         onAgentsChanged?.();
@@ -447,7 +448,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                     <span>
                       {agent.name}
                       <Tag color="purple" style={{ fontSize: 10, marginLeft: 4 }}>智能体</Tag>
-                      {agent.role === 'orchestrator' && (
+                      {agent.role === ROLE_ORCHESTRATOR && (
                         <Tag color="orange" style={{ fontSize: 10, marginLeft: 2 }}>Orch</Tag>
                       )}
                     </span>
