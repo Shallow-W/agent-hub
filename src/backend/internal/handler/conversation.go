@@ -387,6 +387,10 @@ func (h *ConversationHandler) SetAgentRole(c *gin.Context) {
 			middleware.ErrorResponse(c, http.StatusForbidden, 40315, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrConvOrchConflict) {
+			middleware.ErrorResponse(c, http.StatusConflict, 40915, err.Error())
+			return
+		}
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50017, "设置 Agent 角色失败")
 		return
 	}

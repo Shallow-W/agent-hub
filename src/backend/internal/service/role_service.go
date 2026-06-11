@@ -76,6 +76,12 @@ func (s *RoleService) Set(ctx context.Context, userID, convID, agentID string, r
 		}
 	}
 	if err := s.convRepo.UpdateAgentRole(ctx, convID, agentID, string(role)); err != nil {
+		// 仅在写 Orchestrator 时检查 DB 部分唯一索引冲突（migration 047）。
+		// 这是 RoleService "先查后写" 的并发兜底：两个并发 Set 都读到无 orch，
+		// 都尝试写新 orch，第二个会被 uq_conversation_agents_single_orchestrator 拒绝。
+		if role == domain.RoleOrchestrator && isUniqueViolation(err) {
+			return ErrConvOrchConflict
+		}
 		return fmt.Errorf("update agent role: %w", err)
 	}
 

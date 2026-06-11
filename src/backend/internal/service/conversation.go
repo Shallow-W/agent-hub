@@ -56,6 +56,10 @@ var (
 	ErrConvNotMember    = errors.New("不是该会话成员")
 	ErrConvInvalidTitle = errors.New("标题无效")
 	ErrConvInvalidRole  = errors.New("角色无效，仅支持 orchestrator 或 worker")
+	// ErrConvOrchConflict 表示并发请求尝试同时设置同一会话的 Orchestrator，
+	// 被数据库部分唯一索引拒绝（见 migration 047）。此时另一并发请求已抢先
+	// 把 Orchestrator 角色赋给某个 Agent，建议调用方提示用户重试。
+	ErrConvOrchConflict = errors.New("并发设置 Orchestrator 冲突，请重试")
 )
 
 // ConversationService 对话业务逻辑

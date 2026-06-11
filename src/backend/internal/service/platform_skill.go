@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -140,7 +139,3 @@ func normalizePlatformSkillFields(userID, name, category, description, trigger, 
 		nil
 }
 
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
