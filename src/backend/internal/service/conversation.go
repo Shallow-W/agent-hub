@@ -8,7 +8,6 @@ import (
 
 	"log/slog"
 
-	"github.com/agent-hub/backend/internal/domain"
 	"github.com/agent-hub/backend/internal/model"
 )
 
@@ -382,14 +381,22 @@ func (s *ConversationService) ListConversationAgents(ctx context.Context, userID
 	return list, nil
 }
 
-func (s *ConversationService) canManageConversationAgents(ctx context.Context, userID string, conv *model.Conversation) error {
+// conversationMemberRepo 是会话成员权限校验所需的最小仓库接口。
+// 抽窄为包级 helper 函数使用，便于 ConversationService / RoleService 共享。
+type conversationMemberRepo interface {
+	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
+}
+
+// canManageConversationAgents 检查 userID 是否有权限管理 convID 的 Agent 成员。
+// 共享给 ConversationService 和 RoleService：仅群聊，且操作者为创建者/owner/admin。
+func canManageConversationAgents(ctx context.Context, repo conversationMemberRepo, userID string, conv *model.Conversation) error {
 	if conv.Type != "group" {
 		return ErrConvNotGroup
 	}
 	if conv.UserID == userID {
 		return nil
 	}
-	member, err := s.repo.GetMember(ctx, conv.ID, userID)
+	member, err := repo.GetMember(ctx, conv.ID, userID)
 	if err != nil {
 		return fmt.Errorf("get member: %w", err)
 	}
@@ -414,7 +421,7 @@ func (s *ConversationService) AddConversationAgent(ctx context.Context, userID, 
 	if conv == nil {
 		return nil, ErrConvNotFound
 	}
-	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
+	if err := canManageConversationAgents(ctx, s.repo, userID, conv); err != nil {
 		return nil, err
 	}
 	item, err := s.repo.AddAgent(ctx, convID, agentID, userID)
@@ -436,7 +443,7 @@ func (s *ConversationService) RemoveConversationAgent(ctx context.Context, userI
 	if conv == nil {
 		return ErrConvNotFound
 	}
-	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
+	if err := canManageConversationAgents(ctx, s.repo, userID, conv); err != nil {
 		return err
 	}
 	ok, err := s.repo.RemoveAgent(ctx, convID, agentID, userID)
@@ -449,35 +456,5 @@ func (s *ConversationService) RemoveConversationAgent(ctx context.Context, userI
 	return nil
 }
 
-// SetConversationAgentRole 设置会话中 Agent 的角色（Orchestrator/Worker）
-func (s *ConversationService) SetConversationAgentRole(ctx context.Context, userID, convID, agentID, role string) error {
-	if !domain.IsAssignableRole(domain.Role(role)) {
-		return ErrConvInvalidRole
-	}
-	conv, err := s.repo.GetByID(ctx, convID)
-	if err != nil {
-		return fmt.Errorf("get conversation: %w", err)
-	}
-	if conv == nil {
-		return ErrConvNotFound
-	}
-	if err := s.canManageConversationAgents(ctx, userID, conv); err != nil {
-		return err
-	}
-	// 设为 Orch 时，先将现有 Orch 降级
-	if domain.Role(role) == domain.RoleOrchestrator {
-		current, err := s.repo.GetOrchestrator(ctx, convID)
-		if err != nil {
-			return fmt.Errorf("get current orchestrator: %w", err)
-		}
-		if current != nil && current.AgentID != agentID {
-			if err := s.repo.UpdateAgentRole(ctx, convID, current.AgentID, string(domain.RoleWorker)); err != nil {
-				return fmt.Errorf("demote old orchestrator: %w", err)
-			}
-		}
-	}
-	if err := s.repo.UpdateAgentRole(ctx, convID, agentID, role); err != nil {
-		return fmt.Errorf("update agent role: %w", err)
-	}
-	return nil
-}
+// SetConversationAgentRole 已迁移到独立的 RoleService（见 role_service.go）。
+// ConversationService 只保留查询 / 增删 Agent 成员，不再承担角色变更职责。

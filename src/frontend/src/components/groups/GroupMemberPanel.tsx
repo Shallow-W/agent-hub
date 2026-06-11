@@ -31,6 +31,7 @@ import type { ConversationAgent } from '@/types/conversation';
 import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
+import { onConversationRoleChanged } from '@/store/wsStore';
 import { searchUsers as searchUsersApi } from '@/api/friend';
 import type { User } from '@/types/auth';
 import { Checkbox } from 'antd';
@@ -102,6 +103,18 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
       fetchMembers();
     }
   }, [open, conversationId, fetchMembers]);
+
+  // 订阅 WS 角色变更事件：其他客户端改了同一会话的 Agent 角色时，
+  // 本面板需自动刷新成员列表，避免显示过期的 Orch 标签。
+  useEffect(() => {
+    if (!open) return;
+    const unsubscribe = onConversationRoleChanged((payload) => {
+      if (payload.conversationId !== conversationId) return;
+      fetchMembers();
+      onAgentsChanged?.();
+    });
+    return unsubscribe;
+  }, [open, conversationId, fetchMembers, onAgentsChanged]);
 
   const currentUserRole = members.find((m) => m.user_id === currentUserId)?.role;
   const canManage = currentUserRole === 'owner' || currentUserRole === 'admin';

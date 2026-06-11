@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/agent-hub/backend/internal/domain"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
@@ -12,12 +13,15 @@ import (
 
 // ConversationHandler 对话接口处理器
 type ConversationHandler struct {
-	svc *service.ConversationService
+	svc     *service.ConversationService
+	roleSvc *service.RoleService
 }
 
-// NewConversationHandler 创建对话处理器
-func NewConversationHandler(svc *service.ConversationService) *ConversationHandler {
-	return &ConversationHandler{svc: svc}
+// NewConversationHandler 创建对话处理器。
+// roleSvc 用于 PUT /conversations/:id/agents/:agentID/role，
+// 角色变更与广播交给 RoleService 独立承担。
+func NewConversationHandler(svc *service.ConversationService, roleSvc *service.RoleService) *ConversationHandler {
+	return &ConversationHandler{svc: svc, roleSvc: roleSvc}
 }
 
 // CreateRequest 创建对话请求体
@@ -369,7 +373,7 @@ func (h *ConversationHandler) SetAgentRole(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	err := h.svc.SetConversationAgentRole(c.Request.Context(), userID, c.Param("id"), c.Param("agentID"), req.Role)
+	err := h.roleSvc.Set(c.Request.Context(), userID, c.Param("id"), c.Param("agentID"), domain.Role(req.Role))
 	if err != nil {
 		if errors.Is(err, service.ErrConvInvalidRole) {
 			middleware.ErrorResponse(c, http.StatusBadRequest, 40016, err.Error())

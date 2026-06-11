@@ -15,6 +15,28 @@ export function notifyTaskChanged(conversationId: string): void {
   taskChangedListeners.forEach((fn) => fn(conversationId));
 }
 
+// conversation.role_changed 事件载荷：服务端在群聊内 Agent 角色变更后广播。
+// 任何订阅者（如 GroupMemberPanel）收到事件后可按 conversationId 决定是否刷新本地视图。
+export interface RoleChangedPayload {
+  conversationId: string;
+  agentId: string;
+  role: string;
+  actorId: string;
+  demotedAgentId?: string;
+}
+
+type RoleChangedListener = (payload: RoleChangedPayload) => void;
+const roleChangedListeners = new Set<RoleChangedListener>();
+
+export function onConversationRoleChanged(fn: RoleChangedListener): () => void {
+  roleChangedListeners.add(fn);
+  return () => { roleChangedListeners.delete(fn); };
+}
+
+export function notifyConversationRoleChanged(payload: RoleChangedPayload): void {
+  roleChangedListeners.forEach((fn) => fn(payload));
+}
+
 export interface TypingUser {
   userId: string;
   username?: string;

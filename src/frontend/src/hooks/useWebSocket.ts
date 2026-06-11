@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { useWsStore, notifyTaskChanged } from '@/store/wsStore';
+import { useWsStore, notifyTaskChanged, notifyConversationRoleChanged } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
@@ -160,6 +160,22 @@ export function useWebSocket() {
           const taskConvId = msg.data.conversation_id ?? msg.data.conversationId;
           if (taskConvId) {
             notifyTaskChanged(taskConvId);
+          }
+          break;
+        }
+        case 'conversation.role_changed': {
+          // 服务端 EventBroadcaster 推送：某会话内 Agent 角色被改，让所有订阅方刷新本地视图。
+          // convId 来自顶部已有的解析（conversation_id 已被读取），agent_id / role 等字段单独取。
+          const agentId = msg.data.agent_id ?? msg.data.role_agent_id;
+          const roleValue = msg.data.role ?? msg.data.role_value;
+          if (convId && agentId && roleValue) {
+            notifyConversationRoleChanged({
+              conversationId: convId,
+              agentId,
+              role: roleValue,
+              actorId: msg.data.actor_id ?? '',
+              demotedAgentId: msg.data.demoted_agent_id || undefined,
+            });
           }
           break;
         }

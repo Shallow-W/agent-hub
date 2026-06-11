@@ -16,6 +16,7 @@ import (
 
 	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/handler"
+	wsinfra "github.com/agent-hub/backend/internal/infrastructure/ws"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
@@ -162,6 +163,9 @@ func main() {
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
+	// EventBroadcaster 复用 ws.Hub 推送领域事件；RoleService 在角色变更后向会话成员广播。
+	eventBroadcaster := wsinfra.NewEventBroadcaster(hub, logger)
+	roleSvc := service.NewRoleService(convRepo, eventBroadcaster)
 	daemonHub := ws.NewDaemonHub(logger)
 	orchSvc.SetDaemonHub(daemonHub)
 	orchSvc.SetNotifier(hub)
@@ -176,7 +180,7 @@ func main() {
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
 	authHandler := handler.NewAuthHandler(authSvc)
-	convHandler := handler.NewConversationHandler(convSvc)
+	convHandler := handler.NewConversationHandler(convSvc, roleSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
 	friendHandler := handler.NewFriendHandler(friendSvc)
 	groupHandler := handler.NewGroupHandler(groupSvc)
