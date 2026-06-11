@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agent-hub/backend/internal/catalog"
 	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/handler"
 	wsinfra "github.com/agent-hub/backend/internal/infrastructure/ws"
@@ -141,6 +142,21 @@ func main() {
 	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
 	toolDefSvc := service.NewToolDefinitionService(toolDefRepo)
+
+	// Catalog (B1): unified abstraction over the 4 directory vertical slices.
+	// AdapterStore proxies to the existing repos (no DB changes); only
+	// tool_definition currently routes through it — the other 3 domains keep
+	// their legacy paths until B2/B3/B4.
+	catalogRegistry := catalog.DefaultRegistry()
+	catalogStore := catalog.NewAdapterStore(catalog.AdapterDeps{
+		PlatformSkill: platformSkillRepo,
+		ToolDef:       toolDefRepo,
+		AgentPrompt:   agentPromptTemplateRepo,
+		UserTemplate:  userTemplateRepo,
+		Registry:      catalogRegistry,
+	})
+	catalogSvc := catalog.NewService(catalogStore, catalogRegistry)
+	toolDefSvc.SetCatalogLister(toolDefinitionCatalogBridge{svc: catalogSvc})
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	externalURL := resolveExternalURL(cfg)
 	agentSvc.SetServerURL(externalURL)
@@ -197,6 +213,7 @@ func main() {
 	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
 	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
 	toolDefHandler := handler.NewToolDefinitionHandler(toolDefSvc)
+	catalogHandler := catalog.NewHandler(catalogSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
@@ -267,6 +284,7 @@ func main() {
 		AgentPromptTemplateHandler: agentPromptTemplateHandler,
 		UserTemplateHandler:        userTemplateHandler,
 		ToolDefHandler:             toolDefHandler,
+		CatalogHandler:             catalogHandler,
 		DaemonHandler:              daemonHandler,
 		TaskHandler:                taskHandler,
 		ArtifactHandler:            artifactHandler,
@@ -390,4 +408,31 @@ func hasDotDotSegment(value string) bool {
 		}
 	}
 	return false
+}
+
+// toolDefinitionCatalogBridge adapts *catalog.Service to the
+// service.ToolDefinitionCatalogLister interface declared locally in the
+// service package. Declaring the adapter here (in package main, which
+// already imports both catalog and service) breaks the would-be import
+// cycle catalog → middleware → service → catalog.
+type toolDefinitionCatalogBridge struct {
+	svc *catalog.Service
+}
+
+func (b toolDefinitionCatalogBridge) ListToolDefinitions(ctx context.Context) ([]service.ToolDefinitionCatalogItem, error) {
+	items, err := b.svc.List(ctx, catalog.DomainToolDefinition, catalog.ListQuery{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.ToolDefinitionCatalogItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, service.ToolDefinitionCatalogItem{
+			Name:        it.Key,
+			Label:       it.Label,
+			Category:    it.Category,
+			Description: it.Description,
+			CreatedAt:   it.CreatedAt,
+		})
+	}
+	return out, nil
 }

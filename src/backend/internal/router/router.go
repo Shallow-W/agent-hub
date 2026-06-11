@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agent-hub/backend/internal/catalog"
 	"github.com/agent-hub/backend/internal/handler"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,7 @@ type Deps struct {
 	AgentPromptTemplateHandler *handler.AgentPromptTemplateHandler
 	UserTemplateHandler        *handler.UserTemplateHandler
 	ToolDefHandler             *handler.ToolDefinitionHandler
+	CatalogHandler             *catalog.Handler
 	DaemonHandler              *handler.DaemonHandler
 	TaskHandler                *handler.TaskHandler
 	ArtifactHandler            *handler.ArtifactHandler
@@ -156,6 +158,16 @@ func Setup(r *gin.Engine, deps Deps) {
 		apiGroup.GET("/daemon/machines/:id/connect", deps.AgentHandler.GetMachineConnect)
 		apiGroup.GET("/daemon/agent-candidates", deps.AgentHandler.ListAgentCandidates)
 		apiGroup.POST("/daemon/agent-candidates/:id/add", deps.AgentHandler.AddCandidateAgent)
+
+		// Catalog (unified abstraction over platform_skill / tool_definition /
+		// agent_prompt_template / user_template). Authenticated so the handler
+		// can read user_id from JWT for user-scope domains; system-scope reads
+		// work without any user_id.
+		if deps.CatalogHandler != nil {
+			catalogGroup := apiGroup.Group("/catalog")
+			catalogGroup.GET("", deps.CatalogHandler.DomainsHandler)
+			deps.CatalogHandler.Register(catalogGroup)
+		}
 
 		// Tasks
 		taskRoutes := apiGroup.Group("/tasks")
