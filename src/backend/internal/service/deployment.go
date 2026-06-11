@@ -35,6 +35,7 @@ var (
 )
 
 // DeployArtifactRepo 部署服务依赖的产物访问能力。
+// Deprecated: migrate to repository.ArtifactStore for canonical interface.
 type DeployArtifactRepo interface {
 	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
 	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
@@ -43,12 +44,14 @@ type DeployArtifactRepo interface {
 }
 
 // DeployConvRepo 部署服务用于鉴权的对话仓库能力。
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type DeployConvRepo interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 }
 
 // DeployRepo 部署记录持久化能力。
+// Deprecated: migrate to repository.DeploymentStore for canonical interface.
 type DeployRepo interface {
 	Create(ctx context.Context, d model.Deployment) (*model.Deployment, error)
 	UpdateStatus(ctx context.Context, id, status, url, errMsg string) (*model.Deployment, error)

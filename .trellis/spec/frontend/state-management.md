@@ -52,6 +52,64 @@ the shared metadata from a layout-level bootstrap hook.
 
 ---
 
+## Server-Pushed Events (WebSocket)
+
+When the server emits a domain event over WS (e.g. `conversation.role_changed`,
+`task.changed`), follow the listener-Set pattern in `src/frontend/src/store/wsStore.ts`:
+
+```ts
+type RoleChangedListener = (conversationId: string, agentId: string,
+  role: string, actorId: string, demotedAgentId?: string) => void;
+
+const roleChangedListeners = new Set<RoleChangedListener>();
+
+export function onConversationRoleChanged(fn: RoleChangedListener): () => void {
+  roleChangedListeners.add(fn);
+  return () => { roleChangedListeners.delete(fn); };
+}
+
+export function notifyConversationRoleChanged(payload: { ... }): void {
+  roleChangedListeners.forEach((fn) => fn(payload.conversationId, ...));
+}
+```
+
+Wire protocol fields are **snake_case** on the wire; the dispatcher in
+`hooks/useWebSocket.ts` maps them to the `notifyX` call.
+
+Components subscribe in `useEffect` and return `unsubscribe` as the
+cleanup:
+
+```tsx
+useEffect(() => {
+  const unsubscribe = onConversationRoleChanged((convId) => {
+    if (convId === conversationId) {
+      fetchMembers();
+      onAgentsChanged?.();
+    }
+  });
+  return unsubscribe;
+}, [conversationId, fetchMembers, onAgentsChanged]);
+```
+
+When introducing a new WS event type:
+
+1. Add `onX` / `notifyX` pair to `wsStore.ts`.
+2. Extend `StreamMessage.type` union in `types/message.ts`.
+3. Add `case '<event_type>':` to `hooks/useWebSocket.ts` dispatching to `notifyX`.
+
+### When NOT to dedup by actor
+
+If the operator who triggered the event will also receive it, do not
+filter by `actor_id === currentUser.id`. Multi-tab scenarios (same user
+on two tabs) rely on tab B receiving the event even when the actor is
+self. The local re-fetch after the optimistic update plus the WS-driven
+re-fetch converge idempotently; the duplicate GET is cheap.
+
+See [`backend/event-broadcaster.md`](../backend/event-broadcaster.md)
+for the full contract.
+
+---
+
 ## Common Mistakes
 
 - Rendering chat or conversation avatars before Agent metadata is loaded causes
@@ -60,3 +118,5 @@ the shared metadata from a layout-level bootstrap hook.
   deep links, browser history, and future deployment routing harder. Prefer
   paths such as `/chat`, `/agents`, `/contacts`, `/knowledge`, `/tasks`, and
   `/settings` for major workspaces.
+- Polling the server via `setInterval` to detect changes that already arrive as
+  WS events. Adds load and hides the WS source-of-truth.

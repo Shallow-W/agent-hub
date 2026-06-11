@@ -19,6 +19,7 @@ import (
 	wsinfra "github.com/agent-hub/backend/internal/infrastructure/ws"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
+	"github.com/agent-hub/backend/internal/router"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
@@ -101,9 +102,7 @@ func main() {
 	taskSvc := service.NewTaskService(taskRepo)
 	taskSvc.SetOrchCardRepo(orchCardRepo)
 	artifactSvc := service.NewArtifactService(artifactRepo, convRepo)
-	// PUBLIC_BASE_URL：配置内网穿透/公网入口时，部署预览与下载链接拼成绝对公网地址（二维码可扫、可分享）。
 	deploymentSvc := service.NewDeploymentService(deploymentRepo, artifactRepo, convRepo, "", os.Getenv("PUBLIC_BASE_URL"))
-	// GitHub Pages 永久发布（环境变量优先于 config.yaml）。三项齐全才启用，否则 publisher 为 nil。
 	if pub := ghpages.NewPublisher(
 		firstNonEmpty(os.Getenv("GITHUB_TOKEN"), cfg.GitHub.Token),
 		firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner),
@@ -115,7 +114,6 @@ func main() {
 	fileURLs := service.NewFileURLBuilder(cfg.Upload.PublicBaseURL)
 	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir, cfg.Upload.PublicBaseURL)
 
-	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
 		Dir:           cfg.Upload.Dir,
 		MaxImageMB:    cfg.Upload.MaxImageMB,
@@ -146,29 +144,33 @@ func main() {
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	externalURL := resolveExternalURL(cfg)
 	agentSvc.SetServerURL(externalURL)
-	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
-	orchSvc.SetTokenIssuer(tokenIssuer)
-	orchSvc.SetServerURL(externalURL)
-	// 将外部 URL 加入 CORS 白名单，方便局域网前端访问
 	cfg.CORS.AllowedOrigins = append(cfg.CORS.AllowedOrigins, externalURL)
-	orchSvc.SetKBResolver(knowledgeSvc)
-	orchSvc.SetArtifactRepo(artifactRepo)
-	orchSvc.SetOrchTaskRepo(orchTaskRepo)
-	orchSvc.SetTaskSvc(taskSvc)
-	// 服务端抽取消息附件文本时需要定位上传文件。
-	orchSvc.SetUploadDir(cfg.Upload.Dir)
+
+	hub := ws.NewHub(logger)
+	msgSvc.SetNotifier(hub)
+	eventBroadcaster := wsinfra.NewEventBroadcaster(hub, logger)
+	roleSvc := service.NewRoleService(convRepo, eventBroadcaster)
+	daemonHub := ws.NewDaemonHub(logger)
+
+	// OrchestratorService: use the new deps struct instead of 10 setter calls.
+	orchSvc := service.NewOrchestratorServiceWithDeps(service.OrchestratorDeps{
+		ConvRepo:     convRepo,
+		AgentRepo:    agentRepo,
+		MsgRepo:      msgRepo,
+		OrchTaskRepo: orchTaskRepo,
+		TokenIssuer:  tokenIssuer,
+		ServerURL:    externalURL,
+		UploadDir:    cfg.Upload.Dir,
+		KBResolver:   knowledgeSvc,
+		DaemonHub:    daemonHub,
+		ArtifactRepo: artifactRepo,
+		Notifier:     hub,
+		TaskSvc:      taskSvc,
+	})
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetFileURLBuilder(fileURLs)
 	msgSvc.SetDeploymentService(deploymentSvc)
 
-	hub := ws.NewHub(logger)
-	msgSvc.SetNotifier(hub)
-	// EventBroadcaster 复用 ws.Hub 推送领域事件；RoleService 在角色变更后向会话成员广播。
-	eventBroadcaster := wsinfra.NewEventBroadcaster(hub, logger)
-	roleSvc := service.NewRoleService(convRepo, eventBroadcaster)
-	daemonHub := ws.NewDaemonHub(logger)
-	orchSvc.SetDaemonHub(daemonHub)
-	orchSvc.SetNotifier(hub)
 	if rdb != nil {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
 		msgSvc.SetDeliveryState(redisMsgRepo)
@@ -179,6 +181,8 @@ func main() {
 	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
+
+	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc, roleSvc)
 	msgHandler := handler.NewMessageHandler(msgSvc)
@@ -203,17 +207,17 @@ func main() {
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.SetTrustedProxies(nil)
-	router.Use(gin.Recovery())
-	router.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
-	router.Use(middleware.RequestLogger(logger))
+	r := gin.New()
+	r.SetTrustedProxies(nil)
+	r.Use(gin.Recovery())
+	r.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
+	r.Use(middleware.RequestLogger(logger))
 
-	// 健康检查（无需鉴权、不受限流）
-	router.GET("/health", func(c *gin.Context) {
+	// Health checks (depends on concrete DB/Redis types, stay in main)
+	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
 	})
-	router.GET("/health/ready", func(c *gin.Context) {
+	r.GET("/health/ready", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 
@@ -245,273 +249,36 @@ func main() {
 		c.JSON(status, gin.H{"code": 0, "message": "ready", "data": details})
 	})
 
-	// WebSocket 路由（通过 query 参数鉴权，不受限流）
-	router.GET("/ws", wsHandler.Handle)
+	// WebSocket (authenticated via query params, no rate limit)
+	r.GET("/ws", wsHandler.Handle)
 
-	// 认证路由（无需鉴权）
-	authGroup := router.Group("/api/auth")
-	{
-		authGroup.POST("/register", authHandler.Register)
-		authGroup.POST("/login", authHandler.Login)
-	}
+	// All API, daemon, MCP routes
+	router.Setup(r, router.Deps{
+		AuthHandler:                authHandler,
+		ConvHandler:                convHandler,
+		MsgHandler:                 msgHandler,
+		FriendHandler:              friendHandler,
+		GroupHandler:               groupHandler,
+		UserHandler:                userHandler,
+		UploadHandler:              uploadHandler,
+		PptPreviewHandler:          pptPreviewHandler,
+		AgentHandler:               agentHandler,
+		PlatformSkillHandler:       platformSkillHandler,
+		AgentPromptTemplateHandler: agentPromptTemplateHandler,
+		UserTemplateHandler:        userTemplateHandler,
+		ToolDefHandler:             toolDefHandler,
+		DaemonHandler:              daemonHandler,
+		TaskHandler:                taskHandler,
+		ArtifactHandler:            artifactHandler,
+		DeploymentHandler:          deploymentHandler,
+		KnowledgeHandler:           knowledgeHandler,
+		JWTSecret:                  cfg.JWT.Secret,
+		DaemonToken:                cfg.Daemon.Token,
+		UploadDir:                  cfg.Upload.Dir,
+	})
 
-	// 需要鉴权的路由
-	authMiddleware := middleware.Auth(middleware.JWTConfig{Secret: cfg.JWT.Secret})
-	apiGroup := router.Group("/api")
-	apiGroup.Use(authMiddleware)
-	{
-		// 静态文件服务（上传的文件，需要鉴权）
-		uploadDir := cfg.Upload.Dir
-		if uploadDir == "" {
-			uploadDir = "./uploads"
-		}
-		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
-			filePath := cleanUploadRoutePath(c.Param("filepath"))
-			if filePath == "" {
-				c.Status(http.StatusForbidden)
-				return
-			}
-			absPath, err := filepath.Abs(filepath.Join(uploadDir, filePath))
-			uploadDirAbs, absErr := filepath.Abs(uploadDir)
-			if err != nil {
-				c.Status(http.StatusForbidden)
-				return
-			}
-			if absErr != nil {
-				c.Status(http.StatusInternalServerError)
-				return
-			}
-			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
-				c.Status(http.StatusForbidden)
-				return
-			}
-
-			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
-			isThumbnail := strings.HasPrefix(filepath.ToSlash(filePath), "thumbnails/")
-			ext := strings.ToLower(filepath.Ext(absPath))
-			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
-			if isThumbnail || isImage {
-				c.Header("Content-Disposition", "inline")
-			} else {
-				// 非图片文件触发浏览器下载，使用原始文件名
-				fileName := filepath.Base(absPath)
-				c.Header("Content-Disposition", "attachment; filename=\""+fileName+"\"")
-			}
-			c.Header("X-Content-Type-Options", "nosniff")
-			c.File(absPath)
-		})
-
-		// 文件上传
-		apiGroup.POST("/upload", uploadHandler.Upload)
-		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
-		apiGroup.GET("/file-preview/*filepath", pptPreviewHandler.FilePreview)
-
-		// 知识库路由（需要鉴权）
-		kbRoutes := apiGroup.Group("/knowledge-bases")
-		{
-			kbRoutes.GET("", knowledgeHandler.List)
-			kbRoutes.POST("", knowledgeHandler.Create)
-			kbRoutes.PUT("/:id", knowledgeHandler.Update)
-			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
-			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
-			kbRoutes.GET("/:id/files", knowledgeHandler.ListFiles)
-			kbRoutes.GET("/:id/search", knowledgeHandler.SearchFiles)
-			kbRoutes.GET("/:id/files/:fileId/text", knowledgeHandler.GetFileText)
-			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
-			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
-			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
-			kbRoutes.GET("/resolve", knowledgeHandler.ResolveKnowledgeRef)
-		}
-
-		// 会话路由（需要鉴权）
-		convRoutes := apiGroup.Group("/conversations")
-		convRoutes.Use(middleware.ValidateUUIDParam("id"), middleware.ValidateUUIDParam("messageId"))
-		{
-			convRoutes.POST("", convHandler.Create)
-			convRoutes.POST("/private", convHandler.GetOrCreatePrivate)
-			convRoutes.GET("", convHandler.List)
-			convRoutes.GET("/archived", convHandler.ListArchived)
-			convRoutes.PUT("/:id", convHandler.RenameConversation)
-			convRoutes.DELETE("/:id", convHandler.Delete)
-			convRoutes.POST("/:id/archive", convHandler.ArchiveConversation)
-			convRoutes.POST("/:id/unarchive", convHandler.UnarchiveConversation)
-			convRoutes.POST("/:id/pin", convHandler.TogglePin)
-			convRoutes.POST("/:id/messages", msgHandler.Send)
-			convRoutes.GET("/:id/messages", msgHandler.History)
-			convRoutes.GET("/:id/messages/search", msgHandler.Search)
-			convRoutes.GET("/:id/pinned-context", msgHandler.PinnedContext)
-			convRoutes.GET("/:id/blackboard", msgHandler.GetBlackboard)
-			convRoutes.PUT("/:id/blackboard", msgHandler.UpdateBlackboard)
-			convRoutes.PUT("/:id/read", msgHandler.MarkAsRead)
-			convRoutes.GET("/:id/messages/unread", msgHandler.Unread)
-			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
-			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
-			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
-			convRoutes.GET("/:id/messages/:messageId/replies", msgHandler.Replies)
-		}
-		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
-		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
-		apiGroup.POST("/conversations/:id/agents", convHandler.AddAgent)
-		apiGroup.DELETE("/conversations/:id/agents/:agentID", convHandler.RemoveAgent)
-		apiGroup.PUT("/conversations/:id/agents/:agentID/role", convHandler.SetAgentRole)
-		apiGroup.GET("/agents", agentHandler.List)
-		apiGroup.POST("/agents", agentHandler.Create)
-		apiGroup.PUT("/agents/:id", agentHandler.Update)
-		apiGroup.PUT("/agents/:id/avatar", agentHandler.UpdateAvatar)
-		apiGroup.PUT("/agents/:id/tags", agentHandler.UpdateTags)
-		apiGroup.PUT("/agents/:id/custom-skills", agentHandler.UpdateCustomSkills)
-		apiGroup.DELETE("/agents/:id", agentHandler.Delete)
-		apiGroup.POST("/agent-tokens", agentHandler.GenerateAgentToken)
-		apiGroup.POST("/agents/:id/start", agentHandler.StartAgent)
-		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
-		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
-		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
-		apiGroup.GET("/platform-skills", platformSkillHandler.List)
-		apiGroup.POST("/platform-skills", platformSkillHandler.Create)
-		apiGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
-		apiGroup.PUT("/platform-skills/:id", platformSkillHandler.Update)
-		apiGroup.DELETE("/platform-skills/:id", platformSkillHandler.Delete)
-		apiGroup.GET("/agent-prompt-templates", agentPromptTemplateHandler.List)
-		apiGroup.POST("/agent-prompt-templates", agentPromptTemplateHandler.Create)
-		apiGroup.POST("/agent-prompt-templates/import-defaults", agentPromptTemplateHandler.ImportDefaults)
-		apiGroup.PUT("/agent-prompt-templates/:id", agentPromptTemplateHandler.Update)
-		apiGroup.DELETE("/agent-prompt-templates/:id", agentPromptTemplateHandler.Delete)
-		apiGroup.GET("/user-templates", userTemplateHandler.List)
-		apiGroup.POST("/user-templates", userTemplateHandler.Create)
-		apiGroup.PUT("/user-templates/:id", userTemplateHandler.Update)
-		apiGroup.DELETE("/user-templates/:id", userTemplateHandler.Delete)
-		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
-		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
-		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
-		apiGroup.GET("/daemon/machines/:id/connect", agentHandler.GetMachineConnect)
-		apiGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
-		apiGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
-		taskRoutes := apiGroup.Group("/tasks")
-		taskRoutes.Use(middleware.ValidateUUIDParam("id"))
-		{
-			taskRoutes.GET("", taskHandler.List)
-			taskRoutes.POST("", taskHandler.Create)
-			taskRoutes.PUT("/:id", taskHandler.Update)
-			taskRoutes.POST("/:id/status", taskHandler.MoveStatus)
-			taskRoutes.DELETE("/:id", taskHandler.Delete)
-			taskRoutes.GET("/orch-cards", taskHandler.ListOrchCards)
-		}
-
-		// 产物版本路由（需要鉴权，鉴权在 service 层按 rootId→对话成员校验）
-		artifactRoutes := apiGroup.Group("/artifacts")
-		artifactRoutes.Use(middleware.ValidateUUIDParam("rootId"))
-		{
-			artifactRoutes.GET("/:rootId/versions", artifactHandler.ListVersions)
-			artifactRoutes.POST("/:rootId/versions", artifactHandler.CreateVersion)
-			artifactRoutes.POST("/:rootId/ai-edit", artifactHandler.AIEdit)
-			artifactRoutes.POST("/:rootId/deploy", deploymentHandler.Deploy)
-			artifactRoutes.POST("/:rootId/deploy-github", deploymentHandler.DeployGitHub)
-		}
-
-		// 部署状态查询（需要鉴权）
-		apiGroup.GET("/deployments/capabilities", deploymentHandler.Capabilities)
-		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
-		apiGroup.POST("/deployments/deploy", deploymentHandler.DeployByConversation)
-	}
-
-	// 部署产物的公开访问（凭 deployment id 作能力令牌，无需鉴权，便于二维码/分享/直链下载）
-	router.GET("/api/sites/:id/*filepath", middleware.ValidateUUIDParam("id"), deploymentHandler.ServeSite)
-	router.GET("/api/deployments/:id/download", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
-	// 带文件名末段的下载（:name 仅用于让浏览器存成正确的 .zip 名，handler 忽略其值）
-	router.GET("/api/deployments/:id/download/:name", middleware.ValidateUUIDParam("id"), deploymentHandler.Download)
-
-	// 好友路由（需要鉴权）
-	friendGroup := router.Group("/api/friends")
-	friendGroup.Use(authMiddleware)
-	{
-		friendGroup.POST("/request", friendHandler.SendRequest)
-		friendGroup.POST("/:id/accept", middleware.ValidateUUIDParam("id"), friendHandler.AcceptRequest)
-		friendGroup.POST("/:id/reject", middleware.ValidateUUIDParam("id"), friendHandler.RejectRequest)
-		friendGroup.GET("", friendHandler.ListFriends)
-		friendGroup.GET("/pending", friendHandler.ListPending)
-		friendGroup.GET("/search", friendHandler.SearchUsers)
-		friendGroup.DELETE("/:id", middleware.ValidateUUIDParam("id"), friendHandler.DeleteFriend)
-	}
-
-	// 群聊路由（需要鉴权）
-	groupRoutes := router.Group("/api/groups")
-	groupRoutes.Use(authMiddleware, middleware.ValidateUUIDParam("id"))
-	{
-		groupRoutes.POST("", groupHandler.CreateGroup)
-		groupRoutes.GET("/:id", groupHandler.GetGroupInfo)
-		groupRoutes.PUT("/:id", groupHandler.UpdateGroupInfo)
-		groupRoutes.POST("/:id/members", groupHandler.AddMember)
-		groupRoutes.DELETE("/:id/members/:userId", groupHandler.RemoveMember)
-		groupRoutes.GET("/:id/members", groupHandler.ListMembers)
-		groupRoutes.PUT("/:id/members/:memberId/role", groupHandler.ChangeMemberRole)
-		groupRoutes.POST("/:id/leave", groupHandler.LeaveGroup)
-		groupRoutes.POST("/:id/dissolve", groupHandler.DissolveGroup)
-	}
-
-	// 用户路由（需要鉴权）
-	userGroup := router.Group("/api/users")
-	userGroup.Use(authMiddleware)
-	{
-		userGroup.GET("/search", userHandler.Search)
-		userGroup.GET("/me", userHandler.GetProfile)
-		userGroup.PUT("/me", userHandler.UpdateProfile)
-	}
-	router.GET("/daemon/ws", daemonHandler.Handle)
-	router.GET("/daemon/connect", daemonHandler.Handle)
-	router.POST("/daemon/register", daemonHandler.WithMachine(daemonHandler.RegisterHTTP))
-	router.GET("/daemon/agent-token", daemonHandler.WithMachine(daemonHandler.IssueAgentToken))
-	router.GET("/daemon/tasks", daemonHandler.WithMachine(daemonHandler.ClaimTask))
-	router.POST("/daemon/tasks/:id/complete", daemonHandler.WithMachine(daemonHandler.CompleteTask))
-	router.POST("/daemon/tasks/:id/heartbeat", daemonHandler.WithMachine(daemonHandler.Heartbeat))
-
-	// MCP 路由组（daemon token 认证，不依赖用户 JWT）
-	mcpGroup := router.Group("/mcp")
-	mcpGroup.Use(middleware.MCPAuth(cfg.Daemon.Token))
-	{
-		mcpGroup.GET("/conversations", convHandler.List)
-		mcpGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
-		mcpGroup.GET("/conversations/:id/messages", msgHandler.History)
-
-		mcpTaskRoutes := mcpGroup.Group("/tasks")
-		mcpTaskRoutes.Use(middleware.ValidateUUIDParam("id"))
-		{
-			mcpTaskRoutes.GET("", taskHandler.List)
-			mcpTaskRoutes.POST("", taskHandler.Create)
-			mcpTaskRoutes.PUT("/:id", taskHandler.Update)
-			mcpTaskRoutes.POST("/:id/status", taskHandler.MoveStatus)
-			mcpTaskRoutes.DELETE("/:id", taskHandler.Delete)
-		}
-
-		mcpGroup.GET("/agents", agentHandler.MCPList)
-		mcpGroup.POST("/agents", agentHandler.Create)
-		mcpGroup.GET("/agents/:id", agentHandler.MCPGetAgentDetail)
-		mcpGroup.PUT("/agents/:id", agentHandler.Update)
-		mcpGroup.DELETE("/agents/:id", agentHandler.Delete)
-		mcpGroup.POST("/agents/:id/start", agentHandler.StartAgent)
-		mcpGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
-		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
-		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
-		mcpGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
-		mcpGroup.POST("/groups", groupHandler.CreateGroup)
-		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
-		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
-
-		// 知识库
-		mcpGroup.GET("/knowledge-bases", knowledgeHandler.List)
-		mcpGroup.GET("/knowledge-bases/:id/files", knowledgeHandler.ListFiles)
-		mcpGroup.GET("/knowledge-bases/:id/search", knowledgeHandler.SearchFiles)
-		mcpGroup.GET("/knowledge-bases/:id/files/:fileId/text", knowledgeHandler.GetFileText)
-
-		// 平台 Skills（只读）
-		mcpGroup.GET("/platform-skills", platformSkillHandler.List)
-		mcpGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
-	}
-
-	// 工具定义和内置模板（公开元数据，无需鉴权）
-	router.GET("/api/tools/definitions", toolDefHandler.ListDefinitions)
-	router.GET("/api/tools/builtin-templates", toolDefHandler.ListBuiltinTemplates)
-
-	registerSPARoutes(router, frontendDistDir())
+	// SPA fallback (depends on frontend build directory, stays in main)
+	registerSPARoutes(r, frontendDistDir())
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
@@ -520,9 +287,7 @@ func main() {
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
 
-	// 零配置内网穿透：未显式配置 PUBLIC_BASE_URL 且未禁用（AUTO_TUNNEL=false）时，
-	// 自动拉起 cloudflared 快速隧道并把分配到的公网域名回填到部署服务——这样无论在哪台
-	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
+	// 零配置内网穿透
 	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
 		cacheDir := filepath.Join("data", "bin")
 		go tunnel.StartAuto(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL)
@@ -532,7 +297,7 @@ func main() {
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      router,
+		Handler:      r,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 180 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -583,6 +348,23 @@ func frontendDistDir() string {
 	return filepath.Clean("../../frontend/dist")
 }
 
+func frontendDistCandidates() []string {
+	candidates := []string{
+		filepath.Clean("src/frontend/dist"),
+		filepath.Clean("../../frontend/dist"),
+	}
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "..", "src", "frontend", "dist"),
+			filepath.Join(exeDir, "frontend-dist"),
+		)
+	}
+	return candidates
+}
+
+// cleanUploadRoutePath sanitizes the upload route path parameter.
+// Exported for use by spa_test.go.
 func cleanUploadRoutePath(value string) string {
 	cleaned := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
 	if cleaned == "" || strings.HasPrefix(cleaned, "//") {
@@ -608,19 +390,4 @@ func hasDotDotSegment(value string) bool {
 		}
 	}
 	return false
-}
-
-func frontendDistCandidates() []string {
-	candidates := []string{
-		filepath.Clean("src/frontend/dist"),
-		filepath.Clean("../../frontend/dist"),
-	}
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		candidates = append(candidates,
-			filepath.Join(exeDir, "..", "src", "frontend", "dist"),
-			filepath.Join(exeDir, "frontend-dist"),
-		)
-	}
-	return candidates
 }
