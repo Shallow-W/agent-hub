@@ -167,10 +167,10 @@ func TestPreloadKBContextIncludesFileIDsAndInlineDocumentText(t *testing.T) {
 			},
 		},
 	}
-	svc := NewOrchestratorService(nil, nil, nil)
-	svc.SetKBResolver(resolver)
-
-	got := svc.PreloadKBContext(context.Background(), "请参考 {{alice/项目知识}}", "u1")
+	// 直接调 KBBuilder.resolveKB（原 OrchestratorService.PreloadKBContext 的 façade 已删除，
+	// façade 委托的就是这个纯函数；与 chain 内 KBBuilder 共享同一实现）
+	b := &KBBuilder{KBResolver: resolver}
+	got := b.resolveKB(context.Background(), "请参考 {{alice/项目知识}}", "u1")
 
 	if !strings.Contains(got, "[知识库: alice/项目知识") {
 		t.Fatalf("missing knowledge section: %s", got)

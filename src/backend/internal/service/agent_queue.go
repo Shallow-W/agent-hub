@@ -10,10 +10,10 @@ import (
 // 历史：原实现是 OrchestratorService.agentQueues sync.Map[agentID]chan struct{}，
 // dispatchSingleAgent / runDaemonEdit 各自重复 LoadOrStore + send + defer recv 的样板。
 //
-// 行为契约（与原 sync.Map + buffered-1 chan 完全一致）：
+// 行为契约：
 //   - 同一 agentID 的 Run 调用串行执行；后到的调用阻塞等待前一个释放槽位
 //   - 不同 agentID 的 Run 调用彼此并行
-//   - ctx 取消时立即返回 ctx.Err()（不持有槽位）
+//   - ctx 取消时立即返回 ctx.Err()（既未占用槽位，也未执行 fn）
 //
 // 可拓展：未来加优先级 / 配额 / 全局并发上限时只改这里。
 type AgentQueue struct {
@@ -29,15 +29,18 @@ func NewAgentQueue() *AgentQueue {
 // 同 agentID 的多次调用会排队（buffered-1 semaphore）；不同 agentID 并行。
 // fn 的返回值原样透传。
 //
-// 阻塞语义：与原 sync.Map + `sem <- struct{}{}` 完全一致——槽位等待期间
-// 不响应 ctx 取消（保持行为零变更）。ctx 仅用于未来拓展（优先级 / 超时）的占位，
-// 当前实现忽略它；调用方若需响应取消应在 fn 内部自行处理。
-func (q *AgentQueue) Run(_ context.Context, agentID string, fn func() error) error {
+// 取消语义：ctx 取消时立即返回 ctx.Err()（不持有槽位、不执行 fn）。
+// 槽位已被前一个调用占用时，等待 ctx 取消或槽位释放二者先发生。
+func (q *AgentQueue) Run(ctx context.Context, agentID string, fn func() error) error {
 	newSem := make(chan struct{}, 1)
 	actual, _ := q.queues.LoadOrStore(agentID, newSem)
 	sem := actual.(chan struct{})
-	sem <- struct{}{} // blocks until slot available（与原实现一致，不响应 ctx）
-	defer func() { <-sem }()
 
-	return fn()
+	select {
+	case sem <- struct{}{}:
+		defer func() { <-sem }()
+		return fn()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

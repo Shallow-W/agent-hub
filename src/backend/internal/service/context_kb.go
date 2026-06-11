@@ -34,7 +34,7 @@ func (b *KBBuilder) buildKBText(ctx context.Context, in ContextInput) string {
 }
 
 // resolveKB 实时解析 content 中的知识库引用，返回完整 KB 上下文段。
-// 逻辑与 OrchestratorService.PreloadKBContext 等价（供 façade 复用）。
+// RouteMention 入口和 chain 内 KBBuilder 共享此实现。
 func (b *KBBuilder) resolveKB(ctx context.Context, content, userID string) string {
 	if b.KBResolver == nil {
 		return ""

@@ -989,7 +989,8 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 			})
 		} else {
 			// agent 解析失败时仅注入附件段（保持原降级行为，不注入 agent config / blackboard / kb）
-			contextMessages = s.orchSvc.BuildAttachmentContext(ctx, attachments, userID)
+			// 直接调纯函数 BuildAttachmentText（与 AttachmentBuilder 共享同一实现）
+			contextMessages = BuildAttachmentText(ctx, attachments, s.orchSvc.uploadDir, attachmentTextMaxRunes)
 		}
 	}
 

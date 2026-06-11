@@ -305,31 +305,6 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 	}
 }
 
-func TestBuildDispatchContextIncludesParsedMathAssignment(t *testing.T) {
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{},
-		&fakeMsgRepo{},
-	)
-
-	orchOutput := "需要多 Agent 协作。第一轮分派如下：\n\n@123\n任务：计算 27 + 38。请只给出答案，并简要说明计算过程。\n\n@1234\n任务：计算 9 × 7。请只给出答案，并简要说明计算过程。\n\n我会在 123 和 1234 都回答后，汇总两边结果并判断是否正确，然后继续出第二轮。"
-	dispatch := ParseOrchestratorOutput(orchOutput)
-	if dispatch == nil || len(dispatch.Tasks) != 2 {
-		t.Fatalf("expected 2 parsed worker tasks, got %#v", dispatch)
-	}
-
-	ctx, err := svc.buildDispatchContext(context.Background(), "c1", dispatch.Tasks[0], nil, "Codex")
-	if err != nil {
-		t.Fatalf("buildDispatchContext error: %v", err)
-	}
-	if !strings.Contains(ctx, "27 + 38") {
-		t.Fatalf("dispatch context missing math assignment: %q", ctx)
-	}
-	if strings.Contains(ctx, "任务内容为空") {
-		t.Fatalf("dispatch context should not contain empty-task wording: %q", ctx)
-	}
-}
-
 func TestDispatchSingleAgent_SetsReplyToSourceMessage(t *testing.T) {
 	userID := "u1"
 	replyTo := "msg-user-1"
@@ -507,27 +482,25 @@ func TestBuildAgentConfigTextIncludesPlatformSkillContext(t *testing.T) {
 }
 
 func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T) {
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{},
-		&fakeMsgRepo{
-			pinnedMessages: []model.PinnedMessage{
-				{
-					ConversationID: "c1",
-					MessageID:      "m1",
-					Role:           "user",
-					Content:        "第一行\n第二行",
-					Username:       "wjc",
-				},
-			},
-			blackboard: &model.ConversationBlackboard{
+	msgRepo := &fakeMsgRepo{
+		pinnedMessages: []model.PinnedMessage{
+			{
 				ConversationID: "c1",
-				ManualContext:  "请始终使用中文回答",
+				MessageID:      "m1",
+				Role:           "user",
+				Content:        "第一行\n第二行",
+				Username:       "wjc",
 			},
 		},
-	)
+		blackboard: &model.ConversationBlackboard{
+			ConversationID: "c1",
+			ManualContext:  "请始终使用中文回答",
+		},
+	}
 
-	result := svc.BuildConversationBlackboardContext(context.Background(), "c1")
+	// 直接调纯函数 BuildBlackboardText（原 OrchestratorService.BuildConversationBlackboardContext
+	// 的 façade 已删除，façade 委托的就是这个纯函数；与 BlackboardBuilder 共享同一实现）
+	result := BuildBlackboardText(context.Background(), msgRepo, "c1")
 	if !strings.Contains(result, "{会话上下文黑板") {
 		t.Fatal("expected blackboard section")
 	}

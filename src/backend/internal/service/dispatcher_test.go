@@ -448,6 +448,83 @@ func TestAgentQueue_ConcurrentStressDoesNotDeadlock(t *testing.T) {
 	}
 }
 
+// TestAgentQueue_CtxCancelWhileWaitingReturnsErr 验证：当槽位已被占用且 ctx 取消时，
+// 排队等待的 Run 立即返回 ctx.Err()，既不占用槽位也不执行 fn。
+//
+// 这是纯增强：原实现忽略 ctx，调用方在槽位繁忙时会无限阻塞；
+// 新实现对槽位繁忙场景响应 ctx 取消。
+func TestAgentQueue_CtxCancelWhileWaitingReturnsErr(t *testing.T) {
+	q := NewAgentQueue()
+
+	// 第一个 Run：占住 agentID="agent-W" 的槽位，直到 release 被关闭。
+	holderEntered := make(chan struct{})
+	release := make(chan struct{})
+	holderDone := make(chan struct{})
+	go func() {
+		_ = q.Run(context.Background(), "agent-W", func() error {
+			close(holderEntered)
+			<-release
+			return nil
+		})
+		close(holderDone)
+	}()
+
+	<-holderEntered // 确保持有者已占住槽位
+
+	// 第二个 Run 用可取消 ctx，预期立即返回 ctx.Err()
+	ctx, cancel := context.WithCancel(context.Background())
+	gotErr := make(chan error, 1)
+	fnInvoked := make(chan struct{}, 1)
+	go func() {
+		gotErr <- q.Run(ctx, "agent-W", func() error {
+			// 不应被调用：ctx 取消时应从 select 返回 ctx.Err() 而非执行 fn。
+			// 用 buffered chan 记录「被错误调用」事件（避免从非 test goroutine 调 t.Fatalf）。
+			select {
+			case fnInvoked <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+	}()
+
+	// 等待一小段，确认第二个 Run 真的卡在 select 上
+	select {
+	case <-gotErr:
+		t.Fatalf("Run returned before ctx cancel: still blocked expected")
+	case <-fnInvoked:
+		t.Fatalf("fn was invoked before ctx cancel")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	cancel() // 触发取消
+	select {
+	case err := <-gotErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Run did not return after ctx cancel")
+	}
+
+	// 释放持有者，确认槽位未泄漏（持有者正常退出）
+	close(release)
+	<-holderDone
+
+	// 取消后槽位应被正确释放：新 Run 应能立即进入并执行 fn
+	ran := make(chan struct{})
+	go func() {
+		_ = q.Run(context.Background(), "agent-W", func() error {
+			close(ran)
+			return nil
+		})
+	}()
+	select {
+	case <-ran:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("slot was not released after ctx-cancelled Run returned")
+	}
+}
+
 // === Dispatcher 单测 ===
 //
 // Dispatcher 是 dispatchAndWait 的薄封装。这里用一个集成式单测验证：
@@ -492,7 +569,7 @@ func TestDispatcher_DispatchReturnsMessage(t *testing.T) {
 		Prompt:          "hello",
 		ContextMessages: "[ctx]",
 		ReplyTo:         nil,
-	})
+	}, DispatchHooks{})
 	if err != nil {
 		t.Fatalf("Dispatch returned error: %v", err)
 	}
@@ -530,7 +607,7 @@ func TestDispatcher_DispatchDaemonNotConnectedReturnsError(t *testing.T) {
 		UserID: userID,
 		Agent:  agent,
 		Prompt: "hello",
-	})
+	}, DispatchHooks{})
 	if err == nil {
 		t.Fatalf("expected error when daemon not connected, got nil")
 	}
@@ -540,7 +617,7 @@ func TestDispatcher_DispatchDaemonNotConnectedReturnsError(t *testing.T) {
 func TestDispatcher_DispatchMany_EmptyInputReturnsEmpty(t *testing.T) {
 	svc := NewOrchestratorService(nil, nil, nil)
 	d := NewDispatcher(svc)
-	results, errs := d.DispatchMany(context.Background(), nil)
+	results, errs := d.DispatchMany(context.Background(), nil, DispatchHooks{})
 	if len(results) != 0 || len(errs) != 0 {
 		t.Fatalf("expected empty results/errs, got %d/%d", len(results), len(errs))
 	}
@@ -562,5 +639,233 @@ func TestFormatDispatchError_WrapsError(t *testing.T) {
 func TestFormatDispatchError_NilReturnsNil(t *testing.T) {
 	if err := FormatDispatchError("Codex", nil); err != nil {
 		t.Fatalf("expected nil for nil input, got %v", err)
+	}
+}
+
+// === Dispatcher hook 机制单测 ===
+//
+// 这一组测试验证 P6 新增的 DispatchHooks：
+//   - 零值 hooks 等价于直接调 dispatchAndWait
+//   - PreDispatch error 中止派发
+//   - OnTaskCreated 在 daemon task 创建后、WS 推送前触发
+//   - OnMessagePersisted 在消息落库后触发
+//   - OnFailed 在 PreDispatch 失败 / 派发失败时触发
+
+// makeDispatcherTestSvc 构造一个用于 Dispatcher hook 测试的最小 svc：
+// 已连接的 daemonHub + 能落库的 fake msgRepo。
+func makeDispatcherTestSvc(t *testing.T, machineID string) (*OrchestratorService, *ws.DaemonHub) {
+	t.Helper()
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{
+			agent: &model.Agent{
+				ID:        "agent-h",
+				Name:      "HookAgent",
+				CLITool:   "claude",
+				MachineID: stringPtr(machineID),
+			},
+			task: &model.DaemonTask{ID: "task-h", Status: "completed", Result: "ok"},
+		},
+		&fakeMsgRepo{},
+	)
+	hub := newTestDaemonHub(t, machineID)
+	svc.SetDaemonHub(hub)
+	return svc, hub
+}
+
+// TestDispatchHooks_ZeroHooksEquivalentToDispatchAndWait 验证零值 hooks 时
+// Dispatch 的行为与直接调 dispatchAndWait 完全一致（成功路径返回相同 message）。
+func TestDispatchHooks_ZeroHooksEquivalentToDispatchAndWait(t *testing.T) {
+	svc, hub := makeDispatcherTestSvc(t, "machine-h0")
+	taskResult := "result-zero-hooks"
+	svc.agentRepo.(*fakeOrchAgentRepo).task = &model.DaemonTask{ID: "task-h0", Status: "completed", Result: taskResult}
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask("task-h0", &ws.TaskResult{TaskID: "task-h0", Result: taskResult})
+	}()
+
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-h0", Name: "HookAgent0", CLITool: "claude", MachineID: stringPtr("machine-h0")}
+	svc.agentRepo.(*fakeOrchAgentRepo).agent = agent
+
+	d := NewDispatcher(svc)
+	res, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{})
+	if err != nil {
+		t.Fatalf("zero-hooks Dispatch returned error: %v", err)
+	}
+	if res == nil || res.Message == nil {
+		t.Fatalf("expected non-nil message")
+	}
+	if res.Message.Content != taskResult {
+		t.Fatalf("expected content %q, got %q", taskResult, res.Message.Content)
+	}
+}
+
+// TestDispatchHooks_PreDispatchAbortsOnErr 验证 PreDispatch 返回 error 时
+// 立即中止派发，OnTaskCreated / OnMessagePersisted 都不会被调用，
+// OnFailed 会被调用一次（携带 PreDispatch 的错误）。
+func TestDispatchHooks_PreDispatchAbortsOnErr(t *testing.T) {
+	svc, _ := makeDispatcherTestSvc(t, "machine-h1")
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-h1", Name: "HookAgent1", CLITool: "claude", MachineID: stringPtr("machine-h1")}
+	svc.agentRepo.(*fakeOrchAgentRepo).agent = agent
+
+	preErr := errors.New("permission denied")
+	var preCalled, taskCreated, msgPersisted, failed bool
+
+	d := NewDispatcher(svc)
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{
+		PreDispatch: func(_ context.Context, _ DispatchInput) error {
+			preCalled = true
+			return preErr
+		},
+		OnTaskCreated: func(_ context.Context, _ *model.DaemonTask) {
+			taskCreated = true
+		},
+		OnMessagePersisted: func(_ context.Context, _ *model.Message) {
+			msgPersisted = true
+		},
+		OnFailed: func(_ context.Context, _ DispatchInput, ferr error) {
+			failed = true
+			if !errors.Is(ferr, preErr) {
+				t.Fatalf("OnFailed got unexpected err: %v", ferr)
+			}
+		},
+	})
+	if !errors.Is(err, preErr) {
+		t.Fatalf("expected preErr to propagate, got %v", err)
+	}
+	if !preCalled {
+		t.Fatal("PreDispatch should be called")
+	}
+	if taskCreated {
+		t.Fatal("OnTaskCreated should NOT be called when PreDispatch fails")
+	}
+	if msgPersisted {
+		t.Fatal("OnMessagePersisted should NOT be called when PreDispatch fails")
+	}
+	if !failed {
+		t.Fatal("OnFailed should be called when PreDispatch fails")
+	}
+}
+
+// TestDispatchHooks_OnTaskCreatedFiresBeforeWS 验证 OnTaskCreated 在 daemon task
+// 创建成功后、WS 推送前被触发，可拿到 task.ID。
+func TestDispatchHooks_OnTaskCreatedFiresBeforeWS(t *testing.T) {
+	svc, hub := makeDispatcherTestSvc(t, "machine-h2")
+	taskResult := "ok"
+	taskID := "task-h2"
+	svc.agentRepo.(*fakeOrchAgentRepo).task = &model.DaemonTask{ID: taskID, Status: "completed", Result: taskResult}
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-h2", Name: "HookAgent2", CLITool: "claude", MachineID: stringPtr("machine-h2")}
+	svc.agentRepo.(*fakeOrchAgentRepo).agent = agent
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask(taskID, &ws.TaskResult{TaskID: taskID, Result: taskResult})
+	}()
+
+	var capturedTaskID string
+	d := NewDispatcher(svc)
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{
+		OnTaskCreated: func(_ context.Context, task *model.DaemonTask) {
+			capturedTaskID = task.ID
+		},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch returned error: %v", err)
+	}
+	if capturedTaskID != taskID {
+		t.Fatalf("OnTaskCreated expected task.ID=%q, got %q", taskID, capturedTaskID)
+	}
+}
+
+// TestDispatchHooks_OnMessagePersistedFiresAfterCreate 验证 OnMessagePersisted
+// 在消息落库后被调用，能拿到落库的 message。
+func TestDispatchHooks_OnMessagePersistedFiresAfterCreate(t *testing.T) {
+	svc, hub := makeDispatcherTestSvc(t, "machine-h3")
+	taskResult := "summary-payload"
+	taskID := "task-h3"
+	svc.agentRepo.(*fakeOrchAgentRepo).task = &model.DaemonTask{ID: taskID, Status: "completed", Result: taskResult}
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-h3", Name: "HookAgent3", CLITool: "claude", MachineID: stringPtr("machine-h3")}
+	svc.agentRepo.(*fakeOrchAgentRepo).agent = agent
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		hub.ResolveTask(taskID, &ws.TaskResult{TaskID: taskID, Result: taskResult})
+	}()
+
+	var capturedContent string
+	d := NewDispatcher(svc)
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{
+		OnMessagePersisted: func(_ context.Context, msg *model.Message) {
+			capturedContent = msg.Content
+		},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch returned error: %v", err)
+	}
+	if capturedContent != taskResult {
+		t.Fatalf("OnMessagePersisted expected content %q, got %q", taskResult, capturedContent)
+	}
+}
+
+// TestDispatchHooks_OnFailedFiresOnDaemonDown 验证派发失败（daemon 未连接）时
+// OnFailed 被调用且携带原始错误。
+func TestDispatchHooks_OnFailedFiresOnDaemonDown(t *testing.T) {
+	// 故意不 SetDaemonHub → svc.daemonHub 为 nil
+	svc := NewOrchestratorService(
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		&fakeOrchAgentRepo{
+			agent: &model.Agent{ID: "agent-h4", Name: "HookAgent4", CLITool: "claude", MachineID: stringPtr("machine-h4")},
+			task:  &model.DaemonTask{ID: "task-h4", Status: "completed", Result: "x"},
+		},
+		&fakeMsgRepo{},
+	)
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-h4", Name: "HookAgent4", CLITool: "claude", MachineID: stringPtr("machine-h4")}
+
+	var failedErr error
+	d := NewDispatcher(svc)
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{
+		OnFailed: func(_ context.Context, _ DispatchInput, ferr error) {
+			failedErr = ferr
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when daemon hub is nil")
+	}
+	if failedErr == nil {
+		t.Fatal("OnFailed should be called when daemon hub is nil")
+	}
+	if !errors.Is(failedErr, err) {
+		t.Fatalf("OnFailed err should match Dispatch err: got %v want %v", failedErr, err)
 	}
 }

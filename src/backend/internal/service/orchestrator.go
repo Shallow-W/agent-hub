@@ -139,17 +139,6 @@ func (s *OrchestratorService) SetUploadDir(dir string) {
 // attachmentTextMaxRunes 单个附件注入上下文的最大字符数。
 const attachmentTextMaxRunes = 6000
 
-// BuildAttachmentContext 为带附件的消息生成「消息附件」上下文段：在服务端把每个附件抽取
-// 为纯文本并直接内联，Agent 无需下载或解析二进制（避免超时）。无法解析的格式给出降级提示，
-// 保证 Agent 始终能据此回复。无附件时返回空串。
-//
-// Façade：委托给 BuildAttachmentText（与 AttachmentBuilder 共享同一实现），保留旧 API 以
-// 兼容 message.go 等历史调用方。后续 P6 清理 Setter 时会一并评估是否内联化。
-func (s *OrchestratorService) BuildAttachmentContext(ctx context.Context, attachments []model.MessageAttachment, userID string) string {
-	_ = userID // 历史签名保留，附件抽取不依赖 userID
-	return BuildAttachmentText(ctx, attachments, s.uploadDir, attachmentTextMaxRunes)
-}
-
 // SetServerURL sets the server base URL for management tool API calls.
 // Deprecated: use OrchestratorDeps.ServerURL.
 func (s *OrchestratorService) SetServerURL(url string) {
@@ -403,10 +392,12 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 
 	// 在入口处预解析原始用户消息中的知识库引用，
 	// 避免 Orchestrator 改写任务描述后丢失 {{用户名/KB}} 语法
-	kbPreload := s.PreloadKBContext(ctx, content, userID)
+	// （直接用 KBBuilder 纯函数，与 chain 内 KBBuilder 共享同一实现）
+	kbPreload := (&KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}).resolveKB(ctx, content, userID)
 
 	// 把本条消息的附件抽取为文本前置注入，让被 @ 的 Agent 直接据此回答。
-	if attachCtx := s.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+	// （直接调纯函数 BuildAttachmentText，与 AttachmentBuilder 共享同一实现）
+	if attachCtx := BuildAttachmentText(ctx, attachments, s.uploadDir, attachmentTextMaxRunes); attachCtx != "" {
 		kbPreload = attachCtx + kbPreload
 	}
 
@@ -461,16 +452,52 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 // dispatchAndWait creates a daemon task, sends it via WS, waits for the result
 // via channel-based notification, creates a message, and returns it.
 // This is the unified dispatch path shared by both user @mention and orch worker dispatch.
+//
+// dispatchAndWait 是 dispatchWithHooks 的「无 hook」薄封装，等价于传 nil onTaskCreated。
+// 业务包装（权限 / 卡片生命周期 / CAS guard / summary 落库）应通过 Dispatcher.Dispatch
+// + DispatchHooks 暴露，而不是在这里扩张。
 func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string, replyTo *string) (*model.Message, error) {
+	msg, _, err := s.dispatchWithHooks(ctx, DispatchInput{
+		ConvID:          convID,
+		UserID:          userID,
+		Agent:           agent,
+		Prompt:          prompt,
+		ContextMessages: contextMessages,
+		ReplyTo:         replyTo,
+	}, nil)
+	return msg, err
+}
+
+// dispatchWithHooks 是 dispatchAndWait 的核心实现，多一个 onTaskCreated 回调。
+// 该回调在 CreateDaemonTask 成功后、IsConnected 检查 / WS 推送之前触发，
+// 用于 OrchTaskCard 在拿到 daemon task ID 后立即登记生命周期起点。
+//
+// 时序（与原 dispatchAndWait 完全一致，仅多了 onTaskCreated 调用）：
+//
+//	CreateDaemonTask
+//	  ↳ err → return ("create daemon task")
+//	onTaskCreated(task)               ← 若回调非 nil
+//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / CreateMessage
+//
+// onTaskCreated 为 nil 时与原 dispatchAndWait 行为完全等价（零行为变更）。
+func (s *OrchestratorService) dispatchWithHooks(ctx context.Context, in DispatchInput, onTaskCreated func(context.Context, *model.DaemonTask)) (*model.Message, *model.DaemonTask, error) {
+	convID, userID := in.ConvID, in.UserID
+	agent, prompt, contextMessages, replyTo := in.Agent, in.Prompt, in.ContextMessages, in.ReplyTo
+
 	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
 	if err != nil {
-		return nil, fmt.Errorf("create daemon task: %w", err)
+		return nil, nil, fmt.Errorf("create daemon task: %w", err)
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_task_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID, "cli_tool", agent.CLITool, "prompt_len", len(prompt), "context_len", len(contextMessages), "reply_to", stringValue(replyTo), "prompt_preview", orchPreview(prompt))
 
+	// OrchTaskCard 起点回调：拿到 daemon task ID 后立即登记（WS 推送前）。
+	if onTaskCreated != nil {
+		onTaskCreated(ctx, task)
+	}
+
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
 		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
-		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+		return nil, task, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(task.ID)
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
@@ -485,28 +512,28 @@ func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userI
 			"user_id":          userID,
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("dispatch to daemon: %w", err)
+		return nil, task, fmt.Errorf("dispatch to daemon: %w", err)
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
 
 	task, err = s.waitDaemonTask(ctx, task.ID)
 	if err != nil {
 		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
-		return nil, err
+		return nil, task, err
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
 	if task.Status == "failed" {
-		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
+		return nil, task, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 
 	artifacts := agentMetadata(agent)
 	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, replyTo, nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create agent reply: %w", err)
+		return nil, task, fmt.Errorf("create agent reply: %w", err)
 	}
 	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "message_id", msg.ID, "reply_to", stringValue(replyTo), "content_len", len(msg.Content))
 	s.persistArtifacts(ctx, msg, task.Artifacts)
-	return msg, nil
+	return msg, task, nil
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
@@ -540,8 +567,20 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 			KBPreload: kbPreload,
 		})
 
-		msg, err = s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
-		return err
+		// 走 Dispatcher.Dispatch（零 hooks：等价于直接 dispatchAndWait，无业务包装）。
+		res, derr := s.Dispatcher().Dispatch(ctx, DispatchInput{
+			ConvID:          convID,
+			UserID:          userID,
+			Agent:           agent,
+			Prompt:          content,
+			ContextMessages: agentCtx,
+			ReplyTo:         replyTo,
+		}, DispatchHooks{})
+		if derr != nil {
+			return derr
+		}
+		msg = res.Message
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -573,7 +612,7 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		convTitle = conv.Title
 	}
 
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	blackboardCtx := BuildBlackboardText(ctx, s.msgRepo, convID)
 	agentDetails := buildOrchestratorAgentDetails(convAgents)
 	availableAgentNames := agentNames(agentDetails)
 	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, agentDetails, blackboardCtx, recentSummary, content)
@@ -743,90 +782,12 @@ func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.M
 	msg.Artifacts = artifacts
 }
 
-// buildDispatchContext builds Layer 2 context for a worker agent dispatch.
-func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID string, task DispatchTask, depResults map[string]string, orchestratorName string) (string, error) {
-	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, 10)
-	if err != nil {
-		return "", fmt.Errorf("list messages: %w", err)
-	}
-
-	// Reverse to chronological order
-	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
-		msgs[i], msgs[j] = msgs[j], msgs[i]
-	}
-
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
-
-	var sb strings.Builder
-	if blackboardCtx != "" {
-		sb.WriteString(blackboardCtx)
-	}
-	sb.WriteString("[群聊背景]\n")
-	for _, m := range msgs {
-		role := m.Role
-		if m.Role == "assistant" {
-			if name := extractAgentName(m.ArtifactsJSON); name != "" {
-				role = name
-			}
-		}
-		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
-	}
-	sb.WriteString("\n")
-
-	// 限制任务描述长度
-	taskDesc := truncateString(task.Task, 2000)
-
-	if taskDesc != "" {
-		sb.WriteString("[调度指令]\n")
-		fmt.Fprintf(&sb, "Orch @你，分配了以下任务：\n%s\n\n", taskDesc)
-	}
-
-	if len(depResults) > 0 {
-		sb.WriteString("[依赖输出]\n")
-		for name, result := range depResults {
-			fmt.Fprintf(&sb, "%s 已完成，结果摘要：\n%s\n\n", name, result)
-		}
-	}
-
-	if orchestratorName == "" {
-		orchestratorName = "Orchestrator"
-	}
-	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
-
-	// 总长度保护：超过 4000 字符时从最早的消息开始截断
-	const maxContextLen = 6000
-	result := sb.String()
-	runes := []rune(result)
-	if len(runes) > maxContextLen {
-		result = string(runes[len(runes)-maxContextLen:])
-		// 截断后跳过第一个不完整的行
-		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
-			result = result[idx+1:]
-		}
-		if blackboardCtx != "" && !strings.Contains(result, "{会话上下文黑板") {
-			result = blackboardCtx + result
-		}
-	}
-	return result, nil
-}
-
 const (
 	blackboardPinLimit        = 20
 	blackboardMaxEntryRunes   = 800
 	blackboardMaxContextRunes = 5000
 	blackboardMaxManualRunes  = 3000
 )
-
-// BuildConversationBlackboardContext builds the shared conversation context block
-// injected into orchestrator and worker prompts.
-//
-// Façade：委托给 BuildBlackboardText（与 BlackboardBuilder 共享同一实现）。
-func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
-	if s == nil || s.msgRepo == nil {
-		return ""
-	}
-	return BuildBlackboardText(ctx, s.msgRepo, convID)
-}
 
 // buildRecentSummary formats the last 10 messages in chronological order.
 func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string) (string, error) {
@@ -921,16 +882,6 @@ func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string)
 
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
 const kbMaxInlineChars = 4000
-
-// PreloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
-// 生成 KB 上下文字符串。确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
-// 返回空字符串表示无引用或解析失败。
-//
-// Façade：委托给 KBBuilder.resolveKB（与 chain 内 KBBuilder 共享同一实现）。
-func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content string, userID string) string {
-	b := &KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}
-	return b.resolveKB(ctx, content, userID)
-}
 
 func formatFileSize(size int64) string {
 	const (

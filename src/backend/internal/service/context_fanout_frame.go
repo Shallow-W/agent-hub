@@ -6,7 +6,7 @@ import (
 )
 
 // FanoutFrameBuilder 构建 worker 派发时的「群聊背景 + 调度指令」框架段，
-// 前置到 current。orchestratorName + task 文本由 ContextInput.Extra 提供。
+// 前置到 current。orchestratorName + task 文本由 ContextInput.FanoutFrame 提供。
 //
 // 与 orchestrator_async.go 中原内联拼装完全等价：
 //
@@ -22,23 +22,16 @@ import (
 // 无 orchestratorName 时返回 current 不变（无法构成框架）。
 type FanoutFrameBuilder struct{}
 
-// fanoutFrameExtraKey 是 ContextInput.Extra 中存放 fanout 框架原料的 key。
-const fanoutFrameExtraKey = "fanout_frame"
-
 // FanoutFrameInput 是 FanoutFrameBuilder 读取的原料。
 type FanoutFrameInput struct {
 	OrchestratorName string
 	Task             string
 }
 
-// Build 实现 ContextBuilder。orchestratorName 为空时返回 current 不变。
+// Build 实现 ContextBuilder。FanoutFrame 为 nil 或 orchestratorName 为空时返回 current 不变。
 func (b *FanoutFrameBuilder) Build(_ context.Context, in ContextInput, current string) string {
-	raw, ok := in.Extra[fanoutFrameExtraKey]
-	if !ok {
-		return current
-	}
-	fi, ok := raw.(FanoutFrameInput)
-	if !ok {
+	fi := in.FanoutFrame
+	if fi == nil {
 		return current
 	}
 	if fi.OrchestratorName == "" {

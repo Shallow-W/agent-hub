@@ -439,7 +439,3 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 	}
 	// Should not panic; empty name should have been defaulted
 }
-
-// ---------------------------------------------------------------------------
-// Feature 5: Context length protection in buildDispatchContext
-// ---------------------------------------------------------------------------

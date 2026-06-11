@@ -175,7 +175,7 @@ func TestPathA_DirectReplyChain_EquivalentToLegacyAssembly(t *testing.T) {
 
 // TestPathC_WorkerChain_EquivalentToLegacyAssembly 验证路径 C（dispatchSingleAgent）。
 // 重构前拼装顺序（orchestrator.go 旧实现）：
-//  1. kbCtx = kbPreload   (或 PreloadKBContext 回退，等价)
+//  1. kbCtx = kbPreload   (或 KBBuilder.resolveKB 回退，等价)
 //  2. kbCtx = blackboardCtx + kbCtx
 //  3. agentCtx = InjectAgentConfig(agent, kbCtx, ...) = agentConfig + blackboardCtx + kbPreload
 //
@@ -254,11 +254,9 @@ func TestPathC_FanoutChain_EquivalentToLegacyAssembly(t *testing.T) {
 		Agent:     agent,
 		Content:   "fix the bug",
 		KBPreload: "KB_PRELOAD_BODY",
-		Extra: map[string]any{
-			fanoutFrameExtraKey: FanoutFrameInput{
-				OrchestratorName: "Orch",
-				Task:             "fix the bug",
-			},
+		FanoutFrame: &FanoutFrameInput{
+			OrchestratorName: "Orch",
+			Task:             "fix the bug",
 		},
 	}
 
@@ -290,11 +288,9 @@ func TestPathC_FanoutChain_NoKBPreloadOmitsKBSection(t *testing.T) {
 	in := ContextInput{
 		Agent:   agent,
 		Content: "do task",
-		Extra: map[string]any{
-			fanoutFrameExtraKey: FanoutFrameInput{
-				OrchestratorName: "Orch",
-				Task:             "do task",
-			},
+		FanoutFrame: &FanoutFrameInput{
+			OrchestratorName: "Orch",
+			Task:             "do task",
 		},
 	}
 
@@ -332,12 +328,12 @@ func TestPathD_SummaryChain_EquivalentToLegacyAssembly(t *testing.T) {
 	}
 }
 
-// TestFanoutFrameBuilder_NoExtraNoop 验证 Extra 中无 fanout_frame key 时返回 current 不变。
-func TestFanoutFrameBuilder_NoExtraNoop(t *testing.T) {
+// TestFanoutFrameBuilder_NilFanoutFrameNoop 验证 FanoutFrame 为 nil 时返回 current 不变。
+func TestFanoutFrameBuilder_NilFanoutFrameNoop(t *testing.T) {
 	b := &FanoutFrameBuilder{}
 	got := b.Build(context.Background(), ContextInput{}, "current")
 	if got != "current" {
-		t.Fatalf("no extra should be noop: got %q, want %q", got, "current")
+		t.Fatalf("nil FanoutFrame should be noop: got %q, want %q", got, "current")
 	}
 }
 
@@ -345,9 +341,7 @@ func TestFanoutFrameBuilder_NoExtraNoop(t *testing.T) {
 func TestFanoutFrameBuilder_EmptyOrchestratorNameNoop(t *testing.T) {
 	b := &FanoutFrameBuilder{}
 	in := ContextInput{
-		Extra: map[string]any{
-			fanoutFrameExtraKey: FanoutFrameInput{OrchestratorName: "", Task: "x"},
-		},
+		FanoutFrame: &FanoutFrameInput{OrchestratorName: "", Task: "x"},
 	}
 	got := b.Build(context.Background(), in, "current")
 	if got != "current" {
@@ -360,9 +354,7 @@ func TestFanoutFrameBuilder_TruncatesTaskTo2000(t *testing.T) {
 	b := &FanoutFrameBuilder{}
 	longTask := strings.Repeat("a", 3000)
 	in := ContextInput{
-		Extra: map[string]any{
-			fanoutFrameExtraKey: FanoutFrameInput{OrchestratorName: "Orch", Task: longTask},
-		},
+		FanoutFrame: &FanoutFrameInput{OrchestratorName: "Orch", Task: longTask},
 	}
 	got := b.Build(context.Background(), in, "")
 	// 截断后 task 段长度应为 2000
