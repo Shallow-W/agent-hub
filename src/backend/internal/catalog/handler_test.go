@@ -187,8 +187,8 @@ func (c composingStore) Create(ctx context.Context, in CreateInput) (*Item, erro
 func (c composingStore) Update(ctx context.Context, id string, in UpdateInput) (*Item, error) {
 	return c.fake.Update(ctx, id, in)
 }
-func (c composingStore) Delete(ctx context.Context, id string) error {
-	return c.fake.Delete(ctx, id)
+func (c composingStore) Delete(ctx context.Context, d Domain, userID, id string) error {
+	return c.fake.Delete(ctx, d, userID, id)
 }
 
 func storeOrNil() *AdapterStore { return nil }

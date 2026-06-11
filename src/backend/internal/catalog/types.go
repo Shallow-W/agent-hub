@@ -85,7 +85,13 @@ type CreateInput struct {
 
 // UpdateInput is the partial-update payload. Pointer fields are optional;
 // a nil pointer leaves the existing value untouched.
+//
+// Domain tells the Store which repo to dispatch to (mirrors CreateInput).
+// UserID is required for user-scope domains (the repo enforces it on every
+// write to prevent cross-user mutation). System-scope domains ignore it.
 type UpdateInput struct {
+	Domain      Domain
+	UserID      string
 	Key         *string
 	Category    *string
 	Label       *string

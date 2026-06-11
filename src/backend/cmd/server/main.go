@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -157,6 +159,7 @@ func main() {
 	})
 	catalogSvc := catalog.NewService(catalogStore, catalogRegistry)
 	toolDefSvc.SetCatalogLister(toolDefinitionCatalogBridge{svc: catalogSvc})
+	platformSkillSvc.SetCatalogStore(platformSkillCatalogBridge{svc: catalogSvc})
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	externalURL := resolveExternalURL(cfg)
 	agentSvc.SetServerURL(externalURL)
@@ -435,4 +438,144 @@ func (b toolDefinitionCatalogBridge) ListToolDefinitions(ctx context.Context) ([
 		})
 	}
 	return out, nil
+}
+
+// platformSkillCatalogBridge adapts *catalog.Service to the
+// service.PlatformSkillCatalogStore interface declared locally in the
+// service package. Same pattern as toolDefinitionCatalogBridge but with
+// full CRUD — each method maps catalog errors onto the legacy
+// service.ErrPlatformSkill{NotFound,Invalid,Duplicate} sentinels so the
+// handler-level error mapping (handlePlatformSkillError) keeps working
+// without noticing that catalog is now the source of truth.
+type platformSkillCatalogBridge struct {
+	svc *catalog.Service
+}
+
+func (b platformSkillCatalogBridge) ListPlatformSkills(ctx context.Context, userID string) ([]service.PlatformSkillCatalogItem, error) {
+	items, err := b.svc.List(ctx, catalog.DomainPlatformSkill, catalog.ListQuery{UserID: userID})
+	if err != nil {
+		return nil, mapCatalogToPlatformSkillErr(err)
+	}
+	out := make([]service.PlatformSkillCatalogItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, platformSkillItemFromCatalog(it, userID))
+	}
+	return out, nil
+}
+
+func (b platformSkillCatalogBridge) CreatePlatformSkill(ctx context.Context, userID, name, category, description, trigger, detail string) (*service.PlatformSkillCatalogItem, error) {
+	item, err := b.svc.Create(ctx, catalog.CreateInput{
+		Domain:      catalog.DomainPlatformSkill,
+		UserID:      userID,
+		Key:         name,
+		Label:       name,
+		Category:    category,
+		Description: description,
+		PayloadJSON: mustJSONPayload(trigger, detail),
+	})
+	if err != nil {
+		return nil, mapCatalogToPlatformSkillErr(err)
+	}
+	if item == nil {
+		return nil, service.ErrPlatformSkillNotFound
+	}
+	out := platformSkillItemFromCatalog(*item, userID)
+	return &out, nil
+}
+
+func (b platformSkillCatalogBridge) UpdatePlatformSkill(ctx context.Context, id, userID, name, category, description, trigger, detail string) (*service.PlatformSkillCatalogItem, error) {
+	key := name
+	label := name
+	payload := mustJSONPayload(trigger, detail)
+	item, err := b.svc.Update(ctx, id, catalog.UpdateInput{
+		Domain:      catalog.DomainPlatformSkill,
+		UserID:      userID,
+		Key:         &key,
+		Label:       &label,
+		Category:    &category,
+		Description: &description,
+		PayloadJSON: &payload,
+	})
+	if err != nil {
+		return nil, mapCatalogToPlatformSkillErr(err)
+	}
+	if item == nil {
+		return nil, service.ErrPlatformSkillNotFound
+	}
+	out := platformSkillItemFromCatalog(*item, userID)
+	return &out, nil
+}
+
+func (b platformSkillCatalogBridge) DeletePlatformSkill(ctx context.Context, id, userID string) error {
+	if err := b.svc.Delete(ctx, catalog.DomainPlatformSkill, userID, id); err != nil {
+		return mapCatalogToPlatformSkillErr(err)
+	}
+	return nil
+}
+
+// platformSkillItemFromCatalog maps a catalog.Item to the local DTO used
+// by PlatformSkillService, decoding the {trigger, detail} payload. userID
+// is taken from the caller (not Item.UserID) for parity with the legacy
+// repo path, which always returns the caller's userID.
+func platformSkillItemFromCatalog(it catalog.Item, userID string) service.PlatformSkillCatalogItem {
+	trigger, detail := decodePlatformSkillPayload(it.PayloadJSON)
+	uid := userID
+	if it.UserID != nil && *it.UserID != "" {
+		uid = *it.UserID
+	}
+	return service.PlatformSkillCatalogItem{
+		ID:          it.ID,
+		UserID:      uid,
+		Name:        it.Key,
+		Category:    it.Category,
+		Description: it.Description,
+		Trigger:     trigger,
+		Detail:      detail,
+		CreatedAt:   it.CreatedAt,
+		UpdatedAt:   it.UpdatedAt,
+	}
+}
+
+// mustJSONPayload serialises the {trigger, detail} pair as the catalog
+// PayloadJSON. Errors are impossible for this shape, so we silently fall
+// back to an empty object on marshal failure (defensive).
+func mustJSONPayload(trigger, detail string) string {
+	b, err := json.Marshal(map[string]string{"trigger": trigger, "detail": detail})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// decodePlatformSkillPayload is a main-package mirror of
+// catalog.decodePlatformSkillPayload. Duplicated so the bridge doesn't
+// reach into catalog's unexported helpers.
+func decodePlatformSkillPayload(raw string) (trigger, detail string) {
+	if strings.TrimSpace(raw) == "" {
+		return "", ""
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", ""
+	}
+	return m["trigger"], m["detail"]
+}
+
+// mapCatalogToPlatformSkillErr translates catalog sentinel errors into
+// the legacy PlatformSkill error sentinels. main package can import both,
+// so we use errors.Is directly (no string matching).
+func mapCatalogToPlatformSkillErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, catalog.ErrNotFound):
+		return service.ErrPlatformSkillNotFound
+	case errors.Is(err, catalog.ErrDuplicate):
+		return service.ErrPlatformSkillDuplicate
+	case errors.Is(err, catalog.ErrInvalid):
+		return service.ErrPlatformSkillInvalid
+	default:
+		return fmt.Errorf("platform skill via catalog: %w", err)
+	}
 }

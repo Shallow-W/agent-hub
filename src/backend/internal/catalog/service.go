@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Service is the application layer above Store. It owns:
@@ -99,10 +101,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Item, error) 
 }
 
 // Update applies a partial update. Pointer-valued fields that are nil are
-// left unchanged; non-nil pointers replace the stored value.
+// left unchanged; non-nil pointers replace the stored value. Domain is read
+// from input.Domain (the Handler threads it from the URL path); the Store
+// uses it to dispatch to the right repo.
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*Item, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, ErrInvalid
+	}
+	if _, err := s.requireDomain(input.Domain); err != nil {
+		return nil, err
 	}
 	item, err := s.store.Update(ctx, id, input)
 	if err != nil {
@@ -114,12 +121,17 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (*It
 	return item, nil
 }
 
-// Delete removes an Item by id.
-func (s *Service) Delete(ctx context.Context, id string) error {
+// Delete removes an Item by id. domain tells the Store which repo to use;
+// userID is required for user-scope domains (the underlying repo enforces it
+// to prevent cross-user deletion); system-scope domains pass empty string.
+func (s *Service) Delete(ctx context.Context, domain Domain, userID, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return ErrInvalid
 	}
-	if err := s.store.Delete(ctx, id); err != nil {
+	if _, err := s.requireDomain(domain); err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, domain, userID, id); err != nil {
 		return mapStoreErr(err)
 	}
 	return nil
@@ -241,5 +253,19 @@ func mapStoreErr(err error) error {
 	if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no rows") {
 		return ErrNotFound
 	}
+	// PostgreSQL unique-violation (SQLSTATE 23505) → ErrDuplicate. Serves
+	// every domain since the underlying repos all surface pgconn.PgError
+	// when the (domain, user_id, key) uniqueness constraint fires.
+	if isUniqueViolation(err) {
+		return ErrDuplicate
+	}
 	return err
+}
+
+// isUniqueViolation mirrors service.isUniqueViolation without creating a
+// catalog → service dependency (which would close the import cycle
+// catalog → middleware → service → catalog).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

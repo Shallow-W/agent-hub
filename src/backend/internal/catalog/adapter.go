@@ -17,16 +17,12 @@ import (
 // satisfy them. This keeps catalog → repository a one-way dependency and the
 // adapter unit-testable with fakes.
 
-// PlatformSkillLister covers the subset of PlatformSkillRepo methods used by
-// catalog. The full CRUD surface is preserved in the existing service; the
-// catalog AdapterStore only needs read paths for B1 (the other three domains
-// are not yet migrated).
-type PlatformSkillLister interface {
-	ListByUser(ctx context.Context, userID string) ([]model.PlatformSkill, error)
-}
-
+// PlatformSkillStore covers the subset of PlatformSkillRepo methods used by
+// catalog. The existing repository.PlatformSkillRepo already satisfies it.
+// Declared locally so catalog → repository is a one-way dependency and the
+// adapter is unit-testable with fakes.
 type PlatformSkillStore interface {
-	PlatformSkillLister
+	ListByUser(ctx context.Context, userID string) ([]model.PlatformSkill, error)
 	Create(ctx context.Context, userID, name, category, description, trigger, detail string) (*model.PlatformSkill, error)
 	Update(ctx context.Context, id, userID, name, category, description, trigger, detail string) (*model.PlatformSkill, error)
 	Delete(ctx context.Context, id, userID string) (bool, error)
@@ -65,7 +61,7 @@ type UserTemplateStore interface {
 // The store holds narrow interfaces (not concrete pointers) so it is safe to
 // pass in *repository.XxxRepo structs directly, or mocks in tests.
 type AdapterStore struct {
-	platformSkill PlatformSkillLister
+	platformSkill PlatformSkillStore
 	toolDef       ToolDefinitionLister
 	agentPrompt   AgentPromptTemplateLister
 	userTemplate  UserTemplateLister
@@ -76,7 +72,7 @@ type AdapterStore struct {
 // caller doesn't yet need that domain — List on an unset repo returns
 // ErrUnknownDomain via the registry lookup before the repo is touched.
 type AdapterDeps struct {
-	PlatformSkill PlatformSkillLister
+	PlatformSkill PlatformSkillStore
 	ToolDef       ToolDefinitionLister
 	AgentPrompt   AgentPromptTemplateLister
 	UserTemplate  UserTemplateLister
@@ -210,27 +206,130 @@ func (s *AdapterStore) GetByID(ctx context.Context, id string) (*Item, error) {
 
 // ── Write paths ──────────────────────────────────────────────────────────────
 //
-// B1 only routes tool_definition through catalog, and tool_definition is
-// read-only. The write paths are wired for completeness so that future
-// migrations (B2/B3/B4) can switch their handler to the catalog Service
-// without re-touching the adapter — but until then the methods return
-// ErrReadOnly for every registered domain except those whose Store
-// interfaces are also provided.
-//
-// To enable writes for a domain in a later migration: widen the AdapterDeps
-// field type (e.g. PlatformSkillLister → PlatformSkillStore) and implement
-// the case below.
+// B2 wires platform_skill through catalog with full CRUD. The other three
+// domains retain their legacy service/repo paths for now; their cases fall
+// through to ErrReadOnly. B3/B4 will widen them the same way.
 
 func (s *AdapterStore) Create(ctx context.Context, input CreateInput) (*Item, error) {
-	return nil, fmt.Errorf("%w: %s", ErrReadOnly, input.Domain)
+	switch input.Domain {
+	case DomainPlatformSkill:
+		if s.platformSkill == nil {
+			return nil, fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
+		}
+		trigger, detail, err := decodePlatformSkillPayload(input.PayloadJSON)
+		if err != nil {
+			return nil, err
+		}
+		m, err := s.platformSkill.Create(ctx, input.UserID, input.Key, input.Category, input.Description, trigger, detail)
+		if err != nil {
+			return nil, err
+		}
+		if m == nil {
+			return nil, ErrNotFound
+		}
+		item := platformSkillToItem(m)
+		return &item, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrReadOnly, input.Domain)
+	}
 }
 
 func (s *AdapterStore) Update(ctx context.Context, id string, input UpdateInput) (*Item, error) {
-	return nil, fmt.Errorf("%w: id=%s", ErrReadOnly, id)
+	switch input.Domain {
+	case DomainPlatformSkill:
+		if s.platformSkill == nil {
+			return nil, fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
+		}
+		// platform_skill repo.Update is full-replace (every column required).
+		// Resolve nil pointers by reading the current row via List-then-match —
+		// the repo has no GetByID method, but ListByUser + id match is cheap
+		// and matches the existing read pattern.
+		current, err := s.findPlatformSkillByID(ctx, input.UserID, id)
+		if err != nil {
+			return nil, err
+		}
+		name := current.Name
+		if input.Key != nil {
+			name = *input.Key
+		}
+		category := current.Category
+		if input.Category != nil {
+			category = *input.Category
+		}
+		description := current.Description
+		if input.Description != nil {
+			description = *input.Description
+		}
+		trigger, detail := current.Trigger, current.Detail
+		if input.PayloadJSON != nil {
+			t, d, derr := decodePlatformSkillPayload(*input.PayloadJSON)
+			if derr != nil {
+				return nil, derr
+			}
+			trigger, detail = t, d
+		}
+		m, err := s.platformSkill.Update(ctx, id, input.UserID, name, category, description, trigger, detail)
+		if err != nil {
+			return nil, err
+		}
+		if m == nil {
+			return nil, ErrNotFound
+		}
+		item := platformSkillToItem(m)
+		return &item, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrReadOnly, input.Domain)
+	}
 }
 
-func (s *AdapterStore) Delete(ctx context.Context, id string) error {
-	return fmt.Errorf("%w: id=%s", ErrReadOnly, id)
+func (s *AdapterStore) Delete(ctx context.Context, domain Domain, userID, id string) error {
+	switch domain {
+	case DomainPlatformSkill:
+		if s.platformSkill == nil {
+			return fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
+		}
+		deleted, err := s.platformSkill.Delete(ctx, id, userID)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			return ErrNotFound
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: %s", ErrReadOnly, domain)
+	}
+}
+
+// findPlatformSkillByID is a List-then-match helper for platform_skill,
+// required because repository.PlatformSkillRepo exposes no GetByID. Used
+// only by Update to resolve partial-merge source values.
+func (s *AdapterStore) findPlatformSkillByID(ctx context.Context, userID, id string) (model.PlatformSkill, error) {
+	list, err := s.platformSkill.ListByUser(ctx, userID)
+	if err != nil {
+		return model.PlatformSkill{}, err
+	}
+	for i := range list {
+		if list[i].ID == id {
+			return list[i], nil
+		}
+	}
+	return model.PlatformSkill{}, ErrNotFound
+}
+
+// decodePlatformSkillPayload parses the JSON payload carried by Create /
+// Update for the platform_skill domain into the (trigger, detail) pair the
+// underlying repo expects. An empty payload yields two empty strings. A
+// malformed payload yields ErrInvalid.
+func decodePlatformSkillPayload(raw string) (trigger, detail string, err error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", "", nil
+	}
+	var m map[string]string
+	if e := json.Unmarshal([]byte(raw), &m); e != nil {
+		return "", "", fmt.Errorf("%w: payload: %v", ErrInvalid, e)
+	}
+	return m["trigger"], m["detail"], nil
 }
 
 // ── model → Item converters ──────────────────────────────────────────────────

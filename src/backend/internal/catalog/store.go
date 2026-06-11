@@ -15,5 +15,5 @@ type Store interface {
 	GetByID(ctx context.Context, id string) (*Item, error)
 	Create(ctx context.Context, input CreateInput) (*Item, error)
 	Update(ctx context.Context, id string, input UpdateInput) (*Item, error)
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, domain Domain, userID, id string) error
 }

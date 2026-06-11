@@ -97,7 +97,7 @@ func (f *fakeStore) Update(_ context.Context, id string, input UpdateInput) (*It
 	return &it, nil
 }
 
-func (f *fakeStore) Delete(_ context.Context, id string) error {
+func (f *fakeStore) Delete(_ context.Context, _ Domain, _, id string) error {
 	if _, ok := f.items[id]; !ok {
 		return ErrNotFound
 	}
@@ -284,7 +284,10 @@ func TestService_Update(t *testing.T) {
 		t.Fatalf("Create err: %v", err)
 	}
 	newLabel := "renamed"
-	updated, err := svc.Update(context.Background(), item.ID, UpdateInput{Label: &newLabel})
+	updated, err := svc.Update(context.Background(), item.ID, UpdateInput{
+		Domain: DomainUserTemplate,
+		Label:  &newLabel,
+	})
 	if err != nil {
 		t.Fatalf("Update err: %v", err)
 	}
@@ -300,7 +303,7 @@ func TestService_Delete(t *testing.T) {
 	item, _ := svc.Create(context.Background(), CreateInput{
 		Domain: DomainUserTemplate, UserID: "u1", Subtype: "tools", Key: "k",
 	})
-	if err := svc.Delete(context.Background(), item.ID); err != nil {
+	if err := svc.Delete(context.Background(), DomainUserTemplate, "u1", item.ID); err != nil {
 		t.Fatalf("Delete err: %v", err)
 	}
 	if _, err := svc.Get(context.Background(), item.ID); !errors.Is(err, ErrNotFound) {

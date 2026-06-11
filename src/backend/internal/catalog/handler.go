@@ -155,6 +155,8 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	item, err := h.svc.Update(c.Request.Context(), c.Param("id"), UpdateInput{
+		Domain:      domain,
+		UserID:      c.GetString("user_id"),
 		Key:         req.Key,
 		Label:       req.Label,
 		Category:    req.Category,
@@ -179,7 +181,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusMethodNotAllowed, 40592, "该 catalog 域为只读")
 		return
 	}
-	if err := h.svc.Delete(c.Request.Context(), c.Param("id")); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), domain, c.GetString("user_id"), c.Param("id")); err != nil {
 		h.respondErr(c, err, "删除 catalog 条目失败")
 		return
 	}
