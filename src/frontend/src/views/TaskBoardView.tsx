@@ -24,7 +24,6 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { createTask, deleteTask, getOrchTaskCards, getTasks, moveTaskStatus, updateTask } from '@/api/task';
-import { getConversationAgents } from '@/api/conversation';
 import { onTaskChanged } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
@@ -33,8 +32,8 @@ import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentP
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { CreateTaskPayload, OrchTaskCard, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
-import type { ConversationAgent } from '@/types/conversation';
 import { ROLE_ORCHESTRATOR } from '@/types/role';
+import { useConversationAgents } from '@/hooks/useConversationAgents';
 import styles from './TaskBoardView.module.css';
 
 interface TaskFormValues {
@@ -171,24 +170,10 @@ const TaskBoardView: React.FC = () => {
   const activeConversation = conversations.find((item) => item.id === activeConversationId);
   const currentUser = useAuthStore((s) => s.user);
   const agents = useAgentStore((s) => s.agents);
-  const [orchAgent, setOrchAgent] = useState<ConversationAgent | null>(null);
 
-  // Resolve the orchestrator agent for the active conversation (used for card creator display)
-  useEffect(() => {
-    if (!activeConversationId) {
-      setOrchAgent(null);
-      return;
-    }
-    let cancelled = false;
-    getConversationAgents(activeConversationId)
-      .then((list) => {
-        if (cancelled) return;
-        const orch = (list ?? []).find((a) => a.role === ROLE_ORCHESTRATOR);
-        setOrchAgent(orch ?? null);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [activeConversationId]);
+  // 获取会话 Agent 列表 + WS role_changed 自动刷新（由公共 hook 统一管理）
+  const { agents: convAgents } = useConversationAgents(activeConversationId ?? undefined);
+  const orchAgent = convAgents.find((a) => a.role === ROLE_ORCHESTRATOR) ?? null;
 
   const grouped = useMemo(() => {
     const map = new Map<TaskStatus, Array<WorkspaceTask | OrchTaskCard>>();

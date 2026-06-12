@@ -124,10 +124,6 @@ export interface StreamMessage {
     reply_to_message?: ReplyToPreview | null;
     agent_id?: string;
     agent_status?: string;
-    /** conversation.role_changed 事件：被改角色的 Agent ID */
-    role_agent_id?: string;
-    /** conversation.role_changed 事件：新角色（orchestrator / worker） */
-    role_value?: string;
     /** conversation.role_changed 事件：触发变更的用户 ID */
     actor_id?: string;
     /** conversation.role_changed 事件：被降级的旧 Orchestrator Agent ID（可选） */
