@@ -155,7 +155,6 @@ type MessageService struct {
 	orchSvc   *OrchestratorService
 	daemonHub port.DaemonDispatcher
 	fileURLs  *FileURLBuilder
-	deploySvc *DeploymentService
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -196,11 +195,6 @@ func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 // 调用方（main.go）依然传 *ws.DaemonHub 指针，无需改动。
 func (s *MessageService) SetDaemonHub(dh port.DaemonDispatcher) {
 	s.daemonHub = dh
-}
-
-// SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。
-func (s *MessageService) SetDeploymentService(d *DeploymentService) {
-	s.deploySvc = d
 }
 
 // SetFileURLBuilder injects the public URL policy for message attachments.
@@ -286,14 +280,6 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	s.enrichMessageFileURLs(msg)
 
 	result := &SendMessageResult{UserMessage: msg}
-
-	// 聊天「部署」指令拦截：识别后直接部署对话里最新产物并回部署状态卡片，
-	// 不经过 Agent（agent 离线也可用），且不再走常规 Agent 派发。
-	if s.deploySvc != nil && isDeployCommand(content) {
-		go s.asyncDeploy(convID, userID)
-		go s.postPersist(convID, userID, msg)
-		return result, nil
-	}
 
 	// Agent dispatch routing based on conversation type
 	switch conv.Type {
@@ -1068,65 +1054,4 @@ func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, co
 		return ""
 	}
 	return strings.TrimSpace(agents[0].AgentID)
-}
-
-// isDeployCommand 判断一条消息是否为聊天「部署」指令（短消息 + 关键词开头，避免长句误触）。
-func isDeployCommand(content string) bool {
-	c := strings.TrimSpace(content)
-	if c == "" {
-		return false
-	}
-	lower := strings.ToLower(c)
-	if lower == "/deploy" || strings.HasPrefix(lower, "/deploy ") {
-		return true
-	}
-	if len([]rune(c)) > 12 {
-		return false
-	}
-	for _, kw := range []string{"一键部署", "部署", "发布", "deploy"} {
-		if c == kw || strings.HasPrefix(c, kw) || strings.HasPrefix(lower, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-// asyncDeploy 异步处理聊天「部署」指令：部署对话最新产物，并以「部署助手」身份回一条带
-// 部署状态卡片的 assistant 消息（部署信息塞进 artifacts_json 元数据，前端据此渲染卡片）。
-func (s *MessageService) asyncDeploy(convID, userID string) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Warn("asyncDeploy recovered", "panic", r)
-		}
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	var content, metaJSON string
-	dep, err := s.deploySvc.DeployLatestInConversation(ctx, convID, userID)
-	if err != nil {
-		if errors.Is(err, ErrDeployNoArtifact) {
-			content = "当前对话还没有可部署的产物，先让 Agent 生成一个网页/文档/代码产物，再发送「部署」。"
-		} else {
-			slog.Warn("chat deploy failed", "convID", convID, "error", err)
-			content = "部署失败了：" + err.Error()
-		}
-		meta, _ := json.Marshal(map[string]any{"agent_name": "部署助手"})
-		metaJSON = string(meta)
-	} else {
-		content = "已部署成功，预览地址：" + dep.URL
-		meta, _ := json.Marshal(map[string]any{
-			"agent_name": "部署助手",
-			"deployment": dep,
-		})
-		metaJSON = string(meta)
-	}
-
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, metaJSON, nil, nil, nil, nil)
-	if err != nil {
-		slog.Warn("create deploy reply failed", "convID", convID, "error", err)
-		return
-	}
-	s.postPersist(convID, userID, msg)
 }

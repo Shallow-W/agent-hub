@@ -58,10 +58,13 @@ func (h *DeploymentHandler) DeployByConversation(c *gin.Context) {
 	var dep *model.Deployment
 	var err error
 	switch req.Mode {
+	case "preview":
+		dep, err = h.svc.DeployByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
 	case "github":
 		dep, err = h.svc.PublishGitHubByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
 	default:
-		dep, err = h.svc.DeployByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40801, "invalid mode: must be 'preview' or 'github'")
+		return
 	}
 	if err != nil {
 		h.handleErr(c, err)

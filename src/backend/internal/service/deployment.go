@@ -197,18 +197,6 @@ func (s *DeploymentService) Deploy(ctx context.Context, rootID, userID string) (
 	return s.decorate(updated), nil
 }
 
-// DeployLatestInConversation 部署某对话中最新的产物（聊天「部署」指令用）。
-func (s *DeploymentService) DeployLatestInConversation(ctx context.Context, convID, userID string) (*model.Deployment, error) {
-	rootID, err := s.artRepo.GetLatestRootByConversation(ctx, convID)
-	if err != nil {
-		if errors.Is(err, repository.ErrArtifactRootNotFound) {
-			return nil, ErrDeployNoArtifact
-		}
-		return nil, fmt.Errorf("latest artifact in conversation: %w", err)
-	}
-	return s.Deploy(ctx, rootID, userID)
-}
-
 // DeployByConversation 按对话 ID 和可选名称查找产物并部署预览。
 func (s *DeploymentService) DeployByConversation(ctx context.Context, convID, userID, artifactName string) (*model.Deployment, error) {
 	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)

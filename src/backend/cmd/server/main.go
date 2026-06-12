@@ -198,7 +198,6 @@ func main() {
 	orchSvc := service.NewOrchestratorServiceWithDeps(orchDeps)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetFileURLBuilder(fileURLs)
-	msgSvc.SetDeploymentService(deploymentSvc)
 
 	if redisMsgRepo != nil {
 		msgSvc.SetDeliveryState(redisMsgRepo)
