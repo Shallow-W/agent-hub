@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +11,15 @@ import (
 	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
 )
+
+// ErrDaemonNotConnected 表示 daemon 未通过 WS 连接导致派发失败。
+//
+// P9 引入：DispatchPlan 迁移前 3 处 "daemon not connected" 错误格式不一致
+// （dispatcher.go / orchestrator.go 返回 fmt.Errorf 文本，orchestrator_artifact.go
+// 返回 ErrArtifactEditNoAgent）。迁移后 Dispatcher 统一返回此 sentinel，
+// 调用方（如 runDaemonEdit）通过 errors.Is 映射回业务 sentinel（如 ErrArtifactEditNoAgent）
+// 以保留零行为变更。
+var ErrDaemonNotConnected = errors.New("daemon not connected")
 
 // DaemonTaskCreator 是 Dispatcher 创建 daemon task 所需的 agent 仓库子集。
 //
@@ -50,17 +60,23 @@ type DispatcherDeps struct {
 // 包装逻辑（权限校验 / OrchTaskCard 生命周期 / CAS guard / summary 落库）拆成 hook：
 //   - PreDispatch：daemon task 创建前调用（权限 / CAS / 存在性校验）。返回 error 中止。
 //   - OnTaskCreated：daemon task 创建成功后、WS 推送前调用（OrchTaskCard 起点）。
-//   - OnMessagePersisted：assistant message 落库后调用（OrchTaskCard 完结 / summary 触发）。
+//   - OnMessagePersisted：ResultHandler 返回非 nil message 后调用（OrchTaskCard 完结 / summary 触发）。
 //   - OnFailed：派发失败时调用（daemon 未连接 / fn error 等）。
 //
 // P7 进一步：Dispatcher 不再持有 *OrchestratorService 反向引用，所有依赖通过
 // DispatcherDeps 注入；dispatchWithHooks 的核心实现迁到 Dispatcher.dispatchCore。
-// OrchestratorService 持有独立构造的 *Dispatcher，并通过薄壳 s.dispatchAndWait
-// （仅调用 s.dispatcher.Dispatch(..., DispatchHooks{})）保留两条内联路径的现有调用点。
+//
+// P9 进一步：Dispatch 拆成两层：
+//   - DispatchPlan：核心入口，接受 DispatchPlan（Input + PromptBuilder + ResultHandler），
+//     让调用方可以注入「prompt 升级」与「task 产物处理」策略。两条原本内联的路径
+//     （handleOrchestratedDispatch / runDaemonEdit）改走 DispatchPlan 直接注入自定义
+//     PromptBuilder / ResultHandler，消除 3 处重复的 WSMessage 拼装 + 错误码分歧。
+//   - Dispatch：DispatchPlan 的薄壳，用 defaultPromptBuilder + defaultMessageHandler
+//     装配，等价于 P9 之前的行为（worker / summary / 直接 reply 仍走这条）。
 //
 // 注意：Dispatcher 不负责上下文构建（用 chain）也不负责并发护栏（用 AgentQueue）。
 // 它只做「拿到 prompt + contextMessages 后把任务送到 daemon 并等待结果」这一件事。
-// 并发护栏由调用方在调用 Dispatcher.Dispatch 前/后用 AgentQueue.Run 包裹。
+// 并发护栏由调用方在调用 Dispatcher.Dispatch / DispatchPlan 前/后用 AgentQueue.Run 包裹。
 type Dispatcher struct {
 	deps DispatcherDeps
 }
@@ -99,8 +115,8 @@ type DispatchResult struct {
 //	  ↳ error → 直接 return，不调用后续 hook
 //	CreateDaemonTask
 //	OnTaskCreated(task)                      ← daemon task 创建成功后、WS 推送前
-//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / CreateMessage
-//	OnMessagePersisted(msg)                  ← assistant message 落库成功后
+//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / ResultHandler
+//	OnMessagePersisted(msg)                  ← ResultHandler 返回非 nil msg 后
 //	  ↳ 任一中间步骤 error → OnFailed(input, err)
 type DispatchHooks struct {
 	// PreDispatch 在 daemon task 创建前调用，用于权限校验、CAS guard、存在性检查。
@@ -111,8 +127,13 @@ type DispatchHooks struct {
 	// 用于 OrchTaskCard 生命周期起点（创建 todo 卡片）。
 	OnTaskCreated func(ctx context.Context, task *model.DaemonTask)
 
-	// OnMessagePersisted 在 assistant message 落库成功后调用。
+	// OnMessagePersisted 在 ResultHandler 返回非 nil message 后调用。
 	// 用于 OrchTaskCard 完结、summary 落库、postPersistAsync 等后续触发。
+	//
+	// P9 之前此 hook 名为 OnMessagePersisted，含义是「Dispatcher 内部落了 message 后」。
+	// P9 后 DispatchPlan 把「落 message」动作委托给 ResultHandler（可被替换为不落 message
+	// 的实现，例如 runDaemonEdit），但 hook 的语义保持不变：只要 ResultHandler 返回了
+	// 非 nil msg，OnMessagePersisted 就会被调用。
 	OnMessagePersisted func(ctx context.Context, msg *model.Message)
 
 	// OnFailed 在派发失败时调用（daemon 未连接 / WS 失败 / 等待失败 / fn error 等）。
@@ -120,7 +141,85 @@ type DispatchHooks struct {
 	OnFailed func(ctx context.Context, input DispatchInput, err error)
 }
 
+// DispatchPlan 描述一次派发的「输入」和「产物处理策略」。
+//
+// P9 引入：Dispatcher 之前的契约是「创建 daemon task → WS 推 → 等 → 落 assistant
+// message」一条龙，但 handleOrchestratedDispatch 与 runDaemonEdit 两条内联路径
+// 无法套用：
+//   - handleOrchestratedDispatch：daemon 返回后不立刻落 message，先
+//     ParseOrchestratorOutputForAgents 决定 fanout 还是直答；落 message 时
+//     artifacts 来自 agentMetadata(orchAgent) 而非默认的 agentMetadata(input.Agent)。
+//   - runDaemonEdit：daemon 返回后完全不落 message，只返回结果文本给调用方
+//     做 CreateVersion。
+//
+// DispatchPlan 把「prompt 升级」与「task 产物处理」从核心派发流程中剥离成两个
+// 可注入的回调，使得这两条路径也能走 Dispatcher.DispatchPlan 享受 DispatchHooks
+// （生命周期 / metric / 限流）。
+//
+// 零值策略（PromptBuilder / ResultHandler 为 nil）由 defaultPromptBuilder /
+// defaultMessageHandler 兜底，等价于 P9 之前 Dispatch 的行为。
+type DispatchPlan struct {
+	// Input 是派发的输入（convID / userID / agent / prompt / contextMessages / replyTo）。
+	Input DispatchInput
+
+	// PromptBuilder 把 input 升级成最终 prompt。
+	// nil 时使用 defaultPromptBuilder（直接返回 input.Prompt）。
+	//
+	// 适合 handleOrchestratedDispatch 这种「调用方在 closure 里构建好 fullPrompt，
+	// 再注入到 plan.Input.Prompt」的场景（此时默认 builder 即可）。
+	// 也适合需要在 task 创建前对 prompt 做最终变换（如注入动态参数）的场景。
+	PromptBuilder func(ctx context.Context, in DispatchInput) (string, error)
+
+	// ResultHandler 处理 daemon 返回的 task；返回 (msg, error)。
+	//   - (msg, nil)：落 msg，并触发 OnMessagePersisted（worker / orch 直答走这条）
+	//   - (nil, nil)：不落 msg（runDaemonEdit 走这条，调用方从 closure 读 task 副本）
+	//   - (_, err)：视为失败，触发 OnFailed（与 daemon 派发失败等价）
+	//
+	// nil 时使用 defaultMessageHandler：CreateMessage(agentMetadata(input.Agent)) +
+	// persistArtifacts(task.Artifacts)，与 P9 之前 dispatchCore 行为完全等价。
+	ResultHandler func(ctx context.Context, task *model.DaemonTask) (*model.Message, error)
+}
+
+// DispatchPlanResult 是 DispatchPlan 的输出。
+//
+// Task 总是非 nil（DispatchPlan 必然创建了 daemon task，调用方可读 daemon raw
+// output / artifacts，例如 runDaemonEdit 从 task.Artifacts 提取 code 产物）。
+// Message 可为 nil（ResultHandler 返回 nil 时，例如 runDaemonEdit 不落 message）。
+type DispatchPlanResult struct {
+	Task    *model.DaemonTask
+	Message *model.Message
+}
+
+// defaultPromptBuilder 是 DispatchPlan.PromptBuilder 的默认实现：直接返回 input.Prompt。
+//
+// P9 引入：让「调用方在 closure 里构建好 prompt 后注入到 input.Prompt」的场景
+// （如 handleOrchestratedDispatch 把 fullPrompt 写入 input.Prompt）可以零配置走
+// DispatchPlan。
+func defaultPromptBuilder(_ context.Context, in DispatchInput) (string, error) {
+	return in.Prompt, nil
+}
+
+// defaultMessageHandler 是 DispatchPlan.ResultHandler 的默认实现：落 assistant
+// message（artifacts = agentMetadata(input.Agent)）+ persistArtifacts。
+//
+// P9 引入：与 P9 之前 dispatchCore 内联的 CreateMessage + persistArtifacts 行为
+// 完全等价。
+func (d *Dispatcher) defaultMessageHandler(ctx context.Context, in DispatchInput, task *model.DaemonTask) (*model.Message, error) {
+	artifacts := agentMetadata(in.Agent)
+	msg, err := d.deps.MsgRepo.Create(ctx, in.ConvID, "assistant", task.Result, artifacts, nil, in.ReplyTo, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create agent reply: %w", err)
+	}
+	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", in.ConvID, "agent_id", in.Agent.ID, "agent_name", in.Agent.Name, "message_id", msg.ID, "reply_to", stringValue(in.ReplyTo), "content_len", len(msg.Content))
+	d.persistArtifacts(ctx, msg, task.Artifacts)
+	return msg, nil
+}
+
 // Dispatch 把一个任务送到 daemon 并等待结果，落库为 assistant 消息后返回。
+//
+// P9 后 Dispatch 是 DispatchPlan 的薄壳：用 defaultPromptBuilder + defaultMessageHandler
+// 装配 DispatchPlan，零行为变更。两条内联路径（handleOrchestratedDispatch /
+// runDaemonEdit）改走 DispatchPlan 直接注入自定义 PromptBuilder / ResultHandler。
 //
 // hooks 零值（全 nil）时与原 dispatchAndWait 行为完全一致；非 nil 字段会在
 // 对应时序点被调用（详见 DispatchHooks 文档）。每个字段调用前都做 nil 检查。
@@ -128,7 +227,7 @@ type DispatchHooks struct {
 // 错误语义（与原 dispatchWithHooks 完全一致）：
 //   - PreDispatch 返回 error → 直接透传，不进入派发流程
 //   - daemon task 创建失败 → fmt.Errorf("create daemon task: %w", ...)
-//   - daemon 未连接 → fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+//   - daemon 未连接 → fmt.Errorf("agent %q 的 daemon 未通过 WS 连接: %w", agent.Name, ErrDaemonNotConnected)
 //   - WS 发送失败 → fmt.Errorf("dispatch to daemon: %w", ...)
 //   - 等待失败 / 超时 → 原错误透传
 //   - task.Status == "failed" → fmt.Errorf("daemon task failed: %s", task.Error)
@@ -136,6 +235,45 @@ type DispatchHooks struct {
 //
 // 任一错误路径上 OnFailed 都会被调用一次（若非 nil），便于调用方统一处理失败。
 func (d *Dispatcher) Dispatch(ctx context.Context, in DispatchInput, hooks DispatchHooks) (*DispatchResult, error) {
+	plan := DispatchPlan{
+		Input:         in,
+		PromptBuilder: defaultPromptBuilder,
+		ResultHandler: func(ctx context.Context, task *model.DaemonTask) (*model.Message, error) {
+			return d.defaultMessageHandler(ctx, in, task)
+		},
+	}
+	res, err := d.DispatchPlan(ctx, plan, hooks)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	return &DispatchResult{Message: res.Message}, nil
+}
+
+// DispatchPlan 把一个 DispatchPlan 送到 daemon 并等待结果，按 plan.ResultHandler
+// 处理产物（落 message / 不落 message / 触发 fanout）。
+//
+// 时序（与重构前 dispatchCore 完全对齐，仅 PromptBuilder / ResultHandler 可被替换）：
+//
+//	PreDispatch(plan.Input)                  ← hooks.PreDispatch 非 nil 时调用
+//	  ↳ error → OnFailed(input, err)，直接 return
+//	prompt := plan.PromptBuilder(plan.Input) ← 默认 defaultPromptBuilder 直接返回 input.Prompt
+//	CreateDaemonTask(prompt)
+//	  ↳ err → OnFailed(input, "create daemon task")，return
+//	OnTaskCreated(task)                      ← hooks.OnTaskCreated 非 nil 时调用
+//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask
+//	  ↳ 任一 err → OnFailed(input, err)，return
+//	msg := plan.ResultHandler(task)          ← 默认 defaultMessageHandler 落 message
+//	  ↳ err → OnFailed(input, err)，return
+//	OnMessagePersisted(msg)                  ← msg 非 nil 且 hooks.OnMessagePersisted 非 nil 时调用
+//
+// 返回 *DispatchPlanResult 总是携带 task（调用方可读 daemon raw output）；
+// Message 在 ResultHandler 返回 nil 时为 nil（如 runDaemonEdit 不落 message）。
+func (d *Dispatcher) DispatchPlan(ctx context.Context, plan DispatchPlan, hooks DispatchHooks) (*DispatchPlanResult, error) {
+	in := plan.Input
+
 	if hooks.PreDispatch != nil {
 		if err := hooks.PreDispatch(ctx, in); err != nil {
 			if hooks.OnFailed != nil {
@@ -145,35 +283,62 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in DispatchInput, hooks Dispa
 		}
 	}
 
-	msg, task, err := d.dispatchCore(ctx, in, hooks.OnTaskCreated)
+	promptBuilder := plan.PromptBuilder
+	if promptBuilder == nil {
+		promptBuilder = defaultPromptBuilder
+	}
+	resultHandler := plan.ResultHandler
+
+	task, msg, err := d.dispatchPlanCore(ctx, in, promptBuilder, resultHandler, hooks.OnTaskCreated)
 	if err != nil {
 		if hooks.OnFailed != nil {
 			hooks.OnFailed(ctx, in, err)
 		}
 		return nil, err
 	}
-	// task == nil 表示 dispatchCore 在 PreDispatch 之后未真正创建 task（理论上不会发生）
-	_ = task
-	if hooks.OnMessagePersisted != nil {
+
+	// msg 可能为 nil（ResultHandler 返回 nil，例如 runDaemonEdit）。
+	// 仅当 msg 非 nil 时触发 OnMessagePersisted。
+	if hooks.OnMessagePersisted != nil && msg != nil {
 		hooks.OnMessagePersisted(ctx, msg)
 	}
-	return &DispatchResult{Message: msg}, nil
+	return &DispatchPlanResult{Task: task, Message: msg}, nil
 }
 
 // dispatchCore 是 dispatchWithHooks 的核心实现迁移：CreateDaemonTask → onTaskCreated →
-// IsConnected/RegisterTaskPromise/SendToMachine → waitDaemonTask → CreateMessage。
+// IsConnected/RegisterTaskPromise/SendToMachine → waitDaemonTask → ResultHandler。
+//
+// P9 后核心实现支持 PromptBuilder / ResultHandler 注入；task 与 message 分别
+// 通过返回值传出（避免污染 model.DaemonTask 领域模型）。
 //
 // 与原 OrchestratorService.dispatchWithHooks 时序完全一致（零行为变更）：
 //
-//	CreateDaemonTask
+//	CreateDaemonTask(promptFromBuilder)
 //	  ↳ err → return ("create daemon task")
 //	onTaskCreated(task)               ← 若回调非 nil
-//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / CreateMessage
+//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / ResultHandler
 //
 // onTaskCreated 为 nil 时与原 dispatchWithHooks 行为完全等价。
-func (d *Dispatcher) dispatchCore(ctx context.Context, in DispatchInput, onTaskCreated func(context.Context, *model.DaemonTask)) (*model.Message, *model.DaemonTask, error) {
+//
+// resultHandler 为 nil 时使用 defaultMessageHandler（落 message + persistArtifacts）。
+func (d *Dispatcher) dispatchPlanCore(
+	ctx context.Context,
+	in DispatchInput,
+	promptBuilder func(context.Context, DispatchInput) (string, error),
+	resultHandler func(context.Context, *model.DaemonTask) (*model.Message, error),
+	onTaskCreated func(context.Context, *model.DaemonTask),
+) (*model.DaemonTask, *model.Message, error) {
 	convID, userID := in.ConvID, in.UserID
-	agent, prompt, contextMessages, replyTo := in.Agent, in.Prompt, in.ContextMessages, in.ReplyTo
+	agent, contextMessages, replyTo := in.Agent, in.ContextMessages, in.ReplyTo
+
+	prompt := in.Prompt
+	if promptBuilder != nil {
+		p, err := promptBuilder(ctx, in)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build dispatch prompt: %w", err)
+		}
+		prompt = p
+	}
 
 	task, err := d.deps.AgentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
 	if err != nil {
@@ -188,7 +353,7 @@ func (d *Dispatcher) dispatchCore(ctx context.Context, in DispatchInput, onTaskC
 
 	if d.deps.DaemonHub == nil || !d.deps.DaemonHub.IsConnected(*agent.MachineID) {
 		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
-		return nil, task, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
+		return task, nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接: %w", agent.Name, ErrDaemonNotConnected)
 	}
 	d.deps.DaemonHub.RegisterTaskPromise(task.ID)
 	if err := d.deps.DaemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
@@ -203,28 +368,35 @@ func (d *Dispatcher) dispatchCore(ctx context.Context, in DispatchInput, onTaskC
 			"user_id":          userID,
 		},
 	}); err != nil {
-		return nil, task, fmt.Errorf("dispatch to daemon: %w", err)
+		return task, nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
 
 	task, err = d.waitDaemonTask(ctx, task.ID)
 	if err != nil {
 		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
-		return nil, task, err
+		return task, nil, err
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
 	if task.Status == "failed" {
-		return nil, task, fmt.Errorf("daemon task failed: %s", task.Error)
+		return task, nil, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 
-	artifacts := agentMetadata(agent)
-	msg, err := d.deps.MsgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, replyTo, nil, nil)
-	if err != nil {
-		return nil, task, fmt.Errorf("create agent reply: %w", err)
+	// ResultHandler 注入点：调用方可自定义如何处理 task。
+	// nil → defaultMessageHandler：落 message with agentMetadata(agent)。
+	if resultHandler == nil {
+		msg, err := d.defaultMessageHandler(ctx, in, task)
+		if err != nil {
+			return task, nil, err
+		}
+		return task, msg, nil
 	}
-	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "message_id", msg.ID, "reply_to", stringValue(replyTo), "content_len", len(msg.Content))
-	d.persistArtifacts(ctx, msg, task.Artifacts)
-	return msg, task, nil
+
+	msg, err := resultHandler(ctx, task)
+	if err != nil {
+		return task, nil, err
+	}
+	return task, msg, nil
 }
 
 // waitDaemonTask 通过 DaemonHub 等待 daemon task 完成（channel-based 通知）。

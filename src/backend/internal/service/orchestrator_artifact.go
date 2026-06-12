@@ -9,7 +9,6 @@ import (
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/repository"
-	"github.com/agent-hub/backend/pkg/ws"
 )
 
 // AI 编辑产物相关错误（供 handler 映射 HTTP 状态码）。
@@ -27,13 +26,15 @@ var (
 )
 
 // AIEditArtifact 用 AI 改写一个 code 产物，把结果存为该产物血缘的新版本。
-// 专用入口：复用 daemon 派发 + waitDaemonTask 机制，但**不**在对话里建 assistant 消息，只 createVersion。
+// 专用入口：复用 Dispatcher.DispatchPlan 机制（与 dispatchWorker 同款派发流程），
+// 但**不**在对话里建 assistant 消息，只 createVersion。
 //
 // 流程：
 //  1. 鉴权（rootID → conversation → 当前用户是成员）+ 取最新版本（必须是 code 产物）。
 //  2. 选一个已连接 daemon 的 agent（优先产物来源 agent，取不到则用对话内任一已连接 agent）。
 //  3. 构造编辑 prompt（要求只返回完整修改后代码、用代码块包裹）。
-//  4. 复用 dispatchWorker 同款派发：CreateDaemonTask → IsConnected → RegisterTaskPromise → SendToMachine → waitDaemonTask。
+//  4. 通过 Dispatcher.DispatchPlan 派发：CreateDaemonTask → IsConnected → RegisterTaskPromise →
+//     SendToMachine → waitDaemonTask，用自定义 ResultHandler 不落 message。
 //  5. 从结果提取修改后代码。
 //  6. CreateVersion 存为新版本并返回。
 func (s *OrchestratorService) AIEditArtifact(ctx context.Context, rootID, userID, instruction, selection string) (*model.Artifact, error) {
@@ -184,43 +185,52 @@ func (s *OrchestratorService) connectedAgentByID(ctx context.Context, agentID st
 }
 
 // runDaemonEdit 复用 dispatchWorker 的派发机制执行一次 daemon 任务，返回结果文本（含产物时优先取 code 产物 content）。
+//
+// P9 后通过 Dispatcher.DispatchPlan 走统一派发路径（CreateDaemonTask → WS → wait），
+// 但用自定义 ResultHandler 在 daemon 返回后**不落 message**，只把 task 通过 closure
+// 传出供调用方做 CreateVersion。零行为变更：错误码语义、agentQueue 串行化、code 产物
+// 优先取值策略完全保留。
 func (s *OrchestratorService) runDaemonEdit(ctx context.Context, convID, userID string, agent *model.Agent, prompt string) (string, error) {
 	// 派发护栏：通过 AgentQueue 串行化同一 agent 的派发（与 dispatchSingleAgent 一致）。
 	var result string
 	err := s.agentQueue.Run(ctx, agent.ID, func() error {
-		task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, "")
-		if err != nil {
-			return fmt.Errorf("create edit daemon task: %w", err)
-		}
-
-		if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-			return ErrArtifactEditNoAgent
-		}
-		s.daemonHub.RegisterTaskPromise(task.ID)
-		if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-			Type: "task.dispatch",
-			Data: map[string]interface{}{
-				"task_id":          task.ID,
-				"cli_tool":         agent.CLITool,
-				"prompt":           prompt,
-				"context_messages": "",
-				"agent_id":         agent.ID,
-				"conversation_id":  convID,
-				"user_id":          userID,
+		// 通过 closure 捕获 task，让 ResultHandler 把 daemon 返回的 task 透出给外层。
+		var capturedTask *model.DaemonTask
+		plan := DispatchPlan{
+			Input: DispatchInput{
+				ConvID:          convID,
+				UserID:          userID,
+				Agent:           agent,
+				Prompt:          prompt,
+				ContextMessages: "", // 编辑场景不带历史上下文（与原行为一致）
 			},
-		}); err != nil {
-			return fmt.Errorf("dispatch edit to daemon: %w", err)
+			// PromptBuilder 留 nil → defaultPromptBuilder 直接用 input.Prompt。
+			ResultHandler: func(_ context.Context, task *model.DaemonTask) (*model.Message, error) {
+				capturedTask = task
+				// 不落 message：调用方会用 task.Artifacts / task.Result 做 CreateVersion。
+				return nil, nil
+			},
+		}
+		res, derr := s.dispatcher.DispatchPlan(ctx, plan, DispatchHooks{})
+		if derr != nil {
+			// 错误码语义保留：daemon 未连接时映射回 ErrArtifactEditNoAgent
+			// （AIEditArtifact 的 HTTP 错误响应依赖此 sentinel）。
+			if errors.Is(derr, ErrDaemonNotConnected) {
+				return ErrArtifactEditNoAgent
+			}
+			return derr
+		}
+		// DispatchPlan 返回的 res.Task 与 closure 捕获的 capturedTask 是同一对象，
+		// 二者均可读，这里以 closure 捕获的为准（语义更明确）。
+		task := capturedTask
+		if task == nil {
+			task = res.Task
+		}
+		if task == nil {
+			return fmt.Errorf("edit daemon task returned no result")
 		}
 
-		task, err = s.waitDaemonTask(ctx, task.ID)
-		if err != nil {
-			return err
-		}
-		if task.Status == "failed" {
-			return fmt.Errorf("edit daemon task failed: %s", task.Error)
-		}
-
-		// 优先取产物里第一个 code 产物的 content
+		// 优先取产物里第一个 code 产物的 content（与原 runDaemonEdit 行为一致）。
 		for i := range task.Artifacts {
 			if task.Artifacts[i].Type == "code" && task.Artifacts[i].Content != "" {
 				result = task.Artifacts[i].Content
