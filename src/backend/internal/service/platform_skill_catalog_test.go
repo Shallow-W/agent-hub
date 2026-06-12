@@ -21,6 +21,12 @@ type fakePlatformSkillCatalogStore struct {
 	listItems  []PlatformSkillCatalogItem
 	updateItem *PlatformSkillCatalogItem
 	updateNil  bool
+	deleted    bool
+	duplicates map[string]bool
+
+	createdName string
+	created     []string
+	createdData []PlatformSkillCatalogItem
 
 	createCalls []createCallArgs
 	updateCalls []updateCallArgs
@@ -39,21 +45,39 @@ type deleteCallArgs struct {
 	id, userID string
 }
 
-func (f *fakePlatformSkillCatalogStore) ListPlatformSkills(_ context.Context, _ string) ([]PlatformSkillCatalogItem, error) {
-	return f.listItems, f.listErr
+func (f *fakePlatformSkillCatalogStore) ListPlatformSkills(_ context.Context, userID string) ([]PlatformSkillCatalogItem, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if len(f.listItems) > 0 {
+		return f.listItems, nil
+	}
+	if len(f.createdData) > 0 {
+		return f.createdData, nil
+	}
+	return []PlatformSkillCatalogItem{
+		{ID: "skill-1", UserID: userID, Name: "审查"},
+	}, nil
 }
 
 func (f *fakePlatformSkillCatalogStore) CreatePlatformSkill(_ context.Context, userID, name, category, description, trigger, detail string) (*PlatformSkillCatalogItem, error) {
 	f.createCalls = append(f.createCalls, createCallArgs{userID, name, category, description, trigger, detail})
+	f.createdName = name
+	f.created = append(f.created, name)
+	if f.duplicates != nil && f.duplicates[name] {
+		return nil, ErrPlatformSkillDuplicate
+	}
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
 	now := time.Now()
-	return &PlatformSkillCatalogItem{
-		ID: "cat-" + name, UserID: userID, Name: name, Category: category,
+	it := PlatformSkillCatalogItem{
+		ID: "skill-" + name, UserID: userID, Name: name, Category: category,
 		Description: description, Trigger: trigger, Detail: detail,
 		CreatedAt: now, UpdatedAt: now,
-	}, nil
+	}
+	f.createdData = append(f.createdData, it)
+	return &it, nil
 }
 
 func (f *fakePlatformSkillCatalogStore) UpdatePlatformSkill(_ context.Context, id, userID, name, category, description, trigger, detail string) (*PlatformSkillCatalogItem, error) {
@@ -77,7 +101,13 @@ func (f *fakePlatformSkillCatalogStore) UpdatePlatformSkill(_ context.Context, i
 
 func (f *fakePlatformSkillCatalogStore) DeletePlatformSkill(_ context.Context, id, userID string) error {
 	f.deleteCalls = append(f.deleteCalls, deleteCallArgs{id, userID})
-	return f.deleteErr
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	if !f.deleted {
+		return ErrPlatformSkillNotFound
+	}
+	return nil
 }
 
 // ── Routing tests ────────────────────────────────────────────────────────────
@@ -222,27 +252,7 @@ func TestPlatformSkillService_ImportDefaultsRoutesViaCatalog(t *testing.T) {
 	}
 }
 
-// ── Fallback + error-propagation tests ───────────────────────────────────────
-
-// TestPlatformSkillService_FallbackToRepo verifies that without
-// SetCatalogStore, all 4 methods hit the legacy repo (B3/B4 will rely on
-// this contract for incremental rollout).
-func TestPlatformSkillService_FallbackToRepo(t *testing.T) {
-	repo := &fakePlatformSkillRepo{createdData: []model.PlatformSkill{
-		{ID: "from-repo", UserID: "u1", Name: "从Repo"},
-	}}
-	svc := NewPlatformSkillService(repo)
-
-	out, err := svc.List(context.Background(), "u1")
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	// The existing fakePlatformSkillRepo.ListByUser returns a default row
-	// when createdData is empty; with one item it returns createdData as-is.
-	if len(out) == 0 || out[0].Name != "从Repo" {
-		t.Errorf("expected repo-sourced item, got %+v", out)
-	}
-}
+// ── Error-propagation tests ───────────────────────────────────────────────
 
 // TestPlatformSkillService_CatalogErrorPropagates verifies that arbitrary
 // catalog errors are wrapped (not silently swallowed).

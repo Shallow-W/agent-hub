@@ -65,14 +65,7 @@ func (s *ToolDefinitionService) ListDefinitions(ctx context.Context) ([]model.To
 		}
 		return out, nil
 	}
-	list, err := s.repo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list definitions: %w", err)
-	}
-	if list == nil {
-		return []model.ToolDefinition{}, nil
-	}
-	return list, nil
+	return nil, fmt.Errorf("list definitions: catalog lister not configured")
 }
 
 func (s *ToolDefinitionService) ListBuiltinTemplates(ctx context.Context) ([]model.BuiltinToolsetTemplate, error) {

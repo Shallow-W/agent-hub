@@ -104,19 +104,146 @@ func (f *fakePlatformSkillRepo) Delete(_ context.Context, id, userID string) (bo
 }
 
 type fakeAgentPromptRepo struct {
-	items []model.AgentPromptTemplate
+	items        []model.AgentPromptTemplate
+	createCalls  []agentPromptCreateCall
+	updateCalls  []agentPromptUpdateCall
+	deleteCalls  []deleteCall
+	createErr    error
+	deleteResult bool
+	deleteErr    error
 }
 
-func (f *fakeAgentPromptRepo) ListByUser(_ context.Context, _ string) ([]model.AgentPromptTemplate, error) {
-	return f.items, nil
+type agentPromptCreateCall struct {
+	userID, name, category, description, systemPrompt string
+}
+
+type agentPromptUpdateCall struct {
+	id, userID, name, category, description, systemPrompt string
+}
+
+func (f *fakeAgentPromptRepo) ListByUser(_ context.Context, userID string) ([]model.AgentPromptTemplate, error) {
+	out := make([]model.AgentPromptTemplate, 0, len(f.items))
+	for _, m := range f.items {
+		if m.UserID == userID {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeAgentPromptRepo) Create(_ context.Context, userID, name, category, description, systemPrompt string) (*model.AgentPromptTemplate, error) {
+	f.createCalls = append(f.createCalls, agentPromptCreateCall{userID, name, category, description, systemPrompt})
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	m := model.AgentPromptTemplate{
+		ID:           "a-" + name,
+		UserID:       userID,
+		Name:         name,
+		Category:     category,
+		Description:  description,
+		SystemPrompt: systemPrompt,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	f.items = append(f.items, m)
+	return &m, nil
+}
+
+func (f *fakeAgentPromptRepo) Update(_ context.Context, id, userID, name, category, description, systemPrompt string) (*model.AgentPromptTemplate, error) {
+	f.updateCalls = append(f.updateCalls, agentPromptUpdateCall{id, userID, name, category, description, systemPrompt})
+	for i := range f.items {
+		if f.items[i].ID == id && f.items[i].UserID == userID {
+			f.items[i].Name = name
+			f.items[i].Category = category
+			f.items[i].Description = description
+			f.items[i].SystemPrompt = systemPrompt
+			f.items[i].UpdatedAt = time.Now()
+			return &f.items[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeAgentPromptRepo) Delete(_ context.Context, id, userID string) (bool, error) {
+	f.deleteCalls = append(f.deleteCalls, deleteCall{id, userID})
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
+	for i := range f.items {
+		if f.items[i].ID == id && f.items[i].UserID == userID {
+			f.items = append(f.items[:i], f.items[i+1:]...)
+			return true, nil
+		}
+	}
+	return f.deleteResult, nil
 }
 
 type fakeUserTemplateRepo struct {
-	items []model.UserTemplate
+	items        []model.UserTemplate
+	createErr    error
+	createCalls  []utCreateCall
+	deleteCalls  []deleteCall
+	deleteResult bool
+	deleteErr    error
 }
 
-func (f *fakeUserTemplateRepo) ListByUserAndType(_ context.Context, _, _ string) ([]model.UserTemplate, error) {
-	return f.items, nil
+type utCreateCall struct {
+	userID, tplType, name, content string
+}
+
+func (f *fakeUserTemplateRepo) ListByUserAndType(_ context.Context, userID, tplType string) ([]model.UserTemplate, error) {
+	out := make([]model.UserTemplate, 0, len(f.items))
+	for _, m := range f.items {
+		if m.UserID == userID && m.Type == tplType {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeUserTemplateRepo) Create(_ context.Context, userID, tplType, name, content string) (*model.UserTemplate, error) {
+	f.createCalls = append(f.createCalls, utCreateCall{userID, tplType, name, content})
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	m := model.UserTemplate{
+		ID:        "ut-" + name,
+		UserID:    userID,
+		Type:      tplType,
+		Name:      name,
+		Content:   []byte(content),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	f.items = append(f.items, m)
+	return &m, nil
+}
+
+func (f *fakeUserTemplateRepo) Update(_ context.Context, id, userID, name, content string) (*model.UserTemplate, error) {
+	for i := range f.items {
+		if f.items[i].ID == id && f.items[i].UserID == userID {
+			f.items[i].Name = name
+			f.items[i].Content = []byte(content)
+			f.items[i].UpdatedAt = time.Now()
+			return &f.items[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeUserTemplateRepo) Delete(_ context.Context, id, userID string) (bool, error) {
+	f.deleteCalls = append(f.deleteCalls, deleteCall{id, userID})
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
+	for i := range f.items {
+		if f.items[i].ID == id && f.items[i].UserID == userID {
+			f.items = append(f.items[:i], f.items[i+1:]...)
+			return true, nil
+		}
+	}
+	return f.deleteResult, nil
 }
 
 // ── converter round-trip tests ───────────────────────────────────────────────
@@ -508,4 +635,247 @@ func TestAdapterStore_Delete_PlatformSkill_NotFound(t *testing.T) {
 // verify mapStoreErr's unique-violation branch without a real DB.
 func dupErr() error {
 	return &pgconn.PgError{Code: "23505", Message: "unique constraint"}
+}
+
+// ── B3: agent_prompt_template write paths ──────────────────────────────────
+
+func TestAdapterStore_Create_AgentPromptTemplate(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	repo := &fakeAgentPromptRepo{}
+	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	payload := `{"system_prompt":"You are a helpful assistant"}`
+	item, err := store.Create(context.Background(), CreateInput{
+		Domain:      DomainAgentPromptTemplate,
+		UserID:      "u1",
+		Key:         "助手模板",
+		Category:    "通用",
+		Description: "d",
+		PayloadJSON: payload,
+	})
+	if err != nil {
+		t.Fatalf("Create err: %v", err)
+	}
+	if item.Key != "助手模板" || item.Category != "通用" {
+		t.Errorf("item fields wrong: %+v", item)
+	}
+	if !contains(item.PayloadJSON, "system_prompt") || !contains(item.PayloadJSON, "You are a helpful assistant") {
+		t.Errorf("payload not preserved: %s", item.PayloadJSON)
+	}
+	if len(repo.createCalls) != 1 {
+		t.Fatalf("expected 1 repo Create call, got %d", len(repo.createCalls))
+	}
+	c := repo.createCalls[0]
+	if c.systemPrompt != "You are a helpful assistant" {
+		t.Errorf("systemPrompt not decoded: %+v", c)
+	}
+}
+
+func TestAdapterStore_Create_AgentPromptTemplate_EmptyPayload(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	repo := &fakeAgentPromptRepo{}
+	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	item, err := store.Create(context.Background(), CreateInput{
+		Domain: DomainAgentPromptTemplate, UserID: "u1", Key: "k",
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if item == nil {
+		t.Fatal("nil item")
+	}
+	if repo.createCalls[0].systemPrompt != "" {
+		t.Errorf("empty payload should map to empty systemPrompt: %+v", repo.createCalls[0])
+	}
+}
+
+func TestAdapterStore_Create_AgentPromptTemplate_BadPayload(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	store := NewAdapterStore(AdapterDeps{
+		AgentPrompt: &fakeAgentPromptRepo{},
+		Registry:    reg,
+	})
+	if _, err := store.Create(context.Background(), CreateInput{
+		Domain:      DomainAgentPromptTemplate,
+		UserID:      "u1",
+		Key:         "k",
+		PayloadJSON: `{not json`,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid, got %v", err)
+	}
+}
+
+func TestAdapterStore_Update_AgentPromptTemplate_PreservesUnsetFields(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	now := time.Now()
+	repo := &fakeAgentPromptRepo{items: []model.AgentPromptTemplate{{
+		ID: "a1", UserID: "u1", Name: "原", Category: "c", Description: "d",
+		SystemPrompt: "SP", CreatedAt: now, UpdatedAt: now,
+	}}}
+	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+
+	newLabel := "改名后"
+	item, err := store.Update(context.Background(), "a1", UpdateInput{
+		Domain: DomainAgentPromptTemplate,
+		UserID: "u1",
+		Key:    &newLabel,
+	})
+	if err != nil {
+		t.Fatalf("Update err: %v", err)
+	}
+	if item.Key != "改名后" {
+		t.Errorf("Key not updated: %s", item.Key)
+	}
+	if item.Category != "c" || item.Description != "d" {
+		t.Errorf("nil-pointer fields should preserve current row: %+v", item)
+	}
+	if len(repo.updateCalls) != 1 {
+		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
+	}
+	uc := repo.updateCalls[0]
+	if uc.category != "c" || uc.systemPrompt != "SP" {
+		t.Errorf("repo got merged values, got %+v", uc)
+	}
+}
+
+func TestAdapterStore_Update_AgentPromptTemplate_NotFound(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	repo := &fakeAgentPromptRepo{}
+	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	newLabel := "x"
+	_, err := store.Update(context.Background(), "missing", UpdateInput{
+		Domain: DomainAgentPromptTemplate, UserID: "u1", Key: &newLabel,
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestAdapterStore_Delete_AgentPromptTemplate(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	repo := &fakeAgentPromptRepo{items: []model.AgentPromptTemplate{
+		{ID: "a1", UserID: "u1", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	}}
+	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	if err := store.Delete(context.Background(), DomainAgentPromptTemplate, "u1", "a1"); err != nil {
+		t.Fatalf("Delete err: %v", err)
+	}
+	if len(repo.deleteCalls) != 1 {
+		t.Fatalf("expected 1 delete call, got %d", len(repo.deleteCalls))
+	}
+	if repo.deleteCalls[0].userID != "u1" {
+		t.Errorf("userID not threaded: %+v", repo.deleteCalls[0])
+	}
+	if len(repo.items) != 0 {
+		t.Errorf("item should be removed, got %d", len(repo.items))
+	}
+}
+
+func TestAdapterStore_Delete_AgentPromptTemplate_NotFound(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
+	store := NewAdapterStore(AdapterDeps{
+		AgentPrompt: &fakeAgentPromptRepo{},
+		Registry:    reg,
+	})
+	if err := store.Delete(context.Background(), DomainAgentPromptTemplate, "u1", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ── B4: user_template write paths ──────────────────────────────────────────
+
+func TestAdapterStore_Create_UserTemplate(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
+	repo := &fakeUserTemplateRepo{}
+	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	payload := `{"tools":["a","b"]}`
+	item, err := store.Create(context.Background(), CreateInput{
+		Domain:      DomainUserTemplate,
+		UserID:      "u1",
+		Subtype:     "tools",
+		Key:         "新工具集",
+		PayloadJSON: payload,
+	})
+	if err != nil {
+		t.Fatalf("Create err: %v", err)
+	}
+	if item.Key != "新工具集" || item.Subtype != "tools" {
+		t.Errorf("item fields wrong: %+v", item)
+	}
+	if item.PayloadJSON != payload {
+		t.Errorf("payload not preserved: got %q want %q", item.PayloadJSON, payload)
+	}
+	if len(repo.createCalls) != 1 {
+		t.Fatalf("expected 1 repo Create call, got %d", len(repo.createCalls))
+	}
+	c := repo.createCalls[0]
+	if c.tplType != "tools" || c.content != payload {
+		t.Errorf("tplType/content not passed through: %+v", c)
+	}
+}
+
+func TestAdapterStore_Create_UserTemplate_DefaultsSubtype(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
+	repo := &fakeUserTemplateRepo{}
+	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	item, err := store.Create(context.Background(), CreateInput{
+		Domain: DomainUserTemplate, UserID: "u1", Key: "k",
+		PayloadJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if item == nil {
+		t.Fatal("nil item")
+	}
+	if repo.createCalls[0].tplType != "tools" {
+		t.Errorf("expected default subtype tools, got %q", repo.createCalls[0].tplType)
+	}
+}
+
+func TestAdapterStore_Update_UserTemplate(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
+	now := time.Now()
+	repo := &fakeUserTemplateRepo{items: []model.UserTemplate{{
+		ID: "ut1", UserID: "u1", Type: "tools", Name: "原",
+		Content: []byte(`{"old":true}`), CreatedAt: now, UpdatedAt: now,
+	}}}
+	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+
+	newName := "改名后"
+	newPayload := `{"new":true}`
+	item, err := store.Update(context.Background(), "ut1", UpdateInput{
+		Domain:      DomainUserTemplate,
+		UserID:      "u1",
+		Key:         &newName,
+		PayloadJSON: &newPayload,
+	})
+	if err != nil {
+		t.Fatalf("Update err: %v", err)
+	}
+	if item.Key != "改名后" {
+		t.Errorf("Key not updated: %s", item.Key)
+	}
+	if item.PayloadJSON != newPayload {
+		t.Errorf("PayloadJSON not updated: %q", item.PayloadJSON)
+	}
+}
+
+func TestAdapterStore_Delete_UserTemplate(t *testing.T) {
+	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
+	repo := &fakeUserTemplateRepo{items: []model.UserTemplate{
+		{ID: "ut1", UserID: "u1", Type: "tools", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	}}
+	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	if err := store.Delete(context.Background(), DomainUserTemplate, "u1", "ut1"); err != nil {
+		t.Fatalf("Delete err: %v", err)
+	}
+	if len(repo.deleteCalls) != 1 {
+		t.Fatalf("expected 1 delete call, got %d", len(repo.deleteCalls))
+	}
+	if repo.deleteCalls[0].userID != "u1" {
+		t.Errorf("userID not threaded: %+v", repo.deleteCalls[0])
+	}
+	if len(repo.items) != 0 {
+		t.Errorf("item should be removed, got %d", len(repo.items))
+	}
 }

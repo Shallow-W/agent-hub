@@ -55,19 +55,21 @@ func (r *fakeAgentPromptTemplateRepo) Delete(ctx context.Context, id, userID str
 }
 
 func TestAgentPromptTemplateCreateNormalizesFields(t *testing.T) {
-	repo := &fakeAgentPromptTemplateRepo{}
-	svc := NewAgentPromptTemplateService(repo)
+	cat := &fakeAgentPromptCatalogStore{}
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(cat)
 	tpl, err := svc.Create(context.Background(), "user-1", "  代码实现  ", "", " desc ", " prompt ")
 	if err != nil {
 		t.Fatalf("create agent prompt template failed: %v", err)
 	}
-	if repo.createdName != "代码实现" || tpl.Category != "通用" || tpl.Description != "desc" || tpl.SystemPrompt != "prompt" {
-		t.Fatalf("unexpected normalized template: %#v repoName=%q", tpl, repo.createdName)
+	if cat.createCalls[0].name != "代码实现" || tpl.Category != "通用" || tpl.Description != "desc" || tpl.SystemPrompt != "prompt" {
+		t.Fatalf("unexpected normalized template: %#v catName=%q", tpl, cat.createCalls[0].name)
 	}
 }
 
 func TestAgentPromptTemplateCreateRejectsEmptyName(t *testing.T) {
-	svc := NewAgentPromptTemplateService(&fakeAgentPromptTemplateRepo{})
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(&fakeAgentPromptCatalogStore{})
 	_, err := svc.Create(context.Background(), "user-1", " ", "", "", "")
 	if !errors.Is(err, ErrAgentPromptTemplateInvalid) {
 		t.Fatalf("expected ErrAgentPromptTemplateInvalid, got %v", err)
@@ -75,7 +77,8 @@ func TestAgentPromptTemplateCreateRejectsEmptyName(t *testing.T) {
 }
 
 func TestAgentPromptTemplateUpdateReturnsNotFound(t *testing.T) {
-	svc := NewAgentPromptTemplateService(&fakeAgentPromptTemplateRepo{updateNil: true})
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(&fakeAgentPromptCatalogStore{updateNil: true})
 	_, err := svc.Update(context.Background(), "tpl-1", "user-1", "代码实现", "开发", "", "")
 	if !errors.Is(err, ErrAgentPromptTemplateNotFound) {
 		t.Fatalf("expected ErrAgentPromptTemplateNotFound, got %v", err)
@@ -83,7 +86,8 @@ func TestAgentPromptTemplateUpdateReturnsNotFound(t *testing.T) {
 }
 
 func TestAgentPromptTemplateDeleteReturnsNotFound(t *testing.T) {
-	svc := NewAgentPromptTemplateService(&fakeAgentPromptTemplateRepo{deleted: false})
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(&fakeAgentPromptCatalogStore{deleteErr: ErrAgentPromptTemplateNotFound})
 	err := svc.Delete(context.Background(), "tpl-1", "user-1")
 	if !errors.Is(err, ErrAgentPromptTemplateNotFound) {
 		t.Fatalf("expected ErrAgentPromptTemplateNotFound, got %v", err)
@@ -91,8 +95,9 @@ func TestAgentPromptTemplateDeleteReturnsNotFound(t *testing.T) {
 }
 
 func TestAgentPromptTemplateImportDefaultsCreatesTemplates(t *testing.T) {
-	repo := &fakeAgentPromptTemplateRepo{}
-	svc := NewAgentPromptTemplateService(repo)
+	cat := &fakeAgentPromptCatalogStore{}
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(cat)
 	templates, err := svc.ImportDefaults(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("import defaults failed: %v", err)
@@ -100,8 +105,8 @@ func TestAgentPromptTemplateImportDefaultsCreatesTemplates(t *testing.T) {
 	if len(templates) != len(DefaultAgentPromptTemplates()) {
 		t.Fatalf("imported %d templates, want %d", len(templates), len(DefaultAgentPromptTemplates()))
 	}
-	if repo.created[0] != "通用执行型 Agent" {
-		t.Fatalf("first default template = %q", repo.created[0])
+	if cat.createCalls[0].name != "通用执行型 Agent" {
+		t.Fatalf("first default template = %q", cat.createCalls[0].name)
 	}
 	if templates[0].Category != "通用" {
 		t.Fatalf("first default category = %q", templates[0].Category)
@@ -109,8 +114,9 @@ func TestAgentPromptTemplateImportDefaultsCreatesTemplates(t *testing.T) {
 }
 
 func TestAgentPromptTemplateImportDefaultsSkipsDuplicates(t *testing.T) {
-	repo := &fakeAgentPromptTemplateRepo{duplicates: map[string]bool{"通用执行型 Agent": true}}
-	svc := NewAgentPromptTemplateService(repo)
+	cat := &fakeAgentPromptCatalogStore{duplicates: map[string]bool{"通用执行型 Agent": true}}
+	svc := NewAgentPromptTemplateService(nil)
+	svc.SetCatalogStore(cat)
 	templates, err := svc.ImportDefaults(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("import defaults failed: %v", err)

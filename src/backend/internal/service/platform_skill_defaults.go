@@ -1,3 +1,5 @@
+// TODO(B5): delete this file — data is duplicated in catalog/seeders_data.go.
+// ImportDefaults should be migrated to use catalog.Service.ImportDefaults directly.
 package service
 
 type PlatformSkillTemplate struct {

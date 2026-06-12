@@ -68,23 +68,6 @@ func TestToolDefinitionService_RoutesViaCatalog(t *testing.T) {
 	}
 }
 
-// TestToolDefinitionService_FallbackToRepo verifies the unwired path still
-// reads directly from the repo (B2/B3/B4 will rely on this contract).
-func TestToolDefinitionService_FallbackToRepo(t *testing.T) {
-	repo := &fakeToolDefRepo{items: []model.ToolDefinition{
-		{Name: "from-repo", Label: "Repo", Category: "x", Description: "d"},
-	}}
-	svc := NewToolDefinitionService(repo)
-
-	out, err := svc.ListDefinitions(context.Background())
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(out) != 1 || out[0].Name != "from-repo" {
-		t.Fatalf("expected repo-sourced item, got %+v", out)
-	}
-}
-
 // TestToolDefinitionService_CatalogErrorPropagates verifies that catalog
 // errors are wrapped (not silently swallowed) so handler-level error
 // mapping still works.

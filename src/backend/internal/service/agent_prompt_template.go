@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -23,26 +24,59 @@ type AgentPromptTemplateRepo interface {
 	Delete(ctx context.Context, id, userID string) (bool, error)
 }
 
+// AgentPromptTemplateCatalogItem is the catalog-package-neutral representation
+// of one catalog.Item for the agent_prompt_template domain. Declared locally so
+// the service package doesn't need to import internal/catalog.
+type AgentPromptTemplateCatalogItem struct {
+	ID          string
+	UserID      string
+	Name        string
+	Category    string
+	Description string
+	SystemPrompt string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// AgentPromptTemplateCatalogStore is the subset of catalog.Service consumed by
+// AgentPromptTemplateService. Wire an implementation at composition time; when
+// nil, the service falls back to repo.
+type AgentPromptTemplateCatalogStore interface {
+	ListAgentPromptTemplates(ctx context.Context, userID string) ([]AgentPromptTemplateCatalogItem, error)
+	CreateAgentPromptTemplate(ctx context.Context, userID, name, category, description, systemPrompt string) (*AgentPromptTemplateCatalogItem, error)
+	UpdateAgentPromptTemplate(ctx context.Context, id, userID, name, category, description, systemPrompt string) (*AgentPromptTemplateCatalogItem, error)
+	DeleteAgentPromptTemplate(ctx context.Context, id, userID string) error
+}
+
 type AgentPromptTemplateService struct {
-	repo AgentPromptTemplateRepo
+	repo    AgentPromptTemplateRepo
+	catalog AgentPromptTemplateCatalogStore
 }
 
 func NewAgentPromptTemplateService(repo AgentPromptTemplateRepo) *AgentPromptTemplateService {
 	return &AgentPromptTemplateService{repo: repo}
 }
 
+func (s *AgentPromptTemplateService) SetCatalogStore(store AgentPromptTemplateCatalogStore) {
+	s.catalog = store
+}
+
 func (s *AgentPromptTemplateService) List(ctx context.Context, userID string) ([]model.AgentPromptTemplate, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, ErrAgentPromptTemplateInvalid
 	}
-	list, err := s.repo.ListByUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("list agent prompt templates: %w", err)
+	if s.catalog != nil {
+		items, err := s.catalog.ListAgentPromptTemplates(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("list agent prompt templates via catalog: %w", err)
+		}
+		out := make([]model.AgentPromptTemplate, 0, len(items))
+		for _, it := range items {
+			out = append(out, catalogItemToAgentPromptTemplate(it))
+		}
+		return out, nil
 	}
-	if list == nil {
-		return []model.AgentPromptTemplate{}, nil
-	}
-	return list, nil
+	return nil, fmt.Errorf("list agent prompt templates: catalog store not configured")
 }
 
 func (s *AgentPromptTemplateService) ImportDefaults(ctx context.Context, userID string) ([]model.AgentPromptTemplate, error) {
@@ -68,14 +102,15 @@ func (s *AgentPromptTemplateService) Create(ctx context.Context, userID, name, c
 	if err != nil {
 		return nil, err
 	}
-	tpl, err := s.repo.Create(ctx, userID, name, category, description, systemPrompt)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrAgentPromptTemplateDuplicate
+	if s.catalog != nil {
+		it, cErr := s.catalog.CreateAgentPromptTemplate(ctx, userID, name, category, description, systemPrompt)
+		if cErr != nil {
+			return nil, cErr
 		}
-		return nil, fmt.Errorf("create agent prompt template: %w", err)
+		m := catalogItemToAgentPromptTemplate(*it)
+		return &m, nil
 	}
-	return tpl, nil
+	return nil, fmt.Errorf("create agent prompt template: catalog store not configured")
 }
 
 func (s *AgentPromptTemplateService) Update(ctx context.Context, id, userID, name, category, description, systemPrompt string) (*model.AgentPromptTemplate, error) {
@@ -86,31 +121,31 @@ func (s *AgentPromptTemplateService) Update(ctx context.Context, id, userID, nam
 	if err != nil {
 		return nil, err
 	}
-	tpl, err := s.repo.Update(ctx, id, userID, name, category, description, systemPrompt)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrAgentPromptTemplateDuplicate
+	if s.catalog != nil {
+		it, cErr := s.catalog.UpdateAgentPromptTemplate(ctx, id, userID, name, category, description, systemPrompt)
+		if cErr != nil {
+			return nil, cErr
 		}
-		return nil, fmt.Errorf("update agent prompt template: %w", err)
+		if it == nil {
+			return nil, ErrAgentPromptTemplateNotFound
+		}
+		m := catalogItemToAgentPromptTemplate(*it)
+		return &m, nil
 	}
-	if tpl == nil {
-		return nil, ErrAgentPromptTemplateNotFound
-	}
-	return tpl, nil
+	return nil, fmt.Errorf("update agent prompt template: catalog store not configured")
 }
 
 func (s *AgentPromptTemplateService) Delete(ctx context.Context, id, userID string) error {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(userID) == "" {
 		return ErrAgentPromptTemplateInvalid
 	}
-	deleted, err := s.repo.Delete(ctx, id, userID)
-	if err != nil {
-		return fmt.Errorf("delete agent prompt template: %w", err)
+	if s.catalog != nil {
+		if err := s.catalog.DeleteAgentPromptTemplate(ctx, id, userID); err != nil {
+			return err
+		}
+		return nil
 	}
-	if !deleted {
-		return ErrAgentPromptTemplateNotFound
-	}
-	return nil
+	return fmt.Errorf("delete agent prompt template: catalog store not configured")
 }
 
 func normalizeAgentPromptTemplateFields(userID, name, category, description, systemPrompt string) (string, string, string, string, error) {
@@ -127,4 +162,17 @@ func normalizeAgentPromptTemplateFields(userID, name, category, description, sys
 		truncateString(strings.TrimSpace(description), 200),
 		truncateString(strings.TrimSpace(systemPrompt), 8000),
 		nil
+}
+
+func catalogItemToAgentPromptTemplate(it AgentPromptTemplateCatalogItem) model.AgentPromptTemplate {
+	return model.AgentPromptTemplate{
+		ID:           it.ID,
+		UserID:       it.UserID,
+		Name:         it.Name,
+		Category:     it.Category,
+		Description:  it.Description,
+		SystemPrompt: it.SystemPrompt,
+		CreatedAt:    it.CreatedAt,
+		UpdatedAt:    it.UpdatedAt,
+	}
 }

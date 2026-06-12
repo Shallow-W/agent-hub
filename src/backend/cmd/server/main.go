@@ -124,7 +124,7 @@ func main() {
 		PublicBaseURL: cfg.Upload.PublicBaseURL,
 	})
 
-	// Redis 初始化
+	// Redis 初始化（提前到 orchSvc 构造前，便于把 redisMsgRepo 直接注入 OrchestratorDeps）
 	var rdb *goredis.Client
 	rdb, err = pkgredis.NewClient(pkgredis.Config{
 		Host:     cfg.Redis.Host,
@@ -136,6 +136,10 @@ func main() {
 		logger.Warn("redis init failed, running without cache", "error", err)
 	} else {
 		logger.Info("redis connected")
+	}
+	var redisMsgRepo *repository.RedisMsgRepo
+	if rdb != nil {
+		redisMsgRepo = repository.NewRedisMsgRepo(rdb)
 	}
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
@@ -160,6 +164,8 @@ func main() {
 	catalogSvc := catalog.NewService(catalogStore, catalogRegistry)
 	toolDefSvc.SetCatalogLister(toolDefinitionCatalogBridge{svc: catalogSvc})
 	platformSkillSvc.SetCatalogStore(platformSkillCatalogBridge{svc: catalogSvc})
+	agentPromptTemplateSvc.SetCatalogStore(agentPromptCatalogBridge{svc: catalogSvc})
+	userTemplateSvc.SetCatalogStore(userTemplateCatalogBridge{svc: catalogSvc})
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	externalURL := resolveExternalURL(cfg)
 	agentSvc.SetServerURL(externalURL)
@@ -172,7 +178,7 @@ func main() {
 	daemonHub := ws.NewDaemonHub(logger)
 
 	// OrchestratorService: use the new deps struct instead of 10 setter calls.
-	orchSvc := service.NewOrchestratorServiceWithDeps(service.OrchestratorDeps{
+	orchDeps := service.OrchestratorDeps{
 		ConvRepo:     convRepo,
 		AgentRepo:    agentRepo,
 		MsgRepo:      msgRepo,
@@ -185,18 +191,19 @@ func main() {
 		ArtifactRepo: artifactRepo,
 		Notifier:     hub,
 		TaskSvc:      taskSvc,
-	})
+	}
+	if redisMsgRepo != nil {
+		orchDeps.Delivery = redisMsgRepo
+	}
+	orchSvc := service.NewOrchestratorServiceWithDeps(orchDeps)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetFileURLBuilder(fileURLs)
 	msgSvc.SetDeploymentService(deploymentSvc)
 
-	if rdb != nil {
-		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
+	if redisMsgRepo != nil {
 		msgSvc.SetDeliveryState(redisMsgRepo)
-		orchSvc.SetDeliveryState(redisMsgRepo)
 	} else {
 		msgSvc.SetDeliveryState(nil)
-		orchSvc.SetDeliveryState(nil)
 	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
@@ -579,3 +586,221 @@ func mapCatalogToPlatformSkillErr(err error) error {
 		return fmt.Errorf("platform skill via catalog: %w", err)
 	}
 }
+
+	// agentPromptCatalogBridge adapts *catalog.Service to the
+	// service.AgentPromptTemplateCatalogStore interface.
+	type agentPromptCatalogBridge struct {
+		svc *catalog.Service
+	}
+
+	func (b agentPromptCatalogBridge) ListAgentPromptTemplates(ctx context.Context, userID string) ([]service.AgentPromptTemplateCatalogItem, error) {
+		items, err := b.svc.List(ctx, catalog.DomainAgentPromptTemplate, catalog.ListQuery{UserID: userID})
+		if err != nil {
+			return nil, mapCatalogToAgentPromptErr(err)
+		}
+		out := make([]service.AgentPromptTemplateCatalogItem, 0, len(items))
+		for _, it := range items {
+			out = append(out, agentPromptItemFromCatalog(it, userID))
+		}
+		return out, nil
+	}
+
+	func (b agentPromptCatalogBridge) CreateAgentPromptTemplate(ctx context.Context, userID, name, category, description, systemPrompt string) (*service.AgentPromptTemplateCatalogItem, error) {
+		item, err := b.svc.Create(ctx, catalog.CreateInput{
+			Domain:      catalog.DomainAgentPromptTemplate,
+			UserID:      userID,
+			Key:         name,
+			Label:       name,
+			Category:    category,
+			Description: description,
+			PayloadJSON: mustJSONAgentPrompt(systemPrompt),
+		})
+		if err != nil {
+			return nil, mapCatalogToAgentPromptErr(err)
+		}
+		if item == nil {
+			return nil, service.ErrAgentPromptTemplateNotFound
+		}
+		out := agentPromptItemFromCatalog(*item, userID)
+		return &out, nil
+	}
+
+	func (b agentPromptCatalogBridge) UpdateAgentPromptTemplate(ctx context.Context, id, userID, name, category, description, systemPrompt string) (*service.AgentPromptTemplateCatalogItem, error) {
+		key := name
+		label := name
+		payload := mustJSONAgentPrompt(systemPrompt)
+		item, err := b.svc.Update(ctx, id, catalog.UpdateInput{
+			Domain:      catalog.DomainAgentPromptTemplate,
+			UserID:      userID,
+			Key:         &key,
+			Label:       &label,
+			Category:    &category,
+			Description: &description,
+			PayloadJSON: &payload,
+		})
+		if err != nil {
+			return nil, mapCatalogToAgentPromptErr(err)
+		}
+		if item == nil {
+			return nil, service.ErrAgentPromptTemplateNotFound
+		}
+		out := agentPromptItemFromCatalog(*item, userID)
+		return &out, nil
+	}
+
+	func (b agentPromptCatalogBridge) DeleteAgentPromptTemplate(ctx context.Context, id, userID string) error {
+		if err := b.svc.Delete(ctx, catalog.DomainAgentPromptTemplate, userID, id); err != nil {
+			return mapCatalogToAgentPromptErr(err)
+		}
+		return nil
+	}
+
+	func agentPromptItemFromCatalog(it catalog.Item, userID string) service.AgentPromptTemplateCatalogItem {
+		systemPrompt := decodeAgentPromptPayload(it.PayloadJSON)
+		uid := userID
+		if it.UserID != nil && *it.UserID != "" {
+			uid = *it.UserID
+		}
+		return service.AgentPromptTemplateCatalogItem{
+			ID:           it.ID,
+			UserID:       uid,
+			Name:         it.Key,
+			Category:     it.Category,
+			Description:  it.Description,
+			SystemPrompt: systemPrompt,
+			CreatedAt:    it.CreatedAt,
+			UpdatedAt:    it.UpdatedAt,
+		}
+	}
+
+	func mustJSONAgentPrompt(systemPrompt string) string {
+		b, err := json.Marshal(map[string]string{"system_prompt": systemPrompt})
+		if err != nil {
+			return "{}"
+		}
+		return string(b)
+	}
+
+	func decodeAgentPromptPayload(raw string) string {
+		if strings.TrimSpace(raw) == "" {
+			return ""
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			return ""
+		}
+		return m["system_prompt"]
+	}
+
+	func mapCatalogToAgentPromptErr(err error) error {
+		if err == nil {
+			return nil
+		}
+		switch {
+		case errors.Is(err, catalog.ErrNotFound):
+			return service.ErrAgentPromptTemplateNotFound
+		case errors.Is(err, catalog.ErrDuplicate):
+			return service.ErrAgentPromptTemplateDuplicate
+		case errors.Is(err, catalog.ErrInvalid):
+			return service.ErrAgentPromptTemplateInvalid
+		default:
+			return fmt.Errorf("agent prompt template via catalog: %w", err)
+		}
+	}
+
+	// userTemplateCatalogBridge adapts *catalog.Service to the
+	// service.UserTemplateCatalogStore interface.
+	type userTemplateCatalogBridge struct {
+		svc *catalog.Service
+	}
+
+	func (b userTemplateCatalogBridge) ListUserTemplates(ctx context.Context, userID, tplType string) ([]service.UserTemplateCatalogItem, error) {
+		items, err := b.svc.List(ctx, catalog.DomainUserTemplate, catalog.ListQuery{UserID: userID, Subtype: tplType})
+		if err != nil {
+			return nil, mapCatalogToUserTemplateErr(err)
+		}
+		out := make([]service.UserTemplateCatalogItem, 0, len(items))
+		for _, it := range items {
+			out = append(out, userTemplateItemFromCatalog(it, userID))
+		}
+		return out, nil
+	}
+
+	func (b userTemplateCatalogBridge) CreateUserTemplate(ctx context.Context, userID, tplType, name, content string) (*service.UserTemplateCatalogItem, error) {
+		item, err := b.svc.Create(ctx, catalog.CreateInput{
+			Domain:      catalog.DomainUserTemplate,
+			UserID:      userID,
+			Subtype:     tplType,
+			Key:         name,
+			Label:       name,
+			PayloadJSON: content,
+		})
+		if err != nil {
+			return nil, mapCatalogToUserTemplateErr(err)
+		}
+		if item == nil {
+			return nil, service.ErrUserTemplateNotFound
+		}
+		out := userTemplateItemFromCatalog(*item, userID)
+		return &out, nil
+	}
+
+	func (b userTemplateCatalogBridge) UpdateUserTemplate(ctx context.Context, id, userID, name, content string) (*service.UserTemplateCatalogItem, error) {
+		key := name
+		label := name
+		payload := content
+		item, err := b.svc.Update(ctx, id, catalog.UpdateInput{
+			Domain:      catalog.DomainUserTemplate,
+			UserID:      userID,
+			Key:         &key,
+			Label:       &label,
+			PayloadJSON: &payload,
+		})
+		if err != nil {
+			return nil, mapCatalogToUserTemplateErr(err)
+		}
+		if item == nil {
+			return nil, service.ErrUserTemplateNotFound
+		}
+		out := userTemplateItemFromCatalog(*item, userID)
+		return &out, nil
+	}
+
+	func (b userTemplateCatalogBridge) DeleteUserTemplate(ctx context.Context, id, userID string) error {
+		if err := b.svc.Delete(ctx, catalog.DomainUserTemplate, userID, id); err != nil {
+			return mapCatalogToUserTemplateErr(err)
+		}
+		return nil
+	}
+
+	func userTemplateItemFromCatalog(it catalog.Item, userID string) service.UserTemplateCatalogItem {
+		uid := userID
+		if it.UserID != nil && *it.UserID != "" {
+			uid = *it.UserID
+		}
+		return service.UserTemplateCatalogItem{
+			ID:        it.ID,
+			UserID:    uid,
+			Type:      it.Subtype,
+			Name:      it.Key,
+			Content:   it.PayloadJSON,
+			CreatedAt: it.CreatedAt,
+			UpdatedAt: it.UpdatedAt,
+		}
+	}
+
+	func mapCatalogToUserTemplateErr(err error) error {
+		if err == nil {
+			return nil
+		}
+		switch {
+		case errors.Is(err, catalog.ErrNotFound):
+			return service.ErrUserTemplateNotFound
+		case errors.Is(err, catalog.ErrDuplicate):
+			return service.ErrUserTemplateDuplicate
+		case errors.Is(err, catalog.ErrInvalid):
+			return service.ErrUserTemplateInvalid
+		default:
+			return fmt.Errorf("user template via catalog: %w", err)
+		}
+	}

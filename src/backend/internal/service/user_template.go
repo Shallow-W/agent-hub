@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -26,26 +27,56 @@ type UserTemplateRepo interface {
 	Delete(ctx context.Context, id, userID string) (bool, error)
 }
 
+// UserTemplateCatalogItem is the catalog-package-neutral representation of one
+// catalog.Item for the user_template domain.
+type UserTemplateCatalogItem struct {
+	ID        string
+	UserID    string
+	Type      string
+	Name      string
+	Content   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// UserTemplateCatalogStore is the subset of catalog.Service consumed by
+// UserTemplateService.
+type UserTemplateCatalogStore interface {
+	ListUserTemplates(ctx context.Context, userID, tplType string) ([]UserTemplateCatalogItem, error)
+	CreateUserTemplate(ctx context.Context, userID, tplType, name, content string) (*UserTemplateCatalogItem, error)
+	UpdateUserTemplate(ctx context.Context, id, userID, name, content string) (*UserTemplateCatalogItem, error)
+	DeleteUserTemplate(ctx context.Context, id, userID string) error
+}
+
 type UserTemplateService struct {
-	repo UserTemplateRepo
+	repo    UserTemplateRepo
+	catalog UserTemplateCatalogStore
 }
 
 func NewUserTemplateService(repo UserTemplateRepo) *UserTemplateService {
 	return &UserTemplateService{repo: repo}
 }
 
+func (s *UserTemplateService) SetCatalogStore(store UserTemplateCatalogStore) {
+	s.catalog = store
+}
+
 func (s *UserTemplateService) List(ctx context.Context, userID, tplType string) ([]model.UserTemplate, error) {
 	if strings.TrimSpace(userID) == "" || !validTemplateTypes[tplType] {
 		return nil, ErrUserTemplateInvalid
 	}
-	list, err := s.repo.ListByUserAndType(ctx, userID, tplType)
-	if err != nil {
-		return nil, fmt.Errorf("list user templates: %w", err)
+	if s.catalog != nil {
+		items, err := s.catalog.ListUserTemplates(ctx, userID, tplType)
+		if err != nil {
+			return nil, fmt.Errorf("list user templates via catalog: %w", err)
+		}
+		out := make([]model.UserTemplate, 0, len(items))
+		for _, it := range items {
+			out = append(out, catalogItemToUserTemplate(it))
+		}
+		return out, nil
 	}
-	if list == nil {
-		return []model.UserTemplate{}, nil
-	}
-	return list, nil
+	return nil, fmt.Errorf("list user templates: catalog store not configured")
 }
 
 func (s *UserTemplateService) Create(ctx context.Context, userID, tplType, name string, content interface{}) (*model.UserTemplate, error) {
@@ -58,14 +89,15 @@ func (s *UserTemplateService) Create(ctx context.Context, userID, tplType, name 
 	if err != nil {
 		return nil, ErrUserTemplateInvalid
 	}
-	tpl, err := s.repo.Create(ctx, userID, tplType, name, string(contentJSON))
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrUserTemplateDuplicate
+	if s.catalog != nil {
+		it, cErr := s.catalog.CreateUserTemplate(ctx, userID, tplType, name, string(contentJSON))
+		if cErr != nil {
+			return nil, cErr
 		}
-		return nil, fmt.Errorf("create user template: %w", err)
+		m := catalogItemToUserTemplate(*it)
+		return &m, nil
 	}
-	return tpl, nil
+	return nil, fmt.Errorf("create user template: catalog store not configured")
 }
 
 func (s *UserTemplateService) Update(ctx context.Context, id, userID, name string, content interface{}) (*model.UserTemplate, error) {
@@ -78,29 +110,41 @@ func (s *UserTemplateService) Update(ctx context.Context, id, userID, name strin
 	if err != nil {
 		return nil, ErrUserTemplateInvalid
 	}
-	tpl, err := s.repo.Update(ctx, id, userID, name, string(contentJSON))
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrUserTemplateDuplicate
+	if s.catalog != nil {
+		it, cErr := s.catalog.UpdateUserTemplate(ctx, id, userID, name, string(contentJSON))
+		if cErr != nil {
+			return nil, cErr
 		}
-		return nil, fmt.Errorf("update user template: %w", err)
+		if it == nil {
+			return nil, ErrUserTemplateNotFound
+		}
+		m := catalogItemToUserTemplate(*it)
+		return &m, nil
 	}
-	if tpl == nil {
-		return nil, ErrUserTemplateNotFound
-	}
-	return tpl, nil
+	return nil, fmt.Errorf("update user template: catalog store not configured")
 }
 
 func (s *UserTemplateService) Delete(ctx context.Context, id, userID string) error {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(userID) == "" {
 		return ErrUserTemplateInvalid
 	}
-	deleted, err := s.repo.Delete(ctx, id, userID)
-	if err != nil {
-		return fmt.Errorf("delete user template: %w", err)
+	if s.catalog != nil {
+		if err := s.catalog.DeleteUserTemplate(ctx, id, userID); err != nil {
+			return err
+		}
+		return nil
 	}
-	if !deleted {
-		return ErrUserTemplateNotFound
+	return fmt.Errorf("delete user template: catalog store not configured")
+}
+
+func catalogItemToUserTemplate(it UserTemplateCatalogItem) model.UserTemplate {
+	return model.UserTemplate{
+		ID:        it.ID,
+		UserID:    it.UserID,
+		Type:      it.Type,
+		Name:      it.Name,
+		Content:   []byte(it.Content),
+		CreatedAt: it.CreatedAt,
+		UpdatedAt: it.UpdatedAt,
 	}
-	return nil
 }

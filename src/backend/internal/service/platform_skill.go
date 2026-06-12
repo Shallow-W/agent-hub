@@ -88,14 +88,7 @@ func (s *PlatformSkillService) List(ctx context.Context, userID string) ([]model
 		}
 		return out, nil
 	}
-	list, err := s.repo.ListByUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("list platform skills: %w", err)
-	}
-	if list == nil {
-		return []model.PlatformSkill{}, nil
-	}
-	return list, nil
+	return nil, fmt.Errorf("list platform skills: catalog store not configured")
 }
 
 func (s *PlatformSkillService) ImportDefaults(ctx context.Context, userID string) ([]model.PlatformSkill, error) {
@@ -140,14 +133,7 @@ func (s *PlatformSkillService) Create(ctx context.Context, userID, name, categor
 		m := catalogItemToPlatformSkill(*it)
 		return &m, nil
 	}
-	skill, err := s.repo.Create(ctx, userID, name, category, description, trigger, detail)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrPlatformSkillDuplicate
-		}
-		return nil, fmt.Errorf("create platform skill: %w", err)
-	}
-	return skill, nil
+	return nil, fmt.Errorf("create platform skill: catalog store not configured")
 }
 
 func (s *PlatformSkillService) Update(ctx context.Context, id, userID, name, category, description, trigger, detail string) (*model.PlatformSkill, error) {
@@ -169,17 +155,7 @@ func (s *PlatformSkillService) Update(ctx context.Context, id, userID, name, cat
 		m := catalogItemToPlatformSkill(*it)
 		return &m, nil
 	}
-	skill, err := s.repo.Update(ctx, id, userID, name, category, description, trigger, detail)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrPlatformSkillDuplicate
-		}
-		return nil, fmt.Errorf("update platform skill: %w", err)
-	}
-	if skill == nil {
-		return nil, ErrPlatformSkillNotFound
-	}
-	return skill, nil
+	return nil, fmt.Errorf("update platform skill: catalog store not configured")
 }
 
 func (s *PlatformSkillService) Delete(ctx context.Context, id, userID string) error {
@@ -192,14 +168,7 @@ func (s *PlatformSkillService) Delete(ctx context.Context, id, userID string) er
 		}
 		return nil
 	}
-	deleted, err := s.repo.Delete(ctx, id, userID)
-	if err != nil {
-		return fmt.Errorf("delete platform skill: %w", err)
-	}
-	if !deleted {
-		return ErrPlatformSkillNotFound
-	}
-	return nil
+	return fmt.Errorf("delete platform skill: catalog store not configured")
 }
 
 func normalizePlatformSkillFields(userID, name, category, description, trigger, detail string) (string, string, string, string, string, error) {
