@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -87,7 +88,7 @@ const machineAPIKeyPrefix = "sk_machine_"
 type AgentService struct {
 	repo        AgentRepo
 	tracker     *MachineTracker
-	tokenIssuer *TokenIssuer
+	tokenIssuer port.TokenIssuerPort
 	serverURL   string
 	daemonHub   *ws.DaemonHub
 }
@@ -111,7 +112,7 @@ func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
 }
 
 // SetTokenIssuer 注入 TokenIssuer（用于生成 Agent Token）
-func (s *AgentService) SetTokenIssuer(ti *TokenIssuer) {
+func (s *AgentService) SetTokenIssuer(ti port.TokenIssuerPort) {
 	s.tokenIssuer = ti
 }
 

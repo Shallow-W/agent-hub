@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/agent-hub/backend/internal/port"
 )
 
 // KBBuilder 构建知识库引用上下文段，前置到 current。
@@ -12,7 +14,7 @@ import (
 // 无引用或解析失败时返回 current 不变。
 type KBBuilder struct {
 	KBResolver  OrchKBResolver
-	TokenIssuer *TokenIssuer
+	TokenIssuer port.TokenIssuerPort
 	ServerURL   string
 }
 

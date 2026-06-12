@@ -4,8 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// Compile-time assertion that *TokenIssuer satisfies port.TokenIssuerPort
+// via Go structural typing. If the IssueAgentToken signature drifts away from
+// the interface contract, this build fails at the assertion site.
+var _ port.TokenIssuerPort = (*TokenIssuer)(nil)
 
 // TokenIssuer generates scoped JWT tokens for agent management.
 // Shared by AgentService and OrchestratorService to avoid duplicate token logic.

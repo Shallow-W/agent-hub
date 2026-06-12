@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -33,10 +34,10 @@ type MessagePersister interface {
 //
 // P7 之前 Dispatcher 通过 d.svc 反向依赖 OrchestratorService 来访问这些字段；
 // P7 把它们显式提到 DispatcherDeps 中，解掉反向依赖，使得 Dispatcher 可独立测试与构造。
-// DaemonHub 暂保持 concrete 类型（*ws.DaemonHub），端口抽象留给后续阶段。
+// P8b 把 DaemonHub 从 concrete *ws.DaemonHub 改为 port.DaemonDispatcher 端口接口。
 type DispatcherDeps struct {
 	AgentRepo    DaemonTaskCreator
-	DaemonHub    *ws.DaemonHub
+	DaemonHub    port.DaemonDispatcher
 	MsgRepo      MessagePersister
 	UploadDir    string // 用于 artifactsFromMarkdown fallback（目前未直接使用，预留）
 }

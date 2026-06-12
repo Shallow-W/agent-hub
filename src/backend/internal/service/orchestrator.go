@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/pkg/ws"
 )
@@ -52,12 +53,12 @@ type OrchestratorService struct {
 	msgRepo      repository.MessageStore
 	orchTaskRepo repository.OrchTaskStoreCanon
 
-	tokenIssuer *TokenIssuer
+	tokenIssuer port.TokenIssuerPort
 	serverURL   string
 	uploadDir   string // 上传文件落盘根目录，用于服务端抽取附件文本
 
 	kbResolver   OrchKBResolver
-	daemonHub    *ws.DaemonHub
+	daemonHub    port.DaemonDispatcher
 	artifactRepo repository.ArtifactStore
 	notifier     MessageNotifier
 	delivery     OrchDeliveryState
@@ -130,11 +131,11 @@ type OrchestratorDeps struct {
 	AgentRepo    repository.AgentStore
 	MsgRepo      repository.MessageStore
 	OrchTaskRepo repository.OrchTaskStoreCanon
-	TokenIssuer  *TokenIssuer
+	TokenIssuer  port.TokenIssuerPort
 	ServerURL    string
 	UploadDir    string
 	KBResolver   OrchKBResolver
-	DaemonHub    *ws.DaemonHub
+	DaemonHub    port.DaemonDispatcher
 	ArtifactRepo repository.ArtifactStore
 	Notifier     MessageNotifier
 	Delivery     OrchDeliveryState
