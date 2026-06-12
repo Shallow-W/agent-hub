@@ -12,6 +12,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
+import { managementTools } from '@/config/catalogConfig';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -53,7 +54,7 @@ const agentStatusColor: Record<Agent['status'], string> = {
   stopped: 'default',
 };
 
-const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+// managementTools imported from config/catalogConfig
 
 function hasManagementTools(toolsConfig: string): boolean {
   try {
@@ -132,17 +133,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(machine.id);
-      // 后端返回的 command 包含正确的 --server-url，前端不自行拼接
-      if (result.daemon_npm_path) {
-        setReconnectCmd(
-          result.command.replace(
-            /npx\s+@agenthub\/daemon(\S+)?/,
-            `npx "@agenthub/daemon@file:${result.daemon_npm_path}"`,
-          ),
-        );
-      } else {
-        setReconnectCmd(result.command);
-      }
+      setReconnectCmd(result.command);
     } catch {
       message.error('获取连接命令失败');
     } finally {

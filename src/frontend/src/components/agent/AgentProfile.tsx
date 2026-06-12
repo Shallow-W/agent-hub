@@ -13,7 +13,8 @@ import {
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { getPlatformSkills } from '@/api/platformSkill';
+import { useCatalogStore } from '@/store/catalogStore';
+import { managementTools } from '@/config/catalogConfig';
 import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -52,7 +53,7 @@ const tabItems = [
   { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
 
-const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+// managementTools imported from config/catalogConfig
 
 function hasManagementTools(tools: string[]): boolean {
   return tools.some((tool) => managementTools.has(tool));
@@ -142,9 +143,26 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSelectedTools(parsedTools.allowedTools);
   }, [agent?.id, agent?.tools_config, catalogReady]);
 
+  const fetchDomain = useCatalogStore((s) => s.fetchDomain);
+
   useEffect(() => {
-    getPlatformSkills().then(setLibrarySkills).catch(() => {});
-  }, []);
+    fetchDomain('platform_skill')
+      .then((items) => {
+        const mapped = items.map((ci) => ({
+          id: ci.id,
+          user_id: ci.user_id ?? '',
+          name: ci.key,
+          category: ci.category,
+          description: ci.description,
+          trigger: undefined as string | undefined,
+          detail: undefined as string | undefined,
+          created_at: ci.created_at,
+          updated_at: ci.updated_at,
+        }));
+        setLibrarySkills(mapped);
+      })
+      .catch(() => {});
+  }, [fetchDomain]);
 
   useEffect(() => {
     listUserTemplates('tools').then(setDbToolTemplates).catch(() => {});

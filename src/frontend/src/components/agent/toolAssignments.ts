@@ -118,30 +118,12 @@ export function parseToolsConfig(raw?: string): { toolset: string; allowedTools:
   }
 }
 
-export interface CategoryMeta {
-  label: string;
-  color: string;
-}
-
-export const categoryMeta: Record<string, CategoryMeta> = {
-  conversation: { label: '会话', color: '#1677ff' },
-  task: { label: '任务', color: '#fa8c16' },
-  agent: { label: 'Agent', color: '#722ed1' },
-  machine: { label: '电脑', color: '#595959' },
-  group: { label: '群聊', color: '#52c41a' },
-  skill: { label: '技能', color: '#eb2f96' },
-  knowledge: { label: '知识库', color: '#13c2c2' },
-};
-
-export const categoryOrder: string[] = [
-  'conversation',
-  'task',
-  'agent',
-  'machine',
-  'group',
-  'skill',
-  'knowledge',
-];
+// Re-export from centralised config for backward compatibility.
+// Consumers that currently import { categoryMeta, categoryOrder } from './toolAssignments'
+// continue to work without changes.
+import { categoryMeta, categoryOrder } from '@/config/catalogConfig';
+export { categoryMeta, categoryOrder };
+export type { CategoryMeta } from '@/config/catalogConfig';
 
 export function getToolsByCategory(): Record<string, ToolCatalogItem[]> {
   const groups: Record<string, ToolCatalogItem[]> = {};

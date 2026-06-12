@@ -1,6 +1,19 @@
-import { del, get, post, put } from './client';
+/**
+ * User Template API — backward-compatible wrapper over the unified catalog API.
+ *
+ * Exports the same function signatures and types that existing components rely on.
+ */
+import type { CatalogItem } from './catalog';
+import {
+  listCatalog,
+  createCatalogItem,
+  updateCatalogItem,
+  deleteCatalogItem,
+} from './catalog';
 
-const BASE = '/api/user-templates';
+// ---------------------------------------------------------------------------
+// Types (preserved from the original module)
+// ---------------------------------------------------------------------------
 
 export interface UserTemplate {
   id: string;
@@ -12,9 +25,41 @@ export interface UserTemplate {
   updated_at: string;
 }
 
-export async function listUserTemplates(type: 'tools' | 'skills'): Promise<UserTemplate[]> {
-  const list = await get<UserTemplate[] | null>(`${BASE}?type=${type}`);
-  return list ?? [];
+// ---------------------------------------------------------------------------
+// CatalogItem <-> UserTemplate mappers
+// ---------------------------------------------------------------------------
+
+function itemToUserTemplate(item: CatalogItem): UserTemplate {
+  let content: Record<string, unknown> = {};
+  if (item.payload) {
+    try {
+      content = JSON.parse(item.payload) as Record<string, unknown>;
+    } catch {
+      // keep empty content
+    }
+  }
+  return {
+    id: item.id,
+    user_id: item.user_id ?? '',
+    type: (item.subtype as 'tools' | 'skills') ?? 'tools',
+    name: item.key,
+    content,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+const DOMAIN = 'user_template' as const;
+
+// ---------------------------------------------------------------------------
+// Public API (same signatures as before)
+// ---------------------------------------------------------------------------
+
+export async function listUserTemplates(
+  type: 'tools' | 'skills',
+): Promise<UserTemplate[]> {
+  const items = await listCatalog(DOMAIN, { subtype: type });
+  return items.map(itemToUserTemplate);
 }
 
 export async function createUserTemplate(body: {
@@ -22,7 +67,13 @@ export async function createUserTemplate(body: {
   name: string;
   content: Record<string, unknown>;
 }): Promise<UserTemplate> {
-  return post<UserTemplate>(BASE, body);
+  const item = await createCatalogItem(DOMAIN, {
+    key: body.name,
+    label: body.name,
+    subtype: body.type,
+    payload: JSON.stringify(body.content),
+  });
+  return itemToUserTemplate(item);
 }
 
 export async function updateUserTemplate(
@@ -33,9 +84,14 @@ export async function updateUserTemplate(
     content: Record<string, unknown>;
   },
 ): Promise<UserTemplate> {
-  return put<UserTemplate>(`${BASE}/${id}`, body);
+  const item = await updateCatalogItem(DOMAIN, id, {
+    key: body.name,
+    label: body.name,
+    payload: JSON.stringify(body.content),
+  });
+  return itemToUserTemplate(item);
 }
 
 export async function deleteUserTemplate(id: string): Promise<void> {
-  return del<void>(`${BASE}/${id}`);
+  return deleteCatalogItem(DOMAIN, id);
 }

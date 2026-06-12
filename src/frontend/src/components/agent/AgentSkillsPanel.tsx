@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
+import { defaultSkillCategories } from '@/config/catalogConfig';
 import {
   createPlatformSkill,
   deletePlatformSkill,
@@ -126,10 +127,9 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
 
   const skillTemplateOptions = useMemo(() => [
     { value: 'none', label: '无 Skills' },
-    { value: 'cat:产品经理', label: '产品经理' },
-    { value: 'cat:开发人员', label: '开发人员' },
+    ...defaultSkillCategories.map((cat) => ({ value: `cat:${cat}`, label: cat })),
     ...categories
-      .filter((cat) => cat !== '产品经理' && cat !== '开发人员')
+      .filter((cat) => !defaultSkillCategories.includes(cat))
       .map((cat) => ({ value: `cat:${cat}`, label: cat })),
     ...dbTemplates.map((t) => {
       const ids = Array.isArray((t.content as Record<string, unknown>)?.skill_ids) ? (t.content as Record<string, unknown>).skill_ids as string[] : [];

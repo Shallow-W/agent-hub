@@ -5,6 +5,7 @@ import { message } from '@/utils/message';
 import type { AgentCandidate, PlatformSkill } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
 import { getPlatformSkills } from '@/api/platformSkill';
+import { quickTemplates } from '@/config/catalogConfig';
 import {
   categoryMeta,
   categoryOrder,
@@ -25,13 +26,6 @@ interface AgentCreateModalProps {
   onClose: () => void;
   onCreate: (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => Promise<void>;
 }
-
-const quickTemplates = [
-  { key: 'pm', label: '产品经理', toolset: 'tasks', skillCategories: ['产品经理'] },
-  { key: 'dev', label: '开发人员', toolset: 'full', skillCategories: ['开发人员'] },
-  { key: 'manager', label: '管理助手', toolset: 'full', skillCategories: [] },
-  { key: 'empty', label: '空白', toolset: 'none', skillCategories: [] },
-];
 
 export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   open,
