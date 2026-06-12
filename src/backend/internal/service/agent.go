@@ -90,7 +90,7 @@ type AgentService struct {
 	tracker     *MachineTracker
 	tokenIssuer port.TokenIssuerPort
 	serverURL   string
-	daemonHub   *ws.DaemonHub
+	daemonHub   port.DaemonDispatcher
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -106,9 +106,13 @@ func NewAgentService(repo AgentRepo, tracker *MachineTracker) *AgentService {
 	return &AgentService{repo: repo, tracker: tracker}
 }
 
-// SetDaemonHub 注入 DaemonHub（用于通过 WS 向 daemon 发送控制命令）
-func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
+// SetDaemonHub 注入 DaemonDispatcher（用于通过 WS 向 daemon 发送控制命令）。
+//
+// P8b: 字段类型由 *ws.DaemonHub 改为 port.DaemonDispatcher，service 层不再
+// 直接依赖 pkg/ws 具体实现。*ws.DaemonHub 通过 Go 结构化类型自动满足该接口，
+// 调用方（main.go）依然传 *ws.DaemonHub 指针，无需改动。
+func (s *AgentService) SetDaemonHub(dh port.DaemonDispatcher) {
+	s.daemonHub = dh
 }
 
 // SetTokenIssuer 注入 TokenIssuer（用于生成 Agent Token）

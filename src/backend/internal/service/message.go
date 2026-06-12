@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -152,7 +153,7 @@ type MessageService struct {
 	notifier  MessageNotifier
 	delivery  MessageDeliveryState
 	orchSvc   *OrchestratorService
-	daemonHub *ws.DaemonHub
+	daemonHub port.DaemonDispatcher
 	fileURLs  *FileURLBuilder
 	deploySvc *DeploymentService
 }
@@ -188,9 +189,13 @@ func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 	s.orchSvc = orchSvc
 }
 
-// SetDaemonHub 注入 DaemonHub（避免循环依赖，由 main.go 调用）
-func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
+// SetDaemonHub 注入 DaemonDispatcher（避免循环依赖，由 main.go 调用）。
+//
+// P8b: 字段类型由 *ws.DaemonHub 改为 port.DaemonDispatcher，service 层不再
+// 直接依赖 pkg/ws 具体实现。*ws.DaemonHub 通过 Go 结构化类型自动满足该接口，
+// 调用方（main.go）依然传 *ws.DaemonHub 指针，无需改动。
+func (s *MessageService) SetDaemonHub(dh port.DaemonDispatcher) {
+	s.daemonHub = dh
 }
 
 // SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。

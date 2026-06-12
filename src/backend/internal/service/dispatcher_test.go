@@ -700,6 +700,172 @@ func TestFormatDispatchError_NilReturnsNil(t *testing.T) {
 	}
 }
 
+// === P8b: DaemonDispatcher port 契约可替换性单测 ===
+//
+// P8b 把 service 层（Dispatcher / AgentService / MessageService）对 *ws.DaemonHub
+// 的直接依赖全部改为 port.DaemonDispatcher 接口。本测试验证该 port 接口可以
+// 被完全自定义的实现（fakeDaemonDispatcher）替换，且 Dispatcher.Dispatch 在
+// 「daemon connected → send ok → task result returns」路径上的行为与使用真实
+// *ws.DaemonHub 完全一致。
+//
+// 这是 P8b 的核心断言：port.DaemonDispatcher 接口本身是一个可替换的契约，
+// Dispatcher 不依赖 *ws.DaemonHub 的具体实现细节（如 channel 注册表、WS client
+// map 等内部状态）。
+
+// TestDispatcher_DispatchWithFakeDaemonDispatcher 验证 Dispatcher.Dispatch 在注入
+// fakeDaemonDispatcher（而非真实 *ws.DaemonHub）时仍能正确完成「派发 → 等待结果 →
+// 落库」全链路，并断言 fake 的方法被调用过。
+//
+// 关键契约断言：
+//   - IsConnected("machine-fake") 被调用且返回 true（走 dispatchCore 的连接检查分支）
+//   - RegisterTaskPromise(taskID) 被调用（fake 用预分配的 buffered channel 响应）
+//   - SendToMachine(machineID, msg) 被调用且返回 nil（成功发送）
+//   - AwaitTaskResult(taskID) 返回的 channel 收到 *ws.TaskResult（fake 在 closure 里
+//     goroutine 注入结果）
+//   - RemoveTaskPromise(taskID) 被调用（defer 清理）
+//   - Dispatch 返回的 message.Content == fake 注入的 taskResult
+func TestDispatcher_DispatchWithFakeDaemonDispatcher(t *testing.T) {
+	userID := "u1"
+	machineID := "machine-fake"
+	agent := &model.Agent{
+		ID:        "agent-fake",
+		UserID:    &userID,
+		Name:      "FakeDaemonAgent",
+		Type:      "custom",
+		CLITool:   "claude",
+		MachineID: stringPtr(machineID),
+	}
+	taskResult := "fake-dispatched-result"
+
+	// fake 在 RegisterTaskPromise 时分配 buffered channel，并启动 goroutine 注入结果，
+	// 模拟「daemon 接收任务 → 执行 → 通过 promise channel 回传结果」的完整闭环。
+	// Buffered channel + 直接 send 保证测试无 race（不需要 time.Sleep 同步）。
+	promiseCh := make(chan *ws.TaskResult, 1)
+	promiseCh <- &ws.TaskResult{TaskID: "task-fake", Result: taskResult}
+
+	fake := &fakeDaemonDispatcher{
+		isConnected: func(mid string) bool {
+			return mid == machineID // 只对目标 machine 报告在线
+		},
+		registerTaskPromise: func(_ string) chan *ws.TaskResult {
+			return promiseCh // 复用同一个 buffered channel
+		},
+		sendToMachine: func(_ string, _ ws.WSMessage) error {
+			return nil // 发送成功
+		},
+		awaitTaskResult: func(_ string) chan *ws.TaskResult {
+			return promiseCh // dispatcher 等待同一 channel
+		},
+		removeTaskPromise: func(_ string) {
+			// no-op：测试范围内不关心清理副作用
+		},
+	}
+
+	d := NewDispatcher(DispatcherDeps{
+		AgentRepo: &fakeOrchAgentRepo{
+			agent: agent,
+			task:  &model.DaemonTask{ID: "task-fake", Status: "completed", Result: taskResult},
+		},
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: fake,
+	})
+
+	res, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID:          "c1",
+		UserID:          userID,
+		Agent:           agent,
+		Prompt:          "hello",
+		ContextMessages: "[ctx]",
+		ReplyTo:         nil,
+	}, DispatchHooks{})
+	if err != nil {
+		t.Fatalf("Dispatch with fakeDaemonDispatcher returned error: %v", err)
+	}
+	if res == nil || res.Message == nil {
+		t.Fatalf("expected non-nil message")
+	}
+	if res.Message.Content != taskResult {
+		t.Fatalf("expected message content %q, got %q", taskResult, res.Message.Content)
+	}
+
+	// 断言 fake 的 5 个方法都被调用过（port 接口契约验证）。
+	calls := fake.Calls()
+	if calls.IsConnected == 0 {
+		t.Fatal("fake.IsConnected should be called at least once")
+	}
+	if calls.RegisterTaskPromise == 0 {
+		t.Fatal("fake.RegisterTaskPromise should be called at least once")
+	}
+	if calls.SendToMachine == 0 {
+		t.Fatal("fake.SendToMachine should be called at least once")
+	}
+	if calls.AwaitTaskResult == 0 {
+		t.Fatal("fake.AwaitTaskResult should be called at least once")
+	}
+	if calls.RemoveTaskPromise == 0 {
+		t.Fatal("fake.RemoveTaskPromise should be called at least once")
+	}
+
+	// 断言最后一次 IsConnected 入参是目标 machineID（避免 fake 被错误调用到别的 ID）。
+	if calls.LastIsConnectedID != machineID {
+		t.Fatalf("expected IsConnected called with %q, got %q", machineID, calls.LastIsConnectedID)
+	}
+}
+
+// TestDispatcher_DispatchFakeReturnsErrWhenNotConnected 验证 fakeDaemonDispatcher
+// 报告「未连接」时 Dispatcher.Dispatch 返回 daemon 未连接错误，且 SendToMachine
+// 不被调用（短路径返回）。
+//
+// 这是 port 契约的反向断言：fake 可以精确控制「未连接」语义来验证 Dispatcher 的
+// 错误路径，无需像真实 DaemonHub 那样通过不注册 client 来模拟离线。
+func TestDispatcher_DispatchFakeReturnsErrWhenNotConnected(t *testing.T) {
+	userID := "u1"
+	machineID := "machine-down"
+	agent := &model.Agent{
+		ID:        "agent-down",
+		UserID:    &userID,
+		Name:      "DownAgent",
+		CLITool:   "claude",
+		MachineID: stringPtr(machineID),
+	}
+
+	fake := &fakeDaemonDispatcher{
+		isConnected: func(_ string) bool {
+			return false // 精确控制：daemon 未连接
+		},
+		// 其余 closure 留 nil（不应被调用到）
+	}
+
+	d := NewDispatcher(DispatcherDeps{
+		AgentRepo: &fakeOrchAgentRepo{
+			agent: agent,
+			task:  &model.DaemonTask{ID: "task-down", Status: "completed", Result: "x"},
+		},
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: fake,
+	})
+
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{})
+	if err == nil {
+		t.Fatal("expected error when fake reports not connected, got nil")
+	}
+
+	calls := fake.Calls()
+	// IsConnected 必须被调用（这是触发达「未连接」分支的入口）。
+	if calls.IsConnected == 0 {
+		t.Fatal("fake.IsConnected should be called")
+	}
+	// SendToMachine 不应被调用（短路在 IsConnected 之后）。
+	if calls.SendToMachine != 0 {
+		t.Fatalf("fake.SendToMachine should NOT be called when daemon not connected, got %d calls", calls.SendToMachine)
+	}
+}
+
 // === P7: Dispatcher 独立性单测 ===
 //
 // P7 前：Dispatcher 通过 d.svc 反向依赖 OrchestratorService。
