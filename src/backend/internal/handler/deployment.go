@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/agent-hub/backend/internal/middleware"
-	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -20,8 +19,12 @@ type DeploymentHandler struct {
 	svc *service.DeploymentService
 }
 
+// DeploymentCapabilities 描述当前运行时可用的发布能力。
+// github_enabled 字段为前端历史契约，保留不变；strategies 字段为新增能力（mode → 是否启用），
+// 供未来前端动态展示已注册策略（preview / github / cloudflare_pages ...）。
 type DeploymentCapabilities struct {
-	GitHubEnabled bool `json:"github_enabled"`
+	GitHubEnabled bool            `json:"github_enabled"`
+	Strategies    map[string]bool `json:"strategies"`
 }
 
 func NewDeploymentHandler(svc *service.DeploymentService) *DeploymentHandler {
@@ -29,9 +32,15 @@ func NewDeploymentHandler(svc *service.DeploymentService) *DeploymentHandler {
 }
 
 // Capabilities returns publish features available in the current runtime.
+// github_enabled 来自 "github" 策略的 Enabled()；strategies 遍历所有已注册策略。
 func (h *DeploymentHandler) Capabilities(c *gin.Context) {
+	strategies := make(map[string]bool)
+	for _, p := range h.svc.Strategies() {
+		strategies[p.Mode()] = p.Enabled()
+	}
 	middleware.SuccessResponse(c, DeploymentCapabilities{
-		GitHubEnabled: h.svc.GitHubEnabled(),
+		GitHubEnabled: strategies["github"], // 历史字段，保持向后兼容
+		Strategies:    strategies,
 	})
 }
 
@@ -39,11 +48,12 @@ func (h *DeploymentHandler) Capabilities(c *gin.Context) {
 type DeployByConversationRequest struct {
 	ConversationID string `json:"conversation_id" binding:"required"`
 	ArtifactName   string `json:"artifact_name"`
-	Mode           string `json:"mode"` // "preview"(default) | "github"
+	Mode           string `json:"mode"` // "preview"(default) | "github" | 未来其它已注册策略
 }
 
 // DeployByConversation 按 conversation_id + artifact_name 查找并部署产物。
 // MCP 工具和聊天指令统一走此端点，不依赖 URL 中的 rootId。
+// mode 派发全部走 service.DeployByMode：handler 不再有 switch mode，新增策略无需改这里。
 func (h *DeploymentHandler) DeployByConversation(c *gin.Context) {
 	var req DeployByConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -54,18 +64,7 @@ func (h *DeploymentHandler) DeployByConversation(c *gin.Context) {
 	if req.Mode == "" {
 		req.Mode = "preview"
 	}
-
-	var dep *model.Deployment
-	var err error
-	switch req.Mode {
-	case "preview":
-		dep, err = h.svc.DeployByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
-	case "github":
-		dep, err = h.svc.PublishGitHubByConversation(c.Request.Context(), req.ConversationID, userID, req.ArtifactName)
-	default:
-		middleware.ErrorResponse(c, http.StatusBadRequest, 40801, "invalid mode: must be 'preview' or 'github'")
-		return
-	}
+	dep, err := h.svc.DeployByMode(c.Request.Context(), req.Mode, req.ConversationID, userID, req.ArtifactName)
 	if err != nil {
 		h.handleErr(c, err)
 		return
@@ -197,6 +196,10 @@ func (h *DeploymentHandler) handleErr(c *gin.Context, err error) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40805, err.Error())
 	case errors.Is(err, service.ErrGitHubNotConfigured):
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40806, err.Error())
+	case errors.Is(err, service.ErrDeployUnknownMode):
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40807, err.Error())
+	case errors.Is(err, service.ErrDeployModeNotConfigured):
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40808, err.Error())
 	default:
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50800, "deployment failed")
 	}
