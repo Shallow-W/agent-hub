@@ -12,15 +12,25 @@ import {
 } from './catalog';
 
 // ---------------------------------------------------------------------------
-// Types (preserved from the original module)
+// Types
 // ---------------------------------------------------------------------------
+
+export interface ToolTemplateContent {
+  tools: string[];
+}
+
+export interface SkillTemplateContent {
+  skill_ids: string[];
+}
+
+export type UserTemplateContent = ToolTemplateContent | SkillTemplateContent;
 
 export interface UserTemplate {
   id: string;
   user_id: string;
   type: 'tools' | 'skills';
   name: string;
-  content: Record<string, unknown>;
+  content: UserTemplateContent;
   created_at: string;
   updated_at: string;
 }
@@ -29,21 +39,30 @@ export interface UserTemplate {
 // CatalogItem <-> UserTemplate mappers
 // ---------------------------------------------------------------------------
 
-function itemToUserTemplate(item: CatalogItem): UserTemplate {
-  let content: Record<string, unknown> = {};
-  if (item.payload) {
-    try {
-      content = JSON.parse(item.payload) as Record<string, unknown>;
-    } catch {
-      // keep empty content
+function parseContent(raw: string | undefined, type: 'tools' | 'skills'): UserTemplateContent {
+  if (!raw) return type === 'tools' ? { tools: [] } : { skill_ids: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (type === 'tools' && Array.isArray((parsed as Record<string, unknown>)?.tools)) {
+      return { tools: (parsed as { tools: unknown }).tools as string[] };
     }
+    if (type === 'skills' && Array.isArray((parsed as Record<string, unknown>)?.skill_ids)) {
+      return { skill_ids: (parsed as { skill_ids: unknown }).skill_ids as string[] };
+    }
+    return type === 'tools' ? { tools: [] } : { skill_ids: [] };
+  } catch {
+    return type === 'tools' ? { tools: [] } : { skill_ids: [] };
   }
+}
+
+function itemToUserTemplate(item: CatalogItem): UserTemplate {
+  const type = (item.subtype as 'tools' | 'skills') ?? 'tools';
   return {
     id: item.id,
     user_id: item.user_id ?? '',
-    type: (item.subtype as 'tools' | 'skills') ?? 'tools',
+    type,
     name: item.key,
-    content,
+    content: parseContent(item.payload, type),
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -65,7 +84,7 @@ export async function listUserTemplates(
 export async function createUserTemplate(body: {
   type: 'tools' | 'skills';
   name: string;
-  content: Record<string, unknown>;
+  content: UserTemplateContent;
 }): Promise<UserTemplate> {
   const item = await createCatalogItem(DOMAIN, {
     key: body.name,
@@ -81,7 +100,7 @@ export async function updateUserTemplate(
   body: {
     type: 'tools' | 'skills';
     name: string;
-    content: Record<string, unknown>;
+    content: UserTemplateContent;
   },
 ): Promise<UserTemplate> {
   const item = await updateCatalogItem(DOMAIN, id, {

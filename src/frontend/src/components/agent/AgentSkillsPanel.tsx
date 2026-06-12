@@ -123,7 +123,7 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
       .filter((cat) => !defaultSkillCategories.includes(cat))
       .map((cat) => ({ value: `cat:${cat}`, label: cat })),
     ...dbTemplates.map((t) => {
-      const ids = Array.isArray((t.content as Record<string, unknown>)?.skill_ids) ? (t.content as Record<string, unknown>).skill_ids as string[] : [];
+      const ids = 'skill_ids' in t.content ? t.content.skill_ids : [];
       return { value: `saved:${t.id}`, label: `★ ${t.name}`, skillIds: ids };
     }),
   ], [categories, dbTemplates]);

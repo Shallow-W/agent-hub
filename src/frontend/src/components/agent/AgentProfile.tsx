@@ -11,10 +11,11 @@ import {
   ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
-import type { Agent, PlatformSkill } from '@/types/agent';
+import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
 import { hasManagementToolsInArray } from '@/config/catalogConfig';
-import { getPlatformSkills } from '@/api/platformSkill';
+import { itemToSkill } from '@/api/platformSkill';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -73,8 +74,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [toolManageOpen, setToolManageOpen] = useState(false);
-  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [dbToolTemplates, setDbToolTemplates] = useState<UserTemplate[]>([]);
+
+  const { items: rawSkills } = useCatalogDomain('platform_skill');
+  const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
 
   const filteredTools = useMemo(() => {
     if (toolFilter === 'all') return getToolCatalogSync();
@@ -138,10 +141,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   }, [agent?.id, agent?.tools_config, catalogReady]);
 
   useEffect(() => {
-    getPlatformSkills().then(setLibrarySkills).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     listUserTemplates('tools').then(setDbToolTemplates).catch(() => {});
   }, []);
 
@@ -158,8 +157,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const allToolsetOptions = useMemo<ToolsetOption[]>(() => [
     ...getToolsetOptions().filter((o) => o.value !== 'custom'),
     ...dbToolTemplates.map((t) => {
-      const tools = Array.isArray((t.content as Record<string, unknown>)?.tools)
-        ? (t.content as Record<string, unknown>).tools as string[] : [];
+      const tools = 'tools' in t.content ? t.content.tools : [];
       return { value: `db-${t.id}`, label: `★ ${t.name}`, tools };
     }),
   ], [dbToolTemplates]);

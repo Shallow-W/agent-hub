@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button, Input, Select, message } from 'antd';
 import { ImportOutlined, SettingOutlined } from '@ant-design/icons';
-import type { AgentPromptTemplate } from '@/types/agent';
 import {
-  getAgentPromptTemplates,
   importDefaultAgentPromptTemplates,
+  itemToTemplate,
 } from '@/api/agentPromptTemplate';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import { AgentPromptTemplateManagerModal } from './AgentPromptTemplateManagerModal';
 import styles from './AgentPromptTemplates.module.css';
 
@@ -16,13 +16,13 @@ interface AgentPromptTemplateFieldProps {
 }
 
 export const AgentPromptTemplateField: React.FC<AgentPromptTemplateFieldProps> = ({
-  open,
+  open: _open,
   value,
   onChange,
 }) => {
-  const [templates, setTemplates] = useState<AgentPromptTemplate[]>([]);
+  const { items: rawTemplates, refetch: refetchTemplates, loading } = useCatalogDomain('agent_prompt_template');
+  const templates = useMemo(() => rawTemplates.map(itemToTemplate), [rawTemplates]);
   const [selectedID, setSelectedID] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
 
   const options = useMemo(
@@ -32,31 +32,6 @@ export const AgentPromptTemplateField: React.FC<AgentPromptTemplateFieldProps> =
     })),
     [templates],
   );
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setLoading(true);
-    getAgentPromptTemplates()
-      .then((items) => {
-        if (!cancelled) setTemplates(items);
-      })
-      .catch(() => {
-        if (!cancelled) message.error('查询 Prompt 模板失败');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const refreshTemplates = async () => {
-    const items = await getAgentPromptTemplates();
-    setTemplates(items);
-    return items;
-  };
 
   const handleTemplateSelect = (id?: string) => {
     if (!id) {
@@ -71,20 +46,20 @@ export const AgentPromptTemplateField: React.FC<AgentPromptTemplateFieldProps> =
   };
 
   const handleImportDefaults = async () => {
-    setLoading(true);
     try {
       const imported = await importDefaultAgentPromptTemplates();
-      await refreshTemplates();
+      const rawItems = await refetchTemplates();
+      const refreshed = rawItems.map(itemToTemplate);
       if (imported.length === 0) {
         message.info('默认 Prompt 模板已存在');
       } else {
         message.success(`已导入 ${imported.length} 个默认 Prompt 模板`);
       }
+      return refreshed;
     } catch (err) {
       const errorMessage = err instanceof Error && err.message ? err.message : '导入默认 Prompt 模板失败';
       message.error(errorMessage);
-    } finally {
-      setLoading(false);
+      return [];
     }
   };
 
@@ -122,7 +97,9 @@ export const AgentPromptTemplateField: React.FC<AgentPromptTemplateFieldProps> =
         open={managerOpen}
         templates={templates}
         onClose={() => setManagerOpen(false)}
-        onTemplatesChange={setTemplates}
+        onTemplatesChange={() => {
+          refetchTemplates();
+        }}
       />
     </div>
   );

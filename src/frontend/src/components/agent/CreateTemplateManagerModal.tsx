@@ -94,9 +94,8 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
       return { id: t.key, name: t.name, category: t.category, description: t.description, tools: t.tools, skillIds, builtin: true };
     }),
     ...dbTemplates.map((t) => {
-      const content = t.content ?? {};
-      const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
-      const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+      const tools = mode === 'tools' && 'tools' in t.content ? t.content.tools : [];
+      const skillIds = mode === 'skills' && 'skill_ids' in t.content ? t.content.skill_ids : [];
       const desc = mode === 'tools' ? `${tools.length} 个工具` : `${skillIds.length} 个 Skill`;
       return { id: `db-${t.id}`, dbId: t.id, name: t.name, category: '自定义', description: desc, tools, skillIds, builtin: false };
     }),
@@ -141,9 +140,8 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             return { id: t.key, name: t.name, tools: t.tools, skillIds } as TemplateItem;
           }),
           ...list.map((t) => {
-            const content = t.content ?? {};
-            const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
-            const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+            const tools = mode === 'tools' && 'tools' in t.content ? t.content.tools : [];
+            const skillIds = mode === 'skills' && 'skill_ids' in t.content ? t.content.skill_ids : [];
             return { id: `db-${t.id}`, dbId: t.id, name: t.name, tools, skillIds } as TemplateItem;
           }),
         ];

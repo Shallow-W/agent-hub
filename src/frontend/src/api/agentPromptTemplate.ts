@@ -26,7 +26,7 @@ interface AgentPromptPayload {
   system_prompt?: string;
 }
 
-function itemToTemplate(item: CatalogItem): AgentPromptTemplate {
+export function itemToTemplate(item: CatalogItem): AgentPromptTemplate {
   let payload: AgentPromptPayload = {};
   if (item.payload) {
     try {
