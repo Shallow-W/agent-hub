@@ -335,10 +335,12 @@ func TestUserTemplateToItem_ContentIsPayload(t *testing.T) {
 func TestAdapterStore_List_ToolDefinition(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainToolDefinition, Scope: ScopeSystem})
 	store := NewAdapterStore(AdapterDeps{
-		ToolDef:  &fakeToolDefRepo{items: []model.ToolDefinition{
-			{Name: "a", Label: "A", Category: "x", Description: "d1", CreatedAt: time.Now()},
-			{Name: "b", Label: "B", Category: "y", Description: "d2", CreatedAt: time.Now()},
-		}},
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{items: []model.ToolDefinition{
+				{Name: "a", Label: "A", Category: "x", Description: "d1", CreatedAt: time.Now()},
+				{Name: "b", Label: "B", Category: "y", Description: "d2", CreatedAt: time.Now()},
+			}}),
+		},
 		Registry: reg,
 	})
 	items, err := store.List(context.Background(), DomainToolDefinition, ListQuery{})
@@ -356,9 +358,11 @@ func TestAdapterStore_List_ToolDefinition(t *testing.T) {
 func TestAdapterStore_GetByID_ToolDefinition(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainToolDefinition, Scope: ScopeSystem})
 	store := NewAdapterStore(AdapterDeps{
-		ToolDef: &fakeToolDefRepo{items: []model.ToolDefinition{
-			{Name: "found", Label: "L", CreatedAt: time.Now()},
-		}},
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{items: []model.ToolDefinition{
+				{Name: "found", Label: "L", CreatedAt: time.Now()},
+			}}),
+		},
 		Registry: reg,
 	})
 	it, err := store.GetByID(context.Background(), "found")
@@ -384,9 +388,11 @@ func TestAdapterStore_List_UnknownDomain(t *testing.T) {
 func TestAdapterStore_List_PlatformSkillByUser(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	store := NewAdapterStore(AdapterDeps{
-		PlatformSkill: &fakePlatformSkillRepo{items: []model.PlatformSkill{
-			{ID: "p1", UserID: "u1", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		}},
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(&fakePlatformSkillRepo{items: []model.PlatformSkill{
+				{ID: "p1", UserID: "u1", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+			}}),
+		},
 		Registry: reg,
 	})
 	items, err := store.List(context.Background(), DomainPlatformSkill, ListQuery{UserID: "u1"})
@@ -399,9 +405,14 @@ func TestAdapterStore_List_PlatformSkillByUser(t *testing.T) {
 }
 
 func TestAdapterStore_Create_ReturnsReadOnly(t *testing.T) {
-	store := NewAdapterStore(AdapterDeps{Registry: NewRegistry(
-		DomainSpec{Name: DomainToolDefinition, Scope: ScopeSystem},
-	)})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{}),
+		},
+		Registry: NewRegistry(
+			DomainSpec{Name: DomainToolDefinition, Scope: ScopeSystem},
+		),
+	})
 	if _, err := store.Create(context.Background(), CreateInput{Domain: DomainToolDefinition}); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("expected ErrReadOnly, got %v", err)
 	}
@@ -426,7 +437,12 @@ func indexOf(haystack, needle string) int {
 func TestAdapterStore_Create_PlatformSkill(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	repo := &fakePlatformSkillRepo{}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	payload := `{"trigger":"tri","detail":"det"}`
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain:      DomainPlatformSkill,
@@ -457,7 +473,12 @@ func TestAdapterStore_Create_PlatformSkill(t *testing.T) {
 func TestAdapterStore_Create_PlatformSkill_EmptyPayload(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	repo := &fakePlatformSkillRepo{}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain: DomainPlatformSkill, UserID: "u1", Key: "k",
 	})
@@ -478,8 +499,10 @@ func TestAdapterStore_Create_PlatformSkill_EmptyPayload(t *testing.T) {
 func TestAdapterStore_Create_PlatformSkill_BadPayload(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	store := NewAdapterStore(AdapterDeps{
-		PlatformSkill: &fakePlatformSkillRepo{},
-		Registry:      reg,
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(&fakePlatformSkillRepo{}),
+		},
+		Registry: reg,
 	})
 	if _, err := store.Create(context.Background(), CreateInput{
 		Domain:      DomainPlatformSkill,
@@ -496,7 +519,12 @@ func TestAdapterStore_Create_PlatformSkill_DuplicateMapsToErrDuplicate(t *testin
 	repo := &fakePlatformSkillRepo{
 		createErr: dupErr(),
 	}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	_, err := store.Create(context.Background(), CreateInput{
 		Domain: DomainPlatformSkill, UserID: "u1", Key: "dup",
 	})
@@ -515,7 +543,12 @@ func TestAdapterStore_Update_PlatformSkill_PreservesUnsetFields(t *testing.T) {
 		ID: "p1", UserID: "u1", Name: "原", Category: "c", Description: "d",
 		Trigger: "t", Detail: "dt", CreatedAt: now, UpdatedAt: now,
 	}}}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 
 	newLabel := "改名后"
 	item, err := store.Update(context.Background(), "p1", UpdateInput{
@@ -544,7 +577,12 @@ func TestAdapterStore_Update_PlatformSkill_PreservesUnsetFields(t *testing.T) {
 func TestAdapterStore_Update_PlatformSkill_NotFound(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	repo := &fakePlatformSkillRepo{}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	newLabel := "x"
 	_, err := store.Update(context.Background(), "missing", UpdateInput{
 		Domain: DomainPlatformSkill, UserID: "u1", Key: &newLabel,
@@ -564,7 +602,12 @@ func TestAdapterStore_Update_PlatformSkill_RejectsCrossUser(t *testing.T) {
 	repo := &fakePlatformSkillRepo{items: []model.PlatformSkill{{
 		ID: "victim", UserID: "victim-uid", Name: "原", Category: "c",
 	}}}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	newLabel := "hijacked"
 	_, err := store.Update(context.Background(), "victim", UpdateInput{
 		Domain: DomainPlatformSkill, UserID: "attacker", Key: &newLabel,
@@ -582,7 +625,7 @@ func TestAdapterStore_Update_PlatformSkill_RejectsCrossUser(t *testing.T) {
 // of an Item whose source model had empty Trigger/Detail. The bridge's
 // decodePlatformSkillPayload (main.go) and the adapter's
 // decodePlatformSkillPayload must both yield ("", "") for an explicit
-// {"trigger":"","detail":""} payload — not error, not garbage.
+// {"trigger":"","detail":""} payload -- not error, not garbage.
 func TestPlatformSkillToItem_EmptyPayloadDecodes(t *testing.T) {
 	m := &model.PlatformSkill{
 		ID: "p1", UserID: "u1", Name: "n",
@@ -605,7 +648,12 @@ func TestAdapterStore_Delete_PlatformSkill(t *testing.T) {
 	repo := &fakePlatformSkillRepo{items: []model.PlatformSkill{
 		{ID: "p1", UserID: "u1", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 	}}
-	store := NewAdapterStore(AdapterDeps{PlatformSkill: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(repo),
+		},
+		Registry: reg,
+	})
 	if err := store.Delete(context.Background(), DomainPlatformSkill, "u1", "p1"); err != nil {
 		t.Fatalf("Delete err: %v", err)
 	}
@@ -623,8 +671,10 @@ func TestAdapterStore_Delete_PlatformSkill(t *testing.T) {
 func TestAdapterStore_Delete_PlatformSkill_NotFound(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainPlatformSkill, Scope: ScopeUser})
 	store := NewAdapterStore(AdapterDeps{
-		PlatformSkill: &fakePlatformSkillRepo{},
-		Registry:      reg,
+		Plugins: map[Domain]DomainPlugin{
+			DomainPlatformSkill: NewPlatformSkillPlugin(&fakePlatformSkillRepo{}),
+		},
+		Registry: reg,
 	})
 	if err := store.Delete(context.Background(), DomainPlatformSkill, "u1", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
@@ -642,7 +692,12 @@ func dupErr() error {
 func TestAdapterStore_Create_AgentPromptTemplate(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
 	repo := &fakeAgentPromptRepo{}
-	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	payload := `{"system_prompt":"You are a helpful assistant"}`
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain:      DomainAgentPromptTemplate,
@@ -673,7 +728,12 @@ func TestAdapterStore_Create_AgentPromptTemplate(t *testing.T) {
 func TestAdapterStore_Create_AgentPromptTemplate_EmptyPayload(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
 	repo := &fakeAgentPromptRepo{}
-	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain: DomainAgentPromptTemplate, UserID: "u1", Key: "k",
 	})
@@ -691,8 +751,10 @@ func TestAdapterStore_Create_AgentPromptTemplate_EmptyPayload(t *testing.T) {
 func TestAdapterStore_Create_AgentPromptTemplate_BadPayload(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
 	store := NewAdapterStore(AdapterDeps{
-		AgentPrompt: &fakeAgentPromptRepo{},
-		Registry:    reg,
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(&fakeAgentPromptRepo{}),
+		},
+		Registry: reg,
 	})
 	if _, err := store.Create(context.Background(), CreateInput{
 		Domain:      DomainAgentPromptTemplate,
@@ -711,7 +773,12 @@ func TestAdapterStore_Update_AgentPromptTemplate_PreservesUnsetFields(t *testing
 		ID: "a1", UserID: "u1", Name: "原", Category: "c", Description: "d",
 		SystemPrompt: "SP", CreatedAt: now, UpdatedAt: now,
 	}}}
-	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 
 	newLabel := "改名后"
 	item, err := store.Update(context.Background(), "a1", UpdateInput{
@@ -740,7 +807,12 @@ func TestAdapterStore_Update_AgentPromptTemplate_PreservesUnsetFields(t *testing
 func TestAdapterStore_Update_AgentPromptTemplate_NotFound(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
 	repo := &fakeAgentPromptRepo{}
-	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	newLabel := "x"
 	_, err := store.Update(context.Background(), "missing", UpdateInput{
 		Domain: DomainAgentPromptTemplate, UserID: "u1", Key: &newLabel,
@@ -755,7 +827,12 @@ func TestAdapterStore_Delete_AgentPromptTemplate(t *testing.T) {
 	repo := &fakeAgentPromptRepo{items: []model.AgentPromptTemplate{
 		{ID: "a1", UserID: "u1", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 	}}
-	store := NewAdapterStore(AdapterDeps{AgentPrompt: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	if err := store.Delete(context.Background(), DomainAgentPromptTemplate, "u1", "a1"); err != nil {
 		t.Fatalf("Delete err: %v", err)
 	}
@@ -773,8 +850,10 @@ func TestAdapterStore_Delete_AgentPromptTemplate(t *testing.T) {
 func TestAdapterStore_Delete_AgentPromptTemplate_NotFound(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainAgentPromptTemplate, Scope: ScopeUser})
 	store := NewAdapterStore(AdapterDeps{
-		AgentPrompt: &fakeAgentPromptRepo{},
-		Registry:    reg,
+		Plugins: map[Domain]DomainPlugin{
+			DomainAgentPromptTemplate: NewAgentPromptTemplatePlugin(&fakeAgentPromptRepo{}),
+		},
+		Registry: reg,
 	})
 	if err := store.Delete(context.Background(), DomainAgentPromptTemplate, "u1", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
@@ -786,7 +865,12 @@ func TestAdapterStore_Delete_AgentPromptTemplate_NotFound(t *testing.T) {
 func TestAdapterStore_Create_UserTemplate(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
 	repo := &fakeUserTemplateRepo{}
-	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainUserTemplate: NewUserTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	payload := `{"tools":["a","b"]}`
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain:      DomainUserTemplate,
@@ -816,7 +900,12 @@ func TestAdapterStore_Create_UserTemplate(t *testing.T) {
 func TestAdapterStore_Create_UserTemplate_DefaultsSubtype(t *testing.T) {
 	reg := NewRegistry(DomainSpec{Name: DomainUserTemplate, Scope: ScopeUser, Subtypes: []string{"tools", "skills"}})
 	repo := &fakeUserTemplateRepo{}
-	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainUserTemplate: NewUserTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	item, err := store.Create(context.Background(), CreateInput{
 		Domain: DomainUserTemplate, UserID: "u1", Key: "k",
 		PayloadJSON: `{}`,
@@ -839,7 +928,12 @@ func TestAdapterStore_Update_UserTemplate(t *testing.T) {
 		ID: "ut1", UserID: "u1", Type: "tools", Name: "原",
 		Content: []byte(`{"old":true}`), CreatedAt: now, UpdatedAt: now,
 	}}}
-	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainUserTemplate: NewUserTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 
 	newName := "改名后"
 	newPayload := `{"new":true}`
@@ -865,7 +959,12 @@ func TestAdapterStore_Delete_UserTemplate(t *testing.T) {
 	repo := &fakeUserTemplateRepo{items: []model.UserTemplate{
 		{ID: "ut1", UserID: "u1", Type: "tools", Name: "n", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 	}}
-	store := NewAdapterStore(AdapterDeps{UserTemplate: repo, Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainUserTemplate: NewUserTemplatePlugin(repo),
+		},
+		Registry: reg,
+	})
 	if err := store.Delete(context.Background(), DomainUserTemplate, "u1", "ut1"); err != nil {
 		t.Fatalf("Delete err: %v", err)
 	}

@@ -14,7 +14,7 @@ import (
 // We deliberately declare these locally in the catalog package (mirroring the
 // pattern in service/platform_skill.go etc.) instead of importing concrete
 // *repository.XxxRepo structs. The existing repository implementations already
-// satisfy them. This keeps catalog → repository a one-way dependency and the
+// satisfy them. This keeps catalog -> repository a one-way dependency and the
 // adapter unit-testable with fakes.
 
 type PlatformSkillStore interface {
@@ -42,41 +42,43 @@ type UserTemplateStore interface {
 	Delete(ctx context.Context, id, userID string) (bool, error)
 }
 
-// AdapterStore implements Store by delegating to the four existing
-// repositories. It performs the model ↔ Item conversion at the boundary so
-// the rest of the catalog package sees only the unified shape.
+// AdapterStore implements Store by delegating to DomainPlugins. It performs the
+// model <-> Item conversion at the boundary so the rest of the catalog package
+// sees only the unified shape.
 //
-// The store holds narrow interfaces (not concrete pointers) so it is safe to
-// pass in *repository.XxxRepo structs directly, or mocks in tests.
+// To add a new catalog domain: implement DomainPlugin, register it via
+// AdapterDeps.Plugins, and add a DomainSpec to the Registry. You do NOT need
+// to modify this file.
 type AdapterStore struct {
-	platformSkill PlatformSkillStore
-	toolDef       ToolDefinitionLister
-	agentPrompt   AgentPromptTemplateStore
-	userTemplate  UserTemplateStore
-	registry      *Registry
+	plugins  map[Domain]DomainPlugin
+	registry *Registry
+	// toolDefRepo is retained solely for GetByID, which scans by name.
+	toolDefRepo ToolDefinitionLister
 }
 
-// AdapterDeps bundles the four repo interfaces. Fields may be nil if the
-// caller doesn't yet need that domain — List on an unset repo returns
-// ErrUnknownDomain via the registry lookup before the repo is touched.
+// AdapterDeps bundles the plugin map and registry. Fields may be nil if the
+// caller doesn't yet need that domain — List on an unregistered domain returns
+// ErrUnknownDomain via the registry lookup.
 type AdapterDeps struct {
-	PlatformSkill PlatformSkillStore
-	ToolDef       ToolDefinitionLister
-	AgentPrompt   AgentPromptTemplateStore
-	UserTemplate  UserTemplateStore
-	Registry      *Registry
+	Plugins  map[Domain]DomainPlugin
+	Registry *Registry
 }
 
 // NewAdapterStore builds an AdapterStore from the given deps. The Registry
 // is consulted for every operation; only domains that appear in the registry
 // are reachable.
 func NewAdapterStore(deps AdapterDeps) *AdapterStore {
+	// Extract toolDefRepo for GetByID support.
+	var toolDefRepo ToolDefinitionLister
+	if td, ok := deps.Plugins[DomainToolDefinition]; ok {
+		if p, ok := td.(*toolDefinitionPlugin); ok {
+			toolDefRepo = p.repo
+		}
+	}
 	return &AdapterStore{
-		platformSkill: deps.PlatformSkill,
-		toolDef:       deps.ToolDef,
-		agentPrompt:   deps.AgentPrompt,
-		userTemplate:  deps.UserTemplate,
-		registry:      deps.Registry,
+		plugins:     deps.Plugins,
+		registry:    deps.Registry,
+		toolDefRepo: toolDefRepo,
 	}
 }
 
@@ -84,85 +86,54 @@ func NewAdapterStore(deps AdapterDeps) *AdapterStore {
 // same registration data without holding a second copy.
 func (s *AdapterStore) Registry() *Registry { return s.registry }
 
+// plugin looks up the DomainPlugin for a given domain.
+func (s *AdapterStore) plugin(d Domain) (DomainPlugin, error) {
+	p, ok := s.plugins[d]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownDomain, d)
+	}
+	return p, nil
+}
+
+// requireDomain returns the spec for d, or ErrUnknownDomain if it isn't
+// registered.
+func (s *AdapterStore) requireDomain(d Domain) (DomainSpec, error) {
+	if s.registry == nil {
+		return DomainSpec{}, ErrUnknownDomain
+	}
+	spec, ok := s.registry.Get(d)
+	if !ok {
+		return DomainSpec{}, fmt.Errorf("%w: %s", ErrUnknownDomain, d)
+	}
+	return spec, nil
+}
+
 // List dispatches by domain. For system-scope domains the UserID filter is
-// ignored.
+// ignored. For user_template, the Subtype filter is handled specially.
 func (s *AdapterStore) List(ctx context.Context, domain Domain, q ListQuery) ([]Item, error) {
-	if s.registry != nil {
-		if _, ok := s.registry.Get(domain); !ok {
-			return nil, fmt.Errorf("%w: %s", ErrUnknownDomain, domain)
-		}
+	if _, err := s.requireDomain(domain); err != nil {
+		return nil, err
 	}
-	switch domain {
-	case DomainPlatformSkill:
-		if s.platformSkill == nil {
-			return nil, fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
-		}
-		if strings.TrimSpace(q.UserID) == "" {
-			return []Item{}, nil
-		}
-		list, err := s.platformSkill.ListByUser(ctx, q.UserID)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]Item, 0, len(list))
-		for i := range list {
-			out = append(out, platformSkillToItem(&list[i]))
-		}
-		return out, nil
 
-	case DomainToolDefinition:
-		if s.toolDef == nil {
-			return nil, fmt.Errorf("%w: tool_definition repo not configured", ErrUnknownDomain)
-		}
-		list, err := s.toolDef.List(ctx)
+	// user_template has subtype-aware listing — handle it specially.
+	if domain == DomainUserTemplate {
+		p, err := s.plugin(domain)
 		if err != nil {
 			return nil, err
 		}
-		out := make([]Item, 0, len(list))
-		for i := range list {
-			out = append(out, toolDefinitionToItem(&list[i]))
+		utp, ok := p.(*userTemplatePlugin)
+		if !ok {
+			// Fallback: call generic List (loses subtype filter).
+			return p.List(ctx, q.UserID)
 		}
-		return out, nil
-
-	case DomainAgentPromptTemplate:
-		if s.agentPrompt == nil {
-			return nil, fmt.Errorf("%w: agent_prompt_template repo not configured", ErrUnknownDomain)
-		}
-		if strings.TrimSpace(q.UserID) == "" {
-			return []Item{}, nil
-		}
-		list, err := s.agentPrompt.ListByUser(ctx, q.UserID)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]Item, 0, len(list))
-		for i := range list {
-			out = append(out, agentPromptTemplateToItem(&list[i]))
-		}
-		return out, nil
-
-	case DomainUserTemplate:
-		if s.userTemplate == nil {
-			return nil, fmt.Errorf("%w: user_template repo not configured", ErrUnknownDomain)
-		}
-		if strings.TrimSpace(q.UserID) == "" {
-			return []Item{}, nil
-		}
-		subtype := q.Subtype
-		if subtype == "" {
-			subtype = "tools" // default subtype when caller didn't specify
-		}
-		list, err := s.userTemplate.ListByUserAndType(ctx, q.UserID, subtype)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]Item, 0, len(list))
-		for i := range list {
-			out = append(out, userTemplateToItem(&list[i]))
-		}
-		return out, nil
+		return utp.ListWithSubtype(ctx, q.UserID, q.Subtype)
 	}
-	return nil, fmt.Errorf("%w: %s", ErrUnknownDomain, domain)
+
+	p, err := s.plugin(domain)
+	if err != nil {
+		return nil, err
+	}
+	return p.List(ctx, q.UserID)
 }
 
 // ── Read paths: GetByID ──────────────────────────────────────────────────────
@@ -175,282 +146,55 @@ func (s *AdapterStore) List(ctx context.Context, domain Domain, q ListQuery) ([]
 // returns ErrNotFound. The catalog handler's GET-by-ID endpoint will therefore
 // return 404 for those domains — this is acceptable because the frontend uses
 // list endpoints (which do carry userID), not get-by-ID, for user-scope items.
-//
-// A proper fix would be adding GetByID to each user-scope repo interface, but
-// that is out of scope for the current cleanup.
 func (s *AdapterStore) GetByID(ctx context.Context, id string) (*Item, error) {
 	if strings.TrimSpace(id) == "" {
 		return nil, ErrInvalid
 	}
-	if s.toolDef != nil {
-		list, err := s.toolDef.List(ctx)
+	if s.toolDefRepo != nil {
+		item, err := toolDefFindByID(s.toolDefRepo, ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		for i := range list {
-			if list[i].Name == id { // tool_definition uses Name as natural key
-				item := toolDefinitionToItem(&list[i])
-				return &item, nil
-			}
+		if item != nil {
+			return item, nil
 		}
 	}
 	return nil, ErrNotFound
 }
 
 // ── Write paths ──────────────────────────────────────────────────────────────
-//
-// All four domains route through catalog with full CRUD. tool_definition is
-// system-scope (read-only at the catalog level; writes go through its own
-// migration path). The other three are user-scope with full Create/Update/Delete.
 
 func (s *AdapterStore) Create(ctx context.Context, input CreateInput) (*Item, error) {
-	switch input.Domain {
-	case DomainPlatformSkill:
-		if s.platformSkill == nil {
-			return nil, fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
-		}
-		trigger, detail, err := decodePlatformSkillPayload(input.PayloadJSON)
-		if err != nil {
-			return nil, err
-		}
-		m, err := s.platformSkill.Create(ctx, input.UserID, input.Key, input.Category, input.Description, trigger, detail)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := platformSkillToItem(m)
-		return &item, nil
-	case DomainAgentPromptTemplate:
-		if s.agentPrompt == nil {
-			return nil, fmt.Errorf("%w: agent_prompt_template repo not configured", ErrUnknownDomain)
-		}
-		systemPrompt, err := decodeAgentPromptPayload(input.PayloadJSON)
-		if err != nil {
-			return nil, err
-		}
-		m, err := s.agentPrompt.Create(ctx, input.UserID, input.Key, input.Category, input.Description, systemPrompt)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := agentPromptTemplateToItem(m)
-		return &item, nil
-	case DomainUserTemplate:
-		if s.userTemplate == nil {
-			return nil, fmt.Errorf("%w: user_template repo not configured", ErrUnknownDomain)
-		}
-		tplType := input.Subtype
-		if tplType == "" {
-			tplType = "tools"
-		}
-		m, err := s.userTemplate.Create(ctx, input.UserID, tplType, input.Key, input.PayloadJSON)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := userTemplateToItem(m)
-		return &item, nil
-	default:
-		return nil, fmt.Errorf("%w: %s", ErrReadOnly, input.Domain)
+	if _, err := s.requireDomain(input.Domain); err != nil {
+		return nil, err
 	}
+	p, err := s.plugin(input.Domain)
+	if err != nil {
+		return nil, err
+	}
+	return p.Create(ctx, input)
 }
 
 func (s *AdapterStore) Update(ctx context.Context, id string, input UpdateInput) (*Item, error) {
-	switch input.Domain {
-	case DomainPlatformSkill:
-		if s.platformSkill == nil {
-			return nil, fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
-		}
-		current, err := s.findPlatformSkillByID(ctx, input.UserID, id)
-		if err != nil {
-			return nil, err
-		}
-		name := current.Name
-		if input.Key != nil {
-			name = *input.Key
-		}
-		category := current.Category
-		if input.Category != nil {
-			category = *input.Category
-		}
-		description := current.Description
-		if input.Description != nil {
-			description = *input.Description
-		}
-		trigger, detail := current.Trigger, current.Detail
-		if input.PayloadJSON != nil {
-			t, d, derr := decodePlatformSkillPayload(*input.PayloadJSON)
-			if derr != nil {
-				return nil, derr
-			}
-			trigger, detail = t, d
-		}
-		m, err := s.platformSkill.Update(ctx, id, input.UserID, name, category, description, trigger, detail)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := platformSkillToItem(m)
-		return &item, nil
-	case DomainAgentPromptTemplate:
-		if s.agentPrompt == nil {
-			return nil, fmt.Errorf("%w: agent_prompt_template repo not configured", ErrUnknownDomain)
-		}
-		current, err := s.findAgentPromptByID(ctx, input.UserID, id)
-		if err != nil {
-			return nil, err
-		}
-		name := current.Name
-		if input.Key != nil {
-			name = *input.Key
-		}
-		category := current.Category
-		if input.Category != nil {
-			category = *input.Category
-		}
-		description := current.Description
-		if input.Description != nil {
-			description = *input.Description
-		}
-		systemPrompt := current.SystemPrompt
-		if input.PayloadJSON != nil {
-			sp, derr := decodeAgentPromptPayload(*input.PayloadJSON)
-			if derr != nil {
-				return nil, derr
-			}
-			systemPrompt = sp
-		}
-		m, err := s.agentPrompt.Update(ctx, id, input.UserID, name, category, description, systemPrompt)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := agentPromptTemplateToItem(m)
-		return &item, nil
-	case DomainUserTemplate:
-		if s.userTemplate == nil {
-			return nil, fmt.Errorf("%w: user_template repo not configured", ErrUnknownDomain)
-		}
-		current, err := s.findUserTemplateByID(ctx, input.UserID, id)
-		if err != nil {
-			return nil, err
-		}
-		name := current.Name
-		if input.Key != nil {
-			name = *input.Key
-		}
-		content := string(current.Content)
-		if input.PayloadJSON != nil {
-			content = *input.PayloadJSON
-		}
-		m, err := s.userTemplate.Update(ctx, id, input.UserID, name, content)
-		if err != nil {
-			return nil, err
-		}
-		if m == nil {
-			return nil, ErrNotFound
-		}
-		item := userTemplateToItem(m)
-		return &item, nil
-	default:
-		return nil, fmt.Errorf("%w: %s", ErrReadOnly, input.Domain)
+	if _, err := s.requireDomain(input.Domain); err != nil {
+		return nil, err
 	}
+	p, err := s.plugin(input.Domain)
+	if err != nil {
+		return nil, err
+	}
+	return p.Update(ctx, id, input.UserID, input)
 }
 
 func (s *AdapterStore) Delete(ctx context.Context, domain Domain, userID, id string) error {
-	switch domain {
-	case DomainPlatformSkill:
-		if s.platformSkill == nil {
-			return fmt.Errorf("%w: platform_skill repo not configured", ErrUnknownDomain)
-		}
-		deleted, err := s.platformSkill.Delete(ctx, id, userID)
-		if err != nil {
-			return err
-		}
-		if !deleted {
-			return ErrNotFound
-		}
-		return nil
-	case DomainAgentPromptTemplate:
-		if s.agentPrompt == nil {
-			return fmt.Errorf("%w: agent_prompt_template repo not configured", ErrUnknownDomain)
-		}
-		deleted, err := s.agentPrompt.Delete(ctx, id, userID)
-		if err != nil {
-			return err
-		}
-		if !deleted {
-			return ErrNotFound
-		}
-		return nil
-	case DomainUserTemplate:
-		if s.userTemplate == nil {
-			return fmt.Errorf("%w: user_template repo not configured", ErrUnknownDomain)
-		}
-		deleted, err := s.userTemplate.Delete(ctx, id, userID)
-		if err != nil {
-			return err
-		}
-		if !deleted {
-			return ErrNotFound
-		}
-		return nil
-	default:
-		return fmt.Errorf("%w: %s", ErrReadOnly, domain)
+	if _, err := s.requireDomain(domain); err != nil {
+		return err
 	}
-}
-
-func (s *AdapterStore) findPlatformSkillByID(ctx context.Context, userID, id string) (model.PlatformSkill, error) {
-	list, err := s.platformSkill.ListByUser(ctx, userID)
+	p, err := s.plugin(domain)
 	if err != nil {
-		return model.PlatformSkill{}, err
+		return err
 	}
-	for i := range list {
-		if list[i].ID == id {
-			return list[i], nil
-		}
-	}
-	return model.PlatformSkill{}, ErrNotFound
-}
-
-func (s *AdapterStore) findAgentPromptByID(ctx context.Context, userID, id string) (model.AgentPromptTemplate, error) {
-	list, err := s.agentPrompt.ListByUser(ctx, userID)
-	if err != nil {
-		return model.AgentPromptTemplate{}, err
-	}
-	for i := range list {
-		if list[i].ID == id {
-			return list[i], nil
-		}
-	}
-	return model.AgentPromptTemplate{}, ErrNotFound
-}
-
-func (s *AdapterStore) findUserTemplateByID(ctx context.Context, userID, id string) (model.UserTemplate, error) {
-	// Search across both subtypes — Update doesn't carry subtype, so we
-	// check tools and skills.
-	for _, t := range []string{"tools", "skills"} {
-		list, err := s.userTemplate.ListByUserAndType(ctx, userID, t)
-		if err != nil {
-			return model.UserTemplate{}, err
-		}
-		for i := range list {
-			if list[i].ID == id {
-				return list[i], nil
-			}
-		}
-	}
-	return model.UserTemplate{}, ErrNotFound
+	return p.Delete(ctx, id, userID)
 }
 
 // decodePlatformSkillPayload parses the JSON payload carried by Create /
@@ -479,7 +223,7 @@ func decodeAgentPromptPayload(raw string) (systemPrompt string, err error) {
 	return m["system_prompt"], nil
 }
 
-// ── model → Item converters ──────────────────────────────────────────────────
+// ── model -> Item converters ──────────────────────────────────────────────────
 
 func platformSkillToItem(m *model.PlatformSkill) Item {
 	payload := map[string]string{

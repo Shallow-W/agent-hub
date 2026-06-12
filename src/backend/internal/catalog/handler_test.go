@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -66,9 +65,11 @@ func decodeEnvelope(t *testing.T, w *httptest.ResponseRecorder) catalogEnvelope 
 func TestHandler_List_ToolDefinition_FromAdapter(t *testing.T) {
 	reg := DefaultRegistry()
 	store := NewAdapterStore(AdapterDeps{
-		ToolDef: &fakeToolDefRepo{items: []model.ToolDefinition{
-			{Name: "search_web", Label: "Search Web", Category: "MCP", Description: "Search the web", CreatedAt: time.Now()},
-		}},
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{items: []model.ToolDefinition{
+				{Name: "search_web", Label: "Search Web", Category: "MCP", Description: "Search the web", CreatedAt: time.Now()},
+			}}),
+		},
 		Registry: reg,
 	})
 	r := newTestRouter(t, store, reg)
@@ -96,9 +97,11 @@ func TestHandler_List_ToolDefinition_FromAdapter(t *testing.T) {
 func TestHandler_Get_ToolDefinition(t *testing.T) {
 	reg := DefaultRegistry()
 	store := NewAdapterStore(AdapterDeps{
-		ToolDef: &fakeToolDefRepo{items: []model.ToolDefinition{
-			{Name: "tool-x", Label: "Tool X", CreatedAt: time.Now()},
-		}},
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{items: []model.ToolDefinition{
+				{Name: "tool-x", Label: "Tool X", CreatedAt: time.Now()},
+			}}),
+		},
 		Registry: reg,
 	})
 	r := newTestRouter(t, store, reg)
@@ -120,7 +123,9 @@ func TestHandler_Get_ToolDefinition(t *testing.T) {
 func TestHandler_Get_NotFound(t *testing.T) {
 	reg := DefaultRegistry()
 	store := NewAdapterStore(AdapterDeps{
-		ToolDef:  &fakeToolDefRepo{},
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{}),
+		},
 		Registry: reg,
 	})
 	r := newTestRouter(t, store, reg)
@@ -133,7 +138,12 @@ func TestHandler_Get_NotFound(t *testing.T) {
 
 func TestHandler_Create_ReadOnlyDomain_405(t *testing.T) {
 	reg := DefaultRegistry()
-	store := NewAdapterStore(AdapterDeps{Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{}),
+		},
+		Registry: reg,
+	})
 	r := newTestRouter(t, store, reg)
 
 	w := do(t, r, http.MethodPost, "/api/catalog/tool_definition", map[string]string{
@@ -147,11 +157,9 @@ func TestHandler_Create_ReadOnlyDomain_405(t *testing.T) {
 func TestHandler_Create_UserScope(t *testing.T) {
 	reg := DefaultRegistry()
 	fake := newFakeStore()
-	store := composingStore{fake: fake, adapter: storeOrNil()}
 
 	// Replace the read-only AdapterStore with a hybrid: writes go to fake,
 	// reads also go to fake. This keeps the test focused on the handler.
-	_ = store
 	svc := NewService(fake, reg)
 	r := gin.New()
 	h := NewHandler(svc)
@@ -168,34 +176,14 @@ func TestHandler_Create_UserScope(t *testing.T) {
 	}
 }
 
-// composingStore is a placeholder for future compositions; currently unused
-// (kept so the test compiles cleanly without dead-code warnings).
-type composingStore struct {
-	fake    *fakeStore
-	adapter *AdapterStore
-}
-
-func (c composingStore) List(ctx context.Context, d Domain, q ListQuery) ([]Item, error) {
-	return c.fake.List(ctx, d, q)
-}
-func (c composingStore) GetByID(ctx context.Context, id string) (*Item, error) {
-	return c.fake.GetByID(ctx, id)
-}
-func (c composingStore) Create(ctx context.Context, in CreateInput) (*Item, error) {
-	return c.fake.Create(ctx, in)
-}
-func (c composingStore) Update(ctx context.Context, id string, in UpdateInput) (*Item, error) {
-	return c.fake.Update(ctx, id, in)
-}
-func (c composingStore) Delete(ctx context.Context, d Domain, userID, id string) error {
-	return c.fake.Delete(ctx, d, userID, id)
-}
-
-func storeOrNil() *AdapterStore { return nil }
-
 func TestHandler_DomainsHandler_ListsAllRegistered(t *testing.T) {
 	reg := DefaultRegistry()
-	store := NewAdapterStore(AdapterDeps{Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{}),
+		},
+		Registry: reg,
+	})
 	r := newTestRouter(t, store, reg)
 
 	w := do(t, r, http.MethodGet, "/api/catalog", nil)
@@ -214,7 +202,12 @@ func TestHandler_DomainsHandler_ListsAllRegistered(t *testing.T) {
 
 func TestHandler_List_UnknownDomain_404(t *testing.T) {
 	reg := DefaultRegistry()
-	store := NewAdapterStore(AdapterDeps{Registry: reg})
+	store := NewAdapterStore(AdapterDeps{
+		Plugins: map[Domain]DomainPlugin{
+			DomainToolDefinition: NewToolDefinitionPlugin(&fakeToolDefRepo{}),
+		},
+		Registry: reg,
+	})
 	r := newTestRouter(t, store, reg)
 
 	w := do(t, r, http.MethodGet, "/api/catalog/does_not_exist", nil)

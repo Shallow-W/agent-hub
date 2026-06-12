@@ -155,11 +155,13 @@ func main() {
 	// their legacy paths until B2/B3/B4.
 	catalogRegistry := catalog.DefaultRegistry()
 	catalogStore := catalog.NewAdapterStore(catalog.AdapterDeps{
-		PlatformSkill: platformSkillRepo,
-		ToolDef:       toolDefRepo,
-		AgentPrompt:   agentPromptTemplateRepo,
-		UserTemplate:  userTemplateRepo,
-		Registry:      catalogRegistry,
+		Plugins: map[catalog.Domain]catalog.DomainPlugin{
+			catalog.DomainPlatformSkill:       catalog.NewPlatformSkillPlugin(platformSkillRepo),
+			catalog.DomainToolDefinition:      catalog.NewToolDefinitionPlugin(toolDefRepo),
+			catalog.DomainAgentPromptTemplate: catalog.NewAgentPromptTemplatePlugin(agentPromptTemplateRepo),
+			catalog.DomainUserTemplate:        catalog.NewUserTemplatePlugin(userTemplateRepo),
+		},
+		Registry: catalogRegistry,
 	})
 	catalogSvc := catalog.NewService(catalogStore, catalogRegistry)
 	toolDefSvc.SetCatalogLister(toolDefinitionCatalogBridge{svc: catalogSvc})
