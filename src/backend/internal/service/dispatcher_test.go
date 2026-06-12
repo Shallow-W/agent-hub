@@ -602,16 +602,17 @@ func TestDispatcher_DispatchReturnsMessage(t *testing.T) {
 		MachineID: stringPtr("machine-d1"),
 	}
 	taskResult := "dispatched ok"
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	hub := newTestDaemonHub(t, "machine-d1")
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent: agent,
 			task:  &model.DaemonTask{ID: "task-d1", Status: "completed", Result: taskResult},
 		},
-		&fakeMsgRepo{},
-	)
-	hub := newTestDaemonHub(t, "machine-d1")
-	svc.SetDaemonHub(hub)
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 
 	go func() {
 		time.Sleep(10 * time.Millisecond)
@@ -763,11 +764,14 @@ func TestDispatcher_DispatchFailsWhenDaemonHubNil(t *testing.T) {
 
 // makeDispatcherTestSvc 构造一个用于 Dispatcher hook 测试的最小 svc：
 // 已连接的 daemonHub + 能落库的 fake msgRepo。
+//
+// P8a 后 setter 已删除，DaemonHub 通过 OrchestratorDeps.DaemonHub 一次性注入。
 func makeDispatcherTestSvc(t *testing.T, machineID string) (*OrchestratorService, *ws.DaemonHub) {
 	t.Helper()
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	hub := newTestDaemonHub(t, machineID)
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent: &model.Agent{
 				ID:        "agent-h",
 				Name:      "HookAgent",
@@ -776,10 +780,9 @@ func makeDispatcherTestSvc(t *testing.T, machineID string) (*OrchestratorService
 			},
 			task: &model.DaemonTask{ID: "task-h", Status: "completed", Result: "ok"},
 		},
-		&fakeMsgRepo{},
-	)
-	hub := newTestDaemonHub(t, machineID)
-	svc.SetDaemonHub(hub)
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 	return svc, hub
 }
 

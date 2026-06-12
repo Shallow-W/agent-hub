@@ -12,12 +12,18 @@ import (
 
 // DaemonTaskCreator 是 Dispatcher 创建 daemon task 所需的 agent 仓库子集。
 //
-// 取自 OrchAgentRepo.CreateDaemonTask 单方法，避免把整个 OrchAgentRepo 注入 Dispatcher。
+// P8a 后 OrchestratorService 持有 canonical repository.AgentStore；Dispatcher
+// 仍保留此窄接口（仅 CreateDaemonTask 单方法），把「派发」与「查询」职责分离。
+// repository.AgentStore 自动满足 DaemonTaskCreator（结构化接口）。
 type DaemonTaskCreator interface {
 	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
 }
 
 // MessagePersister 是 Dispatcher 落库 assistant 消息所需的 msg 仓库子集。
+//
+// P8a 后 OrchestratorService 持有 canonical repository.MessageStore；Dispatcher
+// 仍保留此窄接口（Create + SaveArtifacts 两方法），隔离 Dispatcher 的最小依赖面。
+// repository.MessageStore 自动满足 MessagePersister。
 type MessagePersister interface {
 	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error)
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error

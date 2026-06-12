@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -163,22 +164,23 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 		},
 	}
 
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{
-			conv:       &model.Conversation{ID: convID},
-			convAgents: convAgents,
-		},
-		agentRepo,
-		&fakeMsgRepo{},
-	)
-
 	// Wire up DaemonHub so dispatch path works
 	hub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	defer hubCancel()
 	go hub.Run(hubCtx)
 	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(hub)
+
+	// P8a: setter 已删除，直接通过 OrchestratorDeps.DaemonHub 一次性注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{
+			conv:       &model.Conversation{ID: convID},
+			convAgents: convAgents,
+		},
+		AgentRepo: agentRepo,
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 
 	// Resolve both tasks after their result channels are registered. A fixed
 	// sleep can race ahead of task creation and drop fake daemon results.
@@ -241,7 +243,11 @@ func TestRouteMention_ConcurrentOrchestration_BothSucceed(t *testing.T) {
 
 // slowConcurrentAgentRepo adds a delay in GetDaemonTask so the first
 // orchestrator stays active long enough for the second to hit the guard.
+//
+// P8a 后 OrchestratorService 持有 canonical repository.AgentStore；
+// 此 fake 通过嵌入 repository.AgentStore 让未覆盖的方法自动走 nil/zero 路径。
 type slowConcurrentAgentRepo struct {
+	repository.AgentStore
 	agent         *model.Agent
 	completedTask *model.DaemonTask
 	onCreate      func()
@@ -404,22 +410,23 @@ func TestOrchestratorName_Empty_DefaultsToOrchestrator(t *testing.T) {
 		Result: "直接回复，不派发",
 	}
 
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{
-			conv:       &model.Conversation{ID: "c1"},
-			convAgents: []model.ConversationAgent{{AgentID: "orch-1", Name: "Orch"}},
-		},
-		&fakeOrchAgentRepo{agent: agent, task: task, inConv: true},
-		&fakeMsgRepo{},
-	)
-
 	// Wire up DaemonHub
 	hub := ws.NewDaemonHub(slog.Default())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	defer hubCancel()
 	go hub.Run(hubCtx)
 	hub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
-	svc.SetDaemonHub(hub)
+
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{
+			conv:       &model.Conversation{ID: "c1"},
+			convAgents: []model.ConversationAgent{{AgentID: "orch-1", Name: "Orch"}},
+		},
+		AgentRepo: &fakeOrchAgentRepo{agent: agent, task: task, inConv: true},
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 
 	// Resolve task in background
 	go func() {

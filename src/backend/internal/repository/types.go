@@ -61,6 +61,7 @@ type ConvStore interface {
 	RemoveAgent(ctx context.Context, conversationID, agentID, userID string) (bool, error)
 	UpdateAgentRole(ctx context.Context, conversationID, agentID, role string) error
 	GetOrchestrator(ctx context.Context, conversationID string) (*model.ConversationAgent, error)
+	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
 }
 
 // AgentStore is the canonical interface for agent persistence.
@@ -93,6 +94,8 @@ type AgentStore interface {
 	MarkMachineAgentsStopped(ctx context.Context, machineID string) error
 	UpdateMachineAPIKey(ctx context.Context, id, apiKeyHash string) error
 	DeleteOwned(ctx context.Context, id, userID string) (bool, error)
+	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
+	SetDaemonTaskOrch(ctx context.Context, taskID, orchTaskID, workerName string)
 }
 
 // OrchTaskStore is the canonical interface for orchestration task persistence.

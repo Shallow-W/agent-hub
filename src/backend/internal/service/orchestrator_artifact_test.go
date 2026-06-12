@@ -11,15 +11,23 @@ import (
 )
 
 // buildEditService 组装一个可跑 AIEditArtifact 的 service（含 daemon hub）。
+//
+// P8a 后 setter 已删除，所有依赖通过 OrchestratorDeps 一次性注入。
 func buildEditService(t *testing.T, convRepo *fakeOrchConvRepo, agentRepo *fakeOrchAgentRepo, msgRepo *fakeMsgRepo, artRepo *fakeArtifactRepo, machineID string) (*OrchestratorService, *ws.DaemonHub) {
 	t.Helper()
-	svc := NewOrchestratorService(convRepo, agentRepo, msgRepo)
-	svc.SetArtifactRepo(artRepo)
+	deps := OrchestratorDeps{
+		ConvRepo:     convRepo,
+		AgentRepo:    agentRepo,
+		MsgRepo:      msgRepo,
+		ArtifactRepo: artRepo,
+	}
 	if machineID != "" {
 		hub := newTestDaemonHub(t, machineID)
-		svc.SetDaemonHub(hub)
+		deps.DaemonHub = hub
+		svc := NewOrchestratorServiceWithDeps(deps)
 		return svc, hub
 	}
+	svc := NewOrchestratorServiceWithDeps(deps)
 	return svc, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -31,7 +32,12 @@ func newTestDaemonHub(t *testing.T, machineID string) *ws.DaemonHub {
 	return hub
 }
 
+// fakeOrchConvRepo 实现测试所需的 repository.ConvStore 子集。
+// P8a 后 OrchestratorService 持有 canonical repository.ConvStore；
+// 此 fake 通过嵌入 repository.ConvStore 让未覆盖的方法自动走 nil/zero 路径，
+// 测试只显式实现用到的 4 个方法（GetByID / ListAgents / GetMember / ListMemberIDs）。
 type fakeOrchConvRepo struct {
+	repository.ConvStore
 	conv       *model.Conversation
 	convAgents []model.ConversationAgent
 	convErr    error
@@ -56,7 +62,11 @@ func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string,
 	return []string{}, nil
 }
 
+// fakeOrchAgentRepo 实现测试所需的 repository.AgentStore 子集。
+// 同上：嵌入 repository.AgentStore 让未覆盖的方法自动 nil-safe；
+// 测试只显式实现用到的 6 个方法。
 type fakeOrchAgentRepo struct {
+	repository.AgentStore
 	agent    *model.Agent
 	agents   map[string]*model.Agent
 	agentErr error
@@ -269,19 +279,19 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 
 	taskResult := "hello world"
 
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	// Wire up DaemonHub with fake connected client
+	hub := newTestDaemonHub(t, "machine-1")
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent:  agent,
 			inConv: true,
 			task:   &model.DaemonTask{ID: "task-2", Status: "completed", Result: taskResult},
 		},
-		&fakeMsgRepo{},
-	)
-
-	// Wire up DaemonHub with fake connected client
-	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 
 	// Resolve the task promise in background after a short delay
 	// (dispatch path registers the promise then waits on it)
@@ -318,18 +328,18 @@ func TestDispatchSingleAgent_SetsReplyToSourceMessage(t *testing.T) {
 	}
 	msgRepo := &fakeMsgRepo{}
 	taskResult := "worker reply"
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	hub := newTestDaemonHub(t, "machine-1")
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent:  agent,
 			inConv: true,
 			task:   &model.DaemonTask{ID: "task-reply", Status: "completed", Result: taskResult},
 		},
-		msgRepo,
-	)
-
-	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+		MsgRepo:   msgRepo,
+		DaemonHub: hub,
+	})
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		hub.ResolveTask("task-reply", &ws.TaskResult{
@@ -391,15 +401,15 @@ func TestHandleOrchestratedDispatchReturnsMessageWhenLifecycleCreateFails(t *tes
 			toResolve <- event
 		},
 	}
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		agentRepo,
-		msgRepo,
-	)
-	svc.SetOrchTaskRepo(failingOrchTaskStore{})
-
 	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+	// P8a: setter 已删除，DaemonHub + OrchTaskRepo 通过 OrchestratorDeps 一次性注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo:     &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo:    agentRepo,
+		MsgRepo:      msgRepo,
+		OrchTaskRepo: failingOrchTaskStore{},
+		DaemonHub:    hub,
+	})
 	go func() {
 		for event := range toResolve {
 			time.Sleep(10 * time.Millisecond)

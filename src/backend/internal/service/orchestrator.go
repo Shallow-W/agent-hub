@@ -8,40 +8,9 @@ import (
 	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/pkg/ws"
 )
-
-// OrchConvRepo queries conversation agents for @mention resolution.
-// Deprecated: migrate to repository.ConvStore for canonical interface.
-type OrchConvRepo interface {
-	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
-	GetByID(ctx context.Context, id string) (*model.Conversation, error)
-	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
-	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
-}
-
-// OrchAgentRepo queries agent details and creates daemon tasks.
-// Deprecated: migrate to repository.AgentStore for canonical interface.
-type OrchAgentRepo interface {
-	GetByID(ctx context.Context, id string) (*model.Agent, error)
-	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
-	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
-	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
-	SetDaemonTaskOrch(ctx context.Context, taskID, orchTaskID, workerName string)
-	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
-}
-
-// OrchTaskStore 定义编排任务的 DB 操作。
-type OrchTaskStore interface {
-	Create(ctx context.Context, task *model.OrchTask) error
-	GetByID(ctx context.Context, id string) (*model.OrchTask, error)
-	UpdateStatus(ctx context.Context, id, status string) error
-	UpdateDispatchMessageID(ctx context.Context, id, messageID string) error
-	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
-	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
-	SetSummaryAndEvaluate(ctx context.Context, id, summary string) error
-	IncrementRound(ctx context.Context, id string) error
-}
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
 type RouteResult struct {
@@ -58,19 +27,19 @@ type DispatchInfo struct {
 }
 
 // OrchKBResolver resolves knowledge base references from message text.
+//
+// P8a: 此 subset interface 保留，因为 ResolveKnowledgeRef 横跨「KB + 用户名校验」
+// 两个领域，且当前实现是 KnowledgeService（service 层），不属于 repository.KnowledgeStore
+// 的纯持久化范畴。强行把它合并到 canonical KnowledgeStore 会污染 domain 边界。
 type OrchKBResolver interface {
 	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
 }
 
-// OrchArtifactRepo 产物访问能力，用于 AI 编辑产物（取最新版本、回溯对话、创建新版本）。
-type OrchArtifactRepo interface {
-	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
-	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
-	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
-}
-
 // OrchDeliveryState stores transient delivery state for async orchestrator messages.
 // Message rows are already persisted; Redis is only used for offline delivery and unread counts.
+//
+// P8a: 此 subset interface 保留，因为它属于 Redis 投递层（offline queue + unread counters），
+// 与 repository.MessageStore（PG 持久化）职责正交，合到 canonical 会混淆持久化与缓存边界。
 type OrchDeliveryState interface {
 	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
@@ -78,10 +47,10 @@ type OrchDeliveryState interface {
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
-	convRepo     OrchConvRepo
-	agentRepo    OrchAgentRepo
-	msgRepo      MsgRepo
-	orchTaskRepo OrchTaskStore
+	convRepo     repository.ConvStore
+	agentRepo    repository.AgentStore
+	msgRepo      repository.MessageStore
+	orchTaskRepo repository.OrchTaskStoreCanon
 
 	tokenIssuer *TokenIssuer
 	serverURL   string
@@ -89,7 +58,7 @@ type OrchestratorService struct {
 
 	kbResolver   OrchKBResolver
 	daemonHub    *ws.DaemonHub
-	artifactRepo OrchArtifactRepo
+	artifactRepo repository.ArtifactStore
 	notifier     MessageNotifier
 	delivery     OrchDeliveryState
 	taskSvc      TaskBoardSync
@@ -125,12 +94,6 @@ type OrchestratorService struct {
 	dispatcher *Dispatcher
 }
 
-// SetTokenIssuer sets the token issuer for generating management tool tokens.
-// Deprecated: use NewOrchestratorServiceWithDeps(OrchestratorDeps{TokenIssuer: ...}).
-func (s *OrchestratorService) SetTokenIssuer(ti *TokenIssuer) {
-	s.tokenIssuer = ti
-}
-
 // SetUploadDir 注入上传文件根目录，用于服务端抽取附件文本。
 func (s *OrchestratorService) SetUploadDir(dir string) {
 	s.uploadDir = dir
@@ -139,70 +102,9 @@ func (s *OrchestratorService) SetUploadDir(dir string) {
 // attachmentTextMaxRunes 单个附件注入上下文的最大字符数。
 const attachmentTextMaxRunes = 6000
 
-// SetServerURL sets the server base URL for management tool API calls.
-// Deprecated: use OrchestratorDeps.ServerURL.
-func (s *OrchestratorService) SetServerURL(url string) {
-	s.serverURL = url
-}
-
-// SetKBResolver sets the knowledge base resolver for injecting KB context.
-// Deprecated: use OrchestratorDeps.KBResolver.
-func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
-	s.kbResolver = resolver
-}
-
-// SetDaemonHub sets the daemon WebSocket hub for task dispatch.
-// Deprecated: use OrchestratorDeps.DaemonHub.
-//
-// 注意：P7 后 Dispatcher 不再反向依赖 svc，持有独立的 deps.DaemonHub。
-// SetDaemonHub 同步更新 svc.daemonHub 与（若已构造）svc.dispatcher.deps.DaemonHub，
-// 保证旧 setter 路径（包括现有测试 makeDispatcherTestSvc）继续可用，零行为变更。
-func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
-	if s.dispatcher != nil {
-		s.dispatcher.deps.DaemonHub = hub
-	}
-}
-
-// SetArtifactRepo sets the artifact repository used for AI editing artifacts.
-// Deprecated: use OrchestratorDeps.ArtifactRepo.
-func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
-	s.artifactRepo = repo
-}
-
-// SetOrchTaskRepo sets the orchestration task store.
-// Deprecated: use OrchestratorDeps.OrchTaskRepo.
-func (s *OrchestratorService) SetOrchTaskRepo(repo OrchTaskStore) {
-	s.orchTaskRepo = repo
-}
-
-// SetNotifier injects the message notifier for pushing async messages to user WS.
-// Deprecated: use OrchestratorDeps.Notifier.
-func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
-	s.notifier = n
-}
-
-// SetDeliveryState injects transient delivery state storage.
-// Deprecated: use OrchestratorDeps.Delivery.
-func (s *OrchestratorService) SetDeliveryState(c OrchDeliveryState) {
-	s.delivery = c
-}
-
-// SetCacher is kept for compatibility with older wiring code.
-// Deprecated: use OrchestratorDeps.Delivery.
-func (s *OrchestratorService) SetCacher(c OrchDeliveryState) {
-	s.SetDeliveryState(c)
-}
-
-// SetTaskSvc injects the task board sync service.
-// Deprecated: use OrchestratorDeps.TaskSvc.
-func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
-	s.taskSvc = svc
-}
-
 // NewOrchestratorService creates a new orchestrator service.
 // Deprecated: use NewOrchestratorServiceWithDeps for explicit dependency injection.
-func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
+func NewOrchestratorService(convRepo repository.ConvStore, agentRepo repository.AgentStore, msgRepo repository.MessageStore) *OrchestratorService {
 	svc := &OrchestratorService{
 		convRepo:   convRepo,
 		agentRepo:  agentRepo,
@@ -224,16 +126,16 @@ func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgR
 // OrchestratorDeps bundles all optional dependencies for OrchestratorService.
 // Use NewOrchestratorServiceWithDeps to construct the service with all deps at once.
 type OrchestratorDeps struct {
-	ConvRepo     OrchConvRepo
-	AgentRepo    OrchAgentRepo
-	MsgRepo      MsgRepo
-	OrchTaskRepo OrchTaskStore
+	ConvRepo     repository.ConvStore
+	AgentRepo    repository.AgentStore
+	MsgRepo      repository.MessageStore
+	OrchTaskRepo repository.OrchTaskStoreCanon
 	TokenIssuer  *TokenIssuer
 	ServerURL    string
 	UploadDir    string
 	KBResolver   OrchKBResolver
 	DaemonHub    *ws.DaemonHub
-	ArtifactRepo OrchArtifactRepo
+	ArtifactRepo repository.ArtifactStore
 	Notifier     MessageNotifier
 	Delivery     OrchDeliveryState
 	TaskSvc      TaskBoardSync
