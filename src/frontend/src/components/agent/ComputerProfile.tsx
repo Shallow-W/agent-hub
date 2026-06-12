@@ -12,7 +12,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
-import { managementTools } from '@/config/catalogConfig';
+import { hasManagementToolsInConfig } from '@/config/catalogConfig';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -53,18 +53,6 @@ const agentStatusColor: Record<Agent['status'], string> = {
   error: 'red',
   stopped: 'default',
 };
-
-// managementTools imported from config/catalogConfig
-
-function hasManagementTools(toolsConfig: string): boolean {
-  try {
-    const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
-    return Array.isArray(cfg.allowed_tools)
-      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && managementTools.has(tool));
-  } catch {
-    return false;
-  }
-}
 
 function inferOS(machine: DaemonMachine): string {
   const text = `${machine.name} ${machine.machine_id}`.toLowerCase();
@@ -153,7 +141,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       system_prompt: systemPrompt,
       tools_config: toolsConfig,
       custom_skills: customSkills,
-      enable_management_tools: hasManagementTools(toolsConfig),
+      enable_management_tools: hasManagementToolsInConfig(toolsConfig),
     });
   };
 

@@ -26,7 +26,7 @@ interface PlatformSkillPayload {
   detail?: string;
 }
 
-function itemToSkill(item: CatalogItem): PlatformSkill {
+export function itemToSkill(item: CatalogItem): PlatformSkill {
   let payload: PlatformSkillPayload = {};
   if (item.payload) {
     try {

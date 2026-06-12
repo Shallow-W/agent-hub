@@ -44,6 +44,20 @@ export const managementTools = new Set([
   'delete_agent',
 ]);
 
+export function hasManagementToolsInArray(tools: string[]): boolean {
+  return tools.some((tool) => managementTools.has(tool));
+}
+
+export function hasManagementToolsInConfig(toolsConfig: string): boolean {
+  try {
+    const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
+    return Array.isArray(cfg.allowed_tools)
+      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && managementTools.has(tool));
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Skill category shortcuts (previously inline in AgentSkillsPanel.tsx)
 // ---------------------------------------------------------------------------

@@ -17,10 +17,11 @@ import { defaultSkillCategories } from '@/config/catalogConfig';
 import {
   createPlatformSkill,
   deletePlatformSkill,
-  getPlatformSkills,
   importDefaultPlatformSkills,
   updatePlatformSkill,
+  itemToSkill,
 } from '@/api/platformSkill';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import { parseSkills, skillsToPlatformJSON } from './agentPresentation';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import type { Skill } from './agentPresentation';
@@ -56,6 +57,12 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   const [createForm, setCreateForm] = useState({ name: '', category: '', description: '', trigger: '', detail: '' });
   const [dbTemplates, setDbTemplates] = useState<UserTemplate[]>([]);
 
+  const { items: rawSkills, refetch: refetchCatalogSkills } = useCatalogDomain('platform_skill');
+
+  useEffect(() => {
+    setLibrarySkills(rawSkills.map(itemToSkill));
+  }, [rawSkills]);
+
   useEffect(() => {
     const nextSkills = parseSkills(agent.custom_skills);
     setBaseSkills(parseSkills(agent.capabilities_json));
@@ -64,22 +71,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     setSelectedLibrarySkillID(null);
     setDetailOpen(false);
   }, [agent.id, agent.capabilities_json, agent.custom_skills]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLibraryLoading(true);
-    getPlatformSkills()
-      .then((items) => {
-        if (!cancelled) setLibrarySkills(items);
-      })
-      .catch(() => {
-        if (!cancelled) message.error('查询平台 Skill 库失败');
-      })
-      .finally(() => {
-        if (!cancelled) setLibraryLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     listUserTemplates('skills')
@@ -183,7 +174,8 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
   }, [librarySkills, categoryFilter, searchQuery]);
 
   const refreshLibrarySkills = async () => {
-    const items = await getPlatformSkills();
+    const rawItems = await refetchCatalogSkills();
+    const items = rawItems.map(itemToSkill);
     setLibrarySkills(items);
     return items;
   };

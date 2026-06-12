@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, Modal, Select } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
 import { message } from '@/utils/message';
-import type { AgentCandidate, PlatformSkill } from '@/types/agent';
+import type { AgentCandidate } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
-import { getPlatformSkills } from '@/api/platformSkill';
+import { itemToSkill } from '@/api/platformSkill';
 import { quickTemplates } from '@/config/catalogConfig';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import {
   categoryMeta,
   categoryOrder,
@@ -41,12 +42,14 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
-  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const [skillFilter, setSkillFilter] = useState<string>('all');
   const [skillTemplate, setSkillTemplate] = useState('none');
   const [toolManageOpen, setToolManageOpen] = useState(false);
   const [skillManageOpen, setSkillManageOpen] = useState(false);
+
+  const { items: rawSkills } = useCatalogDomain('platform_skill');
+  const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
 
   const options = useMemo(
     () => candidates.map((candidate) => ({
@@ -74,7 +77,6 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         setSelectedTools(getTemplateTools('tasks'));
       })
       .catch(() => {});
-    getPlatformSkills().then(setLibrarySkills).catch(() => {});
   }, [open, candidates]);
 
   const filteredTools = useMemo(() => {

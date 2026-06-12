@@ -13,8 +13,8 @@ import {
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { useCatalogStore } from '@/store/catalogStore';
-import { managementTools } from '@/config/catalogConfig';
+import { hasManagementToolsInArray } from '@/config/catalogConfig';
+import { getPlatformSkills } from '@/api/platformSkill';
 import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -52,12 +52,6 @@ const tabItems = [
   { key: 'skills', label: '技能' },
   { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
 ];
-
-// managementTools imported from config/catalogConfig
-
-function hasManagementTools(tools: string[]): boolean {
-  return tools.some((tool) => managementTools.has(tool));
-}
 
 function getStatusText(agent: Agent): string {
   return agent.status === 'online' ? 'Online' : agent.status;
@@ -143,26 +137,9 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSelectedTools(parsedTools.allowedTools);
   }, [agent?.id, agent?.tools_config, catalogReady]);
 
-  const fetchDomain = useCatalogStore((s) => s.fetchDomain);
-
   useEffect(() => {
-    fetchDomain('platform_skill')
-      .then((items) => {
-        const mapped = items.map((ci) => ({
-          id: ci.id,
-          user_id: ci.user_id ?? '',
-          name: ci.key,
-          category: ci.category,
-          description: ci.description,
-          trigger: undefined as string | undefined,
-          detail: undefined as string | undefined,
-          created_at: ci.created_at,
-          updated_at: ci.updated_at,
-        }));
-        setLibrarySkills(mapped);
-      })
-      .catch(() => {});
-  }, [fetchDomain]);
+    getPlatformSkills().then(setLibrarySkills).catch(() => {});
+  }, []);
 
   useEffect(() => {
     listUserTemplates('tools').then(setDbToolTemplates).catch(() => {});
@@ -339,7 +316,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
         custom_skills: agent.custom_skills ?? '',
-        enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementTools(selectedTools),
+        enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementToolsInArray(selectedTools),
       });
       message.success('工具配置已保存');
     } catch {
