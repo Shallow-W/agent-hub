@@ -7,6 +7,10 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
+// CliToolSpec 注册表：把原本散落在 commandForTask / ensureGlobalMcpConfigs /
+// skillRoots / scanAgents 四处分支点的 CLI 行为（claude/codex/opencode/openclaw）
+// 收敛为 spec 对象。新增 CLI 只需在 cli/index.js 加一个工厂，零修改分发函数。
+const cliTools = require('../cli');
 const EXEC_TIMEOUT_MS = 400000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
@@ -205,40 +209,15 @@ function opencodeContextChanged(task, savedSessionId) {
   return Boolean(task && task.agent_id && task.conversation_id);
 }
 
-// ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
-// 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
+// ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex/opencode）在启动时
+// 幂等写入全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
 // 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
+// 改造后：遍历所有已注册 CliToolSpec，调用其可选 ensureMcp(mcpArgs) 钩子。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
-  registerOpenClawMcp(mcpArgs);
-  registerOpenCodeMcp(mcpArgs);
-  registerCodexMcp(mcpArgs);
-}
-
-function registerOpenClawMcp(mcpArgs) {
-  const command = 'openclaw';
-  if (commandVersion(command) === null) return;
-  const value = JSON.stringify({ command: 'node', args: mcpArgs });
-  const spec = processSpec(command, ['mcp', 'set', 'agenthub-platform', value]);
-  const result = spawnSync(spec.command, spec.args, {
-    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  if (result.status === 0) {
-    logFlow('info', 'mcp_config.openclaw_configured', { server: 'agenthub-platform' });
-  } else {
-    logFlow('warn', 'mcp_config.openclaw_failed', { error: firstLine(result.stderr || result.stdout) });
-  }
-}
-
-function registerOpenCodeMcp(mcpArgs) {
-  const command = resolveCommand('opencode');
-  if (commandVersion(command) === null) return;
-  try {
-    const configPath = ensureOpenCodeMcpConfig(['node', ...mcpArgs]);
-    logFlow('info', 'mcp_config.opencode_configured', { server: 'agenthub-platform', file: configPath });
-  } catch (err) {
-    logFlow('warn', 'mcp_config.opencode_failed', { error: errorMessage(err) });
+  for (const spec of cliTools.allCliTools()) {
+    if (typeof spec.ensureMcp === 'function') spec.ensureMcp(mcpArgs);
   }
 }
 
@@ -269,23 +248,6 @@ function ensureOpenCodeMcpConfig(command) {
   return configPath;
 }
 
-function registerCodexMcp(mcpArgs) {
-  const command = resolveCommand('codex');
-  if (commandVersion(command) === null) return;
-  // 幂等：先移除旧条目（忽略不存在的报错），再新增。
-  const remove = processSpec(command, ['mcp', 'remove', 'agenthub-platform']);
-  spawnSync(remove.command, remove.args, { timeout: 15000, windowsHide: true, stdio: 'ignore' });
-  const add = processSpec(command, ['mcp', 'add', 'agenthub-platform', '--', 'node', ...mcpArgs]);
-  const result = spawnSync(add.command, add.args, {
-    encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  if (result.status === 0) {
-    logFlow('info', 'mcp_config.codex_configured', { server: 'agenthub-platform' });
-  } else {
-    logFlow('warn', 'mcp_config.codex_failed', { error: firstLine(result.stderr || result.stdout) });
-  }
-}
-
 function killSessionProcess(sessionId) {
   const child = activeSessions.get(sessionId);
   if (!child) return;
@@ -304,28 +266,15 @@ const OPEN_PATH_TIMEOUT_MS = 5000;
 const MIN_DESCRIPTION_CHARS = 6;
 const OPEN_PATH_TOOL = '__agenthub_open_path__';
 
-const CANDIDATES = [
-  {
-    name: 'Claude Code',
-    cli_tool: 'claude',
-    capabilities: defaultSkills(['coding', 'review', 'orchestration']),
-  },
-  {
-    name: 'Codex',
-    cli_tool: 'codex',
-    capabilities: defaultSkills(['coding', 'review']),
-  },
-  {
-    name: 'OpenCode',
-    cli_tool: 'opencode',
-    capabilities: defaultSkills(['coding']),
-  },
-  {
-    name: 'OpenClaw',
-    cli_tool: 'openclaw',
-    capabilities: defaultSkills(['coding']),
-  },
-];
+// CANDIDATES 现在由 CliToolSpec Registry 派生（见 initCliTools 调用点）。
+// 每次调用都重新映射，确保注册表变化（测试替换 spec）即时反映。
+function getCandidates() {
+  return cliTools.allCliTools().map((spec) => ({
+    name: spec.name,
+    cli_tool: spec.cliTool,
+    capabilities: spec.defaultCapabilities,
+  }));
+}
 
 function defaultSkills(names) {
   return names.map((name) => ({
@@ -434,11 +383,6 @@ function codexLoginStatus(command) {
   return `${result.stdout || ''}${result.stderr || ''}`.trim();
 }
 
-function isCodexAuthenticated(command) {
-  const status = codexLoginStatus(command);
-  return status !== null && /\blogged in\b/i.test(status);
-}
-
 function existingFile(value) {
   return value && fs.existsSync(value) ? value : null;
 }
@@ -523,15 +467,18 @@ function resolveCommand(cliTool) {
 }
 
 function scanAgents() {
-  return CANDIDATES
+  return getCandidates()
     .map((candidate) => {
+      const spec = cliTools.getCliTool(candidate.cli_tool);
       const command = resolveCommand(candidate.cli_tool);
-      if (candidate.cli_tool === 'codex') {
-        console.log(`Codex command resolved: ${command}`);
+      // 保留原 codex 调试日志（onResolvedCommand 钩子，仅 codex 实现）。
+      if (spec && typeof spec.onResolvedCommand === 'function') {
+        spec.onResolvedCommand(command);
       }
       const version = commandVersion(command);
       if (version === null) return null;
-      if (candidate.cli_tool === 'codex' && !isCodexAuthenticated(command)) return null;
+      // 登录态检测委托给 spec.isAuthenticated（仅 codex 实现 isCodexAuthenticated）。
+      if (spec && typeof spec.isAuthenticated === 'function' && !spec.isAuthenticated(command)) return null;
       const skills = scanSkills(candidate.cli_tool);
       return {
         name: candidate.name,
@@ -636,33 +583,13 @@ function openClawInstallSkillRoots(home) {
 }
 
 function skillRoots(cliTool) {
-  const roots = [];
+  // 委托给 CliToolSpec.skillRoots（claude/codex/opencode/openclaw 各自实现）。
+  // 未知 CLI 返回空数组，与原 if-else 链未匹配分支行为一致。
+  const spec = cliTools.getCliTool(cliTool);
+  if (!spec || typeof spec.skillRoots !== 'function') return [];
   const cwd = process.cwd();
   const home = os.homedir();
-  const includeProjectRoots = !isAgentHubWorkspace(cwd);
-  if (cliTool === 'claude') {
-    if (includeProjectRoots) addRoot(roots, path.join(cwd, '.claude', 'skills'));
-    if (home) addRoot(roots, path.join(home, '.claude', 'skills'));
-    if (home) addRoot(roots, path.join(home, '.claude', 'plugins', 'marketplaces'));
-    if (home) addRoot(roots, path.join(home, '.claude', 'plugins', 'cache'));
-  } else if (cliTool === 'codex') {
-    if (includeProjectRoots) addRoot(roots, path.join(cwd, '.agents', 'skills'));
-    if (home) addRoot(roots, path.join(home, '.codex', 'skills'));
-  } else if (cliTool === 'opencode' || cliTool === 'openclaw') {
-    if (includeProjectRoots) {
-      addRoot(roots, path.join(cwd, '.opencode', 'skills'));
-      addRoot(roots, path.join(cwd, '.openclaw', 'skills'));
-    }
-    if (home) addRoot(roots, path.join(home, '.opencode', 'skills'));
-    if (home) addRoot(roots, path.join(home, '.openclaw', 'skills'));
-    if (home) addRoot(roots, path.join(home, '.openclaw', 'plugin-skills'));
-    if (home) {
-      for (const root of openClawInstallSkillRoots(home)) {
-        addRoot(roots, root);
-      }
-    }
-  }
-  return roots;
+  return spec.skillRoots(cwd, home);
 }
 
 function parseSkillFile(fallbackName, sourcePath, content) {
@@ -981,126 +908,60 @@ function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId
   return configFile;
 }
 
+// initCliToolsCtx 是传给 CliToolSpec 工厂的依赖注入对象。
+// 包含 spec 实现需要的全部 daemon 辅助函数（避免 spec 直接 require 主文件造成循环依赖）。
+// 新增 spec 时若需要新辅助函数，在此对象补一个键即可。
+const initCliToolsCtx = {
+  // 通用工具
+  pathJoin: path.join,
+  tmpdir: os.tmpdir,
+  addRoot,
+  errorMessage,
+  firstLine,
+  logFlow,
+  // 命令解析 / 版本检测
+  resolveCommand,
+  commandVersion,
+  processSpec,
+  spawnSync,
+  // prompt / context 辅助
+  buildPlatformMcpArgs,
+  buildAgentHubContextEnv,
+  buildPlatformMcpServerArgs,
+  makeSessionId,
+  sessionKeyForTask,
+  opencodeContextChanged,
+  // codex 专用
+  ensureAgentHubCodexHome,
+  ensureAgentHubCodexMcpConfig,
+  ensureTaskWorkdir,
+  codexLoginStatus,
+  // opencode 专用
+  ensureOpenCodeMcpConfig,
+  // skill 扫描辅助
+  isAgentHubWorkspace,
+  openClawInstallSkillRoots,
+  // 默认能力构造（CANDIDATES 派生用）
+  defaultSkills,
+  // conversationSessions（运行时可变的会话映射）
+  conversationSessions,
+};
+
+// 启动时注册 4 个 CLI spec。函数声明会被提升，此处所有辅助函数已可用。
+cliTools.initCliTools(initCliToolsCtx);
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
-  if (task.cli_tool === 'codex') {
-    const codexHome = ensureAgentHubCodexHome();
-    ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id);
-    const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
-    const codexMcpFallback = [
-      '[Codex MCP 适配]',
-      '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
-      '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
-      '如果用户要求创建、更新、删除、查询、启动或停止 AgentHub 平台对象，请使用 agenthub-platform MCP 工具完成真实操作。',
-      '如果 agenthub-platform MCP 工具不可用，请明确说明不可用的具体工具名和原因，不要声称只有临时子代理工具。',
-      '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
-      '',
-    ].join('\n');
-    const effectivePrompt = systemPrompt
-      ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
-      : `${codexMcpFallback}${userPrompt}`;
-    const execArgs = [
-      '--skip-git-repo-check',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--ephemeral',
-      '--color',
-      'never',
-      '--output-last-message',
-      outputFile,
-    ];
-    return {
+  // 委托给 CliToolSpec.buildCommand。未知 cli_tool 走 fallback（保留原 default 分支行为）。
+  const spec = cliTools.getCliTool(task.cli_tool);
+  if (spec && typeof spec.buildCommand === 'function') {
+    return spec.buildCommand(task, {
       command,
-      args: ['exec', ...execArgs, effectivePrompt],
-      outputFile,
-      cwd: ensureTaskWorkdir(task),
-      env: {
-        CODEX_HOME: codexHome,
-        ...buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
-      },
-    };
-  }
-  if (task.cli_tool === 'opencode') {
-    const sessionKey = sessionKeyForTask(task);
-    const savedSessionId = sessionKey ? conversationSessions.get(sessionKey) : '';
-    const effectivePrompt = systemPrompt
-      ? `[系统指令]\n${systemPrompt}\n\n${userPrompt}`
-      : userPrompt;
-    const args = [
-      'run',
-      '--format',
-      'json',
-      '--no-replay',
-      '--dangerously-skip-permissions',
-    ];
-    if (savedSessionId) {
-      args.push('--session', savedSessionId);
-      if (opencodeContextChanged(task, savedSessionId)) {
-        // OpenCode caches available tools in a session; fork so AgentHub tool changes take effect.
-        args.push('--fork');
-      }
-    }
-    args.push(effectivePrompt);
-    return {
-      command,
-      args,
-      resultFormat: 'opencode-json',
-      persistSessionKey: sessionKey,
-      env: buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
-    };
-  }
-  if (task.cli_tool === 'claude') {
-    const sessionId = task._sessionId || (task.conversation_id && task.agent_id
-      ? makeSessionId(task.conversation_id, task.agent_id)
-      : null);
-    // Check if this agent is in persistent mode (registered via agent.start)
-    const persistent = task.agent_id && runningAgents.has(task.agent_id);
-    const args = [
-      '-p',
-      '--output-format',
-      'text',
-      '--thinking',
-      'off',
-      ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
-    ];
-    if (persistent) {
-      args.push('--dangerously-skip-permissions');
-    } else {
-      args.push('--permission-mode', 'dontAsk');
-    }
-    if (systemPrompt) {
-      args.push('--system-prompt', systemPrompt);
-    }
-    // For persistent agents, use the registered sessionId
-    const effectiveSessionId = persistent
-      ? runningAgents.get(task.agent_id).sessionId
-      : sessionId;
-    return {
-      command,
-      args,
-      stdin: userPrompt,
-      sessionId: effectiveSessionId,
-    };
-  }
-  if (task.cli_tool === 'openclaw') {
-    const sessionId = task._sessionId || (task.conversation_id && task.agent_id
-      ? makeSessionId(task.conversation_id, task.agent_id)
-      : `agenthub-${String(task.agent_id || task.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`);
-    return {
-      command,
-      args: [
-        'agent',
-        '--local',
-        '--session-id',
-        sessionId,
-        '--message',
-        userPrompt,
-        '--json',
-        '--thinking',
-        'off',
-      ],
-      resultFormat: 'openclaw-json',
-    };
+      systemPrompt,
+      userPrompt,
+      runningAgents,
+    });
   }
   return { command, args: [userPrompt] };
 }
