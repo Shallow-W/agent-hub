@@ -299,6 +299,63 @@ func TestRouter_EmptyMentionsReturnsEmpty(t *testing.T) {
 	}
 }
 
+// === P7: Router interface 可替换性单测 ===
+
+// mockRouter 是 Router interface 的测试替身：返回固定 targets，用于验证
+// OrchestratorDeps.Router 可以被任意实现替换（P7 抽 interface 的核心价值）。
+type mockRouter struct {
+	calls   int
+	lastIn  RouterInput
+	targets []DispatchTarget
+}
+
+func (m *mockRouter) Resolve(_ context.Context, in RouterInput) []DispatchTarget {
+	m.calls++
+	m.lastIn = in
+	return m.targets
+}
+
+// TestRouter_InterfaceIsReplaceable 验证 NewDefaultRouter 返回的 Router 是 interface，
+// 可被任意自定义实现替换（mockRouter），且 OrchestratorService.Router() 透传注入的实现。
+//
+// 这是 P7 #1 的核心断言：Router 现在是 interface，调用方可注入自定义策略。
+func TestRouter_InterfaceIsReplaceable(t *testing.T) {
+	want := []DispatchTarget{
+		{Agent: &model.Agent{ID: "fixed-1"}, MentionName: "X", Task: "fixed", Role: DispatchRoleWorker},
+	}
+	mr := &mockRouter{targets: want}
+
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo:  &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{},
+		MsgRepo:   &fakeMsgRepo{},
+		Router:    mr,
+	})
+
+	got := svc.Router()
+	if got != mr {
+		t.Fatalf("svc.Router() should return the injected mock, got %T", got)
+	}
+
+	out := got.Resolve(context.Background(), RouterInput{Content: "abc"})
+	if len(out) != 1 || out[0].Agent.ID != "fixed-1" {
+		t.Fatalf("expected mock targets, got %+v", out)
+	}
+	if mr.calls != 1 {
+		t.Fatalf("expected mockRouter called once, got %d", mr.calls)
+	}
+	if mr.lastIn.Content != "abc" {
+		t.Fatalf("expected lastIn.Content=%q, got %q", "abc", mr.lastIn.Content)
+	}
+}
+
+// TestRouter_DefaultRouterImplementsInterface 编译期保证 defaultRouter 满足 Router interface。
+func TestRouter_DefaultRouterImplementsInterface(t *testing.T) {
+	var _ Router = defaultRouter{}
+	var _ Router = NewDefaultRouter()
+	var _ Router = NewRouter() // 兼容别名同样返回 interface
+}
+
 // === AgentQueue 单测 ===
 
 // TestAgentQueue_SameAgentSerialized 验证同一 agentID 的 Run 调用串行执行。
@@ -561,7 +618,7 @@ func TestDispatcher_DispatchReturnsMessage(t *testing.T) {
 		hub.ResolveTask("task-d1", &ws.TaskResult{TaskID: "task-d1", Result: taskResult})
 	}()
 
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	res, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID:          "c1",
 		UserID:          userID,
@@ -601,7 +658,7 @@ func TestDispatcher_DispatchDaemonNotConnectedReturnsError(t *testing.T) {
 	)
 	// 不 SetDaemonHub → svc.daemonHub 为 nil → dispatchAndWait 返回 daemon 未连接错误
 
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	_, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,
@@ -616,7 +673,7 @@ func TestDispatcher_DispatchDaemonNotConnectedReturnsError(t *testing.T) {
 // TestDispatcher_DispatchMany_EmptyInputReturnsEmpty 验证空输入返回空切片（不 panic）。
 func TestDispatcher_DispatchMany_EmptyInputReturnsEmpty(t *testing.T) {
 	svc := NewOrchestratorService(nil, nil, nil)
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	results, errs := d.DispatchMany(context.Background(), nil, DispatchHooks{})
 	if len(results) != 0 || len(errs) != 0 {
 		t.Fatalf("expected empty results/errs, got %d/%d", len(results), len(errs))
@@ -639,6 +696,59 @@ func TestFormatDispatchError_WrapsError(t *testing.T) {
 func TestFormatDispatchError_NilReturnsNil(t *testing.T) {
 	if err := FormatDispatchError("Codex", nil); err != nil {
 		t.Fatalf("expected nil for nil input, got %v", err)
+	}
+}
+
+// === P7: Dispatcher 独立性单测 ===
+//
+// P7 前：Dispatcher 通过 d.svc 反向依赖 OrchestratorService。
+// P7 后：Dispatcher 只依赖 DispatcherDeps。本组测试验证 Dispatcher 可脱离
+// OrchestratorService 独立构造与使用（这是 #2 解反向依赖的核心断言）。
+
+// TestDispatcher_ConstructsWithDepsOnly 验证 NewDispatcher 不再接受 *OrchestratorService，
+// 而是接受 DispatcherDeps。编译期保证 + 运行时确认 Dispatcher 持有 deps。
+func TestDispatcher_ConstructsWithDepsOnly(t *testing.T) {
+	agentRepo := &fakeOrchAgentRepo{}
+	msgRepo := &fakeMsgRepo{}
+	d := NewDispatcher(DispatcherDeps{
+		AgentRepo: agentRepo,
+		MsgRepo:   msgRepo,
+		// DaemonHub 留 nil（验证 Dispatcher 可在 hub 未就绪时构造）
+	})
+	if d.deps.AgentRepo != agentRepo {
+		t.Fatal("Dispatcher.deps.AgentRepo should equal injected agentRepo")
+	}
+	if d.deps.MsgRepo != msgRepo {
+		t.Fatal("Dispatcher.deps.MsgRepo should equal injected msgRepo")
+	}
+	if d.deps.DaemonHub != nil {
+		t.Fatalf("Dispatcher.deps.DaemonHub should be nil when not injected, got %v", d.deps.DaemonHub)
+	}
+}
+
+// TestDispatcher_DispatchFailsWhenDaemonHubNil 验证 Dispatcher 在没有 OrchestratorService
+// 的场景下，daemon hub 缺失时返回预期错误（"agent %q 的 daemon 未通过 WS 连接"）。
+// 这是 #2 解耦的关键测试：Dispatcher 不需要 svc 即可独立完成 dispatch 流程判断。
+func TestDispatcher_DispatchFailsWhenDaemonHubNil(t *testing.T) {
+	userID := "u1"
+	agent := &model.Agent{ID: "agent-x", Name: "XAgent", CLITool: "claude", MachineID: stringPtr("machine-x")}
+	d := NewDispatcher(DispatcherDeps{
+		AgentRepo: &fakeOrchAgentRepo{
+			agent: agent,
+			task:  &model.DaemonTask{ID: "task-x", Status: "completed", Result: "ok"},
+		},
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: nil, // 故意不注入
+	})
+
+	_, err := d.Dispatch(context.Background(), DispatchInput{
+		ConvID: "c1",
+		UserID: userID,
+		Agent:  agent,
+		Prompt: "p",
+	}, DispatchHooks{})
+	if err == nil {
+		t.Fatal("expected error when DaemonHub is nil")
 	}
 }
 
@@ -689,7 +799,7 @@ func TestDispatchHooks_ZeroHooksEquivalentToDispatchAndWait(t *testing.T) {
 	agent := &model.Agent{ID: "agent-h0", Name: "HookAgent0", CLITool: "claude", MachineID: stringPtr("machine-h0")}
 	svc.agentRepo.(*fakeOrchAgentRepo).agent = agent
 
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	res, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,
@@ -719,7 +829,7 @@ func TestDispatchHooks_PreDispatchAbortsOnErr(t *testing.T) {
 	preErr := errors.New("permission denied")
 	var preCalled, taskCreated, msgPersisted, failed bool
 
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	_, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,
@@ -777,7 +887,7 @@ func TestDispatchHooks_OnTaskCreatedFiresBeforeWS(t *testing.T) {
 	}()
 
 	var capturedTaskID string
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	_, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,
@@ -813,7 +923,7 @@ func TestDispatchHooks_OnMessagePersistedFiresAfterCreate(t *testing.T) {
 	}()
 
 	var capturedContent string
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	_, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,
@@ -848,7 +958,7 @@ func TestDispatchHooks_OnFailedFiresOnDaemonDown(t *testing.T) {
 	agent := &model.Agent{ID: "agent-h4", Name: "HookAgent4", CLITool: "claude", MachineID: stringPtr("machine-h4")}
 
 	var failedErr error
-	d := NewDispatcher(svc)
+	d := svc.Dispatcher()
 	_, err := d.Dispatch(context.Background(), DispatchInput{
 		ConvID: "c1",
 		UserID: userID,

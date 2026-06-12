@@ -43,7 +43,8 @@ type RouterInput struct {
 // Router 把「消息 + 群聊 agent 列表 + @mention」解析成 []DispatchTarget。
 //
 // 历史路径：RouteMention 内联做了三件事——解析 mention、查 agent、判定 orch/worker 角色。
-// P5b 把判定逻辑抽成独立类型，便于未来拓展广播 / 轮询 / 负载均衡策略时只改这里。
+// P5b 把判定逻辑抽成独立类型；P7 进一步把具体实现 defaultRouter 与 interface 解耦，
+// 便于未来拓展广播 / 轮询 / 负载均衡策略时只注入自定义 Router 实现（零行为变更）。
 //
 // 行为契约（与 RouteMention 原内联循环完全一致）：
 //   - 遍历 mentions（不是 convAgents），保留 mention 在文本中的出现顺序
@@ -51,14 +52,27 @@ type RouterInput struct {
 //   - GetByID 失败或返回 nil → 跳过
 //   - 角色：ConversationAgent.IsOrchestrator() 为 true → orch；否则 worker
 //   - Task：worker 取 mention.Task；orch 取整条 content
-type Router struct{}
+type Router interface {
+	Resolve(ctx context.Context, in RouterInput) []DispatchTarget
+}
 
-// NewRouter 构造默认 Router。
-func NewRouter() *Router { return &Router{} }
+// defaultRouter 是 Router interface 的默认实现。
+//
+// 历史上 Router 是一个 struct（type Router struct{}）；P7 将其改为 interface，
+// 旧 struct 改名 defaultRouter 并继续承载原 Resolve 实现，保证零行为变更。
+type defaultRouter struct{}
+
+// NewDefaultRouter 构造默认 Router 实现。
+func NewDefaultRouter() Router { return defaultRouter{} }
+
+// NewRouter 是 NewDefaultRouter 的兼容别名，便于已有调用点零迁移。
+//
+// Deprecated: 优先使用 NewDefaultRouter。
+func NewRouter() Router { return NewDefaultRouter() }
 
 // Resolve 把 input 解析为有序的 []DispatchTarget。
 // ctx 透传给 AgentRepo 查询；查询失败的 agent 会被跳过（与原 RouteMention 行为一致）。
-func (r *Router) Resolve(ctx context.Context, in RouterInput) []DispatchTarget {
+func (defaultRouter) Resolve(ctx context.Context, in RouterInput) []DispatchTarget {
 	targets := make([]DispatchTarget, 0, len(in.Mentions))
 	for _, m := range in.Mentions {
 		agentID, ok := in.MentionMap[m.AgentName]

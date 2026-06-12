@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/pkg/ws"
@@ -117,7 +116,8 @@ type OrchestratorService struct {
 
 	// router 把「消息 + 群聊 agent + @mention」解析成 []DispatchTarget。
 	// 历史路径：RouteMention 内联循环做解析；P5b 抽成独立类型便于未来拓展广播/轮询策略。
-	router *Router
+	// P7 进一步把 Router 从具体 struct 改为 interface，允许注入自定义实现（零行为变更）。
+	router Router
 
 	// dispatcher 封装 dispatchAndWait 的派发动作（task 创建 + WS + 等待 + 落库）。
 	// 当前作为可注入扩展点存在；现有调用方仍直接调 dispatchAndWait 以保持零行为变更，
@@ -153,8 +153,15 @@ func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
 
 // SetDaemonHub sets the daemon WebSocket hub for task dispatch.
 // Deprecated: use OrchestratorDeps.DaemonHub.
+//
+// 注意：P7 后 Dispatcher 不再反向依赖 svc，持有独立的 deps.DaemonHub。
+// SetDaemonHub 同步更新 svc.daemonHub 与（若已构造）svc.dispatcher.deps.DaemonHub，
+// 保证旧 setter 路径（包括现有测试 makeDispatcherTestSvc）继续可用，零行为变更。
 func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
 	s.daemonHub = hub
+	if s.dispatcher != nil {
+		s.dispatcher.deps.DaemonHub = hub
+	}
 }
 
 // SetArtifactRepo sets the artifact repository used for AI editing artifacts.
@@ -203,7 +210,12 @@ func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgR
 		agentQueue: NewAgentQueue(),
 		router:     NewRouter(),
 	}
-	svc.dispatcher = NewDispatcher(svc)
+	svc.dispatcher = NewDispatcher(DispatcherDeps{
+		AgentRepo: svc.agentRepo,
+		DaemonHub: svc.daemonHub,
+		MsgRepo:   svc.msgRepo,
+		UploadDir: svc.uploadDir,
+	})
 	// 装配默认链（依赖项未注入时 builder 会做 nil 防护，不影响构造）
 	svc.buildDefaultChains()
 	return svc
@@ -236,10 +248,10 @@ type OrchestratorDeps struct {
 	// 可选：注入自定义派发并发护栏。nil 时使用默认 AgentQueue。
 	AgentQueue *AgentQueue
 
-	// 可选：注入自定义路由器。nil 时使用默认 Router。
-	Router *Router
+	// 可选：注入自定义路由器。nil 时使用默认 Router（NewDefaultRouter）。
+	Router Router
 
-	// 可选：注入自定义派发器。nil 时使用默认 Dispatcher（绑定到构造完成的 svc）。
+	// 可选：注入自定义派发器。nil 时使用默认 Dispatcher（基于 svc 当前依赖构造 DispatcherDeps）。
 	Dispatcher *Dispatcher
 }
 
@@ -280,10 +292,19 @@ func NewOrchestratorServiceWithDeps(deps OrchestratorDeps) *OrchestratorService 
 		svc.agentQueue = NewAgentQueue()
 	}
 	if svc.router == nil {
-		svc.router = NewRouter()
+		svc.router = NewDefaultRouter()
 	}
 	if svc.dispatcher == nil {
-		svc.dispatcher = NewDispatcher(svc)
+		// P7：Dispatcher 不再反向依赖 svc，构造时从 svc 装配 DispatcherDeps。
+		// 此处取 svc 当前依赖快照；SetDaemonHub 等后续 setter 修改的是 svc.daemonHub，
+		// 但 Dispatcher 内部持有的 *ws.DaemonHub 是指针，setter 修改的 hub 实例需要
+		// 调用方重新构造 Dispatcher 或直接通过 OrchestratorDeps.DaemonHub 注入。
+		svc.dispatcher = NewDispatcher(DispatcherDeps{
+			AgentRepo: svc.agentRepo,
+			DaemonHub: svc.daemonHub,
+			MsgRepo:   svc.msgRepo,
+			UploadDir: svc.uploadDir,
+		})
 	}
 	svc.directReplyChain = deps.DirectReplyChain
 	svc.workerChain = deps.WorkerChain
@@ -354,7 +375,7 @@ func (s *OrchestratorService) FanoutChain() *ContextChain { return s.fanoutChain
 func (s *OrchestratorService) SummaryChain() *ContextChain { return s.summaryChain }
 
 // Router 返回路由器实例（解析 @mention → DispatchTarget）。
-func (s *OrchestratorService) Router() *Router { return s.router }
+func (s *OrchestratorService) Router() Router { return s.router }
 
 // Dispatcher 返回派发器实例（封装 dispatchAndWait）。
 func (s *OrchestratorService) Dispatcher() *Dispatcher { return s.dispatcher }
@@ -453,87 +474,25 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 // via channel-based notification, creates a message, and returns it.
 // This is the unified dispatch path shared by both user @mention and orch worker dispatch.
 //
-// dispatchAndWait 是 dispatchWithHooks 的「无 hook」薄封装，等价于传 nil onTaskCreated。
+// P7 后核心实现已迁移到 Dispatcher.dispatchCore（dispatcher.go）；
+// 这里保留薄壳给两条内联路径（handleOrchestratedDispatch / runDaemonEdit）继续调用，
+// 等价于调用 Dispatcher.Dispatch(..., DispatchHooks{})。零行为变更。
+//
 // 业务包装（权限 / 卡片生命周期 / CAS guard / summary 落库）应通过 Dispatcher.Dispatch
 // + DispatchHooks 暴露，而不是在这里扩张。
 func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string, replyTo *string) (*model.Message, error) {
-	msg, _, err := s.dispatchWithHooks(ctx, DispatchInput{
+	res, err := s.dispatcher.Dispatch(ctx, DispatchInput{
 		ConvID:          convID,
 		UserID:          userID,
 		Agent:           agent,
 		Prompt:          prompt,
 		ContextMessages: contextMessages,
 		ReplyTo:         replyTo,
-	}, nil)
-	return msg, err
-}
-
-// dispatchWithHooks 是 dispatchAndWait 的核心实现，多一个 onTaskCreated 回调。
-// 该回调在 CreateDaemonTask 成功后、IsConnected 检查 / WS 推送之前触发，
-// 用于 OrchTaskCard 在拿到 daemon task ID 后立即登记生命周期起点。
-//
-// 时序（与原 dispatchAndWait 完全一致，仅多了 onTaskCreated 调用）：
-//
-//	CreateDaemonTask
-//	  ↳ err → return ("create daemon task")
-//	onTaskCreated(task)               ← 若回调非 nil
-//	IsConnected / RegisterTaskPromise / SendToMachine / waitDaemonTask / CreateMessage
-//
-// onTaskCreated 为 nil 时与原 dispatchAndWait 行为完全等价（零行为变更）。
-func (s *OrchestratorService) dispatchWithHooks(ctx context.Context, in DispatchInput, onTaskCreated func(context.Context, *model.DaemonTask)) (*model.Message, *model.DaemonTask, error) {
-	convID, userID := in.ConvID, in.UserID
-	agent, prompt, contextMessages, replyTo := in.Agent, in.Prompt, in.ContextMessages, in.ReplyTo
-
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
+	}, DispatchHooks{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("create daemon task: %w", err)
+		return nil, err
 	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_task_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID, "cli_tool", agent.CLITool, "prompt_len", len(prompt), "context_len", len(contextMessages), "reply_to", stringValue(replyTo), "prompt_preview", orchPreview(prompt))
-
-	// OrchTaskCard 起点回调：拿到 daemon task ID 后立即登记（WS 推送前）。
-	if onTaskCreated != nil {
-		onTaskCreated(ctx, task)
-	}
-
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
-		return nil, task, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
-	}
-	s.daemonHub.RegisterTaskPromise(task.ID)
-	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          task.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           prompt,
-			"context_messages": contextMessages,
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
-	}); err != nil {
-		return nil, task, fmt.Errorf("dispatch to daemon: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
-
-	task, err = s.waitDaemonTask(ctx, task.ID)
-	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
-		return nil, task, err
-	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
-	if task.Status == "failed" {
-		return nil, task, fmt.Errorf("daemon task failed: %s", task.Error)
-	}
-
-	artifacts := agentMetadata(agent)
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, replyTo, nil, nil)
-	if err != nil {
-		return nil, task, fmt.Errorf("create agent reply: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "message_id", msg.ID, "reply_to", stringValue(replyTo), "content_len", len(msg.Content))
-	s.persistArtifacts(ctx, msg, task.Artifacts)
-	return msg, task, nil
+	return res.Message, nil
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
@@ -763,23 +722,12 @@ func (s *OrchestratorService) createOrchLifecycle(ctx context.Context, convID, u
 	return orchTaskRecord, true
 }
 
+// persistArtifacts 把 daemon 返回的 artifacts（或从 markdown 抽取）落库并回填 msg.Artifacts。
+//
+// P7：核心实现已迁移到 Dispatcher.persistArtifacts（dispatcher.go）；
+// 这里保留薄壳给 handleOrchestratedDispatch / runDaemonEdit 等内联路径继续调用。零行为变更。
 func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
-	if msg == nil {
-		return
-	}
-	if len(artifacts) == 0 {
-		artifacts = artifactsFromMarkdown(msg.Content)
-	} else if !hasCodeArtifact(artifacts) {
-		artifacts = append(artifacts, codeArtifactsFromMarkdown(msg.Content)...)
-	}
-	if len(artifacts) == 0 {
-		return
-	}
-	if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, artifacts); err != nil {
-		slog.Warn("save orchestrator artifacts failed", "message_id", msg.ID, "error", err)
-		return
-	}
-	msg.Artifacts = artifacts
+	s.dispatcher.persistArtifacts(ctx, msg, artifacts)
 }
 
 const (
@@ -848,36 +796,11 @@ func dispatchSafeAgentDescription(agent model.ConversationAgent) string {
 // waitDaemonTask waits for a daemon task to complete via channel-based
 // notification through DaemonHub. Returns an error if the daemon is not
 // connected or the context times out.
+//
+// P7：核心实现已迁移到 Dispatcher.waitDaemonTask（dispatcher.go）；
+// 这里保留薄壳给 handleOrchestratedDispatch / runDaemonEdit 等内联路径继续调用。零行为变更。
 func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	if s.daemonHub == nil {
-		return nil, fmt.Errorf("daemon hub not available")
-	}
-
-	ch := s.daemonHub.AwaitTaskResult(taskID)
-	if ch == nil {
-		return nil, fmt.Errorf("daemon not connected for task %s", taskID)
-	}
-	defer s.daemonHub.RemoveTaskPromise(taskID)
-
-	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
-	defer cancel()
-
-	select {
-	case result := <-ch:
-		task := &model.DaemonTask{
-			ID:        result.TaskID,
-			Status:    "completed",
-			Result:    result.Result,
-			Artifacts: artifactsFromTaskResult(result.Artifacts),
-		}
-		if result.Error != "" {
-			task.Status = "failed"
-			task.Error = result.Error
-		}
-		return task, nil
-	case <-ctx.Done():
-		return nil, ErrMsgAgentTimeout
-	}
+	return s.dispatcher.waitDaemonTask(ctx, taskID)
 }
 
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
