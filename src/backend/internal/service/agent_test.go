@@ -312,6 +312,7 @@ func TestUpdateCustomReturnsNotFound(t *testing.T) {
 func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
+	svc.SetToolRegistry(testRegistry())
 	_, err := svc.AddCandidateAgent(
 		context.Background(),
 		"user-1",

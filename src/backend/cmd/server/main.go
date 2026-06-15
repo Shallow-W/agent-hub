@@ -19,9 +19,11 @@ import (
 	"github.com/agent-hub/backend/internal/handler"
 	wsinfra "github.com/agent-hub/backend/internal/infrastructure/ws"
 	"github.com/agent-hub/backend/internal/middleware"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/router"
 	"github.com/agent-hub/backend/internal/service"
+	"github.com/agent-hub/backend/internal/service/tool_specs"
 	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
@@ -90,6 +92,11 @@ func main() {
 	userTemplateRepo := repository.NewUserTemplateRepo(db)
 	toolDefRepo := repository.NewToolDefinitionRepo(db)
 
+	// ToolRegistry: single source of truth for MCP tool definitions.
+	// Auto-syncs to DB on register.
+	toolRegistry := service.NewToolRegistry(toolDefRepo)
+	registerAllToolSpecs(toolRegistry)
+
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
 		JWTExpiryHours: cfg.JWT.ExpiryHours,
@@ -142,6 +149,7 @@ func main() {
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	agentSvc.SetToolRegistry(toolRegistry)
 	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
 	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
@@ -222,6 +230,7 @@ func main() {
 	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
 	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
 	toolDefHandler := handler.NewToolDefinitionHandler(toolDefSvc)
+	toolDefHandler.SetToolRegistry(toolRegistry)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
@@ -419,3 +428,62 @@ func hasDotDotSegment(value string) bool {
 	return false
 }
 
+// registerAllToolSpecs registers every MCP tool spec with the ToolRegistry
+// at startup. This auto-syncs each tool's definition to the DB.
+// To add a new tool: implement port.MCPToolSpec in tool_specs/ and add one line here.
+func registerAllToolSpecs(registry *service.ToolRegistry) {
+	ctx := context.Background()
+
+	// Conversation tools
+	mustRegister(ctx, registry, tool_specs.ListConversations())
+	mustRegister(ctx, registry, tool_specs.ListConversationAgents())
+	mustRegister(ctx, registry, tool_specs.ListGroupAgents())
+	mustRegister(ctx, registry, tool_specs.GetMessages())
+	mustRegister(ctx, registry, tool_specs.CreateGroup())
+
+	// Task tools
+	mustRegister(ctx, registry, tool_specs.ListTasks())
+	mustRegister(ctx, registry, tool_specs.CreateTask())
+	mustRegister(ctx, registry, tool_specs.UpdateTask())
+	mustRegister(ctx, registry, tool_specs.MoveTaskStatus())
+	mustRegister(ctx, registry, tool_specs.DeleteTask())
+
+	// Agent tools
+	mustRegister(ctx, registry, tool_specs.ListAgents())
+	mustRegister(ctx, registry, tool_specs.GetAgentSkill())
+	mustRegister(ctx, registry, tool_specs.ListAgentCandidates())
+	mustRegister(ctx, registry, tool_specs.GetAgentDetail())
+	mustRegister(ctx, registry, tool_specs.UpdateAgentPrompt())
+	mustRegister(ctx, registry, tool_specs.StartAgent())
+	mustRegister(ctx, registry, tool_specs.StopAgent())
+	mustRegister(ctx, registry, tool_specs.CreateAgent())
+	mustRegister(ctx, registry, tool_specs.UpdateAgent())
+	mustRegister(ctx, registry, tool_specs.DeleteAgent())
+	mustRegister(ctx, registry, tool_specs.ListToolsets())
+
+	// Machine tools
+	mustRegister(ctx, registry, tool_specs.ListMachines())
+
+	// Group tools
+	mustRegister(ctx, registry, tool_specs.GetGroupInfo())
+	mustRegister(ctx, registry, tool_specs.ListGroupMembers())
+
+	// Knowledge tools
+	mustRegister(ctx, registry, tool_specs.ListKnowledgeBases())
+	mustRegister(ctx, registry, tool_specs.ListKnowledgeFiles())
+	mustRegister(ctx, registry, tool_specs.SearchKnowledge())
+	mustRegister(ctx, registry, tool_specs.ReadKnowledgeFile())
+
+	// Deployment tools (new)
+	mustRegister(ctx, registry, tool_specs.DeployArtifact())
+	mustRegister(ctx, registry, tool_specs.DeployArtifactGitHub())
+
+	// Skill tools (new)
+	mustRegister(ctx, registry, tool_specs.ListPlatformSkills())
+}
+
+func mustRegister(ctx context.Context, registry *service.ToolRegistry, spec port.MCPToolSpec) {
+	if err := registry.Register(ctx, spec); err != nil {
+		slog.Error("register tool spec failed", "name", spec.Name(), "error", err)
+	}
+}

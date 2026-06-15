@@ -86,11 +86,12 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo        AgentRepo
-	tracker     *MachineTracker
-	tokenIssuer port.TokenIssuerPort
-	serverURL   string
-	daemonHub   port.DaemonDispatcher
+	repo         AgentRepo
+	tracker      *MachineTracker
+	tokenIssuer  port.TokenIssuerPort
+	serverURL    string
+	daemonHub    port.DaemonDispatcher
+	toolRegistry ToolRegistryReader
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -123,6 +124,11 @@ func (s *AgentService) SetTokenIssuer(ti port.TokenIssuerPort) {
 // SetServerURL 设置服务端 URL（用于生成 daemon 连接命令）
 func (s *AgentService) SetServerURL(url string) {
 	s.serverURL = url
+}
+
+// SetToolRegistry 注入 ToolRegistryReader（用于校验 tools_config 中的工具名）。
+func (s *AgentService) SetToolRegistry(tr ToolRegistryReader) {
+	s.toolRegistry = tr
 }
 
 // ListAvailable 查询当前用户可用 Agent
@@ -340,7 +346,7 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	toolsConfig, err := normalizeToolsConfig(toolsConfig, s.toolRegistry)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -365,7 +371,7 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	toolsConfig, err := normalizeToolsConfig(toolsConfig, s.toolRegistry)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -397,7 +403,7 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if userID != "" && (current.UserID == nil || *current.UserID != userID) {
 		return nil, ErrAgentNotFound
 	}
-	toolsConfig, err = normalizeToolsConfig(toolsConfig)
+	toolsConfig, err = normalizeToolsConfig(toolsConfig, s.toolRegistry)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}

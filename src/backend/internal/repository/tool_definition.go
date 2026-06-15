@@ -29,6 +29,19 @@ func (r *ToolDefinitionRepo) List(ctx context.Context) ([]model.ToolDefinition, 
 	return list, nil
 }
 
+func (r *ToolDefinitionRepo) Upsert(ctx context.Context, td model.ToolDefinition) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO tool_definitions (name, label, category, description)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (name) DO UPDATE SET
+		   label = EXCLUDED.label,
+		   category = EXCLUDED.category,
+		   description = EXCLUDED.description`,
+		td.Name, td.Label, td.Category, td.Description,
+	)
+	return err
+}
+
 func (r *ToolDefinitionRepo) ListBuiltinTemplates(ctx context.Context) ([]model.BuiltinToolsetTemplate, error) {
 	var list []model.BuiltinToolsetTemplate
 	err := r.db.SelectContext(ctx, &list,

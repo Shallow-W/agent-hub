@@ -290,6 +290,9 @@ func Setup(r *gin.Engine, deps Deps) {
 		// Platform skills (MCP)
 		mcpGroup.GET("/platform-skills", deps.PlatformSkillHandler.List)
 		mcpGroup.POST("/platform-skills/import-defaults", deps.PlatformSkillHandler.ImportDefaults)
+
+		// Tool registry (MCP) - daemon fetches tool definitions at startup
+		mcpGroup.GET("/tool-registry", deps.ToolDefHandler.ToolRegistry)
 	}
 
 	// Tool definitions and builtin templates (public, no auth)

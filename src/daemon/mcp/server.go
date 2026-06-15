@@ -11,50 +11,62 @@ import (
 	"syscall"
 )
 
-// Server 是 MCP Server，通过 stdio 提供 tool 能力
+// Server is an MCP Server that provides tool capabilities via stdio.
 type Server struct {
-	name      string
-	version   string
-	tools     []Tool
-	allowed   map[string]bool
-	handler   ToolHandlerFunc
+	name     string
+	version  string
+	registry *Registry
+	allowed  map[string]bool
 	transport *stdioTransport
-	logger    *slog.Logger
+	logger   *slog.Logger
 }
 
-// NewServer 创建 MCP Server
+// NewServer creates an MCP Server from tools and a shared handler.
+// Kept for backward compatibility; prefer NewServerFromRegistry.
 func NewServer(name, version string, tools []Tool, handler ToolHandlerFunc, logger *slog.Logger) *Server {
+	r := NewRegistry()
+	for _, t := range tools {
+		r.Register(t, handler)
+	}
+	return newServerFromRegistry(name, version, r, logger)
+}
+
+// NewServerFromRegistry creates an MCP Server from a fully-wired Registry.
+func NewServerFromRegistry(name, version string, r *Registry, logger *slog.Logger) *Server {
+	return newServerFromRegistry(name, version, r, logger)
+}
+
+func newServerFromRegistry(name, version string, r *Registry, logger *slog.Logger) *Server {
 	return &Server{
-		name:    name,
-		version: version,
-		tools:   tools,
+		name:     name,
+		version:  version,
+		registry: r,
 		allowed: toolSet(func() []string {
+			tools := r.Tools()
 			names := make([]string, 0, len(tools))
 			for _, tool := range tools {
 				names = append(names, tool.Name)
 			}
 			return names
 		}()),
-		handler: handler,
-		logger:  logger,
+		logger: logger,
 	}
 }
 
 // WithAllowedTools limits tools/list and tools/call to the provided tool names.
 func (s *Server) WithAllowedTools(allowed map[string]bool) *Server {
 	s.allowed = allowed
-	s.tools = filterTools(s.tools, allowed)
+	s.registry.tools = filterTools(s.registry.tools, allowed)
 	return s
 }
 
-// Serve 启动 MCP Server，从 stdin 读取请求，向 stdout 写入响应
+// Serve starts the MCP Server, reading requests from stdin and writing responses to stdout.
 func (s *Server) Serve(ctx context.Context) error {
 	s.transport = newStdioTransport(os.Stdin, os.Stdout)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// 监听信号
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -78,7 +90,6 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			s.logger.Error("read message", "error", err)
-			// JSON-RPC 2.0: 畸形 JSON 应返回 parse error
 			if wErr := s.transport.writeMessage(makeError(nil, errParseError, "Parse error")); wErr != nil {
 				return wErr
 			}
@@ -103,7 +114,6 @@ func (s *Server) handleRequest(req *jsonrpcRequest) *jsonrpcResponse {
 	case "initialize":
 		return s.handleInitialize(req)
 	case "notifications/initialized":
-		// 客户端初始化完成通知，无需响应
 		return nil
 	case "tools/list":
 		return s.handleToolsList(req)
@@ -131,15 +141,16 @@ func (s *Server) handleInitialize(req *jsonrpcRequest) *jsonrpcResponse {
 }
 
 func (s *Server) handleToolsList(req *jsonrpcRequest) *jsonrpcResponse {
-	tools := make([]map[string]interface{}, len(s.tools))
-	for i, t := range s.tools {
-		tools[i] = map[string]interface{}{
+	tools := s.registry.Tools()
+	list := make([]map[string]interface{}, len(tools))
+	for i, t := range tools {
+		list[i] = map[string]interface{}{
 			"name":        t.Name,
 			"description": t.Description,
 			"inputSchema": t.InputSchema,
 		}
 	}
-	return makeResponse(req.ID, map[string]interface{}{"tools": tools})
+	return makeResponse(req.ID, map[string]interface{}{"tools": list})
 }
 
 func (s *Server) handleToolsCall(req *jsonrpcRequest) *jsonrpcResponse {
@@ -161,7 +172,7 @@ func (s *Server) handleToolsCall(req *jsonrpcRequest) *jsonrpcResponse {
 		})
 	}
 
-	result, err := s.handler(params.Name, params.Arguments)
+	result, err := s.registry.Dispatch(params.Name, params.Arguments)
 	if err != nil {
 		return makeResponse(req.ID, map[string]interface{}{
 			"content": []map[string]interface{}{
