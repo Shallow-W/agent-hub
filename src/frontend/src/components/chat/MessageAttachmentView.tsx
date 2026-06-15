@@ -15,8 +15,10 @@ import {
   FilePdfOutlined,
   FilePptOutlined,
   FileWordOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
 } from '@ant-design/icons';
-import { Modal } from 'antd';
+import { Button, Modal, Tooltip } from 'antd';
 import styles from './MessageAttachmentView.module.css';
 
 // 预览库体积较大，只有用户打开弹窗时再加载，避免拉高首屏成本。
@@ -199,6 +201,8 @@ const PreviewableFileAttachment: React.FC<PreviewableFileAttachmentProps> = ({
   renderPreview,
 }) => {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const modalSizeClass = expanded ? styles.previewModalExpanded : styles.previewModalCompact;
 
   return (
     <>
@@ -230,23 +234,41 @@ const PreviewableFileAttachment: React.FC<PreviewableFileAttachmentProps> = ({
       </div>
       <Modal
         open={open}
-        onCancel={() => setOpen(false)}
+        onCancel={() => {
+          setOpen(false);
+          setExpanded(false);
+        }}
         footer={null}
-        width="94vw"
-        style={{ top: 16, maxWidth: 'none' }}
+        width={expanded ? '94vw' : 'min(76vw, 980px)'}
+        style={{ top: expanded ? 16 : 48, maxWidth: 'none' }}
+        className={`${styles.previewModal} ${modalSizeClass}`}
         title={
-          <span className={styles.modalTitle}>
-            {titleIcon}
-            <span className={styles.modalTitleName}>{fileName}</span>
-          </span>
+          <div className={styles.modalTitleBar}>
+            <span className={styles.modalTitle}>
+              {titleIcon}
+              <span className={styles.modalTitleName}>{fileName}</span>
+            </span>
+            <Tooltip title={expanded ? '还原' : '全屏'}>
+              <Button
+                type="text"
+                size="small"
+                icon={expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                aria-label={expanded ? '还原预览大小' : '全屏预览'}
+                className={styles.modalSizeButton}
+                onClick={() => setExpanded((value) => !value)}
+              />
+            </Tooltip>
+          </div>
         }
         destroyOnHidden
       >
+        <div className={styles.previewModalBody}>
         {open && (
           <Suspense fallback={<div className={styles.previewModalLoading}>加载预览组件...</div>}>
             {renderPreview()}
           </Suspense>
         )}
+        </div>
       </Modal>
     </>
   );

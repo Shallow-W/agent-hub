@@ -3,6 +3,7 @@ package service
 import (
 	"archive/zip"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,15 +143,47 @@ func TestExtractKnowledgePreviewPDFUsesSofficeWhenAvailable(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"), 0o644); err != nil {
+	if err := os.WriteFile(path, minimalTextPDF("Knowledge PDF Preview"), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
-	_, previewType := extractKnowledgePreview(context.Background(), path, "note.pdf", "application/pdf", 128)
+	previewText, previewType := extractKnowledgePreview(context.Background(), path, "note.pdf", "application/pdf", 128)
 
-	if previewType == "binary" {
-		t.Fatal("expected soffice-backed PDF extraction to avoid binary preview")
+	if previewType != "text" {
+		t.Fatalf("previewType = %q, want text", previewType)
 	}
+	if !strings.Contains(previewText, "Knowledge PDF Preview") {
+		t.Fatalf("previewText missing PDF content: %q", previewText)
+	}
+}
+
+func minimalTextPDF(text string) []byte {
+	escaped := strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`).Replace(text)
+	content := fmt.Sprintf("BT /F1 24 Tf 72 720 Td (%s) Tj ET", escaped)
+	objects := []string{
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+		"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+		fmt.Sprintf("5 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(content), content),
+	}
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, 0, len(objects))
+	for _, object := range objects {
+		offsets = append(offsets, b.Len())
+		b.WriteString(object)
+	}
+
+	xrefOffset := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n", len(objects)+1)
+	b.WriteString("0000000000 65535 f \n")
+	for _, offset := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xrefOffset)
+	return []byte(b.String())
 }
 
 func TestPreloadKBContextIncludesFileIDsAndInlineDocumentText(t *testing.T) {
