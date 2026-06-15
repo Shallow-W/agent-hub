@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Input, message as antMessage } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Input } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import { FolderOutlined, LeftOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 import { useConversationStore } from '@/store/conversationStore';
 import { useMessageStore } from '@/store/messageStore';
@@ -23,11 +24,11 @@ export const TaskGroupList: React.FC = () => {
   const [archivedConvs, setArchivedConvs] = useState<Conversation[]>([]);
   const [archivedCount, setArchivedCount] = useState(0);
 
-  const groupConvs = conversations.filter((c) => c.type === 'group');
-  const normalized = query.trim().toLowerCase();
-  const filtered = normalized
-    ? groupConvs.filter((c) => (c.title ?? '').toLowerCase().includes(normalized))
-    : groupConvs;
+  const filtered = useMemo(() => {
+    const groups = conversations.filter((c) => c.type === 'group');
+    const n = query.trim().toLowerCase();
+    return n ? groups.filter((c) => (c.title ?? '').toLowerCase().includes(n)) : groups;
+  }, [conversations, query]);
 
   useEffect(() => {
     convApi.getArchivedConversations()
@@ -58,6 +59,11 @@ export const TaskGroupList: React.FC = () => {
     }
   };
 
+  const hasQuery = query.trim().length > 0;
+  const noResults = filtered.length === 0;
+  const noResultsText = hasQuery ? '无匹配结果' : '暂无群聊';
+
+  // archived view...
   if (showArchived) {
     return (
       <div className={listStyles.list}>
@@ -107,8 +113,8 @@ export const TaskGroupList: React.FC = () => {
             <RightOutlined className={listStyles.archiveFolderArrow} />
           </button>
         )}
-        {filtered.length === 0 ? (
-          <div className={listStyles.noResults}>{normalized ? '无匹配结果' : '暂无群聊'}</div>
+        {noResults ? (
+          <div className={listStyles.noResults}>{noResultsText}</div>
         ) : (
           filtered.map((conv) => (
             <GroupItem

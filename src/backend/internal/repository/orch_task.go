@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -15,6 +17,12 @@ import (
 type OrchTaskRepo struct {
 	db *sqlx.DB
 }
+
+const insertOrchTaskWithReplySQL = `INSERT INTO orch_tasks (id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, source_message_id, dispatch_message_id, kb_preload, round, round_history, created_at, updated_at)
+	 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')::uuid, NULLIF($12, '')::uuid, $13, $14, $15, $16, $17)`
+
+const insertOrchTaskWithoutReplySQL = `INSERT INTO orch_tasks (id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at)
+	 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 
 func NewOrchTaskRepo(db *sqlx.DB) *OrchTaskRepo {
 	return &OrchTaskRepo{db: db}
@@ -27,26 +35,70 @@ func (r *OrchTaskRepo) Create(ctx context.Context, task *model.OrchTask) error {
 	now := time.Now()
 	task.CreatedAt = now
 	task.UpdatedAt = now
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO orch_tasks (id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		task.ID, task.ConversationID, task.UserID, task.OrchAgentID, task.Status,
-		task.DispatchPlan, task.WorkerStatus, task.WorkerResults, task.Summary, task.OriginalMessage, task.KBPreload,
-		task.Round, task.RoundHistory,
-		task.CreatedAt, task.UpdatedAt,
-	)
+	err := r.insert(ctx, task, true, task.DispatchPlan)
+	if err == nil {
+		return nil
+	}
+	if isInvalidJSONText(err) {
+		err = r.insert(ctx, task, true, legacyJSONBDispatchPlan(task.DispatchPlan))
+		if err == nil {
+			return nil
+		}
+	}
+	if !shouldRetryWithoutReplyColumns(err) {
+		return fmt.Errorf("insert orch task: %w", err)
+	}
+
+	err = r.insert(ctx, task, false, task.DispatchPlan)
+	if err == nil {
+		return nil
+	}
+	if isInvalidJSONText(err) {
+		err = r.insert(ctx, task, false, legacyJSONBDispatchPlan(task.DispatchPlan))
+		if err == nil {
+			return nil
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("insert orch task: %w", err)
 	}
 	return nil
 }
 
+func (r *OrchTaskRepo) insert(ctx context.Context, task *model.OrchTask, includeReplyColumns bool, dispatchPlan string) error {
+	if includeReplyColumns {
+		_, err := r.db.ExecContext(ctx,
+			insertOrchTaskWithReplySQL,
+			task.ID, task.ConversationID, task.UserID, task.OrchAgentID, task.Status,
+			dispatchPlan, task.WorkerStatus, task.WorkerResults, task.Summary, task.OriginalMessage,
+			task.SourceMessageID, task.DispatchMessageID, task.KBPreload,
+			task.Round, task.RoundHistory,
+			task.CreatedAt, task.UpdatedAt,
+		)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx,
+		insertOrchTaskWithoutReplySQL,
+		task.ID, task.ConversationID, task.UserID, task.OrchAgentID, task.Status,
+		dispatchPlan, task.WorkerStatus, task.WorkerResults, task.Summary, task.OriginalMessage, task.KBPreload,
+		task.Round, task.RoundHistory,
+		task.CreatedAt, task.UpdatedAt,
+	)
+	return err
+}
+
 func (r *OrchTaskRepo) GetByID(ctx context.Context, id string) (*model.OrchTask, error) {
 	var t model.OrchTask
 	err := r.db.QueryRowxContext(ctx,
-		`SELECT id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at
+		`SELECT id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, COALESCE(source_message_id::text, '') AS source_message_id, COALESCE(dispatch_message_id::text, '') AS dispatch_message_id, kb_preload, round, round_history, created_at, updated_at
 		 FROM orch_tasks WHERE id = $1`, id,
 	).StructScan(&t)
+	if isUndefinedColumn(err) {
+		err = r.db.QueryRowxContext(ctx,
+			`SELECT id, conversation_id, user_id, orch_agent_id, status, dispatch_plan, worker_status, worker_results, summary, original_message, kb_preload, round, round_history, created_at, updated_at
+			 FROM orch_tasks WHERE id = $1`, id,
+		).StructScan(&t)
+	}
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -65,6 +117,85 @@ func (r *OrchTaskRepo) UpdateStatus(ctx context.Context, id, status string) erro
 		return fmt.Errorf("update orch task status: %w", err)
 	}
 	return nil
+}
+
+func (r *OrchTaskRepo) UpdateDispatchMessageID(ctx context.Context, id, messageID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE orch_tasks SET dispatch_message_id = NULLIF($2, '')::uuid, updated_at = NOW() WHERE id = $1`,
+		id, messageID,
+	)
+	if isUndefinedColumn(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("update orch task dispatch message: %w", err)
+	}
+	return nil
+}
+
+func isUndefinedColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqlState interface{ SQLState() string }
+	if errors.As(err, &sqlState) {
+		return sqlState.SQLState() == "42703"
+	}
+	return false
+}
+
+func isInvalidJSONText(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqlState interface{ SQLState() string }
+	if errors.As(err, &sqlState) {
+		return sqlState.SQLState() == "22P02" && strings.Contains(strings.ToLower(err.Error()), "json")
+	}
+	return false
+}
+
+func shouldRetryWithoutReplyColumns(err error) bool {
+	if isUndefinedColumn(err) || isReplyReferenceInsertError(err) {
+		return true
+	}
+	return false
+}
+
+func isReplyReferenceInsertError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqlState interface{ SQLState() string }
+	if !errors.As(err, &sqlState) {
+		return false
+	}
+	switch sqlState.SQLState() {
+	case "23503":
+		// source_message_id / dispatch_message_id are optional reply anchors.
+		// If either reference is unavailable, keep the lifecycle record and
+		// lose only the reply anchor instead of dropping worker dispatch.
+		return true
+	case "42804":
+		// Older or partially migrated databases can disagree on the reply anchor
+		// column types. Keep the orchestration lifecycle even if anchors cannot
+		// be stored.
+		return true
+	case "22P02":
+		// Invalid JSON is handled separately for dispatch_plan. Other invalid
+		// text representation errors here are usually optional UUID anchors.
+		return !strings.Contains(strings.ToLower(err.Error()), "json")
+	default:
+		return false
+	}
+}
+
+func legacyJSONBDispatchPlan(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	return string(encoded)
 }
 
 // UpdateWorkerResult 更新单个 worker 的状态和结果，返回 true 表示所有 worker 都已完成。
@@ -160,8 +291,8 @@ func (r *OrchTaskRepo) IncrementRound(ctx context.Context, id string) error {
 		return fmt.Errorf("lock orch task for round increment: %w", err)
 	}
 
-	// Verify we are transitioning from a valid state (completed by evaluateOrchResponse CAS)
-	if currentStatus != model.OrchTaskCompleted && currentStatus != model.OrchTaskEvaluating {
+	// Verify we are transitioning from a valid evaluation/redispatch state.
+	if currentStatus != model.OrchTaskCompleted && currentStatus != model.OrchTaskEvaluating && currentStatus != model.OrchTaskWorkersRunning {
 		return fmt.Errorf("increment round: unexpected status %q for orch task %s", currentStatus, id)
 	}
 

@@ -74,14 +74,16 @@ var (
 
 // UploadConfig 上传配置
 type UploadConfig struct {
-	Dir        string
-	MaxImageMB int
-	MaxPDFMB   int
+	Dir           string
+	MaxImageMB    int
+	MaxPDFMB      int
+	PublicBaseURL string
 }
 
 // UploadService 文件上传服务
 type UploadService struct {
-	cfg UploadConfig
+	cfg        UploadConfig
+	urlBuilder *FileURLBuilder
 }
 
 // NewUploadService 创建上传服务
@@ -95,7 +97,7 @@ func NewUploadService(cfg UploadConfig) *UploadService {
 	if cfg.MaxPDFMB <= 0 {
 		cfg.MaxPDFMB = 50
 	}
-	return &UploadService{cfg: cfg}
+	return &UploadService{cfg: cfg, urlBuilder: NewFileURLBuilder(cfg.PublicBaseURL)}
 }
 
 // UploadResult 上传结果
@@ -105,6 +107,8 @@ type UploadResult struct {
 	FileSize      int64  `json:"file_size"`
 	FilePath      string `json:"file_path"`
 	ThumbnailPath string `json:"thumbnail_path,omitempty"`
+	URL           string `json:"url,omitempty"`
+	ThumbnailURL  string `json:"thumbnail_url,omitempty"`
 	Width         int    `json:"width,omitempty"`
 	Height        int    `json:"height,omitempty"`
 }
@@ -173,6 +177,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 			FileSize: fi.Size(),
 			FilePath: path.Join("uploads", "originals", contentBasedName),
 		}
+		s.populateUploadResultURLs(result)
 
 		// 检查缩略图是否也已存在
 		if isImageMIME(mimeType) {
@@ -180,6 +185,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 			existingThumb := filepath.Join(thumbDir, thumbName)
 			if _, err := os.Stat(existingThumb); err == nil {
 				result.ThumbnailPath = path.Join("uploads", "thumbnails", thumbName)
+				s.populateUploadResultURLs(result)
 				// 从已有图片读取宽高
 				if img, err := imaging.Open(existingPath); err == nil {
 					bounds := img.Bounds()
@@ -193,6 +199,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 					result.ThumbnailPath = thumbPath
 					result.Width = w
 					result.Height = h
+					s.populateUploadResultURLs(result)
 				}
 			}
 		}
@@ -236,6 +243,7 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 		FileSize: fi.Size(),
 		FilePath: path.Join("uploads", "originals", contentBasedName),
 	}
+	s.populateUploadResultURLs(result)
 
 	// 图片缩略图
 	if isImageMIME(mimeType) {
@@ -244,10 +252,19 @@ func (s *UploadService) ProcessUpload(ctx context.Context, fileHeader *multipart
 			result.ThumbnailPath = thumbPath
 			result.Width = w
 			result.Height = h
+			s.populateUploadResultURLs(result)
 		}
 	}
 
 	return result, nil
+}
+
+func (s *UploadService) populateUploadResultURLs(result *UploadResult) {
+	if result == nil || s.urlBuilder == nil {
+		return
+	}
+	result.URL = s.urlBuilder.UploadURL(result.FilePath)
+	result.ThumbnailURL = s.urlBuilder.UploadURL(result.ThumbnailPath)
 }
 
 // generateImageThumbnail 生成图片缩略图
@@ -284,6 +301,8 @@ func (r *UploadResult) ToMessageAttachment() model.MessageAttachment {
 		FileSize:      r.FileSize,
 		FilePath:      r.FilePath,
 		ThumbnailPath: r.ThumbnailPath,
+		URL:           r.URL,
+		ThumbnailURL:  r.ThumbnailURL,
 		Width:         r.Width,
 		Height:        r.Height,
 	}

@@ -32,6 +32,21 @@ pgdata/
 
 # === 配置文件（含敏感信息）===
 src/backend/config/config.yaml
+src/backend/config/*.local.yaml
+src/backend/config/*.secret.yaml
+src/backend/config/*.private.yaml
+
+# === 云服务器 / SSH 本地凭据 ===
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+ssh_config
+cloud*.yaml
+cloud*.json
+server*.local.json
 
 # === IDE / 编辑器 ===
 .idea/
@@ -74,8 +89,14 @@ src/frontend/screenshot.mjs
 /package.json
 /package-lock.json
 
-# === Trellis 本地状态 ===
-.trellis/state/
+# === Trellis ===
+.trellis/
+
+# === OpenCode ===
+.opencode/
+
+# === CodeGraph ===
+.codegraph/
 
 # === Claude Code 会话数据 ===
 .claude/sessions/

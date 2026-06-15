@@ -20,55 +20,101 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 <!-- TRELLIS:END -->
 
-## 项目简介
-AgentHub 是一个以 IM 聊天为核心交互范式的多 Agent 协作平台，用户通过类似飞书/微信的对话界面与多个 AI Agent（Claude Code、Codex、OpenCode 等）交互，支持单聊、群聊、任务分派和产物预览。
+## Project
 
-## 核心概念
+AgentHub — IM-chat-driven multi-agent collaboration platform. Users chat with multiple AI Agents (Claude Code, Codex, OpenCode) through a Feishu/WeChat-style interface. Supports 1-on-1 chat, group chat, task dispatch, and artifact preview.
 
-- **IM聊天范式**：对话列表 + 单聊/群聊 + 富媒体消息，是整个平台的交互核心
-- **Orchestrator（协调器）**：群聊模式下理解用户意图，将任务拆解并分派给子Agent，聚合结果
-- **Agent适配器层**：统一抽象不同Agent平台的API差异（Claude Code、Codex、OpenCode等）
-- **自建Agent**：用户通过对话式创建，设定System Prompt + 工具集
-- **产物系统**：Agent回复中内联预览卡片（网页iframe、代码Diff、文件附件等）
+## Monorepo Layout
 
-## 交付要求
+```
+src/
+  backend/        Go backend (module: github.com/agent-hub/backend)
+    cmd/server/main.go          — entrypoint, all DI wiring happens here
+    internal/{handler,service,repository,model,middleware}/
+    pkg/{ws,redis}/             — shared packages (WebSocket hub, Redis client)
+    config/config.yaml          — gitignored; copy from config.example.yaml
+    migrations/001..023_*.sql   — numbered SQL migrations, applied in order
+  frontend/       React SPA (Vite + TypeScript)
+    src/{api,components,hooks,store,views,types,layout}/
+    e2e/                         — Playwright E2E tests
+  daemon/         Go daemon for local agent scanning & process management (separate go.mod)
+  daemon-npm/     npm wrapper @agenthub/daemon for the Go daemon
+scripts/
+  dev.sh          starts postgres + runs migrations + backend + frontend
+  build.sh        builds backend binary + frontend dist
+```
 
-- 30%权重在AI协作能力（需沉淀Spec、Skill、Rules协作规范）
-- 需产出：产品设计文档 + 技术文档 + 可运行Demo + AI协作开发记录 + 3分钟Demo视频
+## Dev Commands
 
-## 技术栈
-| 层 | 技术 |
-|----|------|
-| 前端 | React + TypeScript + Vite + Zustand + React Router v6 + CSS Modules |
-| 后端 | Go + Gin + pgx/sqlx + go-redis + nhooyr/websocket + koanf + slog |
-| 数据库 | PostgreSQL |
-| 守护进程 | Go（本地 Agent 扫描、进程管理、适配器层） |
+```bash
+# Start infra (PostgreSQL 15 + Redis 7)
+docker compose up -d
 
-## 快速导航
-| 你想做什么 | 去哪里看 |
-|-----------|---------|
-| 了解产品需求 | `doc/需求文档.md`，原始PDF：`doc/AgentHub-_多Agent协作平台设计.pdf` |
-| 了解系统架构 | `doc/architecture/overview.md` |
-| 了解项目目录结构 | `doc/conventions/project-structure.md` |
-| 了解前端编码规范 | `doc/conventions/frontend-conventions.md` |
-| 了解后端编码规范 | `doc/conventions/backend-conventions.md` |
-| 了解 Git 分支和提交规范 | `doc/conventions/git-conventions.md` |
-| 了解文档编写规范 | `doc/conventions/doc-conventions.md` |
-| 了解开发流程经验教训 | `doc/conventions/process-lessons.md` |
-| 了解 API 接口设计 | `doc/reference/api.md` |
-| 了解模块任务详情 | `doc/task/M0-基础设施.md` ~ `doc/task/M10-Pin上下文.md` |
-| 了解当前任务进度 | `doc/TASKLIST.md` |
-| 用 Codegraph 查代码关系 | `doc/reference/codegraph.md` |
+# Backend
+cd src/backend
+cp config/config.example.yaml config/config.yaml   # edit JWT secret + DB password
+go run ./cmd/server/                                 # starts on :8080
+# Live-reload: air (config in .air.toml)
 
-- **P0**：IM 聊天核心体验、单聊/群聊、多 Agent 接入（≥2 个）、Orchestrator
-- **P1**：产物预览卡片、上下文管理（pin 消息）、多会话并行
-- **P2**：部署发布、Diff/版本历史、PPT 浏览、多端支持
+# Frontend
+cd src/frontend
+npm install
+npm run dev        # starts on :5173, proxies /api→:8080 and /ws→ws://:8080
 
-## 硬性规则
+# Build both
+bash scripts/build.sh   # outputs bin/server + src/frontend/dist/
 
-> 编码规范已迁移至 `.trellis/spec/`，由 Trellis SessionStart hook 自动注入。包括：
-> - 通用规则 → `.trellis/spec/guides/general-conventions.md`
-> - 前端规则 → `.trellis/spec/frontend/quality-guidelines.md`
-> - 后端规则 → `.trellis/spec/backend/quality-guidelines.md`
-> - 工作流规则 → `.trellis/spec/guides/workflow-rules.md`
-> - 核心原则 → `.trellis/spec/guides/core-principles.md`
+# Go tests (no external deps needed for unit tests — they use fakes)
+cd src/backend
+go test ./internal/service/...    # run all service tests
+go test ./internal/handler/...    # handler tests
+
+# E2E (requires running backend + frontend)
+cd src/frontend
+npx playwright install            # first time only
+npm run test:e2e:agent            # runs e2e/agent-connect.spec.ts
+```
+
+## Key Architecture Facts
+
+- **Backend DI**: All dependency wiring is in `cmd/server/main.go`. Handlers receive Service interfaces, Services receive Repository interfaces. No `init()` or global state.
+- **WebSocket**: Two separate WS endpoints — `/ws?token=` for user chat and a daemon WS (token-authenticated via `config.yaml → daemon.token`). The WS hub is in `pkg/ws/`.
+- **Migrations**: Sequential numbered SQL files in `src/backend/migrations/`. Applied by `dev.sh` via `psql` or manually. No migration tool binary in the build.
+- **Frontend proxy**: Vite dev server proxies `/api` and `/ws` to the Go backend on `:8080`. In production, the Go server serves the frontend dist and handles routing.
+- **Daemon ↔ Backend**: The daemon connects over WebSocket with a shared token from config. It scans local machines for agent processes and reports status.
+- **Orchestrator**: `internal/service/orchestrator.go` — handles group-chat intent parsing, task splitting, and multi-agent dispatch.
+
+## Conventions
+
+- **Comments**: Chinese (explain "why"). **Names**: English.
+- **Line endings**: LF only (not CRLF).
+- **Go**: tabs, `log/slog` for structured logging, errors wrapped with `%w`, interfaces defined at consumer side.
+- **Frontend**: 2-space indent, CSS Modules (`*.module.css`), path alias `@/` → `src/`, strict TypeScript (`noUnusedLocals`, `noUnusedParameters`, `noUncheckedIndexedAccess`).
+- **Commit format**: `type(scope): 中文描述` — e.g. `feat(chat): 实现WebSocket流式消息推送`. Scopes: `agent|api|auth|chat|daemon|db|orchestrator|preview|ui|conventions|doc`.
+- **Branches**: `feature/<desc>`, `fix/<desc>`, `refactor/<desc>`, `docs/<desc>`. No direct push to `main`.
+
+## Zustand Pitfalls
+
+These have caused real bugs in this codebase:
+- Never inline `?? []` or `?? {}` in selectors — use module-level constants to avoid infinite re-renders.
+- Use precise selectors (`s.messages[convId]`), not the whole store slice.
+- `useEffect` deps must be primitives (IDs), not object references.
+- Never use `Set`/`Map` in Zustand stores — use `Record<string, boolean>`.
+
+## Config
+
+`src/backend/config/config.example.yaml` documents all fields. `config.yaml` is gitignored. Default DB credentials: `agenthub:agenthub@localhost:5432/agenthub`. Redis optional — degrades gracefully when absent.
+
+## Docs
+
+| Need | Location |
+|------|----------|
+| Product requirements | `doc/需求文档.md` |
+| Architecture | `doc/architecture/overview.md` |
+| Project structure | `doc/conventions/project-structure.md` |
+| Frontend conventions | `doc/conventions/frontend-conventions.md` |
+| Backend conventions | `doc/conventions/backend-conventions.md` |
+| Git conventions | `doc/conventions/git-conventions.md` |
+| API reference | `doc/reference/api.md` |
+| Module tasks | `doc/task/M0-基础设施.md` ~ `doc/task/M10-Pin上下文.md` |
+| Task progress | `doc/TASKLIST.md` |

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,7 +21,7 @@ const pptPreviewTimeout = 120 * time.Second
 
 var errPptPreviewToolMissing = errors.New("ppt preview tool missing")
 
-// PptPreviewHandler renders uploaded PowerPoint files through LibreOffice when available.
+// PptPreviewHandler renders uploaded Office files through PDF previews when available.
 type PptPreviewHandler struct {
 	uploadDir string
 }
@@ -48,7 +49,7 @@ func (h *PptPreviewHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	pdfPath, err := h.ensurePDFPreview(c.Request.Context(), absPath)
+	pdfPath, err := h.ensurePDFPreview(c.Request.Context(), absPath, "ppt", true)
 	if err != nil {
 		if errors.Is(err, errPptPreviewToolMissing) {
 			middleware.ErrorResponse(c, http.StatusNotImplemented, 50101, "PPT preview converter is not installed")
@@ -64,8 +65,51 @@ func (h *PptPreviewHandler) Preview(c *gin.Context) {
 	c.File(pdfPath)
 }
 
+func (h *PptPreviewHandler) FilePreview(c *gin.Context) {
+	absPath, err := h.safeUploadPath(c.Param("filepath"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if !isPreviewableFileExt(ext) {
+		c.AbortWithStatus(http.StatusUnsupportedMediaType)
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	if ext == ".pdf" {
+		h.serveInlinePDF(c, absPath)
+		return
+	}
+
+	pdfPath, err := h.ensurePDFPreview(c.Request.Context(), absPath, "documents", false)
+	if err != nil {
+		if errors.Is(err, errPptPreviewToolMissing) {
+			middleware.ErrorResponse(c, http.StatusNotImplemented, 50102, "Document preview converter is not installed")
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50032, "Document preview failed")
+		return
+	}
+
+	h.serveInlinePDF(c, pdfPath)
+}
+
 func (h *PptPreviewHandler) safeUploadPath(filePath string) (string, error) {
-	cleaned := filepath.Clean(strings.TrimPrefix(filePath, "/"))
+	slashed := strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/")
+	if slashed == "" || strings.HasPrefix(slashed, "//") {
+		return "", fmt.Errorf("invalid path")
+	}
+	slashed = strings.TrimPrefix(slashed, "/")
+	if strings.Contains(slashed, ":") || hasDotDotPathSegment(slashed) {
+		return "", fmt.Errorf("invalid path")
+	}
+	cleaned := filepath.FromSlash(path.Clean("/" + slashed))
+	cleaned = strings.TrimPrefix(cleaned, string(os.PathSeparator))
 	if cleaned == "." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) || cleaned == ".." {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -83,12 +127,37 @@ func (h *PptPreviewHandler) safeUploadPath(filePath string) (string, error) {
 	return absPath, nil
 }
 
-func (h *PptPreviewHandler) ensurePDFPreview(ctx context.Context, sourcePath string) (string, error) {
+func hasDotDotPathSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func isPreviewableFileExt(ext string) bool {
+	switch ext {
+	case ".pdf", ".doc", ".docx", ".ppt", ".pptx":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *PptPreviewHandler) serveInlinePDF(c *gin.Context, pdfPath string) {
+	c.Header("Content-Disposition", "inline; filename=\""+strings.TrimSuffix(filepath.Base(pdfPath), filepath.Ext(pdfPath))+".pdf\"")
+	c.Header("Content-Type", "application/pdf")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.File(pdfPath)
+}
+
+func (h *PptPreviewHandler) ensurePDFPreview(ctx context.Context, sourcePath, previewGroup string, allowPowerPointFallback bool) (string, error) {
 	absUploadDir, err := filepath.Abs(h.uploadDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve upload dir: %w", err)
 	}
-	outDir := filepath.Join(absUploadDir, "previews", "ppt")
+	outDir := filepath.Join(absUploadDir, "previews", previewGroup)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("create preview dir: %w", err)
 	}
@@ -98,7 +167,7 @@ func (h *PptPreviewHandler) ensurePDFPreview(ctx context.Context, sourcePath str
 		return pdfPath, nil
 	}
 	if err := convertWithLibreOffice(ctx, sourcePath, outDir); err != nil {
-		if runtime.GOOS != "windows" {
+		if !allowPowerPointFallback || runtime.GOOS != "windows" {
 			return "", err
 		}
 		if ppErr := convertWithPowerPoint(ctx, sourcePath, pdfPath); ppErr != nil {

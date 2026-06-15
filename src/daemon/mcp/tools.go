@@ -18,6 +18,9 @@ func AllTools() []Tool {
 	tools = append(tools, AgentTools()...)
 	tools = append(tools, MachineTools()...)
 	tools = append(tools, GroupTools()...)
+	tools = append(tools, AgentManagementTools()...)
+	tools = append(tools, KnowledgeTools()...)
+	tools = append(tools, AgentCreationTools()...)
 	return tools
 }
 
@@ -244,6 +247,20 @@ func AgentTools() []Tool {
 			},
 		},
 		{
+			Name:        "get_agent_skill",
+			Description: "查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "平台 Skill 名称（必填，必须属于当前 Agent）",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
 			Name:        "list_agent_candidates",
 			Description: "查询本机已发现的 Agent 候选列表（来自 daemon 扫描），包含 CLI 路径、版本、能力（skills）等信息。尚未添加到平台的 Agent 会出现在这里",
 			InputSchema: map[string]interface{}{
@@ -260,6 +277,233 @@ func MachineTools() []Tool {
 		{
 			Name:        "list_machines",
 			Description: "查询当前用户已连接的电脑（daemon 机器）列表，包含机器名称、在线状态、最后心跳时间等信息",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+	}
+}
+
+// AgentManagementTools Agent 管理工具——查询详情、更新提示词、启停控制
+func AgentManagementTools() []Tool {
+	return []Tool{
+		{
+			Name:        "get_agent_detail",
+			Description: "查询单个 Agent 的完整详情，包括名称、类型、CLI 工具、系统提示词、工具配置、状态、版本、机器名称、能力、技能、标签等",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "update_agent_prompt",
+			Description: "更新 Agent 的系统提示词。会先获取当前完整信息，再只修改 system_prompt 字段",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "新的系统提示词（必填）",
+					},
+				},
+				"required": []string{"agent_id", "system_prompt"},
+			},
+		},
+		{
+			Name:        "start_agent",
+			Description: "启动指定的 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "stop_agent",
+			Description: "停止指定的 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+	}
+}
+
+// KnowledgeTools 知识库工具——查询知识库列表、文件列表、关键词搜索
+func KnowledgeTools() []Tool {
+	return []Tool{
+		{
+			Name:        "list_knowledge_bases",
+			Description: "列出当前用户的知识库，包含 ID、名称、描述、可见性、文件数量、创建时间等信息",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "list_knowledge_files",
+			Description: "列出指定知识库中的文件，包含文件名、大小、类型、预览文本等信息",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+				},
+				"required": []string{"knowledge_base_id"},
+			},
+		},
+		{
+			Name:        "search_knowledge",
+			Description: "在指定知识库中按关键词搜索文件，基于文件的 preview_text 字段进行匹配过滤",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+					"keyword": map[string]interface{}{
+						"type":        "string",
+						"description": "搜索关键词（必填）",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "最多返回结果数（可选，默认 20）",
+					},
+				},
+				"required": []string{"knowledge_base_id", "keyword"},
+			},
+		},
+		{
+			Name:        "read_knowledge_file",
+			Description: "读取指定知识库文件已抽取的文本内容。适合在搜索命中文件后按 file_id 获取完整可用上下文",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"knowledge_base_id": map[string]interface{}{
+						"type":        "string",
+						"description": "知识库 ID（必填）",
+					},
+					"file_id": map[string]interface{}{
+						"type":        "string",
+						"description": "文件 ID（必填）",
+					},
+				},
+				"required": []string{"knowledge_base_id", "file_id"},
+			},
+		},
+	}
+}
+
+// AgentCreationTools Agent 自建工具——创建、更新、删除自建 Agent，列出工具模板
+func AgentCreationTools() []Tool {
+	return []Tool{
+		{
+			Name:        "create_agent",
+			Description: "创建自建 Agent。需要提供名称和系统提示词，可选指定工具模板、CLI 工具和标签",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent 名称（必填）",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "系统提示词（必填）",
+					},
+					"toolset": map[string]interface{}{
+						"type":        "string",
+						"description": "工具模板名（none/basic/tasks/orchestrator/agent_builder/agent_manager/knowledge），默认 none",
+					},
+					"cli_tool": map[string]interface{}{
+						"type":        "string",
+						"description": "CLI 工具名，默认 claude",
+					},
+					"tags": map[string]interface{}{
+						"type":        "string",
+						"description": "标签",
+					},
+				},
+				"required": []string{"name", "system_prompt"},
+			},
+		},
+		{
+			Name:        "update_agent",
+			Description: "更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表和标签",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "新名称",
+					},
+					"system_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "新系统提示词",
+					},
+					"toolset": map[string]interface{}{
+						"type":        "string",
+						"description": "切换工具模板",
+					},
+					"allowed_tools": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "自定义工具列表",
+					},
+					"tags": map[string]interface{}{
+						"type":        "string",
+						"description": "新标签",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "delete_agent",
+			Description: "删除自建 Agent",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent ID（必填）",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		},
+		{
+			Name:        "list_toolsets",
+			Description: "列出可用的工具模板及其描述，用于创建或更新 Agent 时选择合适的工具配置",
 			InputSchema: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},

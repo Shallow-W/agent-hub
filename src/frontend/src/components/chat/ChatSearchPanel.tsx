@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { Button, Input, List } from 'antd';
+import { Button, Input } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import type { Message } from '@/types/message';
 import styles from './ChatSearchPanel.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface ChatSearchPanelProps {
   searchLoading: boolean;

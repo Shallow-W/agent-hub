@@ -59,7 +59,7 @@ func (r *ConversationRepo) ListByUserID(ctx context.Context, userID string, limi
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE (c.type = 'agent' AND c.archived_at IS NULL)
+			 WHERE (c.type = 'agent' AND c.user_id = $1 AND c.archived_at IS NULL)
 			    OR (c.type != 'agent' AND c.archived_at IS NULL
 			        AND EXISTS (SELECT 1 FROM conversation_members cm
 			                    WHERE cm.conversation_id = c.id AND cm.user_id = $1
@@ -207,7 +207,7 @@ func (r *ConversationRepo) ListArchivedByUserID(ctx context.Context, userID stri
 			     WHERE conversation_id = c.id AND deleted_at IS NULL
 			     ORDER BY created_at DESC LIMIT 1
 			 ) latest_msg ON true
-			 WHERE (c.type = 'agent' AND c.archived_at IS NOT NULL AND c.user_id = $1)
+			 WHERE (c.type = 'agent' AND c.user_id = $1 AND c.archived_at IS NOT NULL)
 			    OR (c.type != 'agent' AND
 			        EXISTS (SELECT 1 FROM conversation_members cm
 			                WHERE cm.conversation_id = c.id AND cm.user_id = $1
@@ -228,6 +228,7 @@ func (r *ConversationRepo) ListAgents(ctx context.Context, conversationID, userI
 		`SELECT ca.id, ca.conversation_id, ca.agent_id, ca.added_by, ca.role, ca.joined_at,
 			        a.name, a.type, a.cli_tool, a.avatar, a.source, a.status, a.version,
 			        a.machine_id, a.machine_name, a.last_seen_at, a.capabilities_json, COALESCE(a.custom_skills, '') AS custom_skills, a.system_prompt,
+			        COALESCE(a.system_prompt, '') AS description,
 			        COALESCE(a.tags, '') AS tags
 			 FROM conversation_agents ca
 			 JOIN conversations c ON c.id = ca.conversation_id
@@ -567,6 +568,7 @@ func (r *ConversationRepo) GetOrchestrator(ctx context.Context, conversationID s
 		 a.machine_id, COALESCE(a.machine_name, '') AS machine_name,
 		 a.last_seen_at, COALESCE(a.capabilities_json, '') AS capabilities_json,
 		 COALESCE(a.custom_skills, '') AS custom_skills,
+		 COALESCE(a.system_prompt, '') AS description,
 		 COALESCE(a.tags, '') AS tags
 		 FROM conversation_agents ca
 		 JOIN agents a ON a.id = ca.agent_id

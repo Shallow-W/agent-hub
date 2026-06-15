@@ -115,19 +115,19 @@ func (r *fakeAgentRepo) ListAgentCandidates(ctx context.Context, userID string) 
 	return nil, nil
 }
 
-func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string) (*model.Agent, error) {
+func (r *fakeAgentRepo) AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	r.addedPrompt = systemPrompt
 	r.addedCLITool = expectedCLITool
 	r.addedTools = toolsConfig
 	r.addedSkills = customSkills
-	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom"}, nil
+	return &model.Agent{ID: "agent-1", UserID: &userID, Name: displayName, CLITool: "codex", Type: "custom", EnableManagementTools: enableManagementTools}, nil
 }
 
-func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	return &model.Agent{ID: "agent-1", UserID: &userID, Name: name, CLITool: cliTool, Type: "custom"}, nil
 }
 
-func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	return r.updateResult, nil
 }
 
@@ -180,7 +180,7 @@ func (r *fakeAgentRepo) GetAgentsByMachine(ctx context.Context, machineID string
 
 func TestCreateCustomRejectsEmptyName(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", false)
+	_, err := svc.CreateCustom(context.Background(), "user-1", "", "claude", "", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}
@@ -303,7 +303,7 @@ func TestOpenDaemonSkillLocationRejectsUnknownSourcePath(t *testing.T) {
 
 func TestUpdateCustomReturnsNotFound(t *testing.T) {
 	svc := NewAgentService(&fakeAgentRepo{}, nil)
-	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", false)
+	_, err := svc.UpdateCustom(context.Background(), "agent-1", "user-1", "Agent", "claude", "", "", "", "", "", false)
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected ErrAgentNotFound, got %v", err)
 	}
@@ -321,6 +321,7 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 		"persona",
 		`{"toolset":"custom","allowed_tools":["list_tasks","unknown"]}`,
 		`[{"name":"审查"}]`,
+		true,
 	)
 	if err != nil {
 		t.Fatalf("add candidate agent failed: %v", err)
@@ -351,6 +352,7 @@ func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
 		"",
 		`{"toolset":"tasks"}`,
 		`not json`,
+		false,
 	)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
@@ -382,7 +384,7 @@ func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
 	}
 }
 
-func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
+func TestBuildAgentSkillContextUsesIndexAndLookupTool(t *testing.T) {
 	raw := `[{"name":"代码审查","description":"检查 bug 和测试缺口","trigger":"review, bug","detail":"逐项检查边界、权限和测试。"},{"name":"文档撰写","description":"写说明","detail":"不要命中"}]`
 	got := BuildAgentSkillContext(raw, "请 review 这个工具权限 bug")
 	if !strings.Contains(got, "[平台 Skills]") {
@@ -391,11 +393,14 @@ func TestBuildAgentSkillContextProgressivelyLoadsMatchedDetail(t *testing.T) {
 	if !strings.Contains(got, "代码审查：检查 bug 和测试缺口") {
 		t.Fatalf("expected skill index, got %s", got)
 	}
-	if !strings.Contains(got, "逐项检查边界、权限和测试。") {
-		t.Fatalf("expected matched detail, got %s", got)
+	if !strings.Contains(got, "get_agent_skill") {
+		t.Fatalf("expected skill lookup tool instruction, got %s", got)
+	}
+	if strings.Contains(got, "逐项检查边界、权限和测试。") {
+		t.Fatalf("expected detail to remain outside prompt, got %s", got)
 	}
 	if strings.Contains(got, "不要命中") {
-		t.Fatalf("unexpected unmatched detail: %s", got)
+		t.Fatalf("expected no skill detail in prompt: %s", got)
 	}
 }
 

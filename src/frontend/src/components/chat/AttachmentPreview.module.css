@@ -43,6 +43,29 @@
   color: var(--color-text-secondary);
 }
 
+.pdfIcon,
+.wordIcon,
+.pptIcon,
+.genericIcon {
+  font-size: 24px;
+}
+
+.pdfIcon {
+  color: #cf1322;
+}
+
+.wordIcon {
+  color: #1677ff;
+}
+
+.pptIcon {
+  color: #d46b08;
+}
+
+.genericIcon {
+  color: var(--color-text-secondary);
+}
+
 .overlay {
   position: absolute;
   inset: 0;

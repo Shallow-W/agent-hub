@@ -17,6 +17,7 @@ interface AgentState {
   loading: boolean;
   machineLoading: boolean;
   error: string | null;
+  agentsFetching: boolean;
   agentsLoaded: boolean;
   machinesLoaded: boolean;
   candidatesLoaded: boolean;
@@ -47,6 +48,8 @@ function sortAgents(list: Agent[]): Agent[] {
   });
 }
 
+let agentsFetchPromise: Promise<void> | null = null;
+
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
   machines: [],
@@ -54,6 +57,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   loading: false,
   machineLoading: false,
   error: null,
+  agentsFetching: false,
   agentsLoaded: false,
   machinesLoaded: false,
   candidatesLoaded: false,
@@ -61,17 +65,24 @@ export const useAgentStore = create<AgentState>((set) => ({
   fetchAgents: async (force) => {
     const state = useAgentStore.getState();
     if (!force && state.agentsLoaded) return;
-    set({ loading: true, error: null });
-    try {
-      const agents = await agentApi.getAgents();
-      set({ agents: sortAgents(agents), agentsLoaded: true });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '查询 Agent 失败';
-      set({ error: message });
-      throw err;
-    } finally {
-      set({ loading: false });
-    }
+    if (agentsFetchPromise) return agentsFetchPromise;
+
+    agentsFetchPromise = (async () => {
+      set({ loading: true, agentsFetching: true, error: null });
+      try {
+        const agents = await agentApi.getAgents();
+        set({ agents: sortAgents(agents), agentsLoaded: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '查询 Agent 失败';
+        set({ error: message });
+        throw err;
+      } finally {
+        set({ loading: false, agentsFetching: false });
+        agentsFetchPromise = null;
+      }
+    })();
+
+    return agentsFetchPromise;
   },
 
   fetchDaemonMachines: async (force) => {
@@ -210,3 +221,18 @@ export const useAgentStore = create<AgentState>((set) => ({
     }));
   },
 }));
+
+export function resetAgentStore(): void {
+  useAgentStore.setState({
+    agents: [],
+    machines: [],
+    candidates: [],
+    loading: false,
+    machineLoading: false,
+    error: null,
+    agentsFetching: false,
+    agentsLoaded: false,
+    machinesLoaded: false,
+    candidatesLoaded: false,
+  });
+}

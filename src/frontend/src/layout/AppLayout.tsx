@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Alert, message as antMessage } from 'antd';
+import {
+  Outlet,
+  useNavigate,
+  useLocation } from 'react-router-dom';
+import { Alert,
+} from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   LeftOutlined,
   RightOutlined,
@@ -20,17 +25,23 @@ import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
+import { useKnowledgeStore } from '@/store/knowledgeStore';
+import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
 import { AgentProfile } from '@/components/agent/AgentProfile';
 import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
 import { ComputerProfile } from '@/components/agent/ComputerProfile';
 import KnowledgeFilePreview from '@/components/knowledge/KnowledgeFilePreview';
+import { syncSelectedKnowledgeFile } from '@/components/knowledge/knowledgePreviewState.mjs';
+import TitleBar from '@/components/common/TitleBar';
 import type { Agent } from '@/types/agent';
 import type { KnowledgeFile } from '@/types/knowledge';
 import styles from './AppLayout.module.css';
 
 const AppLayout: React.FC = () => {
+  useAppBootstrap();
+
   const navigate = useNavigate();
   const location = useLocation();
   const { create, conversations } = useConversation();
@@ -55,6 +66,7 @@ const AppLayout: React.FC = () => {
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
   const [selectedKnowledgeFile, setSelectedKnowledgeFile] = useState<KnowledgeFile | null>(null);
   const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
+  const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
   const creatingAgentChatRef = useRef<string | null>(null);
 
   const handleNavChange = useCallback((key: string) => {
@@ -77,19 +89,21 @@ const AppLayout: React.FC = () => {
     }
   }, [navigate, location.pathname]);
 
+  // 仅在路由变化时同步 activeNav（不依赖 activeNav 本身，避免循环覆盖用户点击）
   useEffect(() => {
     if (location.pathname.startsWith('/tasks')) {
       setActiveNav('workspace');
-      return;
-    }
-    if (location.pathname.startsWith('/settings')) {
+    } else if (location.pathname.startsWith('/settings')) {
       setActiveNav('settings');
-      return;
+    } else {
+      // Only reset route-based navs (workspace/settings) to 'chat';
+      // preserve overlay navs (skills, knowledge, models, contacts, chat)
+      setActiveNav((prev) => {
+        if (prev === 'workspace' || prev === 'settings') return 'chat';
+        return prev;
+      });
     }
-    if (activeNav === 'workspace' || activeNav === 'settings') {
-      setActiveNav('chat');
-    }
-  }, [activeNav, location.pathname]);
+  }, [location.pathname]);
 
   // 切换到联系人页时自动拉取数据
   useEffect(() => {
@@ -226,97 +240,129 @@ const AppLayout: React.FC = () => {
     setSelectedKbId(kbId);
   }, []);
 
+  useEffect(() => {
+    if (!selectedKnowledgeFile || !selectedKbId) return;
+    const synced = syncSelectedKnowledgeFile({
+      selectedFile: selectedKnowledgeFile,
+      selectedKbId,
+      knowledgeBases,
+    });
+    if (synced.selectedFile?.id !== selectedKnowledgeFile.id || synced.selectedFile !== selectedKnowledgeFile) {
+      setSelectedKnowledgeFile(synced.selectedFile);
+    }
+    if (synced.selectedKbId !== selectedKbId) {
+      setSelectedKbId(synced.selectedKbId);
+    }
+  }, [knowledgeBases, selectedKnowledgeFile, selectedKbId]);
+
   return (
     <div className={styles.container}>
-      {showDisconnectAlert && (
-        <Alert
-          message="连接已断开，正在重连..."
-          type="warning"
-          showIcon
-          banner
-          className={styles.disconnectAlert}
-        />
-      )}
+      <TitleBar />
 
-      <div
-        className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
-      >
-        <SettingsPanel
-          username={user?.username ?? ''}
-          onLogout={handleLogout}
-          wsStatus={status}
-          onNavChange={handleNavChange}
-          activeKey={activeNav}
-          onCreate={handleCreate}
-          collapsed={settingsCollapsed}
-        />
-      </div>
-
-      <button
-        className={`${styles.toggleBtn} ${
-          settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
-        }`}
-        onClick={() => setSettingsCollapsed((c) => !c)}
-        aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
-      >
-        {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
-      </button>
-
-      <div className={styles.convPanel}>
-        <MiddlePanel
-          activeNav={activeNav}
-          conversations={conversations}
-          onCreate={handleCreate}
-          onCreateGroup={() => setGroupModalOpen(true)}
-          onRefresh={() => fetchConversations()}
-          onUpload={handleUpload}
-          onStartChat={handleStartChat}
-          onStartAgentChat={handleStartAgentChat}
-          onSwitchChat={() => setActiveNav('chat')}
-          onSwitchContacts={() => setActiveNav('contacts')}
-          onRefreshContacts={handleRefreshContacts}
-          selectedAgentId={selectedAgentId}
-          selectedMachineId={selectedMachineId}
-          onSelectAgent={handleSelectAgent}
-          onSelectMachine={handleSelectMachine}
-          onKnowledgeFileSelect={handleKnowledgeFileSelect}
-          selectedFileId={selectedKnowledgeFile?.id ?? null}
-          selectedKbId={selectedKbId}
-        />
-      </div>
-
-      {/* 右侧：聊天区域 / 智能体详情 */}
-      <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-        {activeNav === 'knowledge' ? (
-          selectedKnowledgeFile && selectedKbId ? (
-            <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
-          ) : (
-            <div className={styles.emptyRightPanel}>
-              <div className={styles.emptyRightIcon}>📚</div>
-              <div className={styles.emptyRightTitle}>知识库管理</div>
-              <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
-            </div>
-          )
-        ) : activeNav === 'skills' ? (
-          selectedAgent ? (
-            <AgentSkillsPanel agent={selectedAgent} />
-          ) : (
-            <div style={{ padding: 32, color: 'var(--color-text-secondary)' }}>← 选择一个 Agent 管理技能</div>
-          )
-        ) : activeNav === 'models' ? (
-          selectedAgent ? (
-            <AgentProfile agent={selectedAgent} />
-          ) : (
-            <ComputerProfile
-              machineId={selectedMachineId}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={handleSelectAgent}
-              onClearSelection={() => setSelectedMachineId(null)}
-            />
-          )
-        ) : (
-          <Outlet />
+      <div className={styles.contentRow}>
+        {showDisconnectAlert && (
+          <Alert
+            message="连接已断开，正在重连..."
+            type="warning"
+            showIcon
+            banner
+            className={styles.disconnectAlert}
+          />
         )}
+
+        <div
+          className={`${styles.settingsPanel} ${settingsCollapsed ? styles.settingsPanelCollapsed : ''}`}
+        >
+          <SettingsPanel
+            username={user?.username ?? ''}
+            onLogout={handleLogout}
+            wsStatus={status}
+            onNavChange={handleNavChange}
+            activeKey={activeNav}
+            onCreate={handleCreate}
+            collapsed={settingsCollapsed}
+          />
+        </div>
+
+        <button
+          className={`${styles.toggleBtn} ${
+            settingsCollapsed ? styles.toggleBtnCollapsed : styles.toggleBtnExpanded
+          }`}
+          onClick={() => setSettingsCollapsed((c) => !c)}
+          aria-label={settingsCollapsed ? '展开侧栏' : '折叠侧栏'}
+        >
+          {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
+        </button>
+
+        <div className={styles.convPanel}>
+          <MiddlePanel
+            activeNav={activeNav}
+            conversations={conversations}
+            onCreate={handleCreate}
+            onCreateGroup={() => setGroupModalOpen(true)}
+            onRefresh={() => fetchConversations()}
+            onUpload={handleUpload}
+            onStartChat={handleStartChat}
+            onStartAgentChat={handleStartAgentChat}
+            onSwitchChat={() => setActiveNav('chat')}
+            onSwitchContacts={() => setActiveNav('contacts')}
+            onRefreshContacts={handleRefreshContacts}
+            selectedAgentId={selectedAgentId}
+            selectedMachineId={selectedMachineId}
+            onSelectAgent={handleSelectAgent}
+            onSelectMachine={handleSelectMachine}
+            onKnowledgeFileSelect={handleKnowledgeFileSelect}
+            selectedFileId={selectedKnowledgeFile?.id ?? null}
+            selectedKbId={selectedKbId}
+          />
+        </div>
+
+        {/* 右侧：聊天区域 / 智能体详情 */}
+        <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
+          {/* Chat view: always mounted to preserve state across tab switches */}
+          <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <Outlet />
+          </div>
+
+          {/* Knowledge overlay — always mounted to avoid re-fetch */}
+          <div style={activeNav !== 'knowledge' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {selectedKnowledgeFile && selectedKbId ? (
+              <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
+            ) : (
+              <div className={styles.emptyRightPanel}>
+                <div className={styles.emptyRightIcon}>📚</div>
+                <div className={styles.emptyRightTitle}>知识库管理</div>
+                <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+              </div>
+            )}
+          </div>
+
+          {/* Skills overlay — always mounted to avoid re-fetch */}
+          <div style={activeNav !== 'skills' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {selectedAgent ? (
+              <AgentSkillsPanel agent={selectedAgent} />
+            ) : (
+              <div className={styles.skillsEmptyPanel}>
+                <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
+                <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
+              </div>
+            )}
+          </div>
+
+          {/* Models overlay */}
+          {activeNav === 'models' && (
+            selectedAgent ? (
+              <AgentProfile agent={selectedAgent} onMessage={handleStartAgentChat} />
+            ) : (
+              <ComputerProfile
+                machineId={selectedMachineId}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={handleSelectAgent}
+                onClearSelection={() => setSelectedMachineId(null)}
+              />
+            )
+          )}
+        </div>
       </div>
 
       <GroupCreateModal

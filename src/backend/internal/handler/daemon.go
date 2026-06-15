@@ -57,6 +57,9 @@ func (h *DaemonHandler) WithMachine(fn func(*gin.Context, *model.DaemonMachine))
 // Handle 处理 daemon WebSocket 连接
 func (h *DaemonHandler) Handle(c *gin.Context) {
 	token := c.Query("token")
+	if token == "" {
+		token = c.Query("key")
+	}
 	machine, err := h.authenticateMachine(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 40120, "message": "无效 daemon token", "data": nil})
@@ -71,6 +74,7 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "disconnect")
+
 	// Daemon registration can include hundreds of skills with full content (multi-MB).
 	conn.SetReadLimit(10 << 20) // 10MB
 
@@ -131,7 +135,7 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachin
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
 			return
 		}
-			h.agentSvc.MarkMachineOnline(machine.ID)
+		h.agentSvc.MarkMachineOnline(machine.ID)
 		data := gin.H{"count": len(req.Agents)}
 		if h.token != "" {
 			data["daemon_token"] = h.token
@@ -340,8 +344,9 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonCli
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			return
 		}
-			h.agentSvc.MarkMachineOnline(machine.ID)
+		h.agentSvc.MarkMachineOnline(machine.ID)
 		h.logger.Info("daemon machine agents registered", "machine_id", req.MachineID, "machine", machine.ID, "count", len(req.Agents))
+		h.DispatchTask(&model.DaemonTask{MachineID: machine.ID})
 		return
 	}
 

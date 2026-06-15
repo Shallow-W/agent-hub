@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Drawer,
-  List,
   Avatar,
   Button,
   Badge,
   Popconfirm,
-  message,
   Empty,
   Spin,
   Tag,
@@ -14,6 +12,8 @@ import {
   Tabs,
   Dropdown,
 } from 'antd';
+import { message } from '@/utils/message';
+import { SimpleList as List } from '@/components/common/SimpleList';
 import {
   UserAddOutlined,
   DeleteOutlined,
@@ -73,7 +73,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [addingUser, setAddingUser] = useState<string | null>(null);
   const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { friends } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
   const agents = useAgentStore((s) => s.agents);
   const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
   const [addingAgent, setAddingAgent] = useState<string | null>(null);
@@ -252,7 +252,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
       title="群成员"
       open={open}
       onClose={onClose}
-      width={320}
+      size={320}
       extra={
         canManage ? (
           <Button
@@ -481,7 +481,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
           setUserSearchQuery('');
           setUserSearchResults([]);
         }}
-        width={280}
+        size={280}
       >
         <Tabs
           size="small"

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Input } from 'antd';
 import { PlusOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { ConversationList } from '@/components/sidebar/ConversationList';
@@ -155,10 +155,24 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
     fetchAgents().catch(() => {});
   }, [fetchAgents]);
 
-  const normalized = query.trim().toLowerCase();
-  const filtered = normalized
-    ? agents.filter((a) => a.name.toLowerCase().includes(normalized))
-    : agents;
+  const filtered = useMemo(() => {
+    const n = query.trim().toLowerCase();
+    if (!n) return agents;
+    return agents.filter((agent) => {
+      const platformSkills = parseSkills(agent.custom_skills);
+      return agent.name.toLowerCase().includes(n)
+        || platformSkills.some((skill) => skill.name.toLowerCase().includes(n));
+    });
+  }, [agents, query]);
+
+  const skillData = useMemo(() =>
+    filtered.map((agent) => ({
+      agent,
+      skillCount: parseSkills(agent.custom_skills).length,
+      baseSkillCount: parseSkills(agent.capabilities_json).length,
+    })),
+    [filtered],
+  );
 
   return (
     <>
@@ -178,11 +192,10 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
         </div>
         <div className={listStyles.items}>
           <div className={skillStyles.grid}>
-            {filtered.length === 0 && (
-              <div className={skillStyles.empty}>{normalized ? '无匹配结果' : '暂无 Agent'}</div>
+            {skillData.length === 0 && (
+              <div className={skillStyles.empty}>{query.trim() ? '无匹配结果' : '暂无 Agent'}</div>
             )}
-            {filtered.map((agent) => {
-              const skillCount = parseSkills(agent.capabilities_json).length;
+            {skillData.map(({ agent, skillCount, baseSkillCount }) => {
               const isSelected = agent.id === selectedAgentId;
               return (
                 <button
@@ -194,7 +207,7 @@ const SkillsAgentList: React.FC<SkillsAgentListProps> = ({ selectedAgentId, onSe
                   <Avatar size={36} src={resolveAgentAvatar(agent)} icon={<RobotOutlined />} className={skillStyles.avatar} />
                   <div className={skillStyles.info}>
                     <span className={skillStyles.name}>{agent.name}</span>
-                    <span className={skillStyles.meta}>{skillCount} skills</span>
+                    <span className={skillStyles.meta}>已分配 {skillCount} · 底座 {baseSkillCount}</span>
                   </div>
                 </button>
               );

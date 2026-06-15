@@ -22,6 +22,9 @@ cors:
     - http://localhost:5173
 upload:
   dir: "./uploads"
+  # Optional. Set to a public backend origin such as "http://111.228.35.61:8080"
+  # or "https://agenthub.example.com" so attachment APIs return absolute URLs.
+  public_base_url: ""
   max_image_mb: 20
   max_pdf_mb: 50
 log:

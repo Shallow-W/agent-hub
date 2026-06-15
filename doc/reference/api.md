@@ -172,7 +172,20 @@ Authorization: Bearer <token>
 ```json
 {
   "content": "消息内容",
-  "role": "user"
+  "role": "user",
+  "attachments": [
+    {
+      "file_name": "demo.png",
+      "mime_type": "image/png",
+      "file_size": 12345,
+      "file_path": "uploads/originals/<sha>.png",
+      "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+      "url": "/api/uploads/originals/<sha>.png",
+      "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+      "width": 800,
+      "height": 600
+    }
+  ]
 }
 ```
 
@@ -184,6 +197,22 @@ Authorization: Bearer <token>
   "content": "消息内容",
   "role": "user",
   "pinned": false,
+  "attachments": [
+    {
+      "id": "uuid",
+      "message_id": "uuid",
+      "file_name": "demo.png",
+      "mime_type": "image/png",
+      "file_size": 12345,
+      "file_path": "uploads/originals/<sha>.png",
+      "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+      "url": "/api/uploads/originals/<sha>.png",
+      "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+      "width": 800,
+      "height": 600,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ],
   "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -213,6 +242,19 @@ Authorization: Bearer <token>
     "content": "消息内容",
     "role": "user | assistant | system",
     "pinned": false,
+    "attachments": [
+      {
+        "id": "uuid",
+        "message_id": "uuid",
+        "file_name": "demo.png",
+        "mime_type": "image/png",
+        "file_size": 12345,
+        "file_path": "uploads/originals/<sha>.png",
+        "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+        "url": "/api/uploads/originals/<sha>.png",
+        "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg"
+      }
+    ],
     "created_at": "2024-01-01T00:00:00Z"
   }
 ]
@@ -220,6 +262,37 @@ Authorization: Bearer <token>
 
 **错误响应**
 - `404 Not Found` — 对话不存在或无权限
+
+---
+
+### POST /api/upload
+
+上传聊天附件。文件二进制保存到后端配置的 `upload.dir`，数据库只保存相对路径和元信息。若配置了 `upload.public_base_url`，`url` 和 `thumbnail_url` 会返回绝对公网地址；否则返回相对 `/api/...` 地址。
+
+**请求体** `multipart/form-data`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file` | file | 图片、PDF、Office 或文本附件 |
+
+**成功响应** `201 Created`
+```json
+{
+  "file_name": "demo.png",
+  "mime_type": "image/png",
+  "file_size": 12345,
+  "file_path": "uploads/originals/<sha>.png",
+  "thumbnail_path": "uploads/thumbnails/<sha>.jpg",
+  "url": "/api/uploads/originals/<sha>.png",
+  "thumbnail_url": "/api/uploads/thumbnails/<sha>.jpg",
+  "width": 800,
+  "height": 600
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 缺少文件或类型不支持
+- `413 Request Entity Too Large` — 文件超过大小限制
 
 ---
 
@@ -394,7 +467,81 @@ null
 
 ---
 
+### WS /daemon/ws?token=machine_key
+
+本机 daemon 连接后端的长连接通道。daemon 首次连接后发送 `daemon.register` 上报本机 Agent；后端创建 daemon task 后通过该连接主动下发 `task.execute`，daemon 执行 CLI 后回传 `task.done` 或 `task.error`。`daemon_tasks` 仅作为进程内任务队列和完成等待状态，不作为轮询消息队列。
+
+**daemon -> server**
+```json
+{
+  "type": "daemon.register",
+  "data": {
+    "machine_id": "HOSTNAME",
+    "agents": []
+  }
+}
+```
+
+```json
+{
+  "type": "task.done",
+  "data": {
+    "task_id": "uuid",
+    "result": "Agent final response"
+  }
+}
+```
+
+**server -> daemon**
+```json
+{
+  "type": "task.execute",
+  "data": {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "agent_id": "uuid",
+    "machine_id": "uuid",
+    "cli_tool": "claude",
+    "prompt": "user message",
+    "context_messages": "serialized context"
+  }
+}
+```
+
+---
+
 ## Agent 管理
+
+### GET /api/platform-skills
+
+获取当前用户的平台 Skill 库。平台 Skill 库是用户自己维护的可编辑 Skills；底座上报的 machine Skills 仍在 Agent `capabilities_json` 中只读展示。
+
+### POST /api/platform-skills
+
+创建平台 Skill。
+
+**请求体**
+```json
+{
+  "name": "代码审查",
+  "category": "开发人员",
+  "description": "检查 bug 和测试缺口",
+  "trigger": "review, bug",
+  "detail": "按清单检查权限、边界和测试。"
+}
+```
+
+### POST /api/platform-skills/import-defaults
+
+将内置默认平台 Skills 导入当前用户的平台 Skill 库。默认模板覆盖产品经理和开发人员常用工作流，带有 `category` 分类，并使用统一 detail 结构：`适用场景`、`输入要求`、`工作流程`、`输出格式`、`质量检查`。已存在的同名 Skill 会跳过且不会覆盖用户内容；响应会返回当前库中可用于分配的默认 Skills。
+
+### PUT /api/platform-skills/:id
+
+更新平台 Skill。更新库内容不会自动改写已分配给 Agent 的快照；需要在 Agent 技能页重新分配或保存对应 Agent 配置。
+
+### DELETE /api/platform-skills/:id
+
+删除平台 Skill 库条目。删除库条目不会自动移除已经分配给 Agent 的 Skill 快照。
 
 ### GET /api/agents
 
@@ -469,6 +616,7 @@ null
 
 更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力索引和渐进式加载内容，不会被 daemon 底座扫描覆盖。
 仅允许更新当前用户拥有的自建 Agent；保存前会校验为 JSON 数组并只保留 `name`、`description`、`trigger`、`detail` 字段，过滤 `source_path` 等本机扫描字段。
+运行时 prompt 只注入 Skill 索引和触发说明；完整 `detail` 保留在服务端，由当前 Agent 在需要时通过已授权的 MCP 工具 `get_agent_skill` 按名称读取。
 
 **请求体**
 ```json

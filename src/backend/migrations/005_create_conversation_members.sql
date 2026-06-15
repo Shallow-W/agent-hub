@@ -7,8 +7,8 @@ CREATE TABLE IF NOT EXISTS conversation_members (
     joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_membership UNIQUE (conversation_id, user_id)
 );
-CREATE INDEX idx_conv_members_conv ON conversation_members (conversation_id);
-CREATE INDEX idx_conv_members_user ON conversation_members (user_id);
+CREATE INDEX IF NOT EXISTS idx_conv_members_conv ON conversation_members (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conv_members_user ON conversation_members (user_id);
 
 ---- DOWN
 DROP TABLE IF EXISTS conversation_members;

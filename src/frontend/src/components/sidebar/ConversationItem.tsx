@@ -6,7 +6,6 @@ import {
   EditOutlined,
   InboxOutlined,
   PushpinOutlined,
-  RobotOutlined,
   TeamOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
@@ -14,6 +13,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Conversation } from '@/types/conversation';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
+import { modal as appModal } from '@/utils/modal';
 import styles from './ConversationItem.module.css';
 
 interface ConversationItemProps {
@@ -150,7 +150,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
       danger: true,
       onClick: (info) => {
         info.domEvent.stopPropagation();
-        Modal.confirm({
+        appModal.confirm({
           title: isGroup && isOwner ? '解散并删除群聊' : '删除对话',
           content: isGroup && isOwner
             ? `确定要解散并删除「${displayName}」吗？所有成员都会失去这个群聊和聊天记录。`
@@ -184,8 +184,12 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           <Avatar
             style={{ backgroundColor: '#2f9d74', flexShrink: 0 }}
             size={32}
-            src={resolveAgentAvatar(agents.find((a) => a.id === conversation.peer_id) || { id: conversation.peer_id || '', name: conversation.peer_name || conversation.title })}
-            icon={<RobotOutlined />}
+            src={(() => {
+              const a = agents.find((x) => x.id === conversation.peer_id);
+              return a
+                ? resolveAgentAvatar(a)
+                : resolveAgentAvatar({ id: conversation.peer_id || conversation.id, name: conversation.peer_name || conversation.title });
+            })()}
           />
         ) : isGroup ? (
           <Avatar
@@ -256,7 +260,7 @@ export const ConversationItem: React.FC<ConversationItemProps> = ({
           setRenameOpen(false);
         }}
         onCancel={() => setRenameOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Input
           value={renameValue}

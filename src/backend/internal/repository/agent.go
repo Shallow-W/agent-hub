@@ -22,6 +22,9 @@ type AgentRepo struct {
 	taskMu    sync.Mutex
 	tasks     map[string]*model.DaemonTask
 	taskQueue map[string][]string // machineID -> 待领取 taskID FIFO
+
+	dispatchMu sync.RWMutex
+	dispatcher func(*model.DaemonTask)
 }
 
 // NewAgentRepo 创建 Agent 仓库
@@ -31,6 +34,13 @@ func NewAgentRepo(db *sqlx.DB) *AgentRepo {
 		tasks:     make(map[string]*model.DaemonTask),
 		taskQueue: make(map[string][]string),
 	}
+}
+
+// SetDaemonTaskDispatcher 注册实时任务投递器，避免 daemon 端轮询后端。
+func (r *AgentRepo) SetDaemonTaskDispatcher(dispatcher func(*model.DaemonTask)) {
+	r.dispatchMu.Lock()
+	defer r.dispatchMu.Unlock()
+	r.dispatcher = dispatcher
 }
 
 // ListAvailable 查询系统 Agent 和当前用户自建 Agent。userID 为空时返回所有 Agent。
@@ -119,7 +129,7 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*model.Agent, error
 }
 
 // daemonTaskRetention 是已完成任务在内存中的保留期，用于懒清理，防止无限增长。
-// 远大于任务最长生命周期（waitDaemonTask 超时 120s），不会误删在途任务。
+// 远大于任务最长生命周期（waitDaemonTask 超时 400s），不会误删在途任务。
 const daemonTaskRetention = 10 * time.Minute
 
 // CreateDaemonTask 创建一次等待远端电脑执行的 CLI 任务（内存队列，不落库）。
@@ -143,6 +153,13 @@ func (r *AgentRepo) CreateDaemonTask(_ context.Context, userID, conversationID, 
 	r.tasks[task.ID] = task
 	r.taskQueue[machineID] = append(r.taskQueue[machineID], task.ID)
 	r.taskMu.Unlock()
+
+	r.dispatchMu.RLock()
+	dispatcher := r.dispatcher
+	r.dispatchMu.RUnlock()
+	if dispatcher != nil {
+		dispatcher(cloneDaemonTask(task))
+	}
 	return cloneDaemonTask(task), nil
 }
 
@@ -239,15 +256,15 @@ func cloneDaemonTask(task *model.DaemonTask) *model.DaemonTask {
 }
 
 // CreateCustom 创建用户自建 Agent
-func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	var a model.Agent
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, enable_management_tools, source, status)
-		 VALUES ($1, $2, 'custom', $3, $4, $5, $6, $7, $8, 'manual', 'offline')
+		`INSERT INTO agents (user_id, name, type, cli_tool, system_prompt, tools_config, avatar, capabilities_json, custom_skills, enable_management_tools, source, status)
+		 VALUES (NULLIF($1,'')::uuid, $2, 'custom', $3, $4, $5, $6, $7, $8, $9, 'manual', 'offline')
 		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
 		           last_seen_at, created_at, updated_at`,
-		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
+		userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools,
 	).StructScan(&a)
 	if err != nil {
 		return nil, fmt.Errorf("insert custom agent: %w", err)
@@ -255,18 +272,28 @@ func (r *AgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool, sys
 	return &a, nil
 }
 
-// UpdateCustom 更新用户自建 Agent
-func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON string, enableManagementTools bool) (*model.Agent, error) {
+// UpdateCustom 更新用户自建 Agent。userID 为空时跳过归属校验（MCP 模式）。
+func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	var a model.Agent
-	err := r.db.QueryRowxContext(ctx,
-		`UPDATE agents
-		 SET name = $3, cli_tool = $4, system_prompt = $5, tools_config = $6, avatar = $7,
-		     capabilities_json = $8, enable_management_tools = $9, updated_at = NOW()
-		 WHERE id = $1 AND user_id = $2 AND type = 'custom'
-		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+	var args []interface{}
+	var query string
+	if userID != "" {
+		query = `UPDATE agents
+		 SET name = $2, cli_tool = $3, system_prompt = $4, tools_config = $5, avatar = $6,
+		     capabilities_json = $7, custom_skills = $8, enable_management_tools = $9, updated_at = NOW()
+		 WHERE id = $1 AND type = 'custom' AND user_id = $10`
+		args = []interface{}{id, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools, userID}
+	} else {
+		query = `UPDATE agents
+		 SET name = $2, cli_tool = $3, system_prompt = $4, tools_config = $5, avatar = $6,
+		     capabilities_json = $7, custom_skills = $8, enable_management_tools = $9, updated_at = NOW()
+		 WHERE id = $1 AND type = 'custom'`
+		args = []interface{}{id, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools}
+	}
+	query += ` RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
 		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
-		           last_seen_at, created_at, updated_at`,
-		id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, enableManagementTools,
+		           last_seen_at, created_at, updated_at`
+	err := r.db.QueryRowxContext(ctx, query, args...,
 	).StructScan(&a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -351,11 +378,18 @@ func (r *AgentRepo) GetAgentsByMachine(ctx context.Context, machineID string) ([
 	return list, nil
 }
 
-// DeleteOwned 删除当前用户拥有的 Agent，包括自建 Agent 和电脑上报的系统 Agent。
+// DeleteOwned 删除 Agent。userID 为空时仅按 ID 删除（MCP 模式）。
 func (r *AgentRepo) DeleteOwned(ctx context.Context, id, userID string) (bool, error) {
-	res, err := r.db.ExecContext(ctx,
-		`DELETE FROM agents WHERE id = $1 AND user_id = $2`,
-		id, userID,
+	var query string
+	var args []interface{}
+	if userID != "" {
+		query = `DELETE FROM agents WHERE id = $1 AND user_id = $2`
+		args = []interface{}{id, userID}
+	} else {
+		query = `DELETE FROM agents WHERE id = $1`
+		args = []interface{}{id}
+	}
+	res, err := r.db.ExecContext(ctx, query, args...,
 	)
 	if err != nil {
 		return false, fmt.Errorf("delete owned agent: %w", err)

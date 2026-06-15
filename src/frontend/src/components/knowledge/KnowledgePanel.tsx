@@ -5,8 +5,8 @@ import {
   Switch,
   Spin,
   Popconfirm,
-  message as antMessage,
 } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -31,6 +31,37 @@ function formatBytes(bytes: number): string {
   return formatFileSize(bytes);
 }
 
+const KNOWLEDGE_ACCEPTED_TYPES = [
+  '.txt',
+  '.md',
+  '.markdown',
+  '.csv',
+  '.tsv',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.xml',
+  '.html',
+  '.htm',
+  '.svg',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.ppt',
+  '.pptx',
+  '.xls',
+  '.xlsx',
+  '.rtf',
+  '.odt',
+  '.ods',
+  '.odp',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+].join(',');
+
 interface KnowledgePanelProps {
   onFileSelect?: (file: KnowledgeFile, kbId: string) => void;
   selectedFileId?: string | null;
@@ -42,16 +73,14 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
   selectedFileId,
   selectedKbId,
 }) => {
-  const {
-    knowledgeBases,
-    loading,
-    fetchKnowledgeBases,
-    createKnowledgeBase,
-    deleteKnowledgeBase,
-    updateVisibility,
-    addFile,
-    removeFile,
-  } = useKnowledgeStore();
+  const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
+  const loading = useKnowledgeStore((s) => s.loading);
+  const fetchKnowledgeBases = useKnowledgeStore((s) => s.fetchKnowledgeBases);
+  const createKnowledgeBase = useKnowledgeStore((s) => s.createKnowledgeBase);
+  const deleteKnowledgeBase = useKnowledgeStore((s) => s.deleteKnowledgeBase);
+  const updateVisibility = useKnowledgeStore((s) => s.updateVisibility);
+  const addFile = useKnowledgeStore((s) => s.addFile);
+  const removeFile = useKnowledgeStore((s) => s.removeFile);
 
   useEffect(() => {
     fetchKnowledgeBases().catch(() => {});
@@ -133,14 +162,16 @@ const KnowledgePanel: React.FC<KnowledgePanelProps> = ({
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
+    input.accept = KNOWLEDGE_ACCEPTED_TYPES;
     input.onchange = async () => {
       if (!input.files) return;
       for (const file of Array.from(input.files)) {
         try {
           await addFile(kbId, file);
           antMessage.success(`${file.name} 上传成功`);
-        } catch {
-          antMessage.error(`${file.name} 上传失败`);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : '上传失败';
+          antMessage.error(`${file.name} ${reason}`);
         }
       }
     };

@@ -87,3 +87,10 @@ export async function getUnreadMessages(
   const path = `/api/conversations/${conversationId}/messages/unread${qs ? `?${qs}` : ''}`;
   return get<Message[]>(path);
 }
+
+export async function getMessageReplies(
+  conversationId: string,
+  messageId: string,
+): Promise<Message[]> {
+  return get<Message[]>(`/api/conversations/${conversationId}/messages/${messageId}/replies`);
+}

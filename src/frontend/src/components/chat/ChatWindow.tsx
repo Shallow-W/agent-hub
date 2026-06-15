@@ -1,5 +1,8 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography, message as antMessage } from 'antd';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Avatar, Tooltip, Button, Dropdown, Empty, Input, Modal, Typography } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import {
   FolderOpenOutlined,
   LogoutOutlined,
@@ -26,15 +29,19 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ChatSearchPanel } from './ChatSearchPanel';
 import { ForwardModal } from './ForwardModal';
+import { ThreadDrawer } from './ThreadDrawer';
 import { useMessages } from '@/hooks/useMessages';
 import GroupMemberPanel from '@/components/groups/GroupMemberPanel';
 import GroupInfoDrawer from '@/components/groups/GroupInfoDrawer';
 import { searchMessages } from '@/api/search';
 import { getConversationBlackboard, getPinnedContext, updateConversationBlackboard } from '@/api/message';
+import { getConversationAgents } from '@/api/conversation';
 import { uploadFile } from '@/api/upload';
 import type { AttachmentPayload } from '@/types/attachment';
+import type { ConversationAgent } from '@/types/conversation';
 import { resolveAgentAvatar, resolveUserAvatar, avatarUrl } from '@/components/agent/agentPresentation';
 import { useAgentStore } from '@/store/agentStore';
+import { modal as appModal } from '@/utils/modal';
 import styles from './ChatWindow.module.css';
 
 const ACCEPTED_TYPES =
@@ -47,6 +54,14 @@ const { Text } = Typography;
 function getPinnedMessageAuthor(item: PinnedMessage): string {
   const username = item.username?.trim();
   if (username) return username;
+  if (item.role === 'assistant' && item.artifacts_json) {
+    try {
+      const meta = JSON.parse(item.artifacts_json) as { agent_name?: string };
+      if (meta.agent_name?.trim()) return meta.agent_name.trim();
+    } catch {
+      // ignore invalid legacy metadata
+    }
+  }
   if (item.role === 'assistant') return '助手';
   if (item.role === 'system') return '系统';
   return '用户';
@@ -57,7 +72,7 @@ export const ChatWindow: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const agents = useAgentStore((s) => s.agents);
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
-  const activeConv = conversations.find((c) => c.id === activeId);
+  const activeConv = useMemo(() => conversations.find((c) => c.id === activeId), [conversations, activeId]);
   const memberPanelOpen = useConversationStore((s) => s.memberPanelOpen);
   const setMemberPanelOpen = useConversationStore((s) => s.setMemberPanelOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
@@ -66,6 +81,7 @@ export const ChatWindow: React.FC = () => {
   const typingUsersMap = useWsStore((s) => activeId ? (s.typingUsers[activeId] ?? EMPTY_TYPING) : EMPTY_TYPING);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
+  const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -77,6 +93,7 @@ export const ChatWindow: React.FC = () => {
   const [blackboardPinned, setBlackboardPinned] = useState<PinnedMessage[]>([]);
   const [blackboardLoading, setBlackboardLoading] = useState(false);
   const [blackboardSaving, setBlackboardSaving] = useState(false);
+  const [conversationAgents, setConversationAgents] = useState<ConversationAgent[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
@@ -90,6 +107,29 @@ export const ChatWindow: React.FC = () => {
   useEffect(() => {
     activeIdRef.current = activeId ?? null;
   }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId || activeConv?.type !== 'group') {
+      setConversationAgents([]);
+      return;
+    }
+    const conversationId = activeId;
+    let cancelled = false;
+    getConversationAgents(conversationId)
+      .then((items) => {
+        if (!cancelled && activeIdRef.current === conversationId) {
+          setConversationAgents(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && activeIdRef.current === conversationId) {
+          setConversationAgents([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, activeConv?.type]);
 
   const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
     const pinned = await getPinnedContext(conversationId);
@@ -374,8 +414,7 @@ export const ChatWindow: React.FC = () => {
                 label: '解散群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '解散群聊',
                       content: '解散后所有成员将被移除，聊天记录将清除，此操作不可撤销。',
                       okText: '确认解散',
@@ -391,7 +430,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('解散失败');
                         }
                       },
-                    });
                   });
                 },
               }]
@@ -401,8 +439,7 @@ export const ChatWindow: React.FC = () => {
                 label: '退出群聊',
                 danger: true as const,
                 onClick: () => {
-                  import('antd').then(({ Modal }) => {
-                    Modal.confirm({
+                  appModal.confirm({
                       title: '退出群聊',
                       content: '退出后将不再接收此群聊消息。',
                       okText: '确认退出',
@@ -418,7 +455,6 @@ export const ChatWindow: React.FC = () => {
                           antMessage.error('退出失败');
                         }
                       },
-                    });
                   });
                 },
               }]),
@@ -459,10 +495,9 @@ export const ChatWindow: React.FC = () => {
               <Avatar
                 className={styles.conversationAvatar}
                 size={26}
-                src={resolveAgentAvatar(
-                  agents.find((a) => a.id === activeConv.peer_id)
-                    || { id: activeConv.peer_id || '', name: displayName },
-                )}
+                src={agents.find((a) => a.id === activeConv.peer_id)
+                  ? resolveAgentAvatar(agents.find((a) => a.id === activeConv.peer_id)!)
+                  : undefined}
                 icon={<RobotOutlined />}
               />
             ) : isGroup ? (
@@ -555,6 +590,8 @@ export const ChatWindow: React.FC = () => {
         onReply={setReplyTo}
         onForward={setForwardMessage}
         onPinChanged={handlePinnedMessageChange}
+        onOpenThread={setThreadMessage}
+        conversationAgents={conversationAgents}
       />
       {otherTyping.length > 0 && (
         <div className={styles.typingIndicator}>
@@ -599,6 +636,12 @@ export const ChatWindow: React.FC = () => {
         message={forwardMessage}
         currentConversationId={activeId ?? undefined}
       />
+      <ThreadDrawer
+        conversationId={activeId ?? ''}
+        originalMessage={threadMessage}
+        open={threadMessage !== null}
+        onClose={() => setThreadMessage(null)}
+      />
       <Modal
         title="上下文黑板"
         open={blackboardOpen}
@@ -625,25 +668,33 @@ export const ChatWindow: React.FC = () => {
               ) : (
                 blackboardPinned.map((item) => (
                   <div key={item.id} className={styles.pinnedItem}>
-                    <div className={styles.pinnedItemBody}>
+                    <div className={styles.pinnedItemHeader}>
                       <div className={styles.pinnedItemMeta}>
                         <Text strong>{getPinnedMessageAuthor(item)}</Text>
                         <Text type="secondary">
                           {new Date(item.message_created_at).toLocaleString()}
                         </Text>
                       </div>
-                      <div className={styles.pinnedItemContent}>
-                        {item.content || '空消息'}
-                      </div>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PushpinOutlined />}
+                        onClick={() => handleUnpinFromBlackboard(item.message_id)}
+                      >
+                        取消 Pin
+                      </Button>
                     </div>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<PushpinOutlined />}
-                      onClick={() => handleUnpinFromBlackboard(item.message_id)}
-                    >
-                      取消 Pin
-                    </Button>
+                    <div className={styles.pinnedItemBubble}>
+                      {item.content ? (
+                        <div className={styles.pinnedMarkdown}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {item.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <Text type="secondary">空消息</Text>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

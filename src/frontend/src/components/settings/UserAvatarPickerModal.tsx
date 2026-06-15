@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Avatar, Modal, message } from 'antd';
+import { Avatar, Modal } from 'antd';
+import { message } from '@/utils/message';
 import { UserOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import {
@@ -49,7 +50,7 @@ export const UserAvatarPickerModal: React.FC<UserAvatarPickerModalProps> = ({ op
       onCancel={onClose}
       footer={null}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.grid}>
         {USER_AVATAR_KEYS.map((key) => {

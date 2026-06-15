@@ -21,6 +21,11 @@ import (
 
 const apiBase = "https://api.github.com"
 
+const (
+	pagesReadyTimeout  = 5 * time.Minute
+	pagesReadyInterval = 5 * time.Second
+)
+
 // Publisher 持有 GitHub 凭据与目标仓库，负责把站点文件推送到 GitHub Pages。
 // 通过 NewPublisher 构造；凭据不全时返回 nil，调用方据此判断功能是否启用。
 type Publisher struct {
@@ -70,7 +75,47 @@ func (p *Publisher) Publish(ctx context.Context, dir string, files map[string][]
 	if err := p.putFile(ctx, "index.html", latestIndexPage(url), "update latest deployment index"); err != nil {
 		return "", fmt.Errorf("更新 Pages 首页失败: %w", err)
 	}
+	if err := p.waitUntilAvailable(ctx, url); err != nil {
+		return "", err
+	}
 	return url, nil
+}
+
+func (p *Publisher) waitUntilAvailable(ctx context.Context, url string) error {
+	ctx, cancel := context.WithTimeout(ctx, pagesReadyTimeout)
+	defer cancel()
+
+	var lastStatus int
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", "AgentHub-GitHub-Pages-Publisher")
+		resp, err := p.client.Do(req)
+		if err == nil {
+			lastStatus = resp.StatusCode
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+
+		timer := time.NewTimer(pagesReadyInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if lastErr != nil {
+				return fmt.Errorf("GitHub Pages 已推送但预览暂不可访问: %w", lastErr)
+			}
+			return fmt.Errorf("GitHub Pages 已推送但预览暂不可访问，最后状态 HTTP %d", lastStatus)
+		case <-timer.C:
+		}
+	}
 }
 
 func latestIndexPage(url string) []byte {

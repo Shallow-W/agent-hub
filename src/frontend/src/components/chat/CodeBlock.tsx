@@ -10,8 +10,12 @@ import {
   RobotOutlined,
   RollbackOutlined,
   SaveOutlined,
-} from '@ant-design/icons';
-import { Input, Modal, Select, message as antMessage } from 'antd';
+  } from '@ant-design/icons';
+import { Input,
+  Modal,
+  Select,
+} from 'antd';
+import { message as antMessage } from '@/utils/message';
 import type { Artifact } from '@/types/message';
 import { aiEditArtifact, createArtifactVersion, listArtifactVersions } from '@/api/artifact';
 import { ApiError } from '@/api/client';
@@ -58,13 +62,14 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   artifactRootId,
 }) => {
   const lang = language ?? (className?.replace('language-', '') || '');
-  const codeStr = (code ?? extractText(children)).replace(/\n$/, '');
+  const sourceCodeStr = (code ?? extractText(children)).replace(/\n$/, '');
   const displayLang = lang ? (LANG_DISPLAY[lang] || lang) : '';
 
   const [copied, setCopied] = useState(false);
   const [expandedOpen, setExpandedOpen] = useState(false);
+  const [inlineCodeOverride, setInlineCodeOverride] = useState<string | null>(null);
   const [mode, setMode] = useState<CodeMode>('view');
-  const [editedCode, setEditedCode] = useState(codeStr);
+  const [editedCode, setEditedCode] = useState(sourceCodeStr);
   const [selectedCode, setSelectedCode] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
@@ -80,6 +85,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   const [diffOldVersion, setDiffOldVersion] = useState<number | null>(null);
   const [diffNewVersion, setDiffNewVersion] = useState<number | null>(null);
 
+  const codeStr = inlineCodeOverride ?? sourceCodeStr;
   const selectedArtifact = versions.find((v) => v.version === selectedVersion) ?? null;
   const latestVersion = versions.length ? versions[versions.length - 1]!.version : null;
   const baseCode = selectedArtifact?.content ?? codeStr;
@@ -109,11 +115,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
     if (created) {
       setSelectedVersion(created.version);
       setEditedCode(created.content ?? fallbackContent);
+      setInlineCodeOverride(created.content ?? fallbackContent);
       return;
     }
     const latest = list.length ? list[list.length - 1]!.version : null;
     setSelectedVersion(latest);
   };
+
+  useEffect(() => {
+    setInlineCodeOverride(null);
+    setEditedCode(sourceCodeStr);
+  }, [sourceCodeStr, artifactRootId]);
 
   useEffect(() => {
     if (!expandedOpen) return;
@@ -196,6 +208,36 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       antMessage.success(`已回滚，生成 v${newVer}`);
     } catch (err) {
       antMessage.error(err instanceof ApiError ? err.message : '回滚失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApplyDiff = async () => {
+    if (!artifactRootId || saving) return;
+    const target = versions.find((v) => v.version === diffNewVersion);
+    if (!target) {
+      antMessage.warning('请先选择要应用的新版本');
+      return;
+    }
+
+    const nextContent = target.content ?? '';
+    if (target.version === latestVersion) {
+      setSelectedVersion(target.version);
+      setEditedCode(nextContent);
+      setInlineCodeOverride(nextContent);
+      setMode('view');
+      antMessage.success('已应用当前 Diff');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const newVer = await createNewVersionFromContent(nextContent);
+      setMode('view');
+      antMessage.success(`已应用 Diff，生成 v${newVer}`);
+    } catch (err) {
+      antMessage.error(err instanceof ApiError ? err.message : '应用 Diff 失败');
     } finally {
       setSaving(false);
     }
@@ -349,7 +391,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
           style={{ top: 16, maxWidth: 'none' }}
           title={displayLang || '代码'}
           className={styles.expandedCodeModal}
-          destroyOnClose
+          destroyOnHidden
         >
           <div className={styles.expandedCodeView}>
             <div className={styles.expandedCodeHeader}>
@@ -390,10 +432,21 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
 
               <div className={styles.expandedHeaderActions}>
                 {mode === 'diff' ? (
-                  <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={() => setMode('view')}>
-                    <span className={styles.codeCopyIcon}><EyeOutlined /></span>
-                    <span className={styles.codeCopyText}>查看</span>
-                  </button>
+                  <>
+                    <button
+                      className={`${styles.codeActionBtn} ${styles.expandedCopyBtn} ${styles.applyDiffBtn}`}
+                      type="button"
+                      disabled={saving || diffNewVersion === null}
+                      onClick={handleApplyDiff}
+                    >
+                      <span className={styles.codeCopyIcon}><SaveOutlined /></span>
+                      <span className={styles.codeCopyText}>{saving ? '应用中...' : '一键应用 Diff'}</span>
+                    </button>
+                    <button className={`${styles.codeActionBtn} ${styles.expandedCopyBtn}`} type="button" onClick={() => setMode('view')}>
+                      <span className={styles.codeCopyIcon}><EyeOutlined /></span>
+                      <span className={styles.codeCopyText}>查看</span>
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button

@@ -96,6 +96,116 @@ func TestAllowedToolsForAgent_UsesBackendAgentConfig(t *testing.T) {
 	}
 }
 
+func TestHandleGetAgentSkillScopesToCurrentAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/agents" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"data":[{"id":"agent-1","custom_skills":"[{\"name\":\"代码审查\",\"description\":\"找 bug\",\"trigger\":\"review\",\"detail\":\"逐项检查权限和测试\"}]"},{"id":"agent-2","custom_skills":"[{\"name\":\"代码审查\",\"detail\":\"不应返回\"}]"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "token-1")
+	handler := HandleAllTools(client, "agent-1")
+	got, err := handler("get_agent_skill", map[string]interface{}{"name": "代码审查"})
+	if err != nil {
+		t.Fatalf("get_agent_skill failed: %v", err)
+	}
+	skill, ok := got.(platformSkill)
+	if !ok {
+		t.Fatalf("unexpected skill type: %#v", got)
+	}
+	if skill.Detail != "逐项检查权限和测试" {
+		t.Fatalf("expected current agent skill detail, got %#v", skill)
+	}
+}
+
+func TestAllowedToolsFromConfig_TasksIncludesSkillLookup(t *testing.T) {
+	allowed := allowedToolsFromConfig(`{"toolset":"tasks"}`)
+	if !allowed["get_agent_skill"] {
+		t.Fatalf("expected tasks toolset to include get_agent_skill, got %#v", allowed)
+	}
+}
+
+func TestAllowedToolsFromConfig_KnowledgeToolsetsIncludeReadAndSearch(t *testing.T) {
+	for _, toolset := range []string{"orchestrator", "knowledge"} {
+		allowed := allowedToolsFromConfig(`{"toolset":"` + toolset + `"}`)
+		for _, tool := range []string{"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"} {
+			if !allowed[tool] {
+				t.Fatalf("expected %s toolset to include %s, got %#v", toolset, tool, allowed)
+			}
+		}
+	}
+}
+
+func TestAgentBuilderToolsetsIncludeAgentCreationTools(t *testing.T) {
+	for _, source := range []struct {
+		name  string
+		tools map[string]bool
+	}{
+		{name: "runtime", tools: allowedToolsFromConfig(`{"toolset":"agent_builder"}`)},
+		{name: "creation", tools: toolSet(agentCreationToolsets["agent_builder"])},
+	} {
+		for _, tool := range []string{"create_agent", "update_agent", "delete_agent", "list_toolsets"} {
+			if !source.tools[tool] {
+				t.Fatalf("expected %s agent_builder toolset to include %s, got %#v", source.name, tool, source.tools)
+			}
+		}
+	}
+}
+
+func TestAgentCreationToolsetsMatchRuntimeTemplates(t *testing.T) {
+	for name, runtimeTools := range toolsetTemplates {
+		creationTools, ok := agentCreationToolsets[name]
+		if !ok {
+			t.Fatalf("missing creation toolset %s", name)
+		}
+		if len(runtimeTools) != len(creationTools) {
+			t.Fatalf("toolset %s length mismatch: runtime=%#v creation=%#v", name, runtimeTools, creationTools)
+		}
+		for i, tool := range runtimeTools {
+			if creationTools[i] != tool {
+				t.Fatalf("toolset %s tool[%d] mismatch: runtime=%q creation=%q", name, i, tool, creationTools[i])
+			}
+		}
+	}
+}
+
+func TestKnowledgeToolHandlersUseBackendSearchAndTextEndpoints(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.String())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/mcp/knowledge-bases/kb-1/search":
+			if r.URL.Query().Get("keyword") != "Agent" {
+				t.Fatalf("unexpected keyword query: %s", r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("limit") != "5" {
+				t.Fatalf("unexpected limit query: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"id":"file-1","filename":"guide.md"}]}`))
+		case "/mcp/knowledge-bases/kb-1/files/file-1/text":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"file_id":"file-1","text":"Agent knowledge"}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handler := HandleAllTools(NewAPIClient(server.URL, "token-1"), "agent-1")
+	if _, err := handler("search_knowledge", map[string]interface{}{"knowledge_base_id": "kb-1", "keyword": "Agent", "limit": float64(5)}); err != nil {
+		t.Fatalf("search_knowledge failed: %v", err)
+	}
+	if _, err := handler("read_knowledge_file", map[string]interface{}{"knowledge_base_id": "kb-1", "file_id": "file-1"}); err != nil {
+		t.Fatalf("read_knowledge_file failed: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 backend calls, got %#v", seen)
+	}
+}
+
 func TestNoAgentToolSet_IsEmpty(t *testing.T) {
 	allowed := noAgentToolSet()
 	if len(allowed) != 0 {

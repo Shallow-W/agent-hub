@@ -1,10 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
-const apiBaseURL = 'http://127.0.0.1:5173';
-const backendURL = 'http://127.0.0.1:8080';
-const username = '121';
-const password = '121';
+const apiBaseURL = process.env.AGENTHUB_E2E_BASE_URL || 'http://127.0.0.1:5173';
+const backendURL = process.env.AGENTHUB_E2E_BACKEND_URL || 'http://127.0.0.1:8080';
+const username = process.env.AGENTHUB_E2E_USERNAME || 'yzk';
+const password = process.env.AGENTHUB_E2E_PASSWORD || '123456';
 
 interface APIResponse<T> {
   code: number;
@@ -76,10 +79,58 @@ async function loginByUI(page: Page): Promise<void> {
   await expect(page.getByText('AgentHub')).toBeVisible();
 }
 
-async function startDaemon(command: string): Promise<ChildProcessWithoutNullStreams> {
-  const child = spawn(command, {
-    shell: true,
-    cwd: '../..',
+async function confirmPopoverDelete(page: Page): Promise<void> {
+  await page.locator('.ant-popover:visible').getByRole('button', { name: /^删\s*除$/ }).click();
+}
+
+async function addAgentFromCandidate(page: Page, candidateRow: Locator, name: string): Promise<void> {
+  await candidateRow.getByRole('button').click();
+  const createDialog = page.getByRole('dialog', { name: /Agent/ });
+  await expect(createDialog).toBeVisible();
+  await expect(createDialog.locator('[class*=toolGrid]')).toBeVisible();
+  await createDialog.locator('input[maxlength="100"]').fill(name);
+  const createResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/daemon/agent-candidates/')
+      && response.url().endsWith('/add')
+      && response.request().method() === 'POST'
+  ));
+  await createDialog.locator('.ant-btn-primary').click();
+  expect((await createResponse).ok()).toBeTruthy();
+  await expect(createDialog).toBeHidden();
+}
+
+async function createFakeClaudeBin(): Promise<string> {
+  const binDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agenthub-e2e-bin-'));
+  const scriptPath = path.join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+  const script = process.platform === 'win32'
+    ? '@echo off\r\necho AgentHub-claude-ok\r\n'
+    : '#!/bin/sh\necho AgentHub-claude-ok\n';
+  await fs.writeFile(scriptPath, script, { mode: 0o755 });
+  return binDir;
+}
+
+async function startDaemon(command: string, extraPath: string): Promise<ChildProcessWithoutNullStreams> {
+  const daemonPackagePath = command.match(/@agenthub\/daemon@file:([^"]+)/)?.[1];
+  const serverURL = command.match(/--server-url\s+"([^"]+)"/)?.[1];
+  const apiKey = command.match(/--api-key\s+"([^"]+)"/)?.[1];
+  if (!daemonPackagePath || !serverURL || !apiKey) {
+    throw new Error(`invalid daemon command: ${command}`);
+  }
+
+  const child = spawn(process.execPath, [
+    path.join(daemonPackagePath, 'bin', 'agenthub-daemon.js'),
+    '--server-url',
+    serverURL,
+    '--api-key',
+    apiKey,
+  ], {
+    cwd: daemonPackagePath,
+    env: {
+      ...process.env,
+      PATH: `${extraPath}${path.delimiter}${process.env.PATH ?? ''}`,
+      Path: `${extraPath}${path.delimiter}${process.env.Path ?? process.env.PATH ?? ''}`,
+      AGENTHUB_DAEMON_DISABLE_STREAM_SLOT: '1',
+    },
     windowsHide: true,
   });
   let output = '';
@@ -91,11 +142,11 @@ async function startDaemon(command: string): Promise<ChildProcessWithoutNullStre
       settled = true;
       child.kill();
       reject(new Error(`daemon did not start in time: ${output}`));
-    }, 30000);
+    }, 60000);
 
     const onData = (chunk: Buffer) => {
       output += chunk.toString('utf8');
-      if (!settled && output.includes('AgentHub daemon is running')) {
+      if (!settled && (/AgentHub daemon (is running|正在运行)/.test(output) || /stage=daemon\.ready/.test(output))) {
         settled = true;
         clearTimeout(timer);
         resolve(child);
@@ -127,12 +178,13 @@ test.afterEach(async ({ request }) => {
 test('connect computer, detect CLI tools, add and delete agents', async ({ page, request, context }) => {
   test.setTimeout(150000);
   let daemon: ChildProcessWithoutNullStreams | null = null;
+  let fakeClaudeBin = '';
   const token = await loginByAPI(request);
   await cleanupE2EData(request, token);
 
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:5173' });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: apiBaseURL });
   await loginByUI(page);
-  await page.getByRole('menuitem', { name: 'Agent' }).click();
+  await page.getByRole('button', { name: /智能体/ }).click();
   await page.getByRole('button', { name: '连接电脑' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'CONNECT COMPUTER' });
@@ -149,42 +201,40 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
   expect(copiedCommand).toContain('--api-key');
 
   try {
-    daemon = await startDaemon(copiedCommand);
+    fakeClaudeBin = await createFakeClaudeBin();
+    daemon = await startDaemon(copiedCommand, fakeClaudeBin);
 
     await expect(dialog.getByText('Connected computers')).toBeVisible({ timeout: 10000 });
     await expect(dialog.getByText(machineName, { exact: true })).toBeVisible();
-    await expect(dialog.getByText('Claude Code', { exact: true })).toBeVisible({ timeout: 10000 });
 
     const codexRow = dialog.getByText(new RegExp(`claude · ${machineName}`))
       .locator('xpath=ancestor::div[contains(@class,"candidateItem")][1]');
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E A');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E A 已添加')).toBeVisible();
-
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E B');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E B 已添加')).toBeVisible();
-
-    await codexRow.getByRole('textbox').fill('AgentHub UI E2E C');
-    await codexRow.getByRole('button', { name: '添加 Agent' }).click();
-    await expect(page.getByText('AgentHub UI E2E C 已添加')).toBeVisible();
+    await expect(codexRow.getByText('Claude Code', { exact: true })).toBeVisible({ timeout: 10000 });
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E A');
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E B');
+    await addAgentFromCandidate(page, codexRow, 'AgentHub UI E2E C');
 
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: /AgentHub UI E2E A/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /AgentHub UI E2E C/ })).toBeVisible();
+  const machineButton = page.getByRole('button', { name: new RegExp(machineName) });
+  await machineButton.click();
+  if (await page.getByRole('button', { name: /AgentHub UI E2E A/ }).count() === 0) {
+    await machineButton.click();
+  }
+  await expect(page.getByRole('button', { name: /AgentHub UI E2E A/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /AgentHub UI E2E C/ }).first()).toBeVisible();
 
-  const agentCard = page.getByRole('button', { name: /AgentHub UI E2E A/ });
+  const agentCard = page.getByRole('button', { name: /AgentHub UI E2E A/ }).first();
   await agentCard.getByRole('button').click();
-  await page.getByRole('button', { name: /删\s*除/ }).click();
+  await confirmPopoverDelete(page);
   await expect(page.getByRole('button', { name: /AgentHub UI E2E A/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ }).first()).toBeVisible();
 
   const chatTitle = `AgentHub UI E2E Chat ${Date.now()}`;
   const headers = { Authorization: `Bearer ${token}` };
   const conversationResponse = await request.post(`${apiBaseURL}/api/conversations`, {
     headers,
-    data: { type: 'single', title: chatTitle },
+    data: { type: 'group', title: chatTitle },
   });
   expect(conversationResponse.ok()).toBeTruthy();
   const conversation = (await conversationResponse.json()).data;
@@ -200,36 +250,29 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
   expect(addRobotResponse.ok()).toBeTruthy();
 
   await page.reload();
-  await page.getByRole('menuitem', { name: '对话' }).click();
+  await page.getByRole('button', { name: /消息/ }).click();
   await page.getByText(chatTitle, { exact: true }).click();
-  await expect(page.getByText('AgentHub UI E2E B', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '添加 Robot' }).click();
-  const addRobotDialog = page.getByRole('dialog', { name: '添加 Robot 到当前对话' });
-  await addRobotDialog.getByLabel('选择要加入的 Robot').click();
-  await page.getByText('AgentHub UI E2E C ·').click();
-  await page.keyboard.press('Escape');
-  await addRobotDialog.locator('.ant-modal-footer .ant-btn-primary').click();
-  await expect(page.getByText('AgentHub UI E2E C', { exact: true })).toBeVisible();
-  const chatInput = page.getByPlaceholder('输入消息... (Enter 发送, Shift+Enter 换行)');
+  const chatInput = page.getByPlaceholder('发送至当前对话');
+  await expect(chatInput).toBeVisible();
   await chatInput.click();
-  await chatInput.fill('Reply with exactly: AgentHub-claude-ok');
-  await expect(chatInput).toHaveValue('Reply with exactly: AgentHub-claude-ok');
+  await chatInput.fill('@AgentHubUIE2EB Reply with exactly: AgentHub-claude-ok');
+  await expect(chatInput).toHaveValue('@AgentHubUIE2EB Reply with exactly: AgentHub-claude-ok');
   await expect(page.getByRole('button', { name: 'send' })).toBeEnabled();
   const messageRequest = page.waitForResponse((response) => (
     response.url().includes('/messages') && response.request().method() === 'POST'
   ), { timeout: 10000 });
   await page.locator('button').filter({ has: page.locator('.anticon-send') }).click();
-  await expect(page.getByText('Reply with exactly: AgentHub-claude-ok', { exact: true })).toBeVisible();
-  await expect(page.getByText('Agent 正在思考...', { exact: true })).toBeVisible();
+  await expect(page.getByText('@AgentHubUIE2EB Reply with exactly: AgentHub-claude-ok', { exact: true })).toBeVisible();
+  await expect(page.getByText(/AgentHub UI E2E B 正在思考\.\.\./)).toBeVisible();
   await messageRequest;
-  await expect(page.getByText('AgentHub-claude-ok', { exact: true })).toBeVisible({ timeout: 120000 });
+  await expect(page.getByRole('paragraph').filter({ hasText: /^AgentHub-claude-ok$/ })).toBeVisible({ timeout: 120000 });
 
-  await page.getByRole('menuitem', { name: 'Agent' }).click();
+  await page.getByRole('button', { name: /智能体/ }).click();
   await page.getByRole('button', { name: '连接电脑' }).click();
   const deleteDialog = page.getByRole('dialog', { name: 'CONNECT COMPUTER' });
   const machineRow = deleteDialog.getByText(machineName).locator('xpath=ancestor::div[contains(@class,"machineItem")][1]');
   await machineRow.getByRole('button').click();
-  await page.getByRole('button', { name: /删\s*除/ }).click();
+  await confirmPopoverDelete(page);
   await expect(deleteDialog.getByText(machineName, { exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: /AgentHub UI E2E B/ })).toHaveCount(0);
@@ -238,6 +281,9 @@ test('connect computer, detect CLI tools, add and delete agents', async ({ page,
   } finally {
     if (daemon && !daemon.killed) {
       daemon.kill();
+    }
+    if (fakeClaudeBin) {
+      await fs.rm(fakeClaudeBin, { recursive: true, force: true });
     }
   }
 });

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/jmoiron/sqlx"
@@ -219,6 +220,46 @@ func (r *KnowledgeRepo) GetFileByID(ctx context.Context, kbID, fileID string) (*
 		return nil, fmt.Errorf("get knowledge file: %w", err)
 	}
 	return &f, nil
+}
+
+func (r *KnowledgeRepo) UpdateFilePreview(ctx context.Context, kbID, fileID, previewText, previewType string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE knowledge_files
+		    SET preview_text = $1, preview_type = $2
+		  WHERE id = $3 AND knowledge_base_id = $4`,
+		previewText, previewType, fileID, kbID,
+	)
+	if err != nil {
+		return fmt.Errorf("update knowledge file preview: %w", err)
+	}
+	return nil
+}
+
+func (r *KnowledgeRepo) SearchFiles(ctx context.Context, kbID, keyword string, limit int) ([]model.KnowledgeFile, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []model.KnowledgeFile{}, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	var files []model.KnowledgeFile
+	err := r.db.SelectContext(ctx, &files,
+		`SELECT id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at
+		   FROM knowledge_files
+		  WHERE knowledge_base_id = $1
+		    AND (filename ILIKE '%' || $2 || '%' OR preview_text ILIKE '%' || $2 || '%')
+		  ORDER BY created_at DESC
+		  LIMIT $3`,
+		kbID, keyword, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search knowledge files: %w", err)
+	}
+	if files == nil {
+		files = []model.KnowledgeFile{}
+	}
+	return files, nil
 }
 
 // GetFileContent 获取知识库文件路径列表（用于Agent引用）

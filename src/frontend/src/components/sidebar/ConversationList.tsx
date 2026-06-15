@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Skeleton, Button, Input, message as antMessage } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Skeleton, Button, Input } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import { MessageOutlined, TeamOutlined, SearchOutlined, FolderOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import { useConversation } from '@/hooks/useConversation';
 import { useConversationStore } from '@/store/conversationStore';
@@ -40,9 +41,19 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
       .catch(() => {});
   }, []);
 
-  const handleOpenArchived = () => {
-    setShowArchived(true);
-  };
+  const { pinnedConvs, agentConvs, groupConvs, singleConvs } = useMemo(() => {
+    const base = searchQuery
+      ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      : conversations;
+    const pinned = base.filter((c) => c.pinned);
+    const unpinned = base.filter((c) => !c.pinned);
+    return {
+      pinnedConvs: pinned,
+      agentConvs: unpinned.filter((c) => c.type === 'agent'),
+      groupConvs: unpinned.filter((c) => c.type === 'group'),
+      singleConvs: unpinned.filter((c) => c.type === 'single'),
+    };
+  }, [conversations, searchQuery]);
 
   if (loading && conversations.length === 0) {
     return (
@@ -90,6 +101,10 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
     );
   }
 
+  const handleOpenArchived = () => {
+    setShowArchived(true);
+  };
+
   const handleUnarchive = async (convId: string) => {
     try {
       await convApi.unarchiveConversation(convId);
@@ -106,17 +121,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({ onNavigateCo
     }
   };
 
-  const filtered = searchQuery
-    ? conversations.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : conversations;
-
-  const pinnedConvs = filtered.filter((c) => c.pinned);
-  const unpinnedConvs = filtered.filter((c) => !c.pinned);
-  const agentConvs = unpinnedConvs.filter((c) => c.type === 'agent');
-  const groupConvs = unpinnedConvs.filter((c) => c.type === 'group');
-  const singleConvs = unpinnedConvs.filter((c) => c.type === 'single');
-
-  const renderGroup = (convs: typeof filtered, header: string) =>
+  const renderGroup = (convs: Conversation[], header: string) =>
     convs.length > 0 && (
       <>
         <div className={styles.sectionHeader}>{header}</div>

@@ -1,27 +1,28 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Avatar, Input, List, Badge, Tabs, Skeleton, Spin, Empty, Dropdown, Modal, message } from 'antd';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Avatar, Input, Badge, Tabs, Skeleton, Spin, Empty, Dropdown } from 'antd';
+import { message } from '@/utils/message';
+import { modal as appModal } from '@/utils/modal';
 import type { MenuProps } from 'antd';
 import { UserAddOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons';
 import { useFriendStore } from '@/store/friendStore';
 import FriendRequest from './FriendRequest';
 import styles from './FriendList.module.css';
+import { SimpleList as List } from '@/components/common/SimpleList';
 
 interface FriendListProps {
   onStartChat: (friendId: string) => void;
 }
 
 const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
-  const {
-    friends,
-    loading,
-    pendingRequests,
-    searchResults,
-    isSearching,
-    searchUsers,
-    clearSearch,
-    sendRequest,
-    deleteFriend,
-  } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
+  const loading = useFriendStore((s) => s.loading);
+  const pendingRequests = useFriendStore((s) => s.pendingRequests);
+  const searchResults = useFriendStore((s) => s.searchResults);
+  const isSearching = useFriendStore((s) => s.isSearching);
+  const searchUsers = useFriendStore((s) => s.searchUsers);
+  const clearSearch = useFriendStore((s) => s.clearSearch);
+  const sendRequest = useFriendStore((s) => s.sendRequest);
+  const deleteFriend = useFriendStore((s) => s.deleteFriend);
 
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('friends');
@@ -64,7 +65,7 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
   const pendingCount = pendingRequests.length;
 
   const handleDeleteFriend = (friendId: string, friendName: string) => {
-    Modal.confirm({
+    appModal.confirm({
       title: '确认删除好友',
       content: `确定要删除好友「${friendName}」吗？`,
       okText: '删除',
@@ -81,11 +82,14 @@ const FriendList: React.FC<FriendListProps> = ({ onStartChat }) => {
     });
   };
 
-  const filteredFriends = search
-    ? friends.filter((f) =>
-        (f.friend_name ?? '').toLowerCase().includes(search.toLowerCase()),
-      )
-    : friends;
+  const filteredFriends = useMemo(
+    () => search
+      ? friends.filter((f) =>
+          (f.friend_name ?? '').toLowerCase().includes(search.toLowerCase()),
+        )
+      : friends,
+    [friends, search],
+  );
 
   const showSearchResults = search.trim().length > 0 && searchResults.length > 0;
 

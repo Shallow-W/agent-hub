@@ -1,0 +1,157 @@
+.templateField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.templateToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.select :global(.ant-select-selector),
+.textarea,
+.input {
+  border-radius: 8px !important;
+}
+
+.emptyHint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.manager {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 520px;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+.sidebarTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.templateList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.categoryTitle {
+  padding-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.templateCard:hover,
+.templateCardActive {
+  border-color: rgba(47, 143, 107, 0.32);
+  background: rgba(47, 143, 107, 0.04);
+}
+
+.templateCardActive {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.templateName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.templateDesc {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+}
+
+.editorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.editorTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.promptInput {
+  min-height: 220px;
+}
+
+.editorActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.rightActions {
+  display: flex;
+  gap: 8px;
+}
+
+.emptyList {
+  padding: 14px 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}

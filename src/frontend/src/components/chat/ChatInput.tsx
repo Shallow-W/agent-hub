@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Input, Button, Tooltip, Spin, message } from 'antd';
+import { Input, Button, Tooltip, Spin } from 'antd';
+import { message } from '@/utils/message';
 import {
   CloseOutlined,
   LinkOutlined,
@@ -16,6 +17,7 @@ import { uploadFile } from '@/api/upload';
 import { getGroupMembers } from '@/api/group';
 import { getConversationAgents } from '@/api/conversation';
 import { getGroupKnowledgeBases } from '@/api/knowledge';
+import { truncateGraphemes } from '@/utils/truncateText';
 import type { GroupMember } from '@/types/group';
 import type { ConversationAgent } from '@/types/conversation';
 import type { GroupKnowledgeBase } from '@/types/knowledge';
@@ -31,6 +33,7 @@ const { TextArea } = Input;
 const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const REPLY_PREVIEW_LIMIT = 50;
 
 type MentionTarget =
   | { id: string; label: string; mentionLabel: string; kind: 'user'; user: GroupMember }
@@ -38,6 +41,10 @@ type MentionTarget =
 
 function toMentionLabel(label: string): string {
   return label.replace(/\s+/g, '');
+}
+
+function truncatePreview(text: string, maxLength = REPLY_PREVIEW_LIMIT): string {
+  return truncateGraphemes(text, maxLength);
 }
 
 interface KBTarget {
@@ -555,7 +562,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <div className={replyStyles.replyBarLabel}>
               回复 {replyTo.username || (replyTo.role === 'user' ? '用户' : '助手')}
             </div>
-            <div className={replyStyles.replyBarText}>{replyTo.content.length > 50 ? replyTo.content.slice(0, 50) + '...' : replyTo.content}</div>
+            <div className={replyStyles.replyBarText}>{truncatePreview(replyTo.content)}</div>
           </div>
           <Button
             type="text"

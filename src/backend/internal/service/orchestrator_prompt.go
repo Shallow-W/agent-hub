@@ -203,6 +203,15 @@ func BuildSummaryPrompt(orchTask *model.OrchTask) string {
 	sb.WriteString(truncateString(orchTask.OriginalMessage, 1000))
 	sb.WriteString("\n\n")
 
+	if strings.TrimSpace(orchTask.KBPreload) != "" {
+		sb.WriteString("[原始请求引用的知识库]\n")
+		sb.WriteString(truncateString(orchTask.KBPreload, 3000))
+		if !strings.HasSuffix(orchTask.KBPreload, "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	// Include previous rounds context from round_history
 	if orchTask.RoundHistory != "" {
 		var history []roundHistoryEntry

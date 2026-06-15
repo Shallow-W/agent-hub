@@ -5,11 +5,21 @@ export type KnowledgeVisibility = 'private' | 'public';
 export interface KnowledgeFile {
   id: string;
   filename: string;
+  url?: string;
   size: number;
   mime_type: string;
   preview_type: 'text' | 'image' | 'binary' | 'too_large';
   preview_text?: string;
   uploaded_at: string;
+}
+
+export interface KnowledgeFileText {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  preview_type: KnowledgeFile['preview_type'];
+  text: string;
+  truncated: boolean;
 }
 
 /** 知识库 */

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -24,16 +25,16 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *A
 	return &MessageRepo{db: db, attachmentRepo: attachmentRepo, artifactRepo: artifactRepo}
 }
 
-// messageCols 通用消息查询列（含 JOIN users 获取 username）
+// messageCols 通用消息查询列（含 JOIN users + agents 获取 username）
 const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
-COALESCE(u.username, '') AS username,
+COALESCE(a.name, u.username, '') AS username,
 EXISTS (
 	SELECT 1 FROM message_pins mp
 	WHERE mp.message_id = m.id AND mp.conversation_id = m.conversation_id AND mp.enabled = TRUE
 ) AS pinned`
 
 // messageFrom 通用 FROM 子句
-const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id`
+const messageFrom = `messages m LEFT JOIN users u ON u.id = m.sender_id LEFT JOIN agents a ON a.id = m.sender_id`
 
 // Create 创建新消息并刷新对话时间戳（事务保证原子性，附件在同一事务内写入）
 func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error) {
@@ -194,6 +195,20 @@ func (r *MessageRepo) GetMessagesAfter(ctx context.Context, conversationID strin
 	return r.fillAttachmentsAndReply(ctx, list)
 }
 
+// ListReplies 查询某条消息的所有非删除回复，按时间正序
+func (r *MessageRepo) ListReplies(ctx context.Context, messageID string) ([]model.Message, error) {
+	var list []model.Message
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT `+messageCols+` FROM `+messageFrom+
+			` WHERE m.reply_to = $1 AND m.deleted_at IS NULL ORDER BY m.created_at ASC`,
+		messageID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list replies: %w", err)
+	}
+	return r.fillAttachmentsAndReply(ctx, list)
+}
+
 // GetByID 按 ID 查找消息
 func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, error) {
 	var m model.Message
@@ -324,8 +339,9 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 			mp.message_id,
 			m.role,
 			m.content,
+			COALESCE(m.artifacts_json, '') AS artifacts_json,
 			m.sender_id,
-			COALESCE(sender.username, '') AS username,
+			COALESCE(agent_sender.name, sender.username, '') AS username,
 			m.created_at AS message_created_at,
 			mp.created_by AS pinned_by,
 			COALESCE(pinner.username, '') AS pinned_by_name,
@@ -333,6 +349,7 @@ func (r *MessageRepo) ListPinnedMessages(ctx context.Context, conversationID str
 		 FROM message_pins mp
 		 JOIN messages m ON m.id = mp.message_id AND m.conversation_id = mp.conversation_id
 		 LEFT JOIN users sender ON sender.id = m.sender_id
+			 LEFT JOIN agents agent_sender ON agent_sender.id = m.sender_id
 		 LEFT JOIN users pinner ON pinner.id = mp.created_by
 		 WHERE mp.conversation_id = $1 AND mp.enabled = TRUE AND m.deleted_at IS NULL
 		 ORDER BY mp.created_at ASC
@@ -460,8 +477,15 @@ func (r *MessageRepo) fillMentions(ctx context.Context, messages []model.Message
 	for i, m := range messages {
 		ids[i] = m.ID
 	}
-	rows, err := r.db.QueryxContext(ctx,
-		`SELECT id, mentions FROM messages WHERE id = ANY($1) AND mentions IS NOT NULL`, ids)
+	query, args, err := sqlx.In(
+		`SELECT id, mentions FROM messages WHERE id IN (?) AND mentions IS NOT NULL`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build mentions query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fill mentions: %w", err)
 	}
@@ -488,26 +512,27 @@ func (r *MessageRepo) fillMentions(ctx context.Context, messages []model.Message
 
 // fillReplyTo 批量填充回复引用预览
 func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message) ([]model.Message, error) {
-	// 收集所有 reply_to ID
-	replyIDs := make([]string, 0)
-	for _, m := range messages {
-		if m.ReplyTo != nil {
-			replyIDs = append(replyIDs, *m.ReplyTo)
-		}
-	}
+	replyIDs := collectReplyIDs(messages)
 	if len(replyIDs) == 0 {
 		return messages, nil
 	}
 
-	// 批量查询引用的消息，优先使用 messages.sender_id
-	query := `SELECT m.id, m.content, m.deleted_at,
-	          COALESCE(m.sender_id, c.user_id) AS sender_id,
-	          COALESCE(u.username, '') AS username
+	// 批量查询引用的消息。assistant 消息没有 sender_id，显示名从 artifacts_json.agent_name 取；
+	// 不能回退到 conversations.user_id，否则 worker 回复 Orch 消息时会显示成群主/用户。
+	query, args, err := sqlx.In(`SELECT m.id, m.content, m.deleted_at,
+	          COALESCE(m.sender_id::text, '') AS sender_id,
+	          COALESCE(a.name, u.username, '') AS username,
+	          m.role,
+	          COALESCE(m.artifacts_json, '') AS artifacts_json
 	          FROM messages m
-	          JOIN conversations c ON c.id = m.conversation_id
-	          LEFT JOIN users u ON u.id = COALESCE(m.sender_id, c.user_id)
-	          WHERE m.id = ANY($1)`
-	rows, err := r.db.QueryxContext(ctx, query, replyIDs)
+	          LEFT JOIN users u ON u.id = m.sender_id
+		          LEFT JOIN agents a ON a.id = m.sender_id
+	          WHERE m.id IN (?)`, replyIDs)
+	if err != nil {
+		return nil, fmt.Errorf("build reply query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fill reply to: %w", err)
 	}
@@ -515,15 +540,12 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 
 	replyMap := make(map[string]*model.ReplyToPreview)
 	for rows.Next() {
-		var id, content, senderID, username string
+		var id, content, senderID, username, role, artifactsJSON string
 		var deletedAt *time.Time
-		if err := rows.Scan(&id, &content, &deletedAt, &senderID, &username); err != nil {
+		if err := rows.Scan(&id, &content, &deletedAt, &senderID, &username, &role, &artifactsJSON); err != nil {
 			return nil, fmt.Errorf("scan reply: %w", err)
 		}
-		preview := content
-		if len(preview) > 50 {
-			preview = preview[:50] + "..."
-		}
+		preview := truncateRunes(content, 50)
 		if deletedAt != nil {
 			preview = "[消息已撤回]"
 		}
@@ -531,7 +553,7 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 			ID:        id,
 			Content:   preview,
 			SenderID:  senderID,
-			Username:  username,
+			Username:  replyPreviewUsername(role, username, artifactsJSON),
 			DeletedAt: deletedAt,
 		}
 	}
@@ -545,4 +567,53 @@ func (r *MessageRepo) fillReplyTo(ctx context.Context, messages []model.Message)
 	}
 
 	return messages, nil
+}
+
+func collectReplyIDs(messages []model.Message) []string {
+	replyIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.ReplyTo == nil {
+			continue
+		}
+		id := strings.TrimSpace(*m.ReplyTo)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		replyIDs = append(replyIDs, id)
+	}
+	return replyIDs
+}
+
+func replyPreviewUsername(role, username, artifactsJSON string) string {
+	if role != "assistant" {
+		return username
+	}
+	// username 已通过 COALESCE(a.name, u.username) 取到实时名字，优先使用
+	if username != "" {
+		return username
+	}
+	// 兜底：从 artifacts_json.agent_name 取
+	var meta struct {
+		AgentName string `json:"agent_name"`
+	}
+	if err := json.Unmarshal([]byte(artifactsJSON), &meta); err == nil && meta.AgentName != "" {
+		return meta.AgentName
+	}
+	return username
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }

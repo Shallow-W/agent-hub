@@ -3,9 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
+    "dev:electron": "concurrently -k \"npm run dev -- --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "test:electron": "node --test electron/*.test.mjs",
     "build": "tsc -b && vite build",
+    "build:electron": "npm run build && electron-builder --dir",
     "preview": "vite preview",
     "test:e2e:agent": "playwright test e2e/agent-connect.spec.ts --browser=chromium"
   },
@@ -42,7 +46,44 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^38.8.6",
+    "electron-builder": "^26.15.2",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.agenthub.desktop",
+    "productName": "AgentHub",
+    "directories": {
+      "output": "../../.tmp/electron-release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "!electron/*.test.mjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../bin",
+        "to": "bin"
+      },
+      {
+        "from": "dist",
+        "to": "frontend-dist"
+      },
+      {
+        "from": "../backend/config/config.example.yaml",
+        "to": "config/config.yaml"
+      }
+    ],
+    "win": {
+      "target": "dir",
+      "signAndEditExecutable": false,
+      "signExecutable": false
+    }
   }
 }

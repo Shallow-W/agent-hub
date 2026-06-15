@@ -24,6 +24,44 @@ export interface Agent {
   updated_at: string;
 }
 
+export interface PlatformSkill {
+  id: string;
+  user_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  trigger?: string;
+  detail?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformSkillRequest {
+  name: string;
+  category?: string;
+  description?: string;
+  trigger?: string;
+  detail?: string;
+}
+
+export interface AgentPromptTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  system_prompt?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentPromptTemplateRequest {
+  name: string;
+  category?: string;
+  description?: string;
+  system_prompt?: string;
+}
+
 export interface AgentRequest {
   name: string;
   cli_tool: string;
@@ -64,6 +102,7 @@ export interface CreateDaemonMachineRequest {
 
 export interface CreateDaemonMachineResponse {
   machine: DaemonMachine;
+  command: string;
   api_key: string;
   daemon_source_path: string;
   daemon_npm_path: string;
@@ -75,6 +114,7 @@ export interface AddCandidateAgentRequest {
   system_prompt?: string;
   tools_config?: string;
   custom_skills?: string;
+  enable_management_tools?: boolean;
 }
 
 export interface OpenSkillLocationRequest {

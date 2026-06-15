@@ -3,6 +3,8 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+  width: 320px;
+  max-width: 100%;
 }
 
 .imageLink {
@@ -29,7 +31,8 @@
   transform: scale(1.02);
 }
 
-.pdfCard {
+.pdfCard,
+.fileCard {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -40,11 +43,14 @@
   text-decoration: none;
   color: var(--color-text);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  max-width: 280px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
   box-shadow: var(--shadow-sm);
 }
 
-.pdfCard:hover {
+.pdfCard:hover,
+.fileCard:hover {
   border-color: #ffccc7;
   box-shadow: 0 2px 8px rgba(207, 19, 34, 0.08);
 }
@@ -55,7 +61,20 @@
   flex-shrink: 0;
 }
 
-.pdfInfo {
+.wordIcon {
+  font-size: 28px;
+  color: #1677ff;
+  flex-shrink: 0;
+}
+
+.genericIcon {
+  font-size: 28px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.pdfInfo,
+.fileInfo {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -63,7 +82,8 @@
   min-width: 0;
 }
 
-.pdfName {
+.pdfName,
+.fileName {
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
@@ -71,7 +91,8 @@
   text-overflow: ellipsis;
 }
 
-.pdfSize {
+.pdfSize,
+.fileSize {
   font-size: 11px;
   color: var(--color-text-secondary);
 }
@@ -84,7 +105,8 @@
 }
 
 /* ===== PPTX 卡片 ===== */
-.pptCard {
+.pptCard,
+.previewCard {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -93,12 +115,15 @@
   background-color: var(--color-bg-white);
   border: 1px solid var(--color-border);
   color: var(--color-text);
-  width: min(420px, 100%);
+  width: 320px;
+  max-width: 100%;
+  box-sizing: border-box;
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.pptCard:hover {
+.pptCard:hover,
+.previewCard:hover {
   border-color: #ffd591;
   box-shadow: 0 2px 8px rgba(212, 107, 8, 0.1);
 }
@@ -109,7 +134,8 @@
   flex-shrink: 0;
 }
 
-.pptActions {
+.pptActions,
+.previewActions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -117,7 +143,8 @@
   flex-shrink: 0;
 }
 
-.pptPreviewBtn {
+.pptPreviewBtn,
+.previewButton {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -131,12 +158,14 @@
   transition: border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.pptPreviewBtn:hover {
+.pptPreviewBtn:hover,
+.previewButton:hover {
   border-color: #d46b08;
   color: #d46b08;
 }
 
-.pptDownload {
+.pptDownload,
+.downloadButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -145,16 +174,46 @@
   text-decoration: none;
 }
 
-.pptDownload:hover {
+.pptDownload:hover,
+.downloadButton:hover {
   color: #d46b08;
 }
 
-.pptModalLoading {
-  min-height: 60vh;
+.pptModalLoading,
+.previewModalLoading {
+  height: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
+}
+
+.previewModal :global(.ant-modal-body) {
+  padding: 16px 24px 24px;
+}
+
+.previewModalBody {
+  min-height: 0;
+  overflow: hidden;
+  transition: height var(--transition-fast);
+}
+
+.previewModalCompact .previewModalBody {
+  height: min(68vh, 700px);
+}
+
+.previewModalExpanded .previewModalBody {
+  height: calc(100vh - 140px);
+}
+
+.modalTitleBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 44px;
+  min-width: 0;
 }
 
 .modalTitle {
@@ -162,10 +221,15 @@
   align-items: center;
   gap: 8px;
   overflow: hidden;
+  min-width: 0;
 }
 
 .modalTitleName {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.modalSizeButton {
+  flex: 0 0 auto;
 }

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, type ReactNode } from 'react';
-import { Avatar, Typography, Spin, Button, Tooltip, Dropdown, message as antMessage } from 'antd';
+import { Avatar, Typography, Spin, Button, Tooltip, Dropdown } from 'antd';
+import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
 import {
   CloseOutlined,
@@ -19,6 +20,8 @@ import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
+import type { ConversationAgent } from '@/types/conversation';
+import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
@@ -30,6 +33,7 @@ import styles from './MessageBubble.module.css';
 const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
+const REPLY_PREVIEW_LIMIT = 50;
 
 // ── ReactMarkdown custom components ──
 
@@ -76,6 +80,10 @@ function renderChildrenWithMentions(children: ReactNode): ReactNode {
   // Non-string, non-array nodes (elements, null, undefined, numbers, booleans)
   // pass through unchanged — mentions only highlight in text leaves.
   return children;
+}
+
+function truncatePreview(text: string, maxLength = REPLY_PREVIEW_LIMIT): string {
+  return truncateGraphemes(text, maxLength);
 }
 
 /**
@@ -158,6 +166,7 @@ function markdownDocumentContent(content: string): string {
 function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
   // 预构建查找表，纯计算，无 mutation，StrictMode 双调用安全。
   const contentRootMap = buildContentRootMap(codeArtifacts);
+  let codeBlockIndex = 0;
   return {
     code({ className, children, node, ...rest }) {
       const isBlock = className?.startsWith('language-');
@@ -173,7 +182,9 @@ function buildMarkdownComponents(codeArtifacts: Artifact[]): Components {
             </div>
           );
         }
-        const rootId = contentRootMap.get(ct.replace(/\n$/, ''));
+        const fallbackRootId = codeArtifacts[codeBlockIndex]?.root_id;
+        codeBlockIndex += 1;
+        const rootId = contentRootMap.get(ct.replace(/\n$/, '')) ?? fallbackRootId;
         return (
           <CodeBlock className={className} expandable artifactRootId={rootId}>
             {children}
@@ -236,6 +247,7 @@ const embeddedDocumentComponents: Components = {
 };
 
 /** Renders markdown content with full GFM support. */
+const REMARK_PLUGINS = [remarkGfm];
 const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
   content,
   codeArtifacts,
@@ -243,7 +255,7 @@ const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }>
   // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
   const components = buildMarkdownComponents(codeArtifacts);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
       {content}
     </ReactMarkdown>
   );
@@ -262,6 +274,9 @@ interface MessageBubbleProps {
   onRecall?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
+  conversationAgents?: ConversationAgent[];
+  replyCount?: number;
+  onOpenThread?: (message: Message) => void;
 }
 
 function formatTimestamp(dateStr: string): string {
@@ -302,6 +317,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   onRecall,
   onForward,
   onTogglePin,
+  conversationAgents = [],
+  replyCount = 0,
+  onOpenThread,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.role === 'system';
@@ -313,8 +331,16 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     if (message.role !== 'assistant' || !message.artifacts_json) return {};
     try { return JSON.parse(message.artifacts_json) as MessageArtifacts; } catch { return {}; }
   }, [message.role, message.artifacts_json]);
-  const agentName = agentMeta.agent_name ?? null;
   const deployment = agentMeta.deployment ?? null;
+  const conversationAgentRole = useMemo(() => {
+    if (!agentMeta.agent_id) return null;
+    return conversationAgents.find((agent) => agent.agent_id === agentMeta.agent_id)?.role ?? null;
+  }, [agentMeta.agent_id, conversationAgents]);
+  const agentBadgeLabel = conversationAgentRole === 'orchestrator'
+    ? 'Orchestrator agent'
+    : conversationAgentRole === 'worker'
+      ? 'Worker agent'
+      : 'Agent';
 
   // 用 agent_id 从 store 查找完整 agent（含手动选定的 avatar 字段）。
   // selector 取稳定值（agents 数组），React.memo 避免不必要重渲染。
@@ -324,28 +350,34 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     [agents, agentMeta.agent_id],
   );
 
-  const displayName = message.username || agentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
+  // 优先使用 store 中的最新 agent name（agent 重命名后 artifacts_json 中存储的是旧名）
+  const resolvedAgentName = storeAgent?.name || agentMeta.agent_name || null;
+
+  const displayName = message.username || resolvedAgentName || (isOwn ? '我' : (message.role === 'user' ? '用户' : '助手'));
 
   // 头像来源优先级：
-  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)（honors agent.avatar）
-  //   2. assistant + 未找到（历史消息/列表未加载）→ resolveAgentAvatar({id: agent_id, name: agent_name}) 哈希兜底
+  //   1. assistant + store 里找到完整 agent → resolveAgentAvatar(agent)
+  //   2. assistant + store 未加载 → undefined（避免 hash 兜底导致闪烁）
   //   3. 自己（当前登录用户，含 avatar）
   //   4. 其他用户（按 sender_id/username 稳定哈希默认）
   const avatarSrc = useMemo((): string | undefined => {
-    if (message.role === 'assistant' && agentName) {
+    if (message.role === 'assistant' && resolvedAgentName) {
       if (storeAgent) return resolveAgentAvatar(storeAgent);
-      return resolveAgentAvatar({ id: agentMeta.agent_id ?? agentName, name: agentName });
+      return undefined;
     }
     if (message.role === 'assistant') return undefined;
     if (isOwn) {
       const me = useAuthStore.getState().user;
       return me ? resolveUserAvatar(me) : undefined;
     }
+    // Check if sender is an agent (sender_id matches agent ID in store)
+    const senderAgent = message.sender_id ? agents.find((a) => a.id === message.sender_id) : undefined;
+    if (senderAgent) return resolveAgentAvatar(senderAgent);
     return resolveUserAvatar({ id: message.sender_id, username: message.username });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message.role, message.sender_id, message.username, agentName, agentMeta.agent_id, storeAgent, isOwn]);
+  }, [message.role, message.sender_id, message.username, resolvedAgentName, agentMeta.agent_id, storeAgent, isOwn, agents]);
 
-  const avatarLetter = agentName
+  const avatarLetter = resolvedAgentName
     ? 'AI'
     : (message.username?.charAt(0)?.toUpperCase()
         || (isOwn ? (useAuthStore.getState().user?.username?.charAt(0)?.toUpperCase() || '?') : '?'));
@@ -452,6 +484,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       file_size: (p as Record<string, unknown>).file_size as number,
       file_path: (p as Record<string, unknown>).file_path as string,
       thumbnail_path: ((p as Record<string, unknown>).thumbnail_path as string) ?? null,
+      url: (p as Record<string, unknown>).url as string | undefined,
+      thumbnail_url: ((p as Record<string, unknown>).thumbnail_url as string | null | undefined) ?? null,
       width: ((p as Record<string, unknown>).width as number) ?? 0,
       height: ((p as Record<string, unknown>).height as number) ?? 0,
       created_at: new Date().toISOString(),
@@ -521,8 +555,8 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           {showAvatar && (
             <div className={styles.meta}>
               <Text className={styles.agentLabel}>{displayName}</Text>
-              {agentName && (
-                <span className={styles.agentBadge}>Agent</span>
+              {resolvedAgentName && (
+                <span className={styles.agentBadge}>{agentBadgeLabel}</span>
               )}
               {message.pinned && (
                 <Tooltip title="已 Pin 到上下文黑板">
@@ -560,13 +594,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <span className={styles.replyQuoteSender}>
-                  {escapeHtml(message.reply_to_message.sender_id ? message.reply_to_message.username || '用户' : '助手')}
+                  {escapeHtml(message.reply_to_message.username || (message.reply_to_message.sender_id ? '用户' : '助手'))}
                 </span>
-                {escapeHtml(
-                  (message.reply_to_message.content ?? '').length > 50
-                    ? (message.reply_to_message.content ?? '').slice(0, 50) + '...'
-                    : (message.reply_to_message.content ?? ''),
-                )}
+                {escapeHtml(truncatePreview(message.reply_to_message.content ?? ''))}
               </div>
             )}
             {displayAttachments.length > 0 && (
@@ -578,7 +608,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               </div>
             )}
             {cardArtifacts.length > 0 && (
-              <ArtifactCard artifacts={cardArtifacts} agentName={agentName} />
+              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} />
             )}
             {deployment && (
               <div className={styles.deployCard}>
@@ -591,6 +621,19 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               <Spin size="small" className={styles.sendingSpin} />
             )}
           </div>
+          {replyCount > 0 && onOpenThread && (
+            <button
+              className={styles.threadBtn}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenThread(message);
+              }}
+            >
+              <MessageOutlined />
+              {replyCount} 条回复
+            </button>
+          )}
           {shouldCollapse && (
             <button
               className={styles.expandToggle}

@@ -7,12 +7,46 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
-const POLL_INTERVAL_MS = 1500;
-const EXEC_TIMEOUT_MS = 120000;
+const EXEC_TIMEOUT_MS = 400000;
 const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
 const WS_PING_INTERVAL_MS = 30000;
 const INBOUND_WATCHDOG_MS = 70000;
+const DAEMON_LOG_EVENT = 'daemon_flow';
+
+function logValue(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value);
+  const text = String(value);
+  return /^[A-Za-z0-9._:/@=-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+function logFlow(level, stage, fields = {}) {
+  const pairs = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${logValue(value)}`);
+  const line = [
+    new Date().toISOString(),
+    DAEMON_LOG_EVENT,
+    `level=${level}`,
+    `stage=${stage}`,
+    ...pairs,
+  ].join(' ');
+  if (level === 'error' || level === 'warn' || process.argv.includes('--mcp')) {
+    console.error(line);
+    return;
+  }
+  console.log(line);
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function firstLine(value) {
+  return String(value || '').split(/\r?\n/)[0].trim();
+}
 
 let WebSocket;
 try {
@@ -28,14 +62,77 @@ function safeSend(ws, data) {
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(data);
+      return true;
     }
   } catch { /* connection already closed */ }
+  return false;
+}
+
+function sendTaskComplete(data) {
+  const taskId = data && data.task_id;
+  if (!taskId) return;
+  const envelope = JSON.stringify({ type: 'task.complete', data });
+  if (safeSend(currentDaemonWs, envelope)) {
+    pendingTaskCompletions.delete(taskId);
+    logFlow('info', 'task.complete_sent', {
+      task_id: taskId,
+      has_error: Boolean(data.error),
+      result_len: typeof data.result === 'string' ? data.result.length : 0,
+      artifact_count: Array.isArray(data.artifacts) ? data.artifacts.length : 0,
+      pending_count: pendingTaskCompletions.size,
+    });
+    return;
+  }
+  pendingTaskCompletions.set(taskId, data);
+  logFlow('warn', 'task.complete_buffered', {
+    task_id: taskId,
+    has_error: Boolean(data.error),
+    pending_count: pendingTaskCompletions.size,
+  });
+}
+
+function flushPendingTaskCompletions() {
+  if (pendingTaskCompletions.size > 0) {
+    logFlow('info', 'task.complete_flush_start', { pending_count: pendingTaskCompletions.size });
+  }
+  for (const data of pendingTaskCompletions.values()) {
+    sendTaskComplete(data);
+  }
+}
+
+function onWebSocket(ws, eventName, handler) {
+  if (typeof ws.on === 'function') {
+    ws.on(eventName, handler);
+    return;
+  }
+  if (typeof ws.addEventListener !== 'function') {
+    throw new Error('unsupported WebSocket implementation');
+  }
+  ws.addEventListener(eventName, (event) => {
+    if (eventName === 'message') {
+      handler(event.data);
+      return;
+    }
+    if (eventName === 'close') {
+      handler(event.code, event.reason);
+      return;
+    }
+    if (eventName === 'error') {
+      handler(event.error || event);
+      return;
+    }
+    handler(event);
+  });
 }
 
 const activeSessions = new Map();
 const runningAgents = new Map(); // agentID → { process, sessionId, cliTool, sendPrompt, _queue }
 const idleAgentConfigs = new Map(); // agentID → { cliTool, sessionId, systemPrompt }
 const agentTurnStates = new Map(); // agentID → 'idle' | 'active'
+let currentDaemonWs = null;
+const activeTaskIDs = new Set();
+const completedTaskIDs = new Set();
+const pendingTaskCompletions = new Map(); // taskID → task.complete data, flushed after WS reconnect
 
 // Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
 const conversationSessions = new Map();
@@ -56,7 +153,7 @@ function saveSessionMap() {
     fs.mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true });
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2));
   } catch (err) {
-    console.error(`Failed to save session map: ${err.message}`);
+    logFlow('warn', 'session_map.save_failed', { file: SESSIONS_FILE, error: errorMessage(err) });
   }
 }
 
@@ -95,13 +192,27 @@ function buildPlatformMcpArgs(conversationId, userId, agentId) {
   return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
 }
 
+function buildAgentHubContextEnv(conversationId, userId, agentId) {
+  const env = {};
+  if (conversationId) env.AGENTHUB_CONVERSATION_ID = conversationId;
+  if (userId) env.AGENTHUB_USER_ID = userId;
+  if (agentId) env.AGENTHUB_AGENT_ID = agentId;
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+function opencodeContextChanged(task, savedSessionId) {
+  if (!savedSessionId) return false;
+  return Boolean(task && task.agent_id && task.conversation_id);
+}
+
 // ensureGlobalMcpConfigs 为不支持按次注入的 CLI（openclaw/codex）在启动时幂等写入
 // 全局 MCP 配置，把本 daemon 以 --mcp 模式注册为 agenthub-platform server。
-// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响轮询。
+// 仅对本机实际安装的 CLI 生效，失败仅告警、不影响 daemon 连接。
 function ensureGlobalMcpConfigs(serverURL, apiKey) {
   const mcpArgs = [__filename, '--server-url', serverURL, '--api-key', apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpArgs.push('--daemon-token', daemonConn.daemonToken);
   registerOpenClawMcp(mcpArgs);
+  registerOpenCodeMcp(mcpArgs);
   registerCodexMcp(mcpArgs);
 }
 
@@ -114,10 +225,48 @@ function registerOpenClawMcp(mcpArgs) {
     encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 0) {
-    console.log('已为 OpenClaw 配置平台 MCP（agenthub-platform）。');
+    logFlow('info', 'mcp_config.openclaw_configured', { server: 'agenthub-platform' });
   } else {
-    console.error(`OpenClaw MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+    logFlow('warn', 'mcp_config.openclaw_failed', { error: firstLine(result.stderr || result.stdout) });
   }
+}
+
+function registerOpenCodeMcp(mcpArgs) {
+  const command = resolveCommand('opencode');
+  if (commandVersion(command) === null) return;
+  try {
+    const configPath = ensureOpenCodeMcpConfig(['node', ...mcpArgs]);
+    logFlow('info', 'mcp_config.opencode_configured', { server: 'agenthub-platform', file: configPath });
+  } catch (err) {
+    logFlow('warn', 'mcp_config.opencode_failed', { error: errorMessage(err) });
+  }
+}
+
+function openCodeConfigPath() {
+  if (process.env.AGENTHUB_OPENCODE_CONFIG) return process.env.AGENTHUB_OPENCODE_CONFIG;
+  return path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
+}
+
+function ensureOpenCodeMcpConfig(command) {
+  const configPath = openCodeConfigPath();
+  let config = {};
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    config = raw.trim() ? JSON.parse(raw) : {};
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('OpenCode config root must be a JSON object');
+    }
+  }
+  if (!config.$schema) config.$schema = 'https://opencode.ai/config.json';
+  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) config.mcp = {};
+  config.mcp['agenthub-platform'] = {
+    type: 'local',
+    command,
+    enabled: true,
+  };
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return configPath;
 }
 
 function registerCodexMcp(mcpArgs) {
@@ -131,9 +280,9 @@ function registerCodexMcp(mcpArgs) {
     encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 0) {
-    console.log('已为 Codex 配置平台 MCP（agenthub-platform）。');
+    logFlow('info', 'mcp_config.codex_configured', { server: 'agenthub-platform' });
   } else {
-    console.error(`Codex MCP 配置失败: ${(result.stderr || result.stdout || '').toString().trim()}`);
+    logFlow('warn', 'mcp_config.codex_failed', { error: firstLine(result.stderr || result.stdout) });
   }
 }
 
@@ -146,6 +295,7 @@ function killSessionProcess(sessionId) {
     } else {
       process.kill(-child.pid, 'SIGKILL');
     }
+    logFlow('info', 'process.kill_session', { session_id: sessionId, pid: child.pid });
   } catch { /* already dead */ }
   activeSessions.delete(sessionId);
 }
@@ -250,6 +400,10 @@ function makeSessionId(conversationID, agentID) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+function sessionKeyForTask(task) {
+  return task && task.agent_id && task.conversation_id ? `${task.agent_id}:${task.conversation_id}` : '';
+}
+
 function commandOutput(command, args, timeout = 5000) {
   try {
     const spec = processSpec(command, args);
@@ -344,9 +498,26 @@ function resolveCodexCommand() {
   return 'codex';
 }
 
+function resolveOpenCodeCommand() {
+  const candidates = [
+    existingFile(process.env.AGENTHUB_OPENCODE_COMMAND),
+    existingFile(process.platform === 'win32' && process.env.APPDATA
+      ? path.join(process.env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+      : null),
+    'opencode',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (commandVersion(candidate) !== null) return candidate;
+  }
+  return 'opencode';
+}
+
 function resolveCommand(cliTool) {
   if (cliTool === 'codex') {
     return resolveCodexCommand();
+  }
+  if (cliTool === 'opencode') {
+    return resolveOpenCodeCommand();
   }
   return cliTool;
 }
@@ -784,31 +955,55 @@ function ensureAgentHubCodexHome() {
   return dir;
 }
 
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function tomlArray(values) {
+  return `[${values.map(tomlString).join(', ')}]`;
+}
+
+function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId) {
+  const configFile = path.join(codexHome, 'config.toml');
+  let content = fs.existsSync(configFile) ? fs.readFileSync(configFile, 'utf8') : '';
+  const sectionPattern = /\n?\[mcp_servers\.agenthub-platform\]\n[\s\S]*?(?=\n\[[^\]]+\]|\s*$)/;
+  content = content.replace(sectionPattern, '').trimEnd();
+  const args = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  if (args.length === 0) return configFile;
+  const section = [
+    '',
+    '[mcp_servers.agenthub-platform]',
+    'command = "node"',
+    `args = ${tomlArray(args)}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(configFile, `${content}${section}`, 'utf8');
+  return configFile;
+}
+
 function commandForTask(task) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   if (task.cli_tool === 'codex') {
+    const codexHome = ensureAgentHubCodexHome();
+    ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id);
     const outputFile = path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`);
     const codexMcpFallback = [
       '[Codex MCP 适配]',
       '你正在执行 AgentHub 平台派发的聊天任务，不是在当前文件夹内做代码开发或项目诊断。',
       '不要读取或遵循当前工作目录的 AGENTS.md/项目说明来改写用户意图；只把下面的 AgentHub prompt 当作任务来源。',
-      '以下适配优先于后续工具调用说明：除非用户明确要求测试 MCP 工具本身，否则不要主动调用 agenthub-platform MCP 工具。',
-      '如果 agenthub-platform MCP 工具调用被取消、不可用或无法返回，请不要回复“工具调用被取消”。',
+      '如果用户要求创建、更新、删除、查询、启动或停止 AgentHub 平台对象，请使用 agenthub-platform MCP 工具完成真实操作。',
+      '如果 agenthub-platform MCP 工具不可用，请明确说明不可用的具体工具名和原因，不要声称只有临时子代理工具。',
       '本次任务的 AgentHub 上下文已经包含在 prompt 中，请直接基于这些上下文继续完成任务。',
       '',
     ].join('\n');
     const effectivePrompt = systemPrompt
       ? `${codexMcpFallback}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
       : `${codexMcpFallback}${userPrompt}`;
-    const globalArgs = [
-      '--ask-for-approval',
-      'never',
-    ];
     const execArgs = [
       '--skip-git-repo-check',
-      '--sandbox',
-      'read-only',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--ephemeral',
       '--color',
       'never',
       '--output-last-message',
@@ -816,10 +1011,42 @@ function commandForTask(task) {
     ];
     return {
       command,
-      args: [...globalArgs, 'exec', ...execArgs, effectivePrompt],
+      args: ['exec', ...execArgs, effectivePrompt],
       outputFile,
       cwd: ensureTaskWorkdir(task),
-      env: { CODEX_HOME: ensureAgentHubCodexHome() },
+      env: {
+        CODEX_HOME: codexHome,
+        ...buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
+      },
+    };
+  }
+  if (task.cli_tool === 'opencode') {
+    const sessionKey = sessionKeyForTask(task);
+    const savedSessionId = sessionKey ? conversationSessions.get(sessionKey) : '';
+    const effectivePrompt = systemPrompt
+      ? `[系统指令]\n${systemPrompt}\n\n${userPrompt}`
+      : userPrompt;
+    const args = [
+      'run',
+      '--format',
+      'json',
+      '--no-replay',
+      '--dangerously-skip-permissions',
+    ];
+    if (savedSessionId) {
+      args.push('--session', savedSessionId);
+      if (opencodeContextChanged(task, savedSessionId)) {
+        // OpenCode caches available tools in a session; fork so AgentHub tool changes take effect.
+        args.push('--fork');
+      }
+    }
+    args.push(effectivePrompt);
+    return {
+      command,
+      args,
+      resultFormat: 'opencode-json',
+      persistSessionKey: sessionKey,
+      env: buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
     };
   }
   if (task.cli_tool === 'claude') {
@@ -832,6 +1059,8 @@ function commandForTask(task) {
       '-p',
       '--output-format',
       'text',
+      '--thinking',
+      'off',
       ...buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
     ];
     if (persistent) {
@@ -878,13 +1107,31 @@ function commandForTask(task) {
 
 async function executeTask(task) {
   if (task.cli_tool === OPEN_PATH_TOOL) {
+    logFlow('info', 'task.open_path_start', { task_id: task.id });
     return openSkillLocation(task.prompt);
   }
   const spec = commandForTask(task);
+  const taskMeta = {
+    task_id: task.id,
+    cli_tool: task.cli_tool || 'unknown',
+    agent_id: task.agent_id,
+    conversation_id: task.conversation_id,
+  };
+  logFlow('info', 'task.command_prepared', {
+    ...taskMeta,
+    command: spec.command,
+    args_count: Array.isArray(spec.args) ? spec.args.length : 0,
+    has_stdin: typeof spec.stdin === 'string' && spec.stdin.length > 0,
+    stdin_len: typeof spec.stdin === 'string' ? spec.stdin.length : 0,
+    session_id: spec.sessionId,
+    output_file: Boolean(spec.outputFile),
+    result_format: spec.resultFormat,
+  });
 
   let stdout;
   let stderr;
   if (spec.sessionId) {
+    logFlow('info', 'task.session_resume_start', { ...taskMeta, session_id: spec.sessionId });
     killSessionProcess(spec.sessionId);
     await sleep(1000);
 
@@ -896,8 +1143,14 @@ async function executeTask(task) {
         spec.sessionId,
         spec.cwd,
         spec.env,
+        { ...taskMeta, mode: 'resume' },
       ));
     } catch (_err) {
+      logFlow('warn', 'task.session_resume_failed', {
+        ...taskMeta,
+        session_id: spec.sessionId,
+        error: errorMessage(_err),
+      });
       killSessionProcess(spec.sessionId);
       await sleep(500);
       try {
@@ -908,9 +1161,16 @@ async function executeTask(task) {
           spec.sessionId,
           spec.cwd,
           spec.env,
+          { ...taskMeta, mode: 'session_id_retry' },
         ));
       } catch (_err2) {
         const freshId = `agenthub-${String(task.id || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        logFlow('warn', 'task.session_fresh_start', {
+          ...taskMeta,
+          previous_session_id: spec.sessionId,
+          fresh_session_id: freshId,
+          error: errorMessage(_err2),
+        });
         ({ stdout, stderr } = await runProcess(
           spec.command,
           ['--session-id', freshId, ...spec.args],
@@ -918,23 +1178,70 @@ async function executeTask(task) {
           freshId,
           spec.cwd,
           spec.env,
+          { ...taskMeta, mode: 'fresh_session' },
         ));
       }
     }
   } else {
-    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin, undefined, spec.cwd, spec.env));
+    ({ stdout, stderr } = await runProcess(spec.command, spec.args, spec.stdin, undefined, spec.cwd, spec.env, { ...taskMeta, mode: 'one_shot' }));
   }
 
   if (spec.outputFile && fs.existsSync(spec.outputFile)) {
     const text = fs.readFileSync(spec.outputFile, 'utf8').trim();
     fs.rmSync(spec.outputFile, { force: true });
-    if (text) return text;
+    if (text) {
+      logFlow('info', 'task.result_ready', { ...taskMeta, source: 'output_file', result_len: text.length });
+      return text;
+    }
   }
   if (spec.resultFormat === 'openclaw-json') {
-    return parseOpenClawOutput(stdout);
+    const parsed = parseOpenClawOutput(stdout);
+    logFlow('info', 'task.result_ready', { ...taskMeta, source: 'openclaw_json', result_len: parsed.length });
+    return parsed;
+  }
+  if (spec.resultFormat === 'opencode-json') {
+    const parsed = parseOpenCodeOutput(stdout);
+    if (spec.persistSessionKey && parsed.sessionId) {
+      conversationSessions.set(spec.persistSessionKey, parsed.sessionId);
+      saveSessionMap();
+    }
+    logFlow('info', 'task.result_ready', {
+      ...taskMeta,
+      source: 'opencode_json',
+      result_len: parsed.text.length,
+      session_id: parsed.sessionId,
+      session_persisted: Boolean(spec.persistSessionKey && parsed.sessionId),
+    });
+    return parsed.text;
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
+  logFlow('info', 'task.result_ready', { ...taskMeta, source: 'stdio', result_len: text.length });
   return text || '(Agent CLI 没有返回内容)';
+}
+
+async function executeTaskOnce(task) {
+  const taskID = task && task.id;
+  if (!taskID) return executeTask(task);
+  if (activeTaskIDs.has(taskID) || completedTaskIDs.has(taskID)) {
+    logFlow('warn', 'task.dispatch_duplicate_ignored', {
+      task_id: taskID,
+      cli_tool: task.cli_tool,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+    });
+    return null;
+  }
+  activeTaskIDs.add(taskID);
+  try {
+    const result = await executeTask(task);
+    completedTaskIDs.add(taskID);
+    if (completedTaskIDs.size > 1000) {
+      completedTaskIDs.delete(completedTaskIDs.values().next().value);
+    }
+    return result;
+  } finally {
+    activeTaskIDs.delete(taskID);
+  }
 }
 
 function openSkillLocation(prompt) {
@@ -1058,6 +1365,108 @@ function parseOpenClawOutput(stdout) {
 // parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
 // 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
 //   { type, language, filename, title, url, content }
+function extractOpenCodeSessionId(value) {
+  if (!value || typeof value !== 'object') return '';
+  for (const key of ['sessionID', 'sessionId', 'session_id']) {
+    if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+  }
+  if (value.session && typeof value.session === 'object') {
+    for (const key of ['id', 'sessionID', 'sessionId', 'session_id']) {
+      if (typeof value.session[key] === 'string' && value.session[key].trim()) return value.session[key].trim();
+    }
+  }
+  if (value.message && typeof value.message === 'object') {
+    return extractOpenCodeSessionId(value.message);
+  }
+  return '';
+}
+
+function textFromOpenCodeContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => textFromOpenCodeContent(part))
+      .filter(Boolean)
+      .join('');
+  }
+  if (!content || typeof content !== 'object') return '';
+  if (typeof content.text === 'string') return content.text;
+  if (typeof content.content === 'string') return content.content;
+  if (Array.isArray(content.parts)) return textFromOpenCodeContent(content.parts);
+  return '';
+}
+
+function collectOpenCodeText(value, directMessages, partChunks, partUpdates) {
+  if (!value || typeof value !== 'object') return;
+
+  const message = value.message && typeof value.message === 'object' ? value.message : value;
+  if (message.role === 'assistant') {
+    const messageText = textFromOpenCodeContent(message.content || message.parts || message.text);
+    if (messageText.trim()) directMessages.push(messageText);
+  }
+
+  const part = value.part && typeof value.part === 'object' ? value.part : null;
+  if (part && (part.type === 'text' || typeof part.text === 'string')) {
+    const text = textFromOpenCodeContent(part);
+    if (text.trim()) {
+      const partID = String(part.id || value.id || '');
+      if (partID && /updated|delta/i.test(String(value.type || ''))) {
+        partUpdates.set(partID, text);
+      } else {
+        partChunks.push(text);
+      }
+    }
+  }
+
+  for (const key of ['response', 'result', 'output', 'text']) {
+    if (typeof value[key] === 'string' && value[key].trim() && /assistant|result|complete|response|text/i.test(String(value.type || key))) {
+      partChunks.push(value[key]);
+    }
+  }
+}
+
+function parseOpenCodeOutput(stdout) {
+  const text = stdout.trim();
+  if (!text) return { text: '(OpenCode CLI 没有返回内容)', sessionId: '' };
+
+  const events = [];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // OpenCode may fall back to formatted output when JSON is unavailable.
+    }
+  }
+  if (events.length === 0) {
+    try {
+      events.push(JSON.parse(text));
+    } catch {
+      return { text, sessionId: '' };
+    }
+  }
+
+  let sessionId = '';
+  const directMessages = [];
+  const partChunks = [];
+  const partUpdates = new Map();
+  for (const event of events) {
+    sessionId = sessionId || extractOpenCodeSessionId(event);
+    collectOpenCodeText(event, directMessages, partChunks, partUpdates);
+  }
+
+  const directText = directMessages.join('\n').trim();
+  if (directText) return { text: directText, sessionId };
+
+  const updatedText = Array.from(partUpdates.values()).join('').trim();
+  if (updatedText) return { text: updatedText, sessionId };
+
+  const chunkText = partChunks.join('').trim();
+  if (chunkText) return { text: chunkText, sessionId };
+
+  return { text, sessionId };
+}
+
 function lineEndIndex(text, start) {
   const nl = text.indexOf('\n', start);
   return nl === -1 ? text.length : nl + 1;
@@ -1238,16 +1647,25 @@ function parseArtifacts(text) {
   return artifacts;
 }
 
-function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
+function runProcess(command, args, stdin, sessionId, cwd, extraEnv, meta = {}) {
   return new Promise((resolve, reject) => {
     const spec = processSpec(command, args);
     const detached = process.platform !== 'win32';
+    const startedAt = Date.now();
     const child = spawn(spec.command, spec.args, {
       cwd: cwd || undefined,
       env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached,
+    });
+    logFlow('info', 'process.spawn', {
+      ...meta,
+      command: spec.command,
+      args_count: spec.args.length,
+      stdin_len: typeof stdin === 'string' ? stdin.length : 0,
+      session_id: sessionId,
+      pid: child.pid,
     });
     if (sessionId) {
       activeSessions.set(sessionId, child);
@@ -1267,6 +1685,13 @@ function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
           child.kill();
         }
       } catch { /* ignore */ }
+      logFlow('error', 'process.timeout', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        timeout_ms: EXEC_TIMEOUT_MS,
+      });
       reject(new Error(`CLI execution timed out after ${EXEC_TIMEOUT_MS / 1000}s`));
     }, EXEC_TIMEOUT_MS);
 
@@ -1280,10 +1705,27 @@ function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
     });
     child.on('error', (error) => {
       clearTimeout(timer);
+      logFlow('error', 'process.error', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        error: errorMessage(error),
+      });
       reject(error);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      logFlow(code === 0 ? 'info' : 'warn', 'process.exit', {
+        ...meta,
+        command: spec.command,
+        pid: child.pid,
+        session_id: sessionId,
+        exit_code: code,
+        duration_ms: Date.now() - startedAt,
+        stdout_len: stdout.length,
+        stderr_len: stderr.length,
+      });
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
@@ -1296,11 +1738,21 @@ function runProcess(command, args, stdin, sessionId, cwd, extraEnv) {
 
 async function register(serverURL, apiKey) {
   const agents = scanAgents();
-  console.log(`AgentHub daemon 发现 ${agents.length} 个 Agent：`);
+  logFlow('info', 'register.scan_completed', {
+    machine_id: os.hostname(),
+    agent_count: agents.length,
+    agents: agents.map((agent) => `${agent.name}:${agent.cli_tool}`),
+  });
   for (const agent of agents) {
     const version = agent.version ? ` ${String(agent.version).split('\n')[0].trim()}` : '';
     const skillCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : 0;
-    console.log(`  • ${agent.name} (${agent.cli_tool})${version} · ${skillCount} 个技能`);
+    logFlow('info', 'register.agent_detected', {
+      machine_id: os.hostname(),
+      agent_name: agent.name,
+      cli_tool: agent.cli_tool,
+      version: version.trim(),
+      skill_count: skillCount,
+    });
   }
   const res = await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
@@ -1309,8 +1761,12 @@ async function register(serverURL, apiKey) {
   if (res && res.data && res.data.daemon_token && !daemonConn.daemonToken) {
     daemonConn.daemonToken = res.data.daemon_token;
   }
-  console.log('详细能力已上报，请在 AgentHub 网页端查看。');
-  console.log('AgentHub daemon 正在运行，请保持此终端开启以处理聊天任务。');
+  logFlow('info', 'register.completed', {
+    machine_id: os.hostname(),
+    agent_count: agents.length,
+    daemon_token_received: Boolean(res && res.data && res.data.daemon_token),
+  });
+  logFlow('info', 'daemon.ready', { machine_id: os.hostname(), transport: WebSocket ? 'websocket' : 'polling' });
 }
 
 // 在任务执行期间定期发送心跳，告知 server 任务仍在进行中
@@ -1319,7 +1775,7 @@ function startHeartbeat(serverURL, apiKey, taskId) {
     try {
       await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${taskId}/heartbeat`), {});
     } catch (error) {
-      console.error(`AgentHub daemon task ${taskId} heartbeat failed: ${error.message}`);
+      logFlow('warn', 'task.heartbeat_failed', { task_id: taskId, error: errorMessage(error) });
     }
   }, HEARTBEAT_INTERVAL_MS);
   return () => clearInterval(timer);
@@ -1335,27 +1791,43 @@ async function pollTasks(serverURL, apiKey) {
         continue;
       }
 
-      console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool}`);
+      logFlow('info', 'poll.task_claimed', {
+        task_id: task.id,
+        cli_tool: task.cli_tool,
+        agent_id: task.agent_id,
+        conversation_id: task.conversation_id,
+      });
       const stopHeartbeat = startHeartbeat(serverURL, apiKey, task.id);
       try {
-        const result = await executeTask(task);
+        const result = await executeTaskOnce(task);
+        if (result === null) {
+          stopHeartbeat();
+          continue;
+        }
         stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), { result });
-        console.log(`AgentHub daemon task ${task.id} completed.`);
+        logFlow('info', 'poll.task_completed', {
+          task_id: task.id,
+          cli_tool: task.cli_tool,
+          result_len: typeof result === 'string' ? result.length : 0,
+        });
       } catch (error) {
         stopHeartbeat();
         await requestJSON('POST', apiURL(serverURL, apiKey, `/daemon/tasks/${task.id}/complete`), {
           error: error instanceof Error ? error.message : String(error),
         });
-        console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
+        logFlow('error', 'poll.task_failed', {
+          task_id: task.id,
+          cli_tool: task.cli_tool,
+          error: errorMessage(error),
+        });
       }
     } catch (error) {
-      console.error(`AgentHub daemon poll failed: ${error.message}`);
+      logFlow('warn', 'poll.failed', { error: errorMessage(error), retry_ms: POLL_INTERVAL_MS * 2 });
       await sleep(POLL_INTERVAL_MS * 2);
     }
   }
 }
-
 function stopAgentProcess(agent_id) {
   const entry = runningAgents.get(agent_id);
   if (!entry) return;
@@ -1365,6 +1837,12 @@ function stopAgentProcess(agent_id) {
     } else {
       process.kill(-entry.process.pid, 'SIGKILL');
     }
+    logFlow('info', 'agent.process_killed', {
+      agent_id,
+      session_id: entry.sessionId,
+      pid: entry.process.pid,
+      conversation_id: entry.currentConversationId,
+    });
   } catch { /* already dead */ }
   runningAgents.delete(agent_id);
 }
@@ -1398,6 +1876,18 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  logFlow('info', 'agent.process_spawn', {
+    agent_id: agentId,
+    conversation_id: conversationId,
+    user_id: userId,
+    command: spec.command,
+    args_count: spec.args.length,
+    session_id: effectiveSessionId,
+    resume,
+    mcp_enabled: mcpArgs.length > 0,
+    system_prompt_len: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
+    pid: child.pid,
+  });
 
   let stdoutBuf = '';
   let resultResolver = null;
@@ -1417,6 +1907,14 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
         if (event.type === 'result') {
           agentTurnStates.set(agentId, 'idle');
           const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
+          logFlow(event.is_error || event.subtype === 'error_during_execution' ? 'warn' : 'info', 'agent.turn_result', {
+            agent_id: agentId,
+            conversation_id: conversationId,
+            session_id: effectiveSessionId,
+            is_error: Boolean(event.is_error || event.subtype === 'error_during_execution'),
+            subtype: event.subtype,
+            result_len: typeof text === 'string' ? text.length : 0,
+          });
           if (resultResolver) {
             const r = resultResolver;
             resultResolver = null;
@@ -1433,17 +1931,31 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
 
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
-    console.error(`[agent:${agentId}:err] ${chunk.trim()}`);
+    logFlow('warn', 'agent.stderr', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      message: truncateStr(chunk.trim(), 500),
+    });
   });
 
   // Reject any pending resultResolver if process exits mid-turn
   child.on('close', (code) => {
+    const hadPendingTurn = Boolean(resultResolver);
     if (resultResolver) {
       const r = resultResolver;
       resultResolver = null;
       r({ error: `Agent process exited (code=${code})` });
     }
     agentTurnStates.delete(agentId);
+    logFlow(code === 0 ? 'info' : 'warn', 'agent.process_close', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      pid: child.pid,
+      exit_code: code,
+      pending_turn: hadPendingTurn,
+    });
   });
 
   let queueTail = Promise.resolve();
@@ -1453,6 +1965,12 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
       return;
     }
     resultResolver = resolve;
+    logFlow('info', 'agent.prompt_sent', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: effectiveSessionId,
+      prompt_len: typeof prompt === 'string' ? prompt.length : 0,
+    });
     const msg = JSON.stringify({
       type: 'user',
       message: { role: 'user', content: [{ type: 'text', text: prompt }] },
@@ -1461,7 +1979,13 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
     const timer = setTimeout(() => {
       if (resultResolver === resolve) {
         resultResolver = null;
-        reject(new Error('Agent task timed out (120s)'));
+        logFlow('error', 'agent.turn_timeout', {
+          agent_id: agentId,
+          conversation_id: conversationId,
+          session_id: effectiveSessionId,
+          timeout_ms: EXEC_TIMEOUT_MS,
+        });
+        reject(new Error('Agent task timed out (400s)'));
       }
     }, EXEC_TIMEOUT_MS);
     timer.unref(); // Don't keep event loop alive for timeout timer
@@ -1492,10 +2016,20 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   // Fast path: same conversation or unbound agent (null = accept any), process running
   if (slot?.sendPrompt && (slot.currentConversationId === conversationId || slot.currentConversationId === null)) {
     if (slot.currentConversationId === null) {
-      console.log(`Agent ${agentId}: fast path (unbound → binding to conversation ${conversationId})`);
+      logFlow('info', 'agent.dispatch_fast_path', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        previous_conversation_id: 'unbound',
+        session_id: slot.sessionId,
+      });
       slot.currentConversationId = conversationId;
     } else {
-      console.log(`Agent ${agentId}: fast path (same conversation ${conversationId})`);
+      logFlow('info', 'agent.dispatch_fast_path', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        previous_conversation_id: slot.currentConversationId,
+        session_id: slot.sessionId,
+      });
     }
     const response = await slot.sendPrompt(prompt);
     if (response.error) throw new Error(response.error);
@@ -1504,7 +2038,12 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
 
   // Kill existing process if serving a different conversation
   if (slot?.process) {
-    console.log(`Agent ${agentId}: switching conversation ${slot.currentConversationId} → ${conversationId}`);
+    logFlow('info', 'agent.conversation_switch', {
+      agent_id: agentId,
+      from_conversation_id: slot.currentConversationId,
+      to_conversation_id: conversationId,
+      previous_session_id: slot.sessionId,
+    });
     stopAgentProcess(agentId);
     await sleep(500);
   }
@@ -1521,7 +2060,11 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       }
     } catch {
       // Resume failed — spawn fresh with new session ID
-      console.log(`Agent ${agentId}: --resume failed, spawning fresh`);
+      logFlow('warn', 'agent.resume_failed', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        session_id: validSessionId,
+      });
       result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
     }
   } else {
@@ -1537,8 +2080,14 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       runningAgents.delete(agentId);
     }
     agentTurnStates.delete(agentId);
-    console.log(`Agent ${agentId} process exited (code=${code})`);
-    safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
+    logFlow(code === 0 ? 'info' : 'warn', 'agent.process_exit', {
+      agent_id: agentId,
+      conversation_id: conversationId,
+      session_id: sessionId,
+      pid: child.pid,
+      exit_code: code,
+    });
+    safeSend(currentDaemonWs, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
   });
 
   // Register in runningAgents with conversation tracking
@@ -1556,7 +2105,13 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   conversationSessions.set(sessionKey, sessionId);
   saveSessionMap();
 
-  console.log(`Agent ${agentId} spawned for conversation ${conversationId} (session=${sessionId}, pid=${child.pid})`);
+  logFlow('info', 'agent.slot_spawned', {
+    agent_id: agentId,
+    conversation_id: conversationId,
+    session_id: sessionId,
+    pid: child.pid,
+    resumed: Boolean(validSessionId),
+  });
 
   // Send the prompt
   const response = await sendPrompt(prompt);
@@ -1566,6 +2121,11 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
 
 function enqueueAgentStart(ws, payload) {
   agentStartQueue.push({ ws, payload });
+  logFlow('info', 'agent.start_queued', {
+    agent_id: payload && payload.agent_id,
+    cli_tool: payload && payload.cli_tool,
+    queue_len: agentStartQueue.length,
+  });
   processStartQueue();
 }
 
@@ -1591,10 +2151,15 @@ async function handleAgentStart(ws, payload) {
   const { agent_id, cli_tool, system_prompt } = payload;
   if (!agent_id || !cli_tool) return;
 
+  logFlow('info', 'agent.start_requested', {
+    agent_id,
+    cli_tool,
+    system_prompt_len: typeof system_prompt === 'string' ? system_prompt.length : 0,
+  });
   stopAgentProcess(agent_id);
 
   if (cli_tool !== 'claude') {
-    console.log(`Agent ${agent_id}: persistent mode not supported for ${cli_tool}`);
+    logFlow('warn', 'agent.start_unsupported', { agent_id, cli_tool });
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
     return;
   }
@@ -1610,7 +2175,7 @@ async function handleAgentStart(ws, payload) {
     }
 
     child.on('error', (err) => {
-      console.error(`Agent ${agent_id} process error: ${err.message}`);
+      logFlow('error', 'agent.process_error', { agent_id, cli_tool, session_id: sessionId, pid: child.pid, error: errorMessage(err) });
     });
 
     // Handle process exit — cleanup and notify backend
@@ -1619,7 +2184,13 @@ async function handleAgentStart(ws, payload) {
         runningAgents.delete(agent_id);
       }
       agentTurnStates.delete(agent_id);
-      console.log(`Agent ${agent_id} process exited (code=${code})`);
+      logFlow(code === 0 ? 'info' : 'warn', 'agent.process_exit', {
+        agent_id,
+        cli_tool,
+        session_id: sessionId,
+        pid: child.pid,
+        exit_code: code,
+      });
       safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id, exit_code: code } }));
     });
 
@@ -1633,11 +2204,11 @@ async function handleAgentStart(ws, payload) {
     idleAgentConfigs.set(agent_id, { cliTool: cli_tool, sessionId, systemPrompt: system_prompt || '' });
     agentTurnStates.set(agent_id, 'idle');
 
-    console.log(`Agent ${agent_id} started (pid=${child.pid}, session=${sessionId})`);
+    logFlow('info', 'agent.started', { agent_id, cli_tool, session_id: sessionId, pid: child.pid });
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id } }));
   } catch (error) {
-    console.error(`Agent ${agent_id} start failed: ${error.message}`);
-    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: error.message } }));
+    logFlow('error', 'agent.start_failed', { agent_id, cli_tool, error: errorMessage(error) });
+    safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: errorMessage(error) } }));
   }
 }
 
@@ -1648,7 +2219,7 @@ function handleAgentStop(ws, payload) {
   runningAgents.delete(agent_id);
   idleAgentConfigs.delete(agent_id);
   agentTurnStates.delete(agent_id);
-  console.log(`Agent ${agent_id} stopped`);
+  logFlow('info', 'agent.stopped', { agent_id });
   safeSend(ws, JSON.stringify({ type: 'agent.stopped', data: { agent_id } }));
 }
 
@@ -1659,8 +2230,9 @@ function handleAgentRestart(ws, payload) {
 
 async function connectWS(serverURL, apiKey) {
   if (!WebSocket) {
-    console.error('WebSocket not available. Please install ws: npm install ws, or use Node.js 22+');
-    console.log('Falling back to HTTP polling...');
+    logFlow('warn', 'ws.unavailable_fallback_to_polling', {
+      reason: 'WebSocket not available. Please install ws or use Node.js 22+',
+    });
     return pollTasks(serverURL, apiKey);
   }
 
@@ -1672,7 +2244,11 @@ async function connectWS(serverURL, apiKey) {
   let reconnectAttempts = 0;
 
   function connect() {
-    console.log(`AgentHub daemon connecting to ${protocol}//${url.host}/daemon/ws ...`);
+    logFlow('info', 'ws.connect_start', {
+      server: `${protocol}//${url.host}${wsPath}`,
+      reconnect_attempt: reconnectAttempts,
+      machine_id: os.hostname(),
+    });
     const ws = new WebSocket(wsURL);
     let pingTimer = null;
     let watchdogTimer = null;
@@ -1680,14 +2256,18 @@ async function connectWS(serverURL, apiKey) {
     function resetWatchdog() {
       if (watchdogTimer) clearTimeout(watchdogTimer);
       watchdogTimer = setTimeout(() => {
-        console.warn(`No message from server for ${INBOUND_WATCHDOG_MS / 1000}s, closing WS to reconnect.`);
+        logFlow('warn', 'ws.inbound_watchdog_timeout', {
+          timeout_ms: INBOUND_WATCHDOG_MS,
+          machine_id: os.hostname(),
+        });
         try { ws.close(); } catch { /* ignore */ }
       }, INBOUND_WATCHDOG_MS);
     }
 
-    ws.on('open', () => {
+    onWebSocket(ws, 'open', () => {
+      currentDaemonWs = ws;
       reconnectAttempts = 0;
-      console.log('AgentHub daemon WS connected.');
+      logFlow('info', 'ws.connected', { machine_id: os.hostname(), server: `${protocol}//${url.host}${wsPath}` });
       resetWatchdog();
       // Send register message over WS
       const agents = scanAgents();
@@ -1695,6 +2275,12 @@ async function connectWS(serverURL, apiKey) {
         type: 'daemon.register',
         data: { machine_id: os.hostname(), agents },
       }));
+      logFlow('info', 'ws.register_sent', {
+        machine_id: os.hostname(),
+        agent_count: agents.length,
+        agents: agents.map((agent) => `${agent.name}:${agent.cli_tool}`),
+      });
+      flushPendingTaskCompletions();
       // Start ping interval
       pingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -1703,12 +2289,13 @@ async function connectWS(serverURL, apiKey) {
       }, WS_PING_INTERVAL_MS);
     });
 
-    ws.on('message', async (data) => {
+    onWebSocket(ws, 'message', async (data) => {
       resetWatchdog();
       let envelope;
       try {
         envelope = JSON.parse(data.toString());
       } catch {
+        logFlow('warn', 'ws.message_parse_failed', { bytes: Buffer.byteLength(data) });
         return;
       }
 
@@ -1720,20 +2307,34 @@ async function connectWS(serverURL, apiKey) {
       }
 
       if (envelope.type === 'agent.start') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+          cli_tool: envelope.data && envelope.data.cli_tool,
+        });
         enqueueAgentStart(ws, envelope.data);
         return;
       }
       if (envelope.type === 'agent.stop') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+        });
         handleAgentStop(ws, envelope.data);
         return;
       }
       if (envelope.type === 'agent.restart') {
+        logFlow('info', 'ws.control_received', {
+          type: envelope.type,
+          agent_id: envelope.data && envelope.data.agent_id,
+          cli_tool: envelope.data && envelope.data.cli_tool,
+        });
         handleAgentRestart(ws, envelope.data);
         return;
       }
 
       if (envelope.type === 'task.dispatch') {
-        const d = envelope.data;
+        const d = envelope.data || {};
         const task = {
           id: d.task_id,
           cli_tool: d.cli_tool,
@@ -1743,58 +2344,102 @@ async function connectWS(serverURL, apiKey) {
           conversation_id: d.conversation_id,
           user_id: d.user_id,
         };
-        if (!task.id) return;
+        if (!task.id) {
+          logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
+          return;
+        }
 
         const { systemPrompt, userPrompt } = buildPromptParts(task);
 
-        console.log(`AgentHub daemon task ${task.id}: ${task.cli_tool || 'unknown'}`);
+        logFlow('info', 'task.dispatch_received', {
+          task_id: task.id,
+          cli_tool: task.cli_tool || 'unknown',
+          agent_id: task.agent_id,
+          conversation_id: task.conversation_id,
+          user_id: task.user_id,
+          prompt_len: typeof task.prompt === 'string' ? task.prompt.length : 0,
+          context_len: typeof task.context_messages === 'string' ? task.context_messages.length : 0,
+          system_prompt_len: systemPrompt.length,
+          user_prompt_len: userPrompt.length,
+        });
         try {
           let result;
-          if (task.cli_tool === 'claude' && task.agent_id && task.conversation_id) {
+          if (
+            task.cli_tool === 'claude' &&
+            task.agent_id &&
+            task.conversation_id &&
+            process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
+          ) {
             // Unified stream-json slot path with conversation isolation
+            logFlow('info', 'task.execution_start', {
+              task_id: task.id,
+              cli_tool: task.cli_tool,
+              agent_id: task.agent_id,
+              conversation_id: task.conversation_id,
+              mode: 'claude_slot',
+            });
             result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
           } else {
             // Non-claude or missing info — use legacy per-task spawn
-            result = await executeTask(task);
+            logFlow('info', 'task.execution_start', {
+              task_id: task.id,
+              cli_tool: task.cli_tool,
+              agent_id: task.agent_id,
+              conversation_id: task.conversation_id,
+              mode: 'legacy_spawn',
+            });
+            result = await executeTaskOnce(task);
+            if (result === null) return;
           }
           const artifacts = parseArtifacts(result);
-          safeSend(ws, JSON.stringify({
-            type: 'task.complete',
-            data: { task_id: task.id, result, artifacts },
-          }));
-          console.log(`AgentHub daemon task ${task.id} completed (${artifacts.length} artifact(s)).`);
+          sendTaskComplete({ task_id: task.id, result, artifacts });
+          logFlow('info', 'task.execution_completed', {
+            task_id: task.id,
+            cli_tool: task.cli_tool,
+            agent_id: task.agent_id,
+            conversation_id: task.conversation_id,
+            result_len: typeof result === 'string' ? result.length : 0,
+            artifact_count: artifacts.length,
+          });
         } catch (error) {
-          safeSend(ws, JSON.stringify({
-            type: 'task.complete',
-            data: {
-              task_id: task.id,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          }));
-          console.error(`AgentHub daemon task ${task.id} failed: ${error.message}`);
+          sendTaskComplete({
+            task_id: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          logFlow('error', 'task.execution_failed', {
+            task_id: task.id,
+            cli_tool: task.cli_tool,
+            agent_id: task.agent_id,
+            conversation_id: task.conversation_id,
+            error: errorMessage(error),
+          });
         }
         return;
       }
 
-      console.log(`AgentHub daemon unknown WS message: ${envelope.type}`);
+      logFlow('warn', 'ws.unknown_message', { type: envelope.type });
     });
 
-    ws.on('close', (code, reason) => {
+    onWebSocket(ws, 'close', (code, reason) => {
+      if (currentDaemonWs === ws) currentDaemonWs = null;
       if (pingTimer) clearInterval(pingTimer);
       if (watchdogTimer) clearTimeout(watchdogTimer);
-      // Clean up all running agent entries on disconnect
-      for (const [agentId] of runningAgents) {
-        stopAgentProcess(agentId);
-      }
-      runningAgents.clear();
-      idleAgentConfigs.clear();
-      agentTurnStates.clear();
-      console.log(`AgentHub daemon WS closed (code=${code}). Reconnecting in ${WS_RECONNECT_DELAY_MS / 1000}s...`);
+      // Keep running agent processes alive across short control-channel reconnects.
+      // In-flight task completions are buffered and flushed after reconnect.
+      reconnectAttempts += 1;
+      logFlow('warn', 'ws.closed', {
+        code,
+        reason: reason ? reason.toString() : '',
+        reconnect_attempt: reconnectAttempts,
+        retry_ms: WS_RECONNECT_DELAY_MS,
+        running_agent_count: runningAgents.size,
+        pending_completion_count: pendingTaskCompletions.size,
+      });
       setTimeout(connect, WS_RECONNECT_DELAY_MS);
     });
 
-    ws.on('error', (error) => {
-      console.error(`AgentHub daemon WS error: ${error.message}`);
+    onWebSocket(ws, 'error', (error) => {
+      logFlow('error', 'ws.error', { error: errorMessage(error), reconnect_attempt: reconnectAttempts });
       // close handler will trigger reconnect
     });
   }
@@ -1916,7 +2561,7 @@ const MCP_TOOLS = [
       required: ['name'],
       additionalProperties: false,
     },
-    run: (args, ctx) => ctx.callApi('POST', '/api/groups', {
+    run: (args, ctx) => ctx.callMcpApi('POST', '/mcp/groups', {
       body: { name: args.name, member_ids: args.member_ids || [] },
     }),
   },
@@ -1924,7 +2569,29 @@ const MCP_TOOLS = [
     name: 'list_agents',
     description: '列出当前用户可用的 Agent。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    run: (args, ctx) => ctx.callApi('GET', '/api/agents'),
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/agents'),
+  },
+  {
+    name: 'get_agent_skill',
+    description: '查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '平台 Skill 名称，必须属于当前 Agent' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!name) throw new Error('name is required');
+      const agent = await resolveCurrentAgent(ctx);
+      if (!agent) throw new Error('current agent not found');
+      const skills = parsePlatformSkills(agent.custom_skills);
+      const skill = skills.find((item) => item.name.toLowerCase() === name.toLowerCase());
+      if (!skill) throw new Error(`skill not found for current agent: ${name}`);
+      return skill;
+    },
   },
   {
     name: 'list_agent_candidates',
@@ -2121,11 +2788,266 @@ const MCP_TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/daemon/machines'),
   },
+  // ── Agent 管理 ──
+  {
+    name: 'get_agent_detail',
+    description: '查询单个 Agent 的完整详情，包括名称、类型、CLI 工具、系统提示词、工具配置、状态、版本、机器名称等。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(args.agent_id)}`),
+  },
+  {
+    name: 'update_agent_prompt',
+    description: '更新 Agent 的系统提示词。会先获取当前完整信息，再只修改 system_prompt 字段。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+        system_prompt: { type: 'string', description: '新的系统提示词' },
+      },
+      required: ['agent_id', 'system_prompt'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const agentId = args.agent_id;
+      if (!agentId) throw new Error('agent_id is required');
+      const systemPrompt = args.system_prompt;
+      if (!systemPrompt) throw new Error('system_prompt is required');
+      // 先获取当前完整信息
+      const res = await ctx.callMcpApi('GET', `/mcp/agents`);
+      const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      const agent = agents.find((a) => a && a.id === agentId);
+      if (!agent) throw new Error(`agent not found: ${agentId}`);
+      // 只改 system_prompt，其他字段原样传回
+      return ctx.callMcpApi('PUT', `/mcp/agents/${encodeURIComponent(agentId)}`, {
+        body: {
+          name: agent.name,
+          cli_tool: agent.cli_tool,
+          system_prompt: systemPrompt,
+          tools_config: agent.tools_config,
+          capabilities_json: agent.capabilities_json,
+          custom_skills: agent.custom_skills,
+          enable_management_tools: agent.enable_management_tools,
+        },
+      });
+    },
+  },
+  {
+    name: 'start_agent',
+    description: '启动指定的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('POST', `/mcp/agents/${encodeURIComponent(args.agent_id)}/start`),
+  },
+  {
+    name: 'stop_agent',
+    description: '停止指定的 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('POST', `/mcp/agents/${encodeURIComponent(args.agent_id)}/stop`),
+  },
+  // ── 知识库 ──
+  {
+    name: 'list_knowledge_bases',
+    description: '列出当前用户的知识库，包含 ID、名称、描述、可见性、文件数量等信息。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: (args, ctx) => ctx.callMcpApi('GET', '/mcp/knowledge-bases'),
+  },
+  {
+    name: 'list_knowledge_files',
+    description: '列出指定知识库中的文件，包含文件名、大小、类型、预览文本等信息。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: '知识库 ID' },
+      },
+      required: ['knowledge_base_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('GET', `/mcp/knowledge-bases/${encodeURIComponent(args.knowledge_base_id)}/files`),
+  },
+  {
+    name: 'search_knowledge',
+    description: '在指定知识库中按关键词搜索文件，基于文件的 preview_text 字段进行匹配过滤。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: '知识库 ID' },
+        keyword: { type: 'string', description: '搜索关键词' },
+      },
+      required: ['knowledge_base_id', 'keyword'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const kbId = args.knowledge_base_id;
+      const keyword = args.keyword;
+      if (!kbId) throw new Error('knowledge_base_id is required');
+      if (!keyword) throw new Error('keyword is required');
+      const res = await ctx.callMcpApi('GET', `/mcp/knowledge-bases/${encodeURIComponent(kbId)}/files`);
+      const files = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      const keywordLower = keyword.toLowerCase();
+      return files.filter((f) => {
+        const preview = typeof f.preview_text === 'string' ? f.preview_text : '';
+        return preview.toLowerCase().includes(keywordLower);
+      });
+    },
+  },
+  // ── 平台 Skills ──
+  {
+    name: 'list_platform_skills',
+    description: '列出所有平台 Skill，包含名称、分类、描述和触发场景，用于为 Agent 分配 Skill。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: async (args, ctx) => {
+      const res = await ctx.callMcpApi('GET', '/mcp/platform-skills');
+      const skills = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      return skills.map((s) => ({ name: s.name, category: s.category, description: s.description, trigger: s.trigger }));
+    },
+  },
+  // ── Agent 自建 ──
+  {
+    name: 'create_agent',
+    description: '创建自建 Agent。需要提供名称和系统提示词，可选指定工具模板、CLI 工具和标签。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Agent 名称（必填）' },
+        system_prompt: { type: 'string', description: '系统提示词（必填）' },
+        toolset: { type: 'string', description: '工具模板名（none/basic/tasks/orchestrator/agent_builder/agent_manager/knowledge），默认 none' },
+        cli_tool: { type: 'string', description: 'CLI 工具名，默认 claude' },
+        tags: { type: 'string', description: '标签' },
+      },
+      required: ['name', 'system_prompt'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const name = args.name;
+      if (!name) throw new Error('name is required');
+      const systemPrompt = args.system_prompt;
+      if (!systemPrompt) throw new Error('system_prompt is required');
+      const cliTool = args.cli_tool || 'claude';
+      const toolset = args.toolset || 'none';
+      const tpl = TOOLSET_TEMPLATES[toolset] || [];
+      const toolsConfig = JSON.stringify({ toolset, allowed_tools: tpl });
+      const body = { name, cli_tool: cliTool, system_prompt: systemPrompt, tools_config: toolsConfig };
+      if (args.tags) body.tags = args.tags;
+      const candidatesRes = await ctx.callMcpApi('GET', '/mcp/daemon/agent-candidates');
+      const candidates = candidatesRes && Array.isArray(candidatesRes.data) ? candidatesRes.data : Array.isArray(candidatesRes) ? candidatesRes : [];
+      const candidate = candidates.find((item) => item && item.cli_tool === cliTool);
+      if (candidate && candidate.id) {
+        return ctx.callMcpApi('POST', `/mcp/daemon/agent-candidates/${encodeURIComponent(candidate.id)}/add`, { body });
+      }
+      return ctx.callMcpApi('POST', '/mcp/agents', { body });
+    },
+  },
+  {
+    name: 'update_agent',
+    description: '更新 Agent 配置，只改传入的字段。可修改名称、系统提示词、工具模板、自定义工具列表、平台 Skill 分配和标签。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID（必填）' },
+        name: { type: 'string', description: '新名称' },
+        system_prompt: { type: 'string', description: '新系统提示词' },
+        toolset: { type: 'string', description: '切换工具模板' },
+        allowed_tools: { type: 'array', items: { type: 'string' }, description: '自定义工具列表' },
+        skills: { type: 'array', items: { type: 'string' }, description: '平台 Skill 名称列表，传入后覆盖当前 Agent 的 Skill 分配。传空数组清空所有 Skill' },
+        tags: { type: 'string', description: '新标签' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const agentId = args.agent_id;
+      if (!agentId) throw new Error('agent_id is required');
+      // Fetch current agent
+      const res = await ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(agentId)}`);
+      const agent = res && res.data ? res.data : res;
+      if (!agent || typeof agent !== 'object') throw new Error(`agent not found: ${agentId}`);
+      const body = {
+        name: agent.name,
+        cli_tool: agent.cli_tool,
+        system_prompt: agent.system_prompt,
+        tools_config: agent.tools_config,
+        capabilities_json: agent.capabilities_json,
+        custom_skills: agent.custom_skills,
+        enable_management_tools: agent.enable_management_tools,
+      };
+      // Override only provided fields
+      if (args.name) body.name = args.name;
+      if (args.system_prompt) body.system_prompt = args.system_prompt;
+      if (args.tags) body.tags = args.tags;
+      if (args.toolset) {
+        const tpl = TOOLSET_TEMPLATES[args.toolset] || [];
+        body.tools_config = JSON.stringify({ toolset: args.toolset, allowed_tools: tpl });
+      }
+      if (Array.isArray(args.allowed_tools) && args.allowed_tools.length > 0) {
+        const tools = args.allowed_tools.filter((t) => typeof t === 'string' && t);
+        if (tools.length > 0) {
+          body.tools_config = JSON.stringify({ toolset: '', allowed_tools: tools });
+        }
+      }
+      // Skills: fetch platform skills, filter by name, build custom_skills
+      if (Array.isArray(args.skills)) {
+        const skillNames = new Set(args.skills.filter((s) => typeof s === 'string' && s));
+        const psRes = await ctx.callMcpApi('GET', '/mcp/platform-skills');
+        const allSkills = psRes && Array.isArray(psRes.data) ? psRes.data : Array.isArray(psRes) ? psRes : [];
+        const matched = allSkills.filter((s) => skillNames.has(s.name));
+        body.custom_skills = JSON.stringify(matched);
+      }
+      return ctx.callMcpApi('PUT', `/mcp/agents/${encodeURIComponent(agentId)}`, { body });
+    },
+  },
+  {
+    name: 'delete_agent',
+    description: '删除自建 Agent。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Agent ID（必填）' },
+      },
+      required: ['agent_id'],
+      additionalProperties: false,
+    },
+    run: (args, ctx) => ctx.callMcpApi('DELETE', `/mcp/agents/${encodeURIComponent(args.agent_id)}`),
+  },
+  {
+    name: 'list_toolsets',
+    description: '列出可用的工具模板及其描述，用于创建或更新 Agent 时选择合适的工具配置。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: () => [
+      { name: 'none', label: '无工具', description: '不分配任何平台工具' },
+      { name: 'basic', label: '基础群聊', description: '包含群 Agent 列表、消息读取、Skill 查看等基础工具' },
+      { name: 'tasks', label: '任务协作', description: '包含任务看板的完整增删改查能力' },
+      { name: 'orchestrator', label: 'Orchestrator', description: '编排器模板，包含会话、任务、群组管理和知识库搜索' },
+      { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 发现、详情查询、创建和更新工具' },
+      { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 详情、配置更新、提示词修改、启停和删除' },
+      { name: 'knowledge', label: '知识库', description: '知识库列表、文件列表和关键词搜索' },
+    ],
+  },
 ];
 
 const DEFAULT_AGENT_TOOLS = [
   'list_group_agents',
   'get_messages',
+  'get_agent_skill',
   'list_tasks',
   'create_task',
   'update_task',
@@ -2135,7 +3057,7 @@ const NO_AGENT_TOOLS = [];
 
 const TOOLSET_TEMPLATES = {
   none: [],
-  basic: ['list_group_agents', 'get_messages'],
+  basic: ['list_group_agents', 'get_messages', 'get_agent_skill'],
   tasks: DEFAULT_AGENT_TOOLS,
   orchestrator: [
     ...DEFAULT_AGENT_TOOLS,
@@ -2143,13 +3065,23 @@ const TOOLSET_TEMPLATES = {
     'list_conversations',
     'get_group_info',
     'list_group_members',
+    'list_knowledge_bases',
+    'search_knowledge',
   ],
   agent_builder: [
     'list_agents',
     'list_group_agents',
+    'get_agent_skill',
     'list_agent_candidates',
     'list_machines',
+    'get_agent_detail',
+    'create_agent',
+    'update_agent',
+    'update_agent_prompt',
+    'list_platform_skills',
   ],
+  agent_manager: ['list_agents', 'get_agent_detail', 'update_agent', 'update_agent_prompt', 'start_agent', 'stop_agent', 'delete_agent', 'get_agent_skill', 'list_platform_skills'],
+  knowledge: ['list_knowledge_bases', 'list_knowledge_files', 'search_knowledge'],
 };
 
 function normalizeToolName(value) {
@@ -2178,20 +3110,45 @@ function allowedToolsFromConfig(raw) {
   if (!parsed.ok) return NO_AGENT_TOOLS;
   const config = parsed.config;
   if (!config) return NO_AGENT_TOOLS;
-  if (Array.isArray(config.allowed_tools)) return uniqueToolNames(config.allowed_tools);
-  if (Array.isArray(config.tools)) return uniqueToolNames(config.tools);
+  if (Array.isArray(config.allowed_tools) && config.allowed_tools.length > 0) return uniqueToolNames(config.allowed_tools);
+  if (Array.isArray(config.tools) && config.tools.length > 0) return uniqueToolNames(config.tools);
   if (typeof config.toolset === 'string' && Object.prototype.hasOwnProperty.call(TOOLSET_TEMPLATES, config.toolset)) {
     return TOOLSET_TEMPLATES[config.toolset];
   }
   return NO_AGENT_TOOLS;
 }
 
+async function resolveCurrentAgent(ctx) {
+  if (!ctx.agentId) return null;
+  if (ctx.currentAgent !== undefined) return ctx.currentAgent;
+  const res = await ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(ctx.agentId)}`);
+  const agent = res && res.data ? res.data : (res && typeof res === 'object' && !Array.isArray(res) ? res : null);
+  ctx.currentAgent = (agent && agent.id === ctx.agentId) ? agent : null;
+  return ctx.currentAgent;
+}
+
+function parsePlatformSkills(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === 'object' && typeof item.name === 'string' && item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        description: typeof item.description === 'string' ? item.description : '',
+        trigger: typeof item.trigger === 'string' ? item.trigger : '',
+        detail: typeof item.detail === 'string' ? item.detail : '',
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function resolveAllowedTools(ctx) {
   if (!ctx.agentId) return NO_AGENT_TOOLS;
   if (ctx.allowedTools !== null) return ctx.allowedTools;
-  const res = await ctx.callApi('GET', '/api/agents');
-  const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
-  const agent = agents.find((item) => item && item.id === ctx.agentId);
+  const agent = await resolveCurrentAgent(ctx);
   ctx.allowedTools = agent ? allowedToolsFromConfig(agent.tools_config) : NO_AGENT_TOOLS;
   return ctx.allowedTools;
 }
@@ -2285,10 +3242,11 @@ async function handleMcpMessage(line, toolMap, ctx) {
 async function runMcpServer(serverURL, apiKey) {
   const daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   const ctx = {
-    conversationId: readArg('--conversation-id') || null,
-    userId: readArg('--user-id') || null,
-    agentId: readArg('--agent-id') || null,
+    conversationId: readArg('--conversation-id') || process.env.AGENTHUB_CONVERSATION_ID || null,
+    userId: readArg('--user-id') || process.env.AGENTHUB_USER_ID || null,
+    agentId: readArg('--agent-id') || process.env.AGENTHUB_AGENT_ID || null,
     allowedTools: null,
+    currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
   };
@@ -2307,14 +3265,14 @@ async function runMcpServer(serverURL, apiKey) {
     }
   });
   process.stdin.on('end', () => process.exit(0));
-  console.error(`AgentHub MCP server (stdio) 已就绪，暴露 ${MCP_TOOLS.length} 个工具。`);
+  logFlow('info', 'mcp.ready', { tool_count: MCP_TOOLS.length });
 }
 
 async function main() {
   const serverURL = readArg('--server-url');
   const apiKey = readArg('--api-key');
   if (!serverURL || !apiKey) {
-    console.error('Usage: npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]');
+    logFlow('error', 'cli.usage_error', { usage: 'npx @agenthub/daemon --server-url <url> --api-key <key> [--mcp]' });
     process.exit(2);
   }
 
@@ -2332,7 +3290,18 @@ async function main() {
   await connectWS(serverURL, apiKey);
 }
 
-main().catch((error) => {
-  console.error(`AgentHub daemon failed: ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    logFlow('error', 'daemon.failed', { error: errorMessage(error) });
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  commandForTask,
+  conversationSessions,
+  executeTaskOnce,
+  ensureOpenCodeMcpConfig,
+  onWebSocket,
+  parseOpenCodeOutput,
+};

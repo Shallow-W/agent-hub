@@ -8,8 +8,16 @@ import {
   DownloadOutlined,
 } from '@ant-design/icons';
 import type { KnowledgeFile } from '@/types/knowledge';
-import { getKnowledgeFileUrl } from '@/api/knowledge';
+import { getKnowledgeFileText, getKnowledgeFileUrl } from '@/api/knowledge';
 import { getAuthHeaders } from '@/api/client';
+import {
+  buildKnowledgePreviewModel,
+  isImageMime,
+  isPDFMime,
+  isTextMime,
+  shouldTryServerTextPreview,
+  shouldUseTextPreview,
+} from './knowledgePreviewState.mjs';
 import styles from './KnowledgeFilePreview.module.css';
 
 interface KnowledgeFilePreviewProps {
@@ -19,27 +27,9 @@ interface KnowledgeFilePreviewProps {
 
 type PreviewState = 'loading' | 'loaded' | 'error';
 
-function isImageMime(mime: string): boolean {
-  return mime.startsWith('image/');
-}
-
-function isPDFMime(mime: string): boolean {
-  return mime === 'application/pdf';
-}
-
-function isTextMime(mime: string): boolean {
-  return (
-    mime === 'text/plain' ||
-    mime === 'text/markdown' ||
-    mime === 'text/csv' ||
-    mime === 'text/html' ||
-    mime === 'application/json'
-  );
-}
-
 /** 通过认证 fetch 获取文件 blob，创建带 token 的 blob URL */
-async function fetchFileBlob(kbId: string, fileId: string): Promise<{ url: string; blob: Blob } | null> {
-  const url = getKnowledgeFileUrl(kbId, fileId);
+async function fetchFileBlob(kbId: string, file: KnowledgeFile): Promise<{ url: string; blob: Blob } | null> {
+  const url = getKnowledgeFileUrl(kbId, file);
   const res = await fetch(url, {
     headers: getAuthHeaders(),
   });
@@ -79,19 +69,21 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
 
     (async () => {
       try {
-        if (isTextMime(file.mime_type)) {
-          // 文本类：fetch 为文本
-          const url = getKnowledgeFileUrl(kbId, file.id);
-          const res = await fetch(url, { headers: getAuthHeaders() });
-          if (!res.ok) throw new Error(`获取文件失败 (${res.status})`);
-          const text = await res.text();
+        if (shouldUseTextPreview(file)) {
+          const text = file.preview_text || (await getKnowledgeFileText(kbId, file.id)).text;
           if (!cancelled) {
             setTextContent(text);
             setState('loaded');
           }
+        } else if (isTextMime(file.mime_type) || shouldTryServerTextPreview(file)) {
+          const textResult = await getKnowledgeFileText(kbId, file.id);
+          if (!cancelled) {
+            setTextContent(textResult.preview_type === 'text' ? textResult.text : null);
+            setState('loaded');
+          }
         } else if (isImageMime(file.mime_type) || isPDFMime(file.mime_type)) {
           // 图片/PDF：fetch 为 blob
-          const result = await fetchFileBlob(kbId, file.id);
+          const result = await fetchFileBlob(kbId, file);
           if (!cancelled && result) {
             blobUrlRef.current = result.url;
             setBlobUrl(result.url);
@@ -112,11 +104,11 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
     return () => {
       cancelled = true;
     };
-  }, [file.id, file.mime_type, kbId]);
+  }, [file.id, file.mime_type, file.preview_text, file.preview_type, kbId]);
 
   const handleDownload = async () => {
     try {
-      const url = getKnowledgeFileUrl(kbId, file.id);
+      const url = getKnowledgeFileUrl(kbId, file);
       const res = await fetch(url, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error(`下载失败 (${res.status})`);
       const blob = await res.blob();
@@ -152,26 +144,37 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
       );
     }
 
-    if (isImageMime(file.mime_type) && blobUrl) {
+    const preview = buildKnowledgePreviewModel({ file, blobUrl, textContent });
+
+    if (preview.kind === 'image') {
       return (
         <div className={styles.imageWrap}>
-          <img src={blobUrl} alt={file.filename} className={styles.previewImage} />
+          <img src={preview.url} alt={file.filename} className={styles.previewImage} />
         </div>
       );
     }
 
-    if (isPDFMime(file.mime_type) && blobUrl) {
+    if (preview.kind === 'pdf') {
       return (
         <div className={styles.pdfWrap}>
-          <iframe src={blobUrl} className={styles.pdfFrame} title={file.filename} />
+          <iframe src={preview.url} className={styles.pdfFrame} title={file.filename} />
         </div>
       );
     }
 
-    if (isTextMime(file.mime_type) && textContent !== null) {
+    if (preview.kind === 'text') {
       return (
         <div className={styles.textWrap}>
-          <pre className={styles.textContent}>{textContent}</pre>
+          <pre className={styles.textContent}>{preview.text}</pre>
+        </div>
+      );
+    }
+
+    if (preview.kind === 'too_large') {
+      return (
+        <div className={styles.centerWrap}>
+          <FileOutlined className={styles.unsupportedIcon} />
+          <span className={styles.unsupportedText}>文件过大，无法生成文本预览</span>
         </div>
       );
     }
@@ -189,7 +192,7 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
     <FileImageOutlined />
   ) : isPDFMime(file.mime_type) ? (
     <FilePdfOutlined />
-  ) : isTextMime(file.mime_type) ? (
+  ) : shouldUseTextPreview(file) || isTextMime(file.mime_type) ? (
     <FileTextOutlined />
   ) : (
     <FileOutlined />

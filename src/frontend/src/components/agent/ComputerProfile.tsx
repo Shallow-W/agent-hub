@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, message, Tooltip, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, Tooltip, Typography } from 'antd';
+import { message } from '@/utils/message';
 import {
   CaretRightOutlined,
   DeleteOutlined,
@@ -51,6 +52,18 @@ const agentStatusColor: Record<Agent['status'], string> = {
   error: 'red',
   stopped: 'default',
 };
+
+const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+
+function hasManagementTools(toolsConfig: string): boolean {
+  try {
+    const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
+    return Array.isArray(cfg.allowed_tools)
+      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && managementTools.has(tool));
+  } catch {
+    return false;
+  }
+}
 
 function inferOS(machine: DaemonMachine): string {
   const text = `${machine.name} ${machine.machine_id}`.toLowerCase();
@@ -149,6 +162,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       system_prompt: systemPrompt,
       tools_config: toolsConfig,
       custom_skills: customSkills,
+      enable_management_tools: hasManagementTools(toolsConfig),
     });
   };
 

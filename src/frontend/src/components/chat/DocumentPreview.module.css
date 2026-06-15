@@ -1,0 +1,45 @@
+.measure {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-white);
+}
+
+.pdfFrame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-bg-white);
+}
+
+.overlay {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.spinner {
+  font-size: 24px;
+  color: var(--color-primary);
+}
+
+.errorIcon {
+  font-size: 36px;
+  color: var(--color-danger);
+}
+
+.errorText {
+  color: var(--color-text);
+}
+
+.downloadBtn {
+  margin-top: 4px;
+}

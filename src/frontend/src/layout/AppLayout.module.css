@@ -1,15 +1,30 @@
 .container {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
   position: relative;
-  padding: 14px;
-  gap: 12px;
   background: var(--color-bg-app);
   background-image:
     radial-gradient(circle at 16% 8%, rgba(47, 143, 107, 0.12), transparent 40%),
     radial-gradient(circle at 85% 90%, rgba(245, 158, 11, 0.12), transparent 45%);
+  /* 桌面端窗口外框圆角 */
+  border-radius: 12px;
+}
+
+/* 最大化时去掉外框圆角 */
+:global(body.ah-maximized) .container {
+  border-radius: 0;
+}
+
+/* 内容区域：包含三个面板 */
+.contentRow {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 14px 14px 14px;
+  gap: 12px;
 }
 
 .settingsPanel {
@@ -41,7 +56,7 @@
 
 .toggleBtn {
   position: absolute;
-  top: 34px;
+  top: 48px;
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -159,9 +174,6 @@
   overflow: hidden;
   height: 100%;
   background-color: var(--color-bg-chat);
-  background-image:
-    radial-gradient(circle at 8% 0%, rgba(255, 255, 255, 0.65), transparent 42%),
-    radial-gradient(circle at 100% 100%, rgba(255, 255, 255, 0.6), transparent 38%);
   border-radius: var(--border-radius-lg);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-card);
@@ -237,9 +249,7 @@
 }
 
 :global(html.dark) .chatPanel {
-  background-image:
-    radial-gradient(circle at 8% 0%, rgba(52, 211, 153, 0.08), transparent 42%),
-    radial-gradient(circle at 100% 100%, rgba(52, 211, 153, 0.06), transparent 38%);
+  background-color: var(--color-bg-chat);
 }
 
 :global(html.dark) .taskPanel {
@@ -297,6 +307,15 @@
   justify-content: center;
   height: 100%;
   gap: 12px;
+}
+
+.skillsEmptyPanel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 32px;
+  gap: 8px;
 }
 
 .emptyRightIcon {

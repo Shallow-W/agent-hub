@@ -1,6 +1,8 @@
 import { get, post, put, del, getAuthHeaders } from './client';
 import type {
   KnowledgeBase,
+  KnowledgeFile,
+  KnowledgeFileText,
   GroupKnowledgeBase,
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
@@ -54,8 +56,15 @@ export async function deleteKnowledgeFile(kbId: string, fileId: string): Promise
 }
 
 /** 获取知识库文件预览/下载 URL */
-export function getKnowledgeFileUrl(kbId: string, fileId: string): string {
+export function getKnowledgeFileUrl(kbId: string, file: Pick<KnowledgeFile, 'id' | 'url'> | string): string {
+  if (typeof file !== 'string' && file.url) return file.url;
+  const fileId = typeof file === 'string' ? file : file.id;
   return `${BASE}/${kbId}/files/${fileId}/content`;
+}
+
+/** 读取服务端抽取出的知识库文件文本 */
+export async function getKnowledgeFileText(kbId: string, fileId: string): Promise<KnowledgeFileText> {
+  return await get<KnowledgeFileText>(`${BASE}/${kbId}/files/${fileId}/text`);
 }
 
 /** 获取群组中可用的知识库列表（自己的全部 + 其他成员的公开 KB） */

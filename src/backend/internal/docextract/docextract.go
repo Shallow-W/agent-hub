@@ -4,13 +4,13 @@
 // 抽取策略：
 //   - 纯文本类（txt/md/csv/json/...）：直接读取。
 //   - 现代 Office（pptx/docx/xlsx，zip+xml 容器）：纯 Go 解析，无外部依赖。
-//   - 旧格式 / PDF（ppt/doc/xls/pdf/odp/...）：调用 LibreOffice `--convert-to txt`（若已安装）。
-//
-// 任一步失败或格式不支持时返回 ok=false，调用方据此给出降级提示。
+//   - PDF：优先纯 Go 解析（ledongthuc/pdf），失败时回退 LibreOffice。
+//   - 旧格式（ppt/doc/xls/odp/odt/rtf）：调用 LibreOffice `--convert-to`（若已安装）。
 package docextract
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	pdfreader "github.com/ledongthuc/pdf"
 )
 
 const sofficeTimeout = 45 * time.Second
@@ -63,13 +65,21 @@ func Extract(ctx context.Context, filePath, fileName string, maxRunes int) (text
 		if t, ok := extractViaConvert(ctx, filePath, "xlsx:Calc MS Excel 2007 XML", "xlsx"); ok {
 			return cap(t, maxRunes), true
 		}
+	case ".pdf":
+		// 优先纯 Go 提取，避免依赖 LibreOffice（macOS 上常不可用）。
+		if t, err := extractPDFGo(filePath); err == nil && strings.TrimSpace(t) != "" {
+			return cap(t, maxRunes), true
+		}
+		// 回退到 soffice Writer 文本过滤器。
+		if t, ok := extractWithSofficeTxt(ctx, filePath); ok {
+			return cap(t, maxRunes), true
+		}
 	default:
 		if plainTextExts[ext] {
 			if b, err := os.ReadFile(filePath); err == nil {
 				return cap(strings.TrimSpace(string(b)), maxRunes), true
 			}
 		}
-		// 其它（含 pdf）：尝试用 Writer 文本过滤器兜底
 		if t, ok := extractWithSofficeTxt(ctx, filePath); ok {
 			return cap(t, maxRunes), true
 		}
@@ -192,6 +202,26 @@ func extractWithSofficeTxt(ctx context.Context, src string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(string(b)), true
+}
+
+// extractPDFGo 用纯 Go 库从 PDF 中提取纯文本，无需外部依赖。
+func extractPDFGo(filePath string) (string, error) {
+	f, r, err := pdfreader.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// 使用 Reader 级别的 GetPlainText，内部遍历所有页面并处理字体编码。
+	textReader, err := r.GetPlainText()
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, textReader); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func findSoffice() string {

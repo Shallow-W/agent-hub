@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,15 +26,13 @@ type MessageNotifier interface {
 	IsOnline(userID string) bool
 }
 
-// MessageCacher 消息缓存接口（由 Redis repo 实现）
-type MessageCacher interface {
-	CacheMessage(ctx context.Context, conversationID string, msg *model.Message) error
+// MessageDeliveryState stores transient delivery state outside the source-of-truth message DB.
+// History reads must not use this interface; it is only for offline queues and unread counts.
+type MessageDeliveryState interface {
 	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
-	GetCachedMessages(ctx context.Context, conversationID string, limit int) ([]model.Message, error)
 	DequeueOfflineAfter(ctx context.Context, userID, conversationID string, after interface{}) ([]model.Message, error)
 	ClearUnread(ctx context.Context, userID, conversationID string) error
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
-	InvalidateCache(ctx context.Context, conversationID string) error
 }
 
 // MsgRepo 消息服务所需的仓库接口
@@ -52,6 +51,7 @@ type MsgRepo interface {
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
 	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
 	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
+	ListReplies(ctx context.Context, messageID string) ([]model.Message, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -75,6 +75,36 @@ func artifactsFromTaskResult(results []ws.ArtifactResult) []model.Artifact {
 		})
 	}
 	return out
+}
+
+func artifactsFromTaskResultOrMarkdown(results []ws.ArtifactResult, content string) []model.Artifact {
+	if arts := artifactsFromTaskResult(results); len(arts) > 0 {
+		return arts
+	}
+	return artifactsFromMarkdown(content)
+}
+
+func hasCodeArtifact(artifacts []model.Artifact) bool {
+	for _, artifact := range artifacts {
+		if artifact.Type == "code" {
+			return true
+		}
+	}
+	return false
+}
+
+func codeArtifactsFromMarkdown(content string) []model.Artifact {
+	parsed := artifactsFromMarkdown(content)
+	if len(parsed) == 0 {
+		return nil
+	}
+	codeArtifacts := make([]model.Artifact, 0, len(parsed))
+	for _, artifact := range parsed {
+		if artifact.Type == "code" {
+			codeArtifacts = append(codeArtifacts, artifact)
+		}
+	}
+	return codeArtifacts
 }
 
 // ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
@@ -117,10 +147,11 @@ type MessageService struct {
 	convRepo  ConvRepoForMsg
 	agentRepo AgentRepoForMsg
 	notifier  MessageNotifier
-	cacher    MessageCacher
+	delivery  MessageDeliveryState
 	orchSvc   *OrchestratorService
 	daemonHub *ws.DaemonHub
 	deploySvc *DeploymentService
+	fileURLs  *FileURLBuilder
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -131,7 +162,7 @@ type SendMessageResult struct {
 
 // NewMessageService 创建消息服务
 func NewMessageService(msgRepo MsgRepo, convRepo ConvRepoForMsg, agentRepo AgentRepoForMsg) *MessageService {
-	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, agentRepo: agentRepo}
+	return &MessageService{msgRepo: msgRepo, convRepo: convRepo, agentRepo: agentRepo, fileURLs: NewFileURLBuilder("")}
 }
 
 // SetNotifier 注入消息推送器（避免循环依赖，由 main.go 调用）
@@ -139,9 +170,14 @@ func (s *MessageService) SetNotifier(n MessageNotifier) {
 	s.notifier = n
 }
 
-// SetCacher 注入消息缓存器
-func (s *MessageService) SetCacher(c MessageCacher) {
-	s.cacher = c
+// SetDeliveryState injects transient delivery state storage.
+func (s *MessageService) SetDeliveryState(c MessageDeliveryState) {
+	s.delivery = c
+}
+
+// SetCacher is kept for compatibility with older wiring code.
+func (s *MessageService) SetCacher(c MessageDeliveryState) {
+	s.SetDeliveryState(c)
 }
 
 // SetOrchestratorService 注入 Orchestrator 服务（避免循环依赖，由 main.go 调用）
@@ -157,6 +193,14 @@ func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
 // SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。
 func (s *MessageService) SetDeploymentService(d *DeploymentService) {
 	s.deploySvc = d
+}
+
+// SetFileURLBuilder injects the public URL policy for message attachments.
+func (s *MessageService) SetFileURLBuilder(builder *FileURLBuilder) {
+	if builder == nil {
+		builder = NewFileURLBuilder("")
+	}
+	s.fileURLs = builder
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -231,6 +275,7 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
 	}
+	s.enrichMessageFileURLs(msg)
 
 	result := &SendMessageResult{UserMessage: msg}
 
@@ -246,15 +291,21 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	switch conv.Type {
 	case "agent":
 		// Single/agent chat — direct dispatch via agentID
-		if strings.TrimSpace(agentID) != "" {
-			go s.asyncAgentReply(convID, userID, agentID, content, msg.Attachments)
+		resolvedAgentID := strings.TrimSpace(agentID)
+		if resolvedAgentID == "" {
+			resolvedAgentID = s.resolveAgentConversationAgentID(ctx, convID, userID)
+		}
+		slog.Info("agent chat dispatch resolved", "conversation_id", convID, "agent_id", resolvedAgentID, "provided_agent_id", strings.TrimSpace(agentID) != "")
+		if resolvedAgentID != "" {
+			go s.asyncAgentReply(convID, userID, resolvedAgentID, content, msg.Attachments, &msg.ID)
 		}
 	case "group":
 		// Group chat — mention routing via Orchestrator
 		if s.orchSvc != nil {
 			parsedMentions := ParseMentions(content)
 			if len(mentions) > 0 || len(parsedMentions) > 0 {
-				go s.asyncMentionDispatch(convID, userID, content, msg.Attachments)
+				slog.Info(orchFlowLog, "stage", "message.async_mention_enqueued", "conversation_id", convID, "user_id", userID, "source_message_id", msg.ID, "mention_count", len(parsedMentions))
+				go s.asyncMentionDispatch(convID, userID, msg.ID, content, msg.Attachments)
 			}
 		}
 	default:
@@ -293,23 +344,19 @@ func (s *MessageService) postPersist(conversationID, senderID string, msg *model
 		s.notifier.PushToConversation(conversationID, memberIDs, msg)
 	}
 
-	// 缓存到 Redis
-	if s.cacher != nil {
-		if err := s.cacher.CacheMessage(ctx, conversationID, msg); err != nil {
-			slog.Warn("cache message failed", "conversation_id", conversationID, "error", err)
-		}
-
-		// 为不在线的成员加入离线队列 + 递增未读计数
+	// Record transient delivery state. The persisted message row remains the
+	// source of truth for history reads.
+	if s.delivery != nil {
 		for _, uid := range memberIDs {
 			if uid == senderID {
 				continue
 			}
 			if s.notifier != nil && !s.notifier.IsOnline(uid) {
-				if err := s.cacher.EnqueueOffline(ctx, uid, conversationID, msg); err != nil {
+				if err := s.delivery.EnqueueOffline(ctx, uid, conversationID, msg); err != nil {
 					slog.Warn("enqueue offline failed", "user_id", uid, "conversation_id", conversationID, "error", err)
 				}
 			}
-			if err := s.cacher.IncrementUnread(ctx, uid, conversationID); err != nil {
+			if err := s.delivery.IncrementUnread(ctx, uid, conversationID); err != nil {
 				slog.Warn("increment unread failed", "user_id", uid, "conversation_id", conversationID, "error", err)
 			}
 		}
@@ -333,10 +380,10 @@ func (s *MessageService) MarkAsRead(ctx context.Context, userID, convID string) 
 		return err
 	}
 
-	if s.cacher != nil {
-		_ = s.cacher.ClearUnread(ctx, userID, convID)
+	if s.delivery != nil {
+		_ = s.delivery.ClearUnread(ctx, userID, convID)
 		// 同时清空离线消息队列，防止 GetUnreadMessages 再次返回已读消息
-		_, _ = s.cacher.DequeueOfflineAfter(ctx, userID, convID, "+inf")
+		_, _ = s.delivery.DequeueOfflineAfter(ctx, userID, convID, "+inf")
 	}
 
 	return nil
@@ -362,18 +409,12 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 		limit = 200
 	}
 
-	// 仅在无游标时使用缓存（缓存是最新N条，不含历史分页）
-	if s.cacher != nil && before == nil {
-		cached, err := s.cacher.GetCachedMessages(ctx, convID, limit)
-		if err == nil && len(cached) > 0 {
-			return cached, nil
-		}
-	}
-
 	messages, err := s.msgRepo.ListByConversation(ctx, convID, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	s.ensureParsedArtifacts(ctx, messages)
+	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
 
@@ -397,9 +438,10 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 		limit = 200
 	}
 
-	if s.cacher != nil {
-		offline, err := s.cacher.DequeueOfflineAfter(ctx, userID, convID, "-inf")
+	if s.delivery != nil {
+		offline, err := s.delivery.DequeueOfflineAfter(ctx, userID, convID, "-inf")
 		if err == nil && len(offline) > 0 {
+			s.enrichMessagesFileURLs(offline)
 			return offline, nil
 		}
 	}
@@ -415,6 +457,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
+	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
 
@@ -430,7 +473,76 @@ func (s *MessageService) SearchMessages(ctx context.Context, conversationID, use
 	if err := s.checkMembership(ctx, conv, userID); err != nil {
 		return nil, err
 	}
-	return s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+	messages, err := s.msgRepo.SearchByContent(ctx, conversationID, keyword, 20)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichMessagesFileURLs(messages)
+	return messages, nil
+}
+
+// GetReplies 获取某条消息的所有回复（验证消息归属和状态后再查询）
+func (s *MessageService) GetReplies(ctx context.Context, conversationID, messageID string) ([]model.Message, error) {
+	// 校验目标消息存在
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMsgNotFound
+		}
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return nil, ErrMsgNotFound
+	}
+	// 消息不属于当前对话
+	if msg.ConversationID != conversationID {
+		return nil, ErrMsgReplyWrongConv
+	}
+	// 消息已被软删除
+	if msg.DeletedAt != nil {
+		return nil, ErrMsgNotFound
+	}
+
+	replies, err := s.msgRepo.ListReplies(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("list replies: %w", err)
+	}
+	s.enrichMessagesFileURLs(replies)
+	return replies, nil
+}
+
+func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
+	for i := range messages {
+		s.enrichMessageFileURLs(&messages[i])
+	}
+}
+
+func (s *MessageService) enrichMessageFileURLs(message *model.Message) {
+	if message == nil || s.fileURLs == nil {
+		return
+	}
+	for i := range message.Attachments {
+		message.Attachments[i].URL = s.fileURLs.UploadURL(message.Attachments[i].FilePath)
+		message.Attachments[i].ThumbnailURL = s.fileURLs.UploadURL(message.Attachments[i].ThumbnailPath)
+	}
+}
+
+func (s *MessageService) ensureParsedArtifacts(ctx context.Context, messages []model.Message) {
+	for i := range messages {
+		msg := &messages[i]
+		if msg.Role != "assistant" || hasCodeArtifact(msg.Artifacts) || strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		arts := codeArtifactsFromMarkdown(msg.Content)
+		if len(arts) == 0 {
+			continue
+		}
+		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
+			slog.Warn("backfill message artifacts failed", "message_id", msg.ID, "error", err)
+			continue
+		}
+		msg.Artifacts = append(msg.Artifacts, arts...)
+	}
 }
 
 // PinMessage pins a message into the shared conversation context blackboard.
@@ -442,7 +554,6 @@ func (s *MessageService) PinMessage(ctx context.Context, convID, messageID, user
 	if err != nil {
 		return nil, fmt.Errorf("pin message: %w", err)
 	}
-	s.invalidateMessageCache(ctx, convID)
 	return pin, nil
 }
 
@@ -454,7 +565,6 @@ func (s *MessageService) UnpinMessage(ctx context.Context, convID, messageID, us
 	if err := s.msgRepo.UnpinMessage(ctx, convID, messageID); err != nil {
 		return fmt.Errorf("unpin message: %w", err)
 	}
-	s.invalidateMessageCache(ctx, convID)
 	return nil
 }
 
@@ -545,19 +655,10 @@ func (s *MessageService) ensureMessageContextAccess(ctx context.Context, convID,
 	return nil
 }
 
-func (s *MessageService) invalidateMessageCache(ctx context.Context, convID string) {
-	if s.cacher == nil {
-		return
-	}
-	if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
-		slog.Warn("invalidate cache after context pin change failed", "conversation_id", convID, "error", err)
-	}
-}
-
 // ClearUnread 清除未读计数
 func (s *MessageService) ClearUnread(ctx context.Context, userID, convID string) error {
-	if s.cacher != nil {
-		return s.cacher.ClearUnread(ctx, userID, convID)
+	if s.delivery != nil {
+		return s.delivery.ClearUnread(ctx, userID, convID)
 	}
 	return nil
 }
@@ -606,13 +707,6 @@ func (s *MessageService) RecallMessage(ctx context.Context, convID, messageID, u
 	// 软删除
 	if err := s.msgRepo.SoftDelete(ctx, messageID); err != nil {
 		return fmt.Errorf("recall message: %w", err)
-	}
-
-	// 清除该会话的 Redis 缓存，避免撤回后仍返回旧内容
-	if s.cacher != nil {
-		if err := s.cacher.InvalidateCache(ctx, convID); err != nil {
-			slog.Warn("invalidate cache after recall failed", "conversation_id", convID, "error", err)
-		}
 	}
 
 	// 撤回成功后异步推送通知给其他成员（排除发送者）
@@ -726,7 +820,7 @@ func (s *MessageService) buildAgentHandoffs(ctx context.Context, convID string) 
 }
 
 // createAgentReply 生成 Agent 回复消息
-func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string) (*model.Message, error) {
+func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, agentID, userContent, contextMessages string, replyTo *string) (*model.Message, error) {
 	if s.agentRepo == nil {
 		return nil, ErrAgentNotFound
 	}
@@ -785,7 +879,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
 
 	var result *ws.TaskResult
@@ -808,13 +902,13 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, replyTo, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
 
 	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
-	if arts := artifactsFromTaskResult(result.Artifacts); len(arts) > 0 {
+	if arts := artifactsFromTaskResultOrMarkdown(result.Artifacts, result.Result); len(arts) > 0 {
 		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
 			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
 		} else {
@@ -888,35 +982,39 @@ func (s *MessageService) asyncDeploy(convID, userID string) {
 }
 
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
-func (s *MessageService) asyncMentionDispatch(convID, userID, content string, attachments []model.MessageAttachment) {
+func (s *MessageService) asyncMentionDispatch(convID, userID, sourceMessageID, content string, attachments []model.MessageAttachment) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Warn("asyncMentionDispatch recovered", "panic", r)
+			slog.Warn(orchFlowLog, "stage", "message.async_mention_panic", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "panic", r)
 		}
 	}()
 
+	slog.Info(orchFlowLog, "stage", "message.async_mention_start", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "content_len", len(content), "content_preview", orchPreview(content))
 	s.broadcastAgentTyping(convID, true)
 	defer s.broadcastAgentTyping(convID, false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments)
+	orchResult, err := s.orchSvc.RouteMention(ctx, convID, userID, content, attachments, &sourceMessageID)
 	if err != nil {
-		slog.Warn("mention routing failed", "convID", convID, "error", err)
-		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
+		slog.Warn(orchFlowLog, "stage", "message.async_mention_route_failed", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "error", err)
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err), &sourceMessageID)
 		return
 	}
 	if orchResult == nil || len(orchResult.AgentMessages) == 0 {
+		slog.Info(orchFlowLog, "stage", "message.async_mention_no_messages", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID)
 		return
 	}
+	slog.Info(orchFlowLog, "stage", "message.async_mention_messages_ready", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "message_count", len(orchResult.AgentMessages))
 	for _, agentMsg := range orchResult.AgentMessages {
+		slog.Info(orchFlowLog, "stage", "message.async_mention_push", "conversation_id", convID, "user_id", userID, "source_message_id", sourceMessageID, "message_id", agentMsg.ID, "reply_to", stringValue(agentMsg.ReplyTo), "content_len", len(agentMsg.Content))
 		s.postPersist(convID, userID, agentMsg)
 	}
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
-func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment) {
+func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment, replyTo *string) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
@@ -929,7 +1027,10 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	contextMessages := s.buildAgentHandoffs(ctx, convID)
+	// 单聊 Agent 不需要群聊风格的 handoff 上下文：
+	// Claude Code 通过 --session-id/--resume 自行维护对话历史，
+	// 无需服务端额外发送历史摘要。
+	contextMessages := ""
 
 	// Include text extracted from this message's attachments before shared context.
 	if s.orchSvc != nil {
@@ -952,18 +1053,18 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 		}
 	}
 
-	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages)
+	agentMsg, err := s.createAgentReply(ctx, convID, userID, agentID, content, contextMessages, replyTo)
 	if err != nil {
 		slog.Warn("agent reply failed", "convID", convID, "agentID", agentID, "error", err)
-		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err))
+		s.postAgentFailure(ctx, convID, userID, "Agent 调用失败："+shortAgentError(err), replyTo)
 		return
 	}
 	s.postPersist(convID, userID, agentMsg)
 }
 
-func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string) {
+func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, content string, replyTo *string) {
 	meta, _ := json.Marshal(map[string]string{"agent_name": "AgentHub"})
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, nil, nil, nil)
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, string(meta), nil, replyTo, nil, nil)
 	if err != nil {
 		slog.Warn("create agent failure message failed", "convID", convID, "error", err)
 		return
@@ -1010,4 +1111,15 @@ func (s *MessageService) broadcastAgentTyping(convID string, typing bool) {
 	s.notifier.PushCustomEvent(convID, memberIDs, eventType, map[string]string{
 		"conversation_id": convID,
 	})
+}
+
+func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, convID, userID string) string {
+	agents, err := s.convRepo.ListAgents(ctx, convID, userID)
+	if err != nil || len(agents) == 0 {
+		if err != nil {
+			slog.Warn("resolve agent conversation agent failed", "conversation_id", convID, "error", err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(agents[0].AgentID)
 }

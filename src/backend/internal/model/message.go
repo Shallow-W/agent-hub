@@ -46,6 +46,7 @@ type PinnedMessage struct {
 	MessageID        string    `json:"message_id" db:"message_id"`
 	Role             string    `json:"role" db:"role"`
 	Content          string    `json:"content" db:"content"`
+	ArtifactsJSON    string    `json:"artifacts_json,omitempty" db:"artifacts_json"`
 	SenderID         *string   `json:"sender_id,omitempty" db:"sender_id"`
 	Username         string    `json:"username,omitempty" db:"username"`
 	MessageCreatedAt time.Time `json:"message_created_at" db:"message_created_at"`

@@ -7,108 +7,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/handler"
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/internal/service"
-	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/tunnel"
 	pkgredis "github.com/agent-hub/backend/pkg/redis"
 	"github.com/agent-hub/backend/pkg/ws"
 	"github.com/gin-gonic/gin"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmoiron/sqlx"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/v2"
 	goredis "github.com/redis/go-redis/v9"
 )
-
-// Config 应用配置结构
-type Config struct {
-	Server struct {
-		Port int `koanf:"port"`
-	} `koanf:"server"`
-	Database struct {
-		Host     string `koanf:"host"`
-		Port     int    `koanf:"port"`
-		User     string `koanf:"user"`
-		Password string `koanf:"password"`
-		DBName   string `koanf:"dbname"`
-		SSLMode  string `koanf:"sslmode"`
-	} `koanf:"database"`
-	JWT struct {
-		Secret      string `koanf:"secret"`
-		ExpiryHours int    `koanf:"expiry_hours"`
-	} `koanf:"jwt"`
-	Daemon struct {
-		Token string `koanf:"token"`
-	} `koanf:"daemon"`
-	CORS struct {
-		AllowedOrigins []string `koanf:"allowed_origins"`
-	} `koanf:"cors"`
-	Redis struct {
-		Host     string `koanf:"host"`
-		Port     int    `koanf:"port"`
-		Password string `koanf:"password"`
-		DB       int    `koanf:"db"`
-	} `koanf:"redis"`
-	Upload struct {
-		Dir        string `koanf:"dir"`
-		MaxImageMB int    `koanf:"max_image_mb"`
-		MaxPDFMB   int    `koanf:"max_pdf_mb"`
-	} `koanf:"upload"`
-	Log struct {
-		Level string `koanf:"level"`
-	} `koanf:"log"`
-	RateLimit struct {
-		RPS   float64 `koanf:"rps"`
-		Burst int     `koanf:"burst"`
-	} `koanf:"rate_limit"`
-	GitHub struct {
-		Token     string `koanf:"token"`      // PAT（classic，repo 权限）；建议用环境变量 GITHUB_TOKEN 注入
-		Owner     string `koanf:"owner"`      // 仓库归属账号，如 Shallow-W；可用 GITHUB_PAGES_OWNER 覆盖
-		PagesRepo string `koanf:"pages_repo"` // 专用公开仓库名，如 agent-hub-sites；可用 GITHUB_PAGES_REPO 覆盖
-	} `koanf:"github"`
-}
-
-// firstNonEmpty 返回第一个非空字符串（用于环境变量覆盖配置文件）。
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func parseLogLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}
-
-// isFalsy 判断环境变量是否表示「关闭」（false/0/no/off，忽略大小写与首尾空白）。
-func isFalsy(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "false", "0", "no", "off":
-		return true
-	}
-	return false
-}
 
 func main() {
 	// 加载配置
@@ -138,8 +53,11 @@ func main() {
 	msgRepo := repository.NewMessageRepo(db, attachmentRepo, artifactRepo)
 	friendRepo := repository.NewFriendRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	platformSkillRepo := repository.NewPlatformSkillRepo(db)
+	agentPromptTemplateRepo := repository.NewAgentPromptTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
+	userTemplateRepo := repository.NewUserTemplateRepo(db)
 
 	authSvc := service.NewAuthService(userRepo, service.AuthConfig{
 		JWTSecret:      cfg.JWT.Secret,
@@ -165,13 +83,15 @@ func main() {
 		deploymentSvc.SetGitHubPublisher(pub)
 		logger.Info("GitHub Pages 永久发布已启用", "owner", firstNonEmpty(os.Getenv("GITHUB_PAGES_OWNER"), cfg.GitHub.Owner), "repo", firstNonEmpty(os.Getenv("GITHUB_PAGES_REPO"), cfg.GitHub.PagesRepo))
 	}
-	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir)
+	fileURLs := service.NewFileURLBuilder(cfg.Upload.PublicBaseURL)
+	knowledgeSvc := service.NewKnowledgeService(repository.NewKnowledgeRepo(db), userRepo, cfg.Upload.Dir, cfg.Upload.PublicBaseURL)
 
 	// 文件上传服务
 	uploadSvc := service.NewUploadService(service.UploadConfig{
-		Dir:        cfg.Upload.Dir,
-		MaxImageMB: cfg.Upload.MaxImageMB,
-		MaxPDFMB:   cfg.Upload.MaxPDFMB,
+		Dir:           cfg.Upload.Dir,
+		MaxImageMB:    cfg.Upload.MaxImageMB,
+		MaxPDFMB:      cfg.Upload.MaxPDFMB,
+		PublicBaseURL: cfg.Upload.PublicBaseURL,
 	})
 
 	// Redis 初始化
@@ -190,6 +110,9 @@ func main() {
 	machineTracker := service.NewMachineTracker(agentRepo, logger)
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
+	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
+	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
+	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
 	agentSvc.SetTokenIssuer(tokenIssuer)
 	agentSvc.SetServerURL(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
 	orchSvc := service.NewOrchestratorService(convRepo, agentRepo, msgRepo)
@@ -203,6 +126,7 @@ func main() {
 	orchSvc.SetUploadDir(cfg.Upload.Dir)
 	msgSvc.SetOrchestratorService(orchSvc)
 	msgSvc.SetDeploymentService(deploymentSvc)
+	msgSvc.SetFileURLBuilder(fileURLs)
 
 	hub := ws.NewHub(logger)
 	msgSvc.SetNotifier(hub)
@@ -211,10 +135,11 @@ func main() {
 	orchSvc.SetNotifier(hub)
 	if rdb != nil {
 		redisMsgRepo := repository.NewRedisMsgRepo(rdb)
-		msgSvc.SetCacher(redisMsgRepo)
-		orchSvc.SetCacher(redisMsgRepo)
+		msgSvc.SetDeliveryState(redisMsgRepo)
+		orchSvc.SetDeliveryState(redisMsgRepo)
 	} else {
-		msgSvc.SetCacher(nil)
+		msgSvc.SetDeliveryState(nil)
+		orchSvc.SetDeliveryState(nil)
 	}
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
@@ -228,7 +153,11 @@ func main() {
 	pptPreviewHandler := handler.NewPptPreviewHandler(cfg.Upload.Dir)
 	wsHandler := handler.NewWebSocketHandler(authSvc, hub, groupSvc, msgSvc, logger, cfg.CORS.AllowedOrigins)
 	agentHandler := handler.NewAgentHandler(agentSvc, hub)
+	platformSkillHandler := handler.NewPlatformSkillHandler(platformSkillSvc)
+	agentPromptTemplateHandler := handler.NewAgentPromptTemplateHandler(agentPromptTemplateSvc)
+	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
+	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
@@ -246,6 +175,37 @@ func main() {
 	// 健康检查（无需鉴权、不受限流）
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok", "data": nil})
+	})
+	router.GET("/health/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		healthy := true
+		details := make(map[string]string)
+
+		if err := db.PingContext(ctx); err != nil {
+			healthy = false
+			details["database"] = "unreachable: " + err.Error()
+		} else {
+			details["database"] = "ok"
+		}
+
+		if rdb != nil {
+			if err := rdb.Ping(ctx).Err(); err != nil {
+				healthy = false
+				details["redis"] = "unreachable: " + err.Error()
+			} else {
+				details["redis"] = "ok"
+			}
+		} else {
+			details["redis"] = "not_configured"
+		}
+
+		status := http.StatusOK
+		if !healthy {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"code": 0, "message": "ready", "data": details})
 	})
 
 	// WebSocket 路由（通过 query 参数鉴权，不受限流）
@@ -269,11 +229,19 @@ func main() {
 			uploadDir = "./uploads"
 		}
 		apiGroup.GET("/uploads/*filepath", func(c *gin.Context) {
-			filePath := c.Param("filepath")
-			absPath, err := filepath.Abs(filepath.Join(uploadDir, filepath.Clean(filePath)))
-			uploadDirAbs, _ := filepath.Abs(uploadDir)
+			filePath := cleanUploadRoutePath(c.Param("filepath"))
+			if filePath == "" {
+				c.Status(http.StatusForbidden)
+				return
+			}
+			absPath, err := filepath.Abs(filepath.Join(uploadDir, filePath))
+			uploadDirAbs, absErr := filepath.Abs(uploadDir)
 			if err != nil {
 				c.Status(http.StatusForbidden)
+				return
+			}
+			if absErr != nil {
+				c.Status(http.StatusInternalServerError)
 				return
 			}
 			if !strings.HasPrefix(absPath, uploadDirAbs+string(os.PathSeparator)) && absPath != uploadDirAbs {
@@ -282,7 +250,7 @@ func main() {
 			}
 
 			// 缩略图和图片用 inline 预览，其他文件用 attachment 下载
-			isThumbnail := strings.HasPrefix(filepath.Clean(filePath), string(os.PathSeparator)+"thumbnails")
+			isThumbnail := strings.HasPrefix(filepath.ToSlash(filePath), "thumbnails/")
 			ext := strings.ToLower(filepath.Ext(absPath))
 			isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp"
 			if isThumbnail || isImage {
@@ -299,6 +267,7 @@ func main() {
 		// 文件上传
 		apiGroup.POST("/upload", uploadHandler.Upload)
 		apiGroup.GET("/ppt-preview/*filepath", pptPreviewHandler.Preview)
+		apiGroup.GET("/file-preview/*filepath", pptPreviewHandler.FilePreview)
 
 		// 知识库路由（需要鉴权）
 		kbRoutes := apiGroup.Group("/knowledge-bases")
@@ -309,6 +278,8 @@ func main() {
 			kbRoutes.DELETE("/:id", knowledgeHandler.Delete)
 			kbRoutes.POST("/:id/files", knowledgeHandler.UploadFile)
 			kbRoutes.GET("/:id/files", knowledgeHandler.ListFiles)
+			kbRoutes.GET("/:id/search", knowledgeHandler.SearchFiles)
+			kbRoutes.GET("/:id/files/:fileId/text", knowledgeHandler.GetFileText)
 			kbRoutes.GET("/:id/files/:fileId/content", knowledgeHandler.GetFileContent)
 			kbRoutes.DELETE("/:id/files/:fileId", knowledgeHandler.DeleteFile)
 			kbRoutes.GET("/group/:groupId", knowledgeHandler.ListGroup)
@@ -339,6 +310,7 @@ func main() {
 			convRoutes.POST("/:id/messages/:messageId/pin", msgHandler.Pin)
 			convRoutes.DELETE("/:id/messages/:messageId/pin", msgHandler.Unpin)
 			convRoutes.DELETE("/:id/messages/:messageId", msgHandler.Recall)
+			convRoutes.GET("/:id/messages/:messageId/replies", msgHandler.Replies)
 		}
 		apiGroup.GET("/conversations/:id/agents", convHandler.ListAgents)
 		apiGroup.POST("/conversations/agent", convHandler.GetOrCreateAgentPrivate)
@@ -357,6 +329,20 @@ func main() {
 		apiGroup.POST("/agents/:id/restart", agentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", agentHandler.OpenSkillLocation)
+		apiGroup.GET("/platform-skills", platformSkillHandler.List)
+		apiGroup.POST("/platform-skills", platformSkillHandler.Create)
+		apiGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
+		apiGroup.PUT("/platform-skills/:id", platformSkillHandler.Update)
+		apiGroup.DELETE("/platform-skills/:id", platformSkillHandler.Delete)
+		apiGroup.GET("/agent-prompt-templates", agentPromptTemplateHandler.List)
+		apiGroup.POST("/agent-prompt-templates", agentPromptTemplateHandler.Create)
+		apiGroup.POST("/agent-prompt-templates/import-defaults", agentPromptTemplateHandler.ImportDefaults)
+		apiGroup.PUT("/agent-prompt-templates/:id", agentPromptTemplateHandler.Update)
+		apiGroup.DELETE("/agent-prompt-templates/:id", agentPromptTemplateHandler.Delete)
+		apiGroup.GET("/user-templates", userTemplateHandler.List)
+		apiGroup.POST("/user-templates", userTemplateHandler.Create)
+		apiGroup.PUT("/user-templates/:id", userTemplateHandler.Update)
+		apiGroup.DELETE("/user-templates/:id", userTemplateHandler.Delete)
 		apiGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		apiGroup.POST("/daemon/machines", agentHandler.CreateDaemonMachine)
 		apiGroup.DELETE("/daemon/machines/:id", agentHandler.DeleteDaemonMachine)
@@ -386,6 +372,7 @@ func main() {
 		}
 
 		// 部署状态查询（需要鉴权）
+		apiGroup.GET("/deployments/capabilities", deploymentHandler.Capabilities)
 		apiGroup.GET("/deployments/:id", middleware.ValidateUUIDParam("id"), deploymentHandler.Get)
 	}
 
@@ -432,6 +419,7 @@ func main() {
 		userGroup.PUT("/me", userHandler.UpdateProfile)
 	}
 	router.GET("/daemon/ws", daemonHandler.Handle)
+	router.GET("/daemon/connect", daemonHandler.Handle)
 	router.POST("/daemon/register", daemonHandler.WithMachine(daemonHandler.RegisterHTTP))
 	router.GET("/daemon/agent-token", daemonHandler.WithMachine(daemonHandler.IssueAgentToken))
 	router.GET("/daemon/tasks", daemonHandler.WithMachine(daemonHandler.ClaimTask))
@@ -457,12 +445,31 @@ func main() {
 		}
 
 		mcpGroup.GET("/agents", agentHandler.MCPList)
+		mcpGroup.POST("/agents", agentHandler.Create)
+		mcpGroup.GET("/agents/:id", agentHandler.MCPGetAgentDetail)
+		mcpGroup.PUT("/agents/:id", agentHandler.Update)
+		mcpGroup.DELETE("/agents/:id", agentHandler.Delete)
+		mcpGroup.POST("/agents/:id/start", agentHandler.StartAgent)
+		mcpGroup.POST("/agents/:id/stop", agentHandler.StopAgent)
 		mcpGroup.GET("/daemon/machines", agentHandler.ListDaemonMachines)
 		mcpGroup.GET("/daemon/agent-candidates", agentHandler.ListAgentCandidates)
+		mcpGroup.POST("/daemon/agent-candidates/:id/add", agentHandler.AddCandidateAgent)
 		mcpGroup.POST("/groups", groupHandler.CreateGroup)
 		mcpGroup.GET("/groups/:id", groupHandler.GetGroupInfo)
 		mcpGroup.GET("/groups/:id/members", groupHandler.ListMembers)
+
+		// 知识库
+		mcpGroup.GET("/knowledge-bases", knowledgeHandler.List)
+		mcpGroup.GET("/knowledge-bases/:id/files", knowledgeHandler.ListFiles)
+		mcpGroup.GET("/knowledge-bases/:id/search", knowledgeHandler.SearchFiles)
+		mcpGroup.GET("/knowledge-bases/:id/files/:fileId/text", knowledgeHandler.GetFileText)
+
+		// 平台 Skills（只读）
+		mcpGroup.GET("/platform-skills", platformSkillHandler.List)
+		mcpGroup.POST("/platform-skills/import-defaults", platformSkillHandler.ImportDefaults)
 	}
+
+	registerSPARoutes(router, frontendDistDir())
 
 	// 启动 Hub 事件循环
 	ctx, cancel := context.WithCancel(context.Background())
@@ -476,9 +483,7 @@ func main() {
 	// 电脑启动项目，"部署"产出的预览/下载链接都天然是公网地址，无需手动配置。
 	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
 		cacheDir := filepath.Join("data", "bin")
-		if _, err := tunnel.Start(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL); err != nil {
-			logger.Warn("内网穿透启动失败，部署链接将回落为本地地址", "error", err)
-		}
+		go tunnel.StartAuto(ctx, cfg.Server.Port, cacheDir, logger, deploymentSvc.SetPublicBaseURL)
 	}
 
 	// 启动 HTTP 服务器
@@ -524,139 +529,56 @@ func main() {
 	logger.Info("server stopped")
 }
 
-// initDatabase 连接数据库，若不存在则自动创建并运行迁移
-func initDatabase(cfg *Config, logger *slog.Logger) (*sqlx.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
-	)
-
-	db, err := sqlx.Connect("pgx", dsn)
-	if err != nil {
-		// 数据库不存在时自动创建
-		if strings.Contains(err.Error(), "does not exist") {
-			logger.Info("database not found, creating...", "dbname", cfg.Database.DBName)
-			if err := createDatabase(cfg); err != nil {
-				return nil, fmt.Errorf("create database: %w", err)
-			}
-			logger.Info("database created", "dbname", cfg.Database.DBName)
-			db, err = sqlx.Connect("pgx", dsn)
-			if err != nil {
-				return nil, fmt.Errorf("connect after create: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("connect database: %w", err)
+func frontendDistDir() string {
+	if dir := os.Getenv("AGENTHUB_FRONTEND_DIST"); dir != "" {
+		return dir
+	}
+	for _, dir := range frontendDistCandidates() {
+		if info, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !info.IsDir() {
+			return dir
 		}
 	}
-
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(2 * time.Minute)
-
-	// 自动运行迁移
-	if err := runMigrations(db, logger); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-
-	logger.Info("database connected and migrated")
-	return db, nil
+	return filepath.Clean("../../frontend/dist")
 }
 
-// createDatabase 连接到默认 postgres 库并创建目标数据库
-func createDatabase(cfg *Config) error {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=postgres sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.SSLMode,
-	)
-	db, err := sqlx.Connect("pgx", dsn)
-	if err != nil {
-		return fmt.Errorf("connect to postgres: %w", err)
+func cleanUploadRoutePath(value string) string {
+	cleaned := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	if cleaned == "" || strings.HasPrefix(cleaned, "//") {
+		return ""
 	}
-	defer db.Close()
-
-	// Quote identifier to prevent injection; name comes from config, not user input
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE \"%s\"", strings.ReplaceAll(cfg.Database.DBName, "\"", "")))
-	return err
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	cleaned = strings.TrimPrefix(cleaned, "uploads/")
+	if cleaned == "" || strings.Contains(cleaned, ":") || strings.HasPrefix(cleaned, "/") || hasDotDotSegment(cleaned) {
+		return ""
+	}
+	cleaned = path.Clean("/" + cleaned)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "." || cleaned == "" || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return filepath.FromSlash(cleaned)
 }
 
-// runMigrations 从 migrations/ 目录读取 SQL 文件并执行（幂等）
-func runMigrations(db *sqlx.DB, logger *slog.Logger) error {
-	// 创建迁移追踪表
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version VARCHAR PRIMARY KEY,
-		applied_at TIMESTAMPTZ DEFAULT NOW()
-	)`); err != nil {
-		return fmt.Errorf("create schema_migrations table: %w", err)
+func hasDotDotSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if segment == ".." {
+			return true
+		}
 	}
-
-	files, err := filepath.Glob("migrations/*.sql")
-	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
-	}
-	sort.Strings(files)
-
-	for _, path := range files {
-		name := filepath.Base(path)
-
-		// 检查是否已执行
-		var exists bool
-		err := db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", name)
-		if err != nil || exists {
-			continue
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
-		}
-
-		// 只执行 ---- DOWN 之前的部分（UP migration）
-		sql := string(content)
-		if idx := strings.Index(sql, "---- DOWN"); idx != -1 {
-			sql = sql[:idx]
-		}
-
-		if _, err := db.Exec(sql); err != nil {
-			return fmt.Errorf("exec migration %s: %w", name, err)
-		}
-
-		_, _ = db.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", name)
-		logger.Info("migration applied", "file", name)
-	}
-
-	return nil
+	return false
 }
 
-// loadConfig 从 YAML 文件加载配置
-func loadConfig(path string) (*Config, error) {
-	k := koanf.New(".")
-	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
-		return nil, fmt.Errorf("load config file: %w", err)
+func frontendDistCandidates() []string {
+	candidates := []string{
+		filepath.Clean("src/frontend/dist"),
+		filepath.Clean("../../frontend/dist"),
 	}
-
-	var cfg Config
-	if err := k.Unmarshal("", &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal config: %w", err)
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "..", "src", "frontend", "dist"),
+			filepath.Join(exeDir, "frontend-dist"),
+		)
 	}
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
-	}
-	return &cfg, nil
-}
-
-func (c *Config) validate() error {
-	if c.JWT.Secret == "" {
-		return fmt.Errorf("jwt.secret is required")
-	}
-	if c.Server.Port <= 0 {
-		return fmt.Errorf("server.port must be positive")
-	}
-	if c.Database.Host == "" {
-		return fmt.Errorf("database.host is required")
-	}
-	if c.Database.DBName == "" {
-		return fmt.Errorf("database.dbname is required")
-	}
-	return nil
+	return candidates
 }

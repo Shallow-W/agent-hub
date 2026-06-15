@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS orch_tasks (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_orch_tasks_conversation ON orch_tasks (conversation_id);
-CREATE INDEX idx_orch_tasks_status ON orch_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_orch_tasks_conversation ON orch_tasks (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_orch_tasks_status ON orch_tasks (status);
