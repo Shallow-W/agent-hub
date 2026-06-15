@@ -22,11 +22,6 @@ func RegisterConversationTools(r *Registry, api *APIClient) {
 			RouteDef{Method: "GET", Path: "/mcp/conversations/{conversation_id}/agents", Required: []string{"conversation_id"}},
 		},
 		RouteEntry{
-			T("list_group_agents", "查询指定群聊中参与的 Agent 列表，用于了解群聊中有哪些 Agent 可用",
-				Schema(map[string]map[string]interface{}{"conversation_id": Prop("群聊会话ID（必填）")}, "conversation_id")),
-			RouteDef{Method: "GET", Path: "/mcp/conversations/{conversation_id}/agents", Required: []string{"conversation_id"}},
-		},
-		RouteEntry{
 			T("get_messages", "读取指定会话的历史消息，用于获取上下文",
 				Schema(map[string]map[string]interface{}{
 					"conversation_id": Prop("会话ID（必填）"),
@@ -108,11 +103,6 @@ func RegisterAgentTools(r *Registry, api *APIClient, agentID string) {
 			T("list_agent_candidates", "查询本机已发现的 Agent 候选列表（来自 daemon 扫描），包含 CLI 路径、版本、能力（skills）等信息。尚未添加到平台的 Agent 会出现在这里", NoParams()),
 			RouteDef{Method: "GET", Path: "/mcp/daemon/agent-candidates"},
 		},
-	)
-	r.Register(
-		T("get_agent_skill", "查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail",
-			Schema(map[string]map[string]interface{}{"name": Prop("平台 Skill 名称（必填，必须属于当前 Agent）")}, "name")),
-		makeGetAgentSkillHandler(api, agentID),
 	)
 }
 
@@ -242,7 +232,12 @@ func RegisterAgentCreationTools(r *Registry, api *APIClient, ts *ToolsetStore) {
 }
 
 // RegisterSkillTools registers platform-skill query tools.
-func RegisterSkillTools(r *Registry, api *APIClient) {
+func RegisterSkillTools(r *Registry, api *APIClient, agentID string) {
+	r.Register(
+		T("get_agent_skill", "查看当前 Agent 已分配平台 Skill 的详细内容。先根据提示词中的 Skill 索引选择 name，再调用本工具渐进加载 detail",
+			Schema(map[string]map[string]interface{}{"name": Prop("平台 Skill 名称（必填，必须属于当前 Agent）")}, "name")),
+		makeGetAgentSkillHandler(api, agentID),
+	)
 	RegisterRoutes(r, api,
 		RouteEntry{
 			T("list_platform_skills", "列出所有平台 Skill 摘要，包含名称、分类、描述和触发场景，用于为 Agent 分配 Skill", NoParams()),

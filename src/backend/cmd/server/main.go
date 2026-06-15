@@ -91,6 +91,7 @@ func main() {
 	orchTaskRepo := repository.NewOrchTaskRepo(db)
 	userTemplateRepo := repository.NewUserTemplateRepo(db)
 	toolDefRepo := repository.NewToolDefinitionRepo(db)
+	toolCategoryRepo := repository.NewToolCategoryRepo(db)
 
 	// ToolRegistry: single source of truth for MCP tool definitions.
 	// Auto-syncs to DB on register.
@@ -150,6 +151,7 @@ func main() {
 	tokenIssuer := service.NewTokenIssuer(cfg.JWT.Secret)
 	agentSvc := service.NewAgentService(agentRepo, machineTracker)
 	agentSvc.SetToolRegistry(toolRegistry)
+	agentSvc.SetToolsetStore(toolDefRepo)
 	platformSkillSvc := service.NewPlatformSkillService(platformSkillRepo)
 	agentPromptTemplateSvc := service.NewAgentPromptTemplateService(agentPromptTemplateRepo)
 	userTemplateSvc := service.NewUserTemplateService(userTemplateRepo)
@@ -231,6 +233,7 @@ func main() {
 	userTemplateHandler := handler.NewUserTemplateHandler(userTemplateSvc)
 	toolDefHandler := handler.NewToolDefinitionHandler(toolDefSvc)
 	toolDefHandler.SetToolRegistry(toolRegistry)
+	toolCategoryHandler := handler.NewToolCategoryHandler(toolCategoryRepo)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
@@ -302,6 +305,7 @@ func main() {
 		AgentPromptTemplateHandler: agentPromptTemplateHandler,
 		UserTemplateHandler:        userTemplateHandler,
 		ToolDefHandler:             toolDefHandler,
+		ToolCategoryHandler:        toolCategoryHandler,
 		CatalogHandler:             catalogHandler,
 		DaemonHandler:              daemonHandler,
 		TaskHandler:                taskHandler,
@@ -437,7 +441,6 @@ func registerAllToolSpecs(registry *service.ToolRegistry) {
 	// Conversation tools
 	mustRegister(ctx, registry, tool_specs.ListConversations())
 	mustRegister(ctx, registry, tool_specs.ListConversationAgents())
-	mustRegister(ctx, registry, tool_specs.ListGroupAgents())
 	mustRegister(ctx, registry, tool_specs.GetMessages())
 	mustRegister(ctx, registry, tool_specs.CreateGroup())
 
@@ -450,7 +453,6 @@ func registerAllToolSpecs(registry *service.ToolRegistry) {
 
 	// Agent tools
 	mustRegister(ctx, registry, tool_specs.ListAgents())
-	mustRegister(ctx, registry, tool_specs.GetAgentSkill())
 	mustRegister(ctx, registry, tool_specs.ListAgentCandidates())
 	mustRegister(ctx, registry, tool_specs.GetAgentDetail())
 	mustRegister(ctx, registry, tool_specs.UpdateAgentPrompt())
@@ -479,11 +481,13 @@ func registerAllToolSpecs(registry *service.ToolRegistry) {
 	mustRegister(ctx, registry, tool_specs.DeployArtifactGitHub())
 
 	// Skill tools (new)
+	mustRegister(ctx, registry, tool_specs.GetAgentSkill())
 	mustRegister(ctx, registry, tool_specs.ListPlatformSkills())
 }
 
 func mustRegister(ctx context.Context, registry *service.ToolRegistry, spec port.MCPToolSpec) {
 	if err := registry.Register(ctx, spec); err != nil {
 		slog.Error("register tool spec failed", "name", spec.Name(), "error", err)
+		os.Exit(1)
 	}
 }

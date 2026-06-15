@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
 import { hasManagementToolsInConfig } from '@/config/catalogConfig';
+import { getManagementTools } from './toolAssignments';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
@@ -141,7 +142,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       system_prompt: systemPrompt,
       tools_config: toolsConfig,
       custom_skills: customSkills,
-      enable_management_tools: hasManagementToolsInConfig(toolsConfig),
+      enable_management_tools: hasManagementToolsInConfig(toolsConfig, getManagementTools()),
     });
   };
 

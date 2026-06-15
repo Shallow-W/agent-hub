@@ -19,11 +19,12 @@ type ToolDefinitionRepo interface {
 // the service package doesn't need to import internal/catalog (which would
 // cause an import cycle: catalog → middleware → service → catalog).
 type ToolDefinitionCatalogItem struct {
-	Name        string
-	Label       string
-	Category    string
-	Description string
-	CreatedAt   time.Time // set by the catalog bridge from Item.CreatedAt
+	Name         string
+	Label        string
+	Category     string
+	Description  string
+	IsManagement bool
+	CreatedAt    time.Time // set by the catalog bridge from Item.CreatedAt
 }
 
 // ToolDefinitionCatalogLister is the subset of catalog.Service consumed by
@@ -81,15 +82,16 @@ func (s *ToolDefinitionService) ListBuiltinTemplates(ctx context.Context) ([]mod
 
 // catalogItemToToolDefinition reverses the AdapterStore mapping. Used only
 // by the tool_definition pilot migration to preserve legacy response shape.
-// All fields from the catalog Item (including CreatedAt) are preserved so
-// the /api/tools/definitions response stays byte-equivalent to the legacy
-// direct-repo path.
+// All fields from the catalog Item (including CreatedAt and IsManagement)
+// are preserved so the /api/tools/definitions response stays byte-equivalent
+// to the legacy direct-repo path.
 func catalogItemToToolDefinition(it ToolDefinitionCatalogItem) model.ToolDefinition {
 	return model.ToolDefinition{
-		Name:        it.Name,
-		Label:       it.Label,
-		Category:    it.Category,
-		Description: it.Description,
-		CreatedAt:   it.CreatedAt,
+		Name:         it.Name,
+		Label:        it.Label,
+		Category:     it.Category,
+		Description:  it.Description,
+		IsManagement: it.IsManagement,
+		CreatedAt:    it.CreatedAt,
 	}
 }

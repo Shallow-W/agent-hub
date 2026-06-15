@@ -246,16 +246,17 @@ func platformSkillToItem(m *model.PlatformSkill) Item {
 
 func toolDefinitionToItem(m *model.ToolDefinition) Item {
 	return Item{
-		ID:          m.Name,
-		Domain:      DomainToolDefinition,
-		UserID:      nil,
-		Key:         m.Name,
-		Label:       firstNonEmpty(m.Label, m.Name),
-		Category:    m.Category,
-		Description: m.Description,
-		PayloadJSON: "",
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.CreatedAt,
+		ID:           m.Name,
+		Domain:       DomainToolDefinition,
+		UserID:       nil,
+		Key:          m.Name,
+		Label:        firstNonEmpty(m.Label, m.Name),
+		Category:     m.Category,
+		Description:  m.Description,
+		PayloadJSON:  "",
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.CreatedAt,
+		IsManagement: m.IsManagement,
 	}
 }
 

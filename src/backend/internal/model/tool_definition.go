@@ -7,11 +7,12 @@ import (
 
 // ToolDefinition 表示 MCP 工具定义（全局工具目录）。
 type ToolDefinition struct {
-	Name        string    `json:"name" db:"name"`
-	Label       string    `json:"label" db:"label"`
-	Category    string    `json:"category" db:"category"`
-	Description string    `json:"description" db:"description"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	Name         string    `json:"name" db:"name"`
+	Label        string    `json:"label" db:"label"`
+	Category     string    `json:"category" db:"category"`
+	Description  string    `json:"description" db:"description"`
+	IsManagement bool      `json:"is_management" db:"is_management"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 // BuiltinToolsetTemplate 表示内置工具集模板。

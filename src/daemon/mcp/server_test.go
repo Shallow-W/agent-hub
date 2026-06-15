@@ -228,16 +228,16 @@ func TestBuildRegistryRegistersAllTools(t *testing.T) {
 	registry := BuildRegistry(NewAPIClient(server.URL, "token"), "agent-1")
 	tools := registry.Tools()
 
-	// Verify we have all 29 tools (28 originals + list_platform_skills)
+	// Verify we have all 28 tools (27 originals minus list_group_agents, plus list_platform_skills)
 	expectedNames := map[string]bool{
-		// Conversation (5)
-		"list_conversations": true, "list_conversation_agents": true, "list_group_agents": true,
+		// Conversation (4)
+		"list_conversations": true, "list_conversation_agents": true,
 		"get_messages": true, "create_group": true,
 		// Task (5)
 		"list_tasks": true, "create_task": true, "update_task": true,
 		"move_task_status": true, "delete_task": true,
-		// Agent (3)
-		"list_agents": true, "get_agent_skill": true, "list_agent_candidates": true,
+		// Agent (2)
+		"list_agents": true, "list_agent_candidates": true,
 		// Machine (1)
 		"list_machines": true,
 		// Group (2)
@@ -251,8 +251,8 @@ func TestBuildRegistryRegistersAllTools(t *testing.T) {
 		// Agent Creation (4)
 		"create_agent": true, "update_agent": true,
 		"delete_agent": true, "list_toolsets": true,
-			// Skill (1)
-			"list_platform_skills": true,
+		// Skill (2)
+		"get_agent_skill": true, "list_platform_skills": true,
 	}
 
 	if len(tools) != len(expectedNames) {

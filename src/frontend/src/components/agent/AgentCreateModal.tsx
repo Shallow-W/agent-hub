@@ -8,8 +8,8 @@ import { itemToSkill } from '@/api/platformSkill';
 import { quickTemplates } from '@/config/catalogConfig';
 import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
   getTemplateTools,
   getToolCatalogSync,
   getToolsetOptions,
@@ -47,9 +47,13 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [skillTemplate, setSkillTemplate] = useState('none');
   const [toolManageOpen, setToolManageOpen] = useState(false);
   const [skillManageOpen, setSkillManageOpen] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
 
   const { items: rawSkills } = useCatalogDomain('platform_skill');
   const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const options = useMemo(
     () => candidates.map((candidate) => ({
@@ -73,6 +77,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setSkillManageOpen(false);
     fetchToolCatalog()
       .then(() => {
+        setCatalogReady(true);
         setToolset('tasks');
         setSelectedTools(getTemplateTools('tasks'));
       })
@@ -83,7 +88,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     const catalog = getToolCatalogSync();
     if (toolFilter === 'all') return catalog;
     return catalog.filter((t) => t.category === toolFilter);
-  }, [toolFilter]);
+  }, [toolFilter, catalogReady]);
 
   const skillCategories = useMemo(() => {
     const cats = new Set<string>();

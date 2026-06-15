@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -23,8 +24,16 @@ func (m *mockToolRegistry) Lookup(name string) (port.MCPToolSpec, bool) {
 
 func (m *mockToolRegistry) List() []port.MCPToolSpec { return nil }
 
-// testRegistry builds a mock ToolRegistryReader containing all tool names
-// from the old platformToolCatalog plus the three new tools.
+// mockToolsetStore implements ToolsetStore for tests.
+type mockToolsetStore struct {
+	names map[string]bool
+}
+
+func (m *mockToolsetStore) IsValidToolset(_ context.Context, name string) (bool, error) {
+	return m.names[name], nil
+}
+
+// testRegistry builds a mock ToolRegistryReader containing all tool names.
 func testRegistry() ToolRegistryReader {
 	return &mockToolRegistry{names: map[string]bool{
 		"list_conversations":       true,
@@ -32,7 +41,6 @@ func testRegistry() ToolRegistryReader {
 		"get_messages":             true,
 		"create_group":             true,
 		"list_agents":              true,
-		"list_group_agents":        true,
 		"list_tasks":               true,
 		"create_task":              true,
 		"update_task":              true,
@@ -61,10 +69,25 @@ func testRegistry() ToolRegistryReader {
 	}}
 }
 
+// testToolsetStore builds a mock ToolsetStore mirroring the seeded builtin_toolset_templates.
+func testToolsetStore() ToolsetStore {
+	return &mockToolsetStore{names: map[string]bool{
+		"none":          true,
+		"basic":         true,
+		"tasks":         true,
+		"orchestrator":  true,
+		"agent_builder": true,
+		"agent_manager": true,
+		"knowledge":     true,
+	}}
+}
+
 func TestNormalizeToolsConfig_FiltersUnknownTools(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
+	ts := testToolsetStore()
 	raw := `{"toolset":"custom","allowed_tools":["list_tasks","unknown","list_tasks"]}`
-	got, err := normalizeToolsConfig(raw, reg)
+	got, err := normalizeToolsConfig(ctx, raw, reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
@@ -81,9 +104,11 @@ func TestNormalizeToolsConfig_FiltersUnknownTools(t *testing.T) {
 }
 
 func TestNormalizeToolsConfig_PreservesLegacyText(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
+	ts := testToolsetStore()
 	raw := "## legacy tool docs"
-	got, err := normalizeToolsConfig(raw, reg)
+	got, err := normalizeToolsConfig(ctx, raw, reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
@@ -93,8 +118,10 @@ func TestNormalizeToolsConfig_PreservesLegacyText(t *testing.T) {
 }
 
 func TestNormalizeToolsConfig_EmptyMeansNoTools(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
-	got, err := normalizeToolsConfig("", reg)
+	ts := testToolsetStore()
+	got, err := normalizeToolsConfig(ctx, "", reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
@@ -104,8 +131,10 @@ func TestNormalizeToolsConfig_EmptyMeansNoTools(t *testing.T) {
 }
 
 func TestNormalizeToolsConfig_PreservesNoneAndEmptyAllowedTools(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
-	got, err := normalizeToolsConfig(`{"toolset":"none","allowed_tools":[]}`, reg)
+	ts := testToolsetStore()
+	got, err := normalizeToolsConfig(ctx, `{"toolset":"none","allowed_tools":[]}`, reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
@@ -122,8 +151,10 @@ func TestNormalizeToolsConfig_PreservesNoneAndEmptyAllowedTools(t *testing.T) {
 }
 
 func TestNormalizeToolsConfig_PreservesTemplateWithoutExplicitAllowedTools(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
-	got, err := normalizeToolsConfig(`{"toolset":"basic"}`, reg)
+	ts := testToolsetStore()
+	got, err := normalizeToolsConfig(ctx, `{"toolset":"basic"}`, reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
@@ -139,33 +170,29 @@ func TestNormalizeToolsConfig_PreservesTemplateWithoutExplicitAllowedTools(t *te
 	}
 }
 
-func TestPlatformToolCatalogIncludesTemplateTools(t *testing.T) {
-	for toolset, tools := range platformToolsets {
-		for _, tool := range tools {
-			// toolsets may reference tools that were in the old platformToolCatalog.
-			// This is now informational — the source of truth is the ToolRegistry.
-			_ = tool
-			_ = toolset
-		}
+func TestNormalizeToolsConfig_NilToolsetStoreSkipsValidation(t *testing.T) {
+	ctx := context.Background()
+	reg := testRegistry()
+	// 即使 toolsetStore 为 nil，custom toolset 名也应放行（向后兼容）。
+	got, err := normalizeToolsConfig(ctx, `{"toolset":"custom"}`, reg, nil)
+	if err != nil {
+		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}
-}
-
-func TestAgentBuilderToolsetIncludesAgentCreationTools(t *testing.T) {
-	tools := map[string]bool{}
-	for _, tool := range platformToolsets["agent_builder"] {
-		tools[tool] = true
+	var cfg agentToolsConfig
+	if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+		t.Fatalf("unmarshal normalized config: %v", err)
 	}
-	for _, tool := range []string{"create_agent", "update_agent", "delete_agent", "list_toolsets"} {
-		if !tools[tool] {
-			t.Fatalf("expected agent_builder toolset to include %s, got %#v", tool, platformToolsets["agent_builder"])
-		}
+	if cfg.Toolset != "custom" {
+		t.Fatalf("expected custom toolset preserved when store is nil, got %q", cfg.Toolset)
 	}
 }
 
 func TestNormalizeToolsConfig_AllowsKnowledgeTools(t *testing.T) {
+	ctx := context.Background()
 	reg := testRegistry()
+	ts := testToolsetStore()
 	raw := `{"toolset":"knowledge","allowed_tools":["list_knowledge_bases","list_knowledge_files","search_knowledge","read_knowledge_file"]}`
-	got, err := normalizeToolsConfig(raw, reg)
+	got, err := normalizeToolsConfig(ctx, raw, reg, ts)
 	if err != nil {
 		t.Fatalf("normalizeToolsConfig error: %v", err)
 	}

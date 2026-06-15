@@ -1,10 +1,74 @@
 import { get } from '@/api/client';
 
+// ---------------------------------------------------------------------------
+// Tool categories (sourced from GET /api/tools/categories)
+// ---------------------------------------------------------------------------
+
+export interface ToolCategory {
+  name: string;
+  label: string;
+  color: string;
+  sort_order: number;
+}
+
+let _toolCategories: ToolCategory[] = [];
+
+export async function fetchToolCategories(): Promise<void> {
+  if (_toolCategories.length > 0) return;
+  try {
+    const list = await get<ToolCategory[]>('/api/tools/categories');
+    if (Array.isArray(list)) {
+      _toolCategories = [...list].sort((a, b) => a.sort_order - b.sort_order);
+    }
+  } catch (e) {
+    console.warn('fetchToolCategories failed', e);
+  }
+}
+
+export function getToolCategoriesSync(): ToolCategory[] {
+  return _toolCategories;
+}
+
+export function getCategoryLabel(name: string): string {
+  const c = _toolCategories.find((c) => c.name === name);
+  return c?.label ?? name;
+}
+
+export function getCategoryColor(name: string): string {
+  const c = _toolCategories.find((c) => c.name === name);
+  return c?.color ?? '#595959';
+}
+
+export function getCategoryOrder(): string[] {
+  return _toolCategories.map((c) => c.name);
+}
+
+export interface CategoryMeta {
+  label: string;
+  color: string;
+}
+
+/**
+ * Build a category metadata lookup (label + color) from the API-backed
+ * categories cache. Returns an empty record if the cache hasn't loaded yet.
+ */
+export function getCategoryMeta(): Record<string, CategoryMeta> {
+  const map: Record<string, CategoryMeta> = {};
+  for (const c of _toolCategories) {
+    map[c.name] = { label: c.label, color: c.color };
+  }
+  return map;
+}
+
 export interface ToolCatalogItem {
   name: string;
   label: string;
-  category: 'conversation' | 'task' | 'agent' | 'machine' | 'group' | 'skill' | 'knowledge';
+  // Category is a free-form string. The closed union was removed so new
+  // categories (e.g. `deployment`) introduced by the backend don't require
+  // a frontend type change.
+  category: string;
   description: string;
+  is_management?: boolean;
 }
 
 export interface BuiltinTemplate {
@@ -25,12 +89,16 @@ async function ensureLoaded(): Promise<void> {
   if (_fetchPromise) return _fetchPromise;
   _fetchPromise = (async () => {
     try {
-      const [definitions, templates] = await Promise.all([
+      const [definitions, templates, categories] = await Promise.all([
         get<ToolCatalogItem[]>('/api/tools/definitions'),
         get<BuiltinTemplate[]>('/api/tools/builtin-templates'),
+        get<ToolCategory[]>('/api/tools/categories'),
       ]);
       _toolCatalog = definitions ?? [];
       _builtinTemplates = templates ?? [];
+      if (Array.isArray(categories)) {
+        _toolCategories = [...categories].sort((a, b) => a.sort_order - b.sort_order);
+      }
       _toolsetTemplates = {};
       for (const tpl of _builtinTemplates) {
         _toolsetTemplates[tpl.name] = tpl.tool_names ?? [];
@@ -52,6 +120,20 @@ export function getToolsetTemplatesSync(): Record<string, string[]> {
 
 export function getBuiltinTemplatesSync(): BuiltinTemplate[] {
   return _builtinTemplates;
+}
+
+/**
+ * Derive the set of management tool names from the loaded catalog.
+ * Returns an empty set when the catalog has not loaded yet (callers
+ * that need the value during save should ensure `fetchToolCatalog` has
+ * resolved first).
+ */
+export function getManagementTools(): Set<string> {
+  const set = new Set<string>();
+  for (const item of _toolCatalog) {
+    if (item.is_management) set.add(item.name);
+  }
+  return set;
 }
 
 /**
@@ -118,16 +200,9 @@ export function parseToolsConfig(raw?: string): { toolset: string; allowedTools:
   }
 }
 
-// Re-export from centralised config for backward compatibility.
-// Consumers that currently import { categoryMeta, categoryOrder } from './toolAssignments'
-// continue to work without changes.
-import { categoryMeta, categoryOrder } from '@/config/catalogConfig';
-export { categoryMeta, categoryOrder };
-export type { CategoryMeta } from '@/config/catalogConfig';
-
 export function getToolsByCategory(): Record<string, ToolCatalogItem[]> {
   const groups: Record<string, ToolCatalogItem[]> = {};
-  for (const cat of categoryOrder) {
+  for (const cat of getCategoryOrder()) {
     groups[cat] = [];
   }
   for (const tool of _toolCatalog) {
@@ -142,7 +217,8 @@ export function getToolsByCategory(): Record<string, ToolCatalogItem[]> {
 export function toolsConfigToJSON(toolset: string, allowedTools: string[]): string {
   // Do NOT filter against _toolCatalog here — the catalog may be empty due to
   // a failed/late fetch, which would silently discard all tools on save.
-  // The backend normalizeToolNames already validates against platformToolCatalog.
+  // The backend normalizeToolNames already validates against the in-memory
+  // tool registry (single source of truth).
   return JSON.stringify({
     toolset: toolset === 'custom' ? '' : toolset,
     allowed_tools: allowedTools,

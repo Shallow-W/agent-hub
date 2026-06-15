@@ -40,6 +40,10 @@ func NewToolRegistry(repo ToolDefinitionUpserter) *ToolRegistry {
 
 // Register adds a spec to the in-memory registry AND syncs its definition
 // to the DB tool_definitions table. Returns error if DB write fails.
+//
+// 为了避免内存状态被污染：先做名称唯一性检查，再尝试 DB 写入，最后才把 spec
+// 写进内存。这样当 Upsert 失败时，后续 Register 不会因为 "duplicate tool spec"
+// 而失败。
 func (r *ToolRegistry) Register(ctx context.Context, spec port.MCPToolSpec) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -48,17 +52,20 @@ func (r *ToolRegistry) Register(ctx context.Context, spec port.MCPToolSpec) erro
 		return fmt.Errorf("duplicate tool spec: %s", spec.Name())
 	}
 
-	r.specs[spec.Name()] = spec
-	r.ordered = append(r.ordered, spec)
-
+	// 先尝试 DB 写入；失败直接返回，不修改内存状态
 	if r.repo != nil {
-		return r.repo.Upsert(ctx, model.ToolDefinition{
+		if err := r.repo.Upsert(ctx, model.ToolDefinition{
 			Name:        spec.Name(),
 			Label:       spec.Label(),
 			Category:    spec.Category(),
 			Description: spec.Description(),
-		})
+		}); err != nil {
+			return err
+		}
 	}
+
+	r.specs[spec.Name()] = spec
+	r.ordered = append(r.ordered, spec)
 	return nil
 }
 
@@ -77,27 +84,4 @@ func (r *ToolRegistry) List() []port.MCPToolSpec {
 	out := make([]port.MCPToolSpec, len(r.ordered))
 	copy(out, r.ordered)
 	return out
-}
-
-// SyncAllToDB re-syncs all registered specs to the DB.
-func (r *ToolRegistry) SyncAllToDB(ctx context.Context) error {
-	if r.repo == nil {
-		return nil
-	}
-	r.mu.RLock()
-	specs := make([]port.MCPToolSpec, len(r.ordered))
-	copy(specs, r.ordered)
-	r.mu.RUnlock()
-
-	for _, spec := range specs {
-		if err := r.repo.Upsert(ctx, model.ToolDefinition{
-			Name:        spec.Name(),
-			Label:       spec.Label(),
-			Category:    spec.Category(),
-			Description: spec.Description(),
-		}); err != nil {
-			return fmt.Errorf("sync tool %s: %w", spec.Name(), err)
-		}
-	}
-	return nil
 }

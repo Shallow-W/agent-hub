@@ -13,7 +13,6 @@ import {
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { hasManagementToolsInArray } from '@/config/catalogConfig';
 import { itemToSkill } from '@/api/platformSkill';
 import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
@@ -29,8 +28,9 @@ import {
 import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
+  getManagementTools,
   getTemplateTools,
   parseToolsConfig,
   getToolCatalogSync,
@@ -75,6 +75,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [toolManageOpen, setToolManageOpen] = useState(false);
   const [dbToolTemplates, setDbToolTemplates] = useState<UserTemplate[]>([]);
+  const [catalogReady, setCatalogReady] = useState(false);
 
   const { items: rawSkills } = useCatalogDomain('platform_skill');
   const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
@@ -82,7 +83,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const filteredTools = useMemo(() => {
     if (toolFilter === 'all') return getToolCatalogSync();
     return getToolCatalogSync().filter((t) => t.category === toolFilter);
-  }, [toolFilter]);
+  }, [toolFilter, catalogReady]);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const parseTagsFromJSON = (raw: string): string => {
     if (!raw || raw === '[]') return '';
@@ -106,8 +110,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
 
   // Load tool catalog eagerly; once loaded, re-apply tools_config from the agent
   // so that tool names are properly recognised.
-  const [catalogReady, setCatalogReady] = useState(false);
-
   useEffect(() => {
     fetchToolCatalog()
       .then(() => setCatalogReady(true))
@@ -306,6 +308,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSaving(true);
     try {
       const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
+      const mgmt = getManagementTools();
+      const hasMgmt = selectedTools.some((t) => mgmt.has(t));
       await updateAgent(agent.id, {
         name: agent.name,
         cli_tool: agent.cli_tool,
@@ -314,7 +318,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         tools_config: nextToolsConfig,
         capabilities_json: agent.capabilities_json ?? '',
         custom_skills: agent.custom_skills ?? '',
-        enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementToolsInArray(selectedTools),
+        enable_management_tools: (agent.enable_management_tools ?? false) || hasMgmt,
       });
       message.success('工具配置已保存');
     } catch {

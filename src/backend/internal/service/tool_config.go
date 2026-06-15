@@ -1,18 +1,17 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 )
 
-var platformToolsets = map[string][]string{
-	"none":          {},
-	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
-	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file", "create_agent", "update_agent", "delete_agent", "list_toolsets", "list_platform_skills"},
-	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail", "create_agent", "update_agent", "update_agent_prompt", "delete_agent", "list_toolsets", "list_platform_skills"},
-	"agent_manager": {"list_agents", "get_agent_detail", "update_agent", "update_agent_prompt", "start_agent", "stop_agent", "delete_agent", "get_agent_skill", "list_platform_skills"},
-	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
+// ToolsetStore 是 toolset 模板校验所需的最小接口。
+// 实现侧（如 *repository.ToolDefinitionRepo）通过查询 builtin_toolset_templates
+// 表来判断 toolset 名是否合法。
+type ToolsetStore interface {
+	// IsValidToolset 返回给定 toolset 名是否在 builtin_toolset_templates 中存在。
+	IsValidToolset(ctx context.Context, name string) (bool, error)
 }
 
 type agentToolsConfig struct {
@@ -21,8 +20,9 @@ type agentToolsConfig struct {
 }
 
 // normalizeToolsConfig validates and normalizes a JSON tool config string.
-// registry is used to validate tool names; if nil, tool name filtering is skipped.
-func normalizeToolsConfig(raw string, registry ToolRegistryReader) (string, error) {
+// registry 用于校验工具名；toolsetStore 用于校验 toolset 名是否在 DB 中存在；
+// 任一为 nil 时对应校验环节跳过。
+func normalizeToolsConfig(ctx context.Context, raw string, registry ToolRegistryReader, toolsetStore ToolsetStore) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return `{"toolset":"none","allowed_tools":[]}`, nil
@@ -35,8 +35,23 @@ func normalizeToolsConfig(raw string, registry ToolRegistryReader) (string, erro
 		return raw, nil
 	}
 
-	if _, ok := platformToolsets[cfg.Toolset]; !ok {
-		cfg.Toolset = ""
+	// 校验 toolset 名：
+	//   - "none" 始终合法
+	//   - 有 ToolsetStore：交给 DB-backed 校验
+	//   - 无 ToolsetStore（测试场景）：放行任何非空 toolset，以保持 Agent 单测的
+	//     行为（"custom" 之类的自由文本会被上层模板系统进一步解析）。
+	if cfg.Toolset == "" {
+		// 保持空，下面会保留现状
+	} else if cfg.Toolset == "none" {
+		// "none" 始终合法
+	} else if toolsetStore != nil {
+		ok, err := toolsetStore.IsValidToolset(ctx, cfg.Toolset)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			cfg.Toolset = ""
+		}
 	}
 	cfg.AllowedTools = normalizeToolNames(cfg.AllowedTools, registry)
 

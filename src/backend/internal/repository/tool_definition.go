@@ -19,7 +19,7 @@ func NewToolDefinitionRepo(db *sqlx.DB) *ToolDefinitionRepo {
 func (r *ToolDefinitionRepo) List(ctx context.Context) ([]model.ToolDefinition, error) {
 	var list []model.ToolDefinition
 	err := r.db.SelectContext(ctx, &list,
-		`SELECT name, label, category, description, created_at
+		`SELECT name, label, category, description, is_management, created_at
 		 FROM tool_definitions
 		 ORDER BY name ASC`,
 	)
@@ -53,4 +53,21 @@ func (r *ToolDefinitionRepo) ListBuiltinTemplates(ctx context.Context) ([]model.
 		return nil, fmt.Errorf("list builtin toolset templates: %w", err)
 	}
 	return list, nil
+}
+
+// IsValidToolset 返回给定 toolset 名是否在 builtin_toolset_templates 中存在。
+// "none" 是内置合法值，无需查 DB。
+func (r *ToolDefinitionRepo) IsValidToolset(ctx context.Context, name string) (bool, error) {
+	if name == "" || name == "none" {
+		return name == "none", nil
+	}
+	var exists bool
+	err := r.db.GetContext(ctx, &exists,
+		`SELECT EXISTS(SELECT 1 FROM builtin_toolset_templates WHERE name = $1)`,
+		name,
+	)
+	if err != nil {
+		return false, fmt.Errorf("check toolset validity: %w", err)
+	}
+	return exists, nil
 }

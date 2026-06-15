@@ -137,11 +137,12 @@ func (b toolDefinitionCatalogBridge) ListToolDefinitions(ctx context.Context) ([
 	out := make([]service.ToolDefinitionCatalogItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, service.ToolDefinitionCatalogItem{
-			Name:        it.Key,
-			Label:       it.Label,
-			Category:    it.Category,
-			Description: it.Description,
-			CreatedAt:   it.CreatedAt,
+			Name:         it.Key,
+			Label:        it.Label,
+			Category:     it.Category,
+			Description:  it.Description,
+			IsManagement: it.IsManagement,
+			CreatedAt:    it.CreatedAt,
 		})
 	}
 	return out, nil

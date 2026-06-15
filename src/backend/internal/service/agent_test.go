@@ -313,6 +313,7 @@ func TestAddCandidateAgentStoresPrompt(t *testing.T) {
 	repo := &fakeAgentRepo{}
 	svc := NewAgentService(repo, nil)
 	svc.SetToolRegistry(testRegistry())
+	svc.SetToolsetStore(testToolsetStore())
 	_, err := svc.AddCandidateAgent(
 		context.Background(),
 		"user-1",

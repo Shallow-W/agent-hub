@@ -2,11 +2,22 @@ package handler
 
 import (
 	"net/http"
+	"regexp"
 
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+// paramPlaceholderRe matches `{name}` style path placeholders used internally
+// by RouteInfo.Path. Output to clients (gin-compatible) requires `:name`.
+var paramPlaceholderRe = regexp.MustCompile(`\{(\w+)\}`)
+
+// ginizePath converts internal `{param}` path placeholders to gin-compatible
+// `:param` form for emission to daemon/clients.
+func ginizePath(p string) string {
+	return paramPlaceholderRe.ReplaceAllString(p, ":$1")
+}
 
 type ToolDefinitionHandler struct {
 	svc          *service.ToolDefinitionService
@@ -76,7 +87,7 @@ func (h *ToolDefinitionHandler) ToolRegistry(c *gin.Context) {
 		if ri := spec.RouteInfo(); ri != nil {
 			item.Route = &RouteInfoDTO{
 				Method:   ri.Method,
-				Path:     ri.Path,
+				Path:     ginizePath(ri.Path),
 				Required: ri.Required,
 				Optional: ri.Optional,
 			}

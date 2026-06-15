@@ -28,6 +28,7 @@ type Deps struct {
 	AgentPromptTemplateHandler *handler.AgentPromptTemplateHandler
 	UserTemplateHandler        *handler.UserTemplateHandler
 	ToolDefHandler             *handler.ToolDefinitionHandler
+	ToolCategoryHandler        *handler.ToolCategoryHandler
 	CatalogHandler             *catalog.Handler
 	DaemonHandler              *handler.DaemonHandler
 	TaskHandler                *handler.TaskHandler
@@ -298,6 +299,7 @@ func Setup(r *gin.Engine, deps Deps) {
 	// Tool definitions and builtin templates (public, no auth)
 	r.GET("/api/tools/definitions", deps.ToolDefHandler.ListDefinitions)
 	r.GET("/api/tools/builtin-templates", deps.ToolDefHandler.ListBuiltinTemplates)
+	r.GET("/api/tools/categories", deps.ToolCategoryHandler.List)
 }
 
 // makeUploadHandler returns a gin.HandlerFunc for serving authenticated upload files.

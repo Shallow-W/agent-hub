@@ -92,6 +92,7 @@ type AgentService struct {
 	serverURL    string
 	daemonHub    port.DaemonDispatcher
 	toolRegistry ToolRegistryReader
+	toolsetStore ToolsetStore
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -129,6 +130,11 @@ func (s *AgentService) SetServerURL(url string) {
 // SetToolRegistry 注入 ToolRegistryReader（用于校验 tools_config 中的工具名）。
 func (s *AgentService) SetToolRegistry(tr ToolRegistryReader) {
 	s.toolRegistry = tr
+}
+
+// SetToolsetStore 注入 ToolsetStore（用于校验 tools_config 中的 toolset 名）。
+func (s *AgentService) SetToolsetStore(ts ToolsetStore) {
+	s.toolsetStore = ts
 }
 
 // ListAvailable 查询当前用户可用 Agent
@@ -346,7 +352,7 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig, s.toolRegistry)
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -371,7 +377,7 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig, s.toolRegistry)
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -403,7 +409,7 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if userID != "" && (current.UserID == nil || *current.UserID != userID) {
 		return nil, ErrAgentNotFound
 	}
-	toolsConfig, err = normalizeToolsConfig(toolsConfig, s.toolRegistry)
+	toolsConfig, err = normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}

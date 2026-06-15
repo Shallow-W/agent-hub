@@ -149,7 +149,7 @@ func BuildRegistry(api *APIClient, agentID string) *Registry {
 	RegisterAgentManagementTools(r, api)
 	RegisterKnowledgeTools(r, api)
 	RegisterAgentCreationTools(r, api, ts)
-	RegisterSkillTools(r, api)
+	RegisterSkillTools(r, api, agentID)
 
 	return r
 }

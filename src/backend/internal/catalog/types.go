@@ -59,6 +59,10 @@ type Item struct {
 	PayloadJSON string    `json:"payload,omitempty"` // domain-specific structured payload
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// IsManagement is set only for the tool_definition domain. It marks the
+	// three management tools (create_agent/update_agent/delete_agent) so the
+	// frontend can hide them unless enable_management_tools is on.
+	IsManagement bool `json:"is_management,omitempty"`
 }
 
 // ListQuery carries optional filters to List. Fields with zero values are

@@ -11,8 +11,8 @@ import {
   type UserTemplate,
 } from '@/api/userTemplate';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
   getTemplateTools,
   getToolCatalogSync,
   getToolsetOptions,
@@ -69,6 +69,10 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   const [toolFilter, setToolFilter] = useState('all');
   const [skillFilter, setSkillFilter] = useState('all');
   const [saving, setSaving] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const builtInTemplates: BuiltInTemplate[] = useMemo(() => {
     if (mode === 'tools') {
@@ -79,11 +83,10 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
           return { key: `tpl-tools-${opt.value}`, name: opt.label, category: '内置', description: `${tools.length} 个工具`, tools, skillCategories: [] };
         });
     }
-    return [
-      { key: 'tpl-skills-pm', name: '产品经理', category: '快速', description: '产品经理分类 Skills', tools: [], skillCategories: ['产品经理'] },
-      { key: 'tpl-skills-dev', name: '开发人员', category: '快速', description: '开发人员分类 Skills', tools: [], skillCategories: ['开发人员'] },
-      { key: 'tpl-skills-none', name: '无 Skills', category: '快速', description: '不分配任何 Skill', tools: [], skillCategories: [] },
-    ];
+    // Skills mode: no built-in quick templates here — the parent components
+    // (AgentSkillsPanel / AgentCreateModal) own the skill template dropdown
+    // and source shortcuts from `defaultSkillCategories` / `quickTemplates`.
+    return [];
   }, [mode]);
 
   const templates: TemplateItem[] = useMemo(() => [
@@ -129,6 +132,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     setToolFilter('all');
     setSkillFilter('all');
     fetchToolCatalog()
+      .then(() => setCatalogReady(true))
       .then(() => listUserTemplates(mode))
       .then((list) => {
         setDbTemplates(list);
@@ -238,7 +242,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     if (toolFilter !== 'all') list = list.filter((t) => t.category === toolFilter);
     if (toolSearch) list = list.filter((t) => t.label.includes(toolSearch) || t.name.includes(toolSearch) || t.description.includes(toolSearch));
     return list;
-  }, [toolFilter, toolSearch]);
+  }, [toolFilter, toolSearch, catalogReady]);
 
   const filteredEditorSkills = useMemo(() => {
     let list = librarySkills;

@@ -14,6 +14,9 @@ type MCPToolSpec interface {
 
 // RouteInfo provides enough metadata for the daemon to auto-generate an HTTP-proxy
 // handler without any daemon-side code per tool.
+//
+// 路径约定：Path 字段在内部代码里使用 `{param}` 占位符（与 OpenAPI 风格一致）；
+// 在向 daemon / 客户端输出时（如 ToolRegistry handler）需转换为 gin 风格 `:param`。
 type RouteInfo struct {
 	Method   string   // GET, POST, PUT, DELETE
 	Path     string   // URL path with {param} placeholders (e.g., "/mcp/tasks/{id}/status")

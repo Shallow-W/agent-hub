@@ -1,71 +1,59 @@
 /**
  * Centralised catalog configuration constants.
  *
- * Domain knowledge that was previously hardcoded across multiple components
- * is consolidated here so it can be maintained in a single place.
+ * Tool category metadata and management-tool membership are now sourced
+ * from the backend (see `components/agent/toolAssignments.ts`); this file
+ * only retains UX-only constants (skill category shortcuts, quick
+ * templates) and the backward-compatible `hasManagementTools*` helpers.
  */
 
 // ---------------------------------------------------------------------------
-// Tool category metadata (previously in toolAssignments.ts)
+// Management tools helpers (backward-compatible)
+//
+// The hardcoded Set is gone — management membership now comes from the
+// API (`is_management` flag on tool definitions). These helpers accept an
+// optional `managementSet` parameter so updated callers can pass the
+// dynamic set returned by `getManagementTools()`. Callers that haven't
+// been migrated yet get the legacy fallback set so the function still
+// produces a sensible result before the catalog finishes loading.
 // ---------------------------------------------------------------------------
 
-export interface CategoryMeta {
-  label: string;
-  color: string;
-}
-
-export const categoryMeta: Record<string, CategoryMeta> = {
-  conversation: { label: '会话', color: '#1677ff' },
-  task: { label: '任务', color: '#fa8c16' },
-  agent: { label: 'Agent', color: '#722ed1' },
-  machine: { label: '电脑', color: '#595959' },
-  group: { label: '群聊', color: '#52c41a' },
-  skill: { label: '技能', color: '#eb2f96' },
-  knowledge: { label: '知识库', color: '#13c2c2' },
-};
-
-export const categoryOrder: string[] = [
-  'conversation',
-  'task',
-  'agent',
-  'machine',
-  'group',
-  'skill',
-  'knowledge',
-];
-
-// ---------------------------------------------------------------------------
-// Management tools set (previously in AgentProfile.tsx / ComputerProfile.tsx)
-// ---------------------------------------------------------------------------
-
-export const managementTools = new Set([
+const fallbackManagementTools = new Set([
   'create_agent',
   'update_agent',
   'delete_agent',
 ]);
 
-export function hasManagementToolsInArray(tools: string[]): boolean {
-  return tools.some((tool) => managementTools.has(tool));
+export function hasManagementToolsInArray(
+  tools: string[],
+  managementSet?: Set<string>,
+): boolean {
+  const set = managementSet ?? fallbackManagementTools;
+  return tools.some((tool) => set.has(tool));
 }
 
-export function hasManagementToolsInConfig(toolsConfig: string): boolean {
+export function hasManagementToolsInConfig(
+  toolsConfig: string,
+  managementSet?: Set<string>,
+): boolean {
   try {
     const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
+    const set = managementSet ?? fallbackManagementTools;
     return Array.isArray(cfg.allowed_tools)
-      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && managementTools.has(tool));
+      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && set.has(tool));
   } catch {
     return false;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Skill category shortcuts (previously inline in AgentSkillsPanel.tsx)
+// Skill category shortcuts (UX-only data — no backend equivalent)
 // ---------------------------------------------------------------------------
 
 export const defaultSkillCategories = ['产品经理', '开发人员'];
 
 // ---------------------------------------------------------------------------
-// Quick templates (previously in AgentCreateModal.tsx)
+// Quick templates (UX-only data — labels for the "快速模板" pill row)
 // ---------------------------------------------------------------------------
 
 export interface QuickTemplate {
@@ -77,7 +65,7 @@ export interface QuickTemplate {
 
 export const quickTemplates: QuickTemplate[] = [
   { key: 'pm', label: '产品经理', toolset: 'tasks', skillCategories: ['产品经理'] },
-  { key: 'dev', label: '开发人员', toolset: 'full', skillCategories: ['开发人员'] },
-  { key: 'manager', label: '管理助手', toolset: 'full', skillCategories: [] },
+  { key: 'dev', label: '开发人员', toolset: 'orchestrator', skillCategories: ['开发人员'] },
+  { key: 'manager', label: '管理助手', toolset: 'orchestrator', skillCategories: [] },
   { key: 'empty', label: '空白', toolset: 'none', skillCategories: [] },
 ];
