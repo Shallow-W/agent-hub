@@ -23,3 +23,11 @@ type BuiltinToolsetTemplate struct {
 	ToolNames   json.RawMessage `json:"tool_names" db:"tool_names"`
 	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
 }
+
+// BuiltinSkillTemplate 表示内置技能模板（与 BuiltinToolsetTemplate 对称）。
+type BuiltinSkillTemplate struct {
+	Name            string          `json:"name" db:"name"`
+	Label           string          `json:"label" db:"label"`
+	Description     string          `json:"description" db:"description"`
+	SkillCategories json.RawMessage `json:"skill_categories" db:"skill_categories"`
+}

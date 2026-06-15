@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { defaultSkillCategories } from '@/config/catalogConfig';
+import { getSkillTemplateOptions, getTemplateSkillCategories } from './toolAssignments';
 import {
   createPlatformSkill,
   deletePlatformSkill,
@@ -116,17 +116,29 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
     return Array.from(cats);
   }, [librarySkills]);
 
+  const featuredSkillCategories = useMemo(() => {
+    // Derive featured skill categories from the API-backed builtin skill
+    // templates (replaces the old hardcoded defaultSkillCategories). Each
+    // template carries one or more skill_categories; we flatten and dedupe.
+    const cats = new Set<string>();
+    for (const tplName of getSkillTemplateOptions().map((o) => o.value)) {
+      if (tplName === 'custom') continue;
+      for (const cat of getTemplateSkillCategories(tplName)) cats.add(cat);
+    }
+    return Array.from(cats);
+  }, []);
+
   const skillTemplateOptions = useMemo(() => [
     { value: 'none', label: '无 Skills' },
-    ...defaultSkillCategories.map((cat) => ({ value: `cat:${cat}`, label: cat })),
+    ...featuredSkillCategories.map((cat) => ({ value: `cat:${cat}`, label: cat })),
     ...categories
-      .filter((cat) => !defaultSkillCategories.includes(cat))
+      .filter((cat) => !featuredSkillCategories.includes(cat))
       .map((cat) => ({ value: `cat:${cat}`, label: cat })),
     ...dbTemplates.map((t) => {
       const ids = 'skill_ids' in t.content ? t.content.skill_ids : [];
       return { value: `saved:${t.id}`, label: `★ ${t.name}`, skillIds: ids };
     }),
-  ], [categories, dbTemplates]);
+  ], [categories, dbTemplates, featuredSkillCategories]);
 
   const handleSkillTemplateChange = (value: string) => {
     setSkillTemplate(value);

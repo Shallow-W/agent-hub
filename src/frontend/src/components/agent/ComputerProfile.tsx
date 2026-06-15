@@ -12,8 +12,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
-import { hasManagementToolsInConfig } from '@/config/catalogConfig';
-import { getManagementTools } from './toolAssignments';
+import { getManagementTools, hasManagementToolsInConfig } from './toolAssignments';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';

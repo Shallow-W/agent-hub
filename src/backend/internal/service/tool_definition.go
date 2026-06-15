@@ -12,6 +12,7 @@ import (
 type ToolDefinitionRepo interface {
 	List(ctx context.Context) ([]model.ToolDefinition, error)
 	ListBuiltinTemplates(ctx context.Context) ([]model.BuiltinToolsetTemplate, error)
+	ListBuiltinSkillTemplates(ctx context.Context) ([]model.BuiltinSkillTemplate, error)
 }
 
 // ToolDefinitionCatalogItem is the catalog-package-neutral representation
@@ -76,6 +77,17 @@ func (s *ToolDefinitionService) ListBuiltinTemplates(ctx context.Context) ([]mod
 	}
 	if list == nil {
 		return []model.BuiltinToolsetTemplate{}, nil
+	}
+	return list, nil
+}
+
+func (s *ToolDefinitionService) ListBuiltinSkillTemplates(ctx context.Context) ([]model.BuiltinSkillTemplate, error) {
+	list, err := s.repo.ListBuiltinSkillTemplates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list builtin skill templates: %w", err)
+	}
+	if list == nil {
+		return []model.BuiltinSkillTemplate{}, nil
 	}
 	return list, nil
 }

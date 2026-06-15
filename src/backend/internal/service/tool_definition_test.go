@@ -35,6 +35,10 @@ func (r *fakeToolDefRepo) ListBuiltinTemplates(_ context.Context) ([]model.Built
 	return nil, nil
 }
 
+func (r *fakeToolDefRepo) ListBuiltinSkillTemplates(_ context.Context) ([]model.BuiltinSkillTemplate, error) {
+	return nil, nil
+}
+
 // TestToolDefinitionService_RoutesViaCatalog verifies the B1 pilot
 // migration: when SetCatalogLister has been called, ListDefinitions returns
 // data sourced from the catalog lister (not the repo). The full field set

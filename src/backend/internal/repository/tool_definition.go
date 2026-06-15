@@ -71,3 +71,28 @@ func (r *ToolDefinitionRepo) IsValidToolset(ctx context.Context, name string) (b
 	}
 	return exists, nil
 }
+
+func (r *ToolDefinitionRepo) ListBuiltinSkillTemplates(ctx context.Context) ([]model.BuiltinSkillTemplate, error) {
+	var list []model.BuiltinSkillTemplate
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT name, label, description, skill_categories FROM builtin_skill_templates ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list builtin skill templates: %w", err)
+	}
+	return list, nil
+}
+
+// IsValidSkillTemplate 返回给定 skill 模板名是否在 builtin_skill_templates 中存在。
+// "none" 与空串是内置合法值，无需查 DB。
+func (r *ToolDefinitionRepo) IsValidSkillTemplate(ctx context.Context, name string) (bool, error) {
+	if name == "none" || name == "" {
+		return true, nil
+	}
+	var exists bool
+	err := r.db.GetContext(ctx, &exists,
+		`SELECT EXISTS(SELECT 1 FROM builtin_skill_templates WHERE name = $1)`, name)
+	if err != nil {
+		return false, fmt.Errorf("check skill template: %w", err)
+	}
+	return exists, nil
+}

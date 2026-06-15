@@ -51,6 +51,15 @@ func (h *ToolDefinitionHandler) ListBuiltinTemplates(c *gin.Context) {
 	middleware.SuccessResponse(c, list)
 }
 
+func (h *ToolDefinitionHandler) BuiltinSkillTemplates(c *gin.Context) {
+	list, err := h.svc.ListBuiltinSkillTemplates(c.Request.Context())
+	if err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50094, "查询内置技能模板失败")
+		return
+	}
+	middleware.SuccessResponse(c, list)
+}
+
 // ToolRegistryItem is the DTO for an individual tool in the tool-registry response.
 type ToolRegistryItem struct {
 	Name        string                 `json:"name"`

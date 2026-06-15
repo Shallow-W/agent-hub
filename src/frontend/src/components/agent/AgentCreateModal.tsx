@@ -5,7 +5,6 @@ import { message } from '@/utils/message';
 import type { AgentCandidate } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
 import { itemToSkill } from '@/api/platformSkill';
-import { quickTemplates } from '@/config/catalogConfig';
 import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import {
   getCategoryMeta,
@@ -153,25 +152,6 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setSkillTemplate('custom');
   };
 
-  const handleApplyQuickTemplate = (key: string) => {
-    const tpl = quickTemplates.find((t) => t.key === key);
-    if (!tpl) return;
-    setToolset(tpl.toolset);
-    if (tpl.toolset !== 'custom') {
-      setSelectedTools(getTemplateTools(tpl.toolset));
-    }
-    if (tpl.skillCategories.length > 0) {
-      const matched = librarySkills
-        .filter((s) => tpl.skillCategories.includes(s.category?.trim() || '未分类'))
-        .map((s) => s.id);
-      setSelectedSkillIds(new Set(matched));
-      setSkillTemplate(`cat:${tpl.skillCategories[0]}`);
-    } else {
-      setSelectedSkillIds(new Set());
-      setSkillTemplate('none');
-    }
-  };
-
   const handleApplyFromManager = (mode: 'tools' | 'skills', tools: string[], skillIds: string[]) => {
     setSelectedTools(tools);
     setToolset(tools.length > 0 ? 'custom' : 'none');
@@ -229,22 +209,6 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       width={780}
     >
       <div className={styles.content}>
-        <div className={styles.field}>
-          <span className={styles.label}>快速模板</span>
-          <div className={styles.templateRow}>
-            {quickTemplates.map((tpl) => (
-              <button
-                key={tpl.key}
-                className={styles.templatePill}
-                type="button"
-                onClick={() => handleApplyQuickTemplate(tpl.key)}
-              >
-                {tpl.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div className={styles.field}>
           <span className={styles.label}>底座</span>
           <Select

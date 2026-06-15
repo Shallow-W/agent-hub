@@ -85,7 +85,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     }
     // Skills mode: no built-in quick templates here — the parent components
     // (AgentSkillsPanel / AgentCreateModal) own the skill template dropdown
-    // and source shortcuts from `defaultSkillCategories` / `quickTemplates`.
+    // and source shortcuts from the API-backed builtin skill templates.
     return [];
   }, [mode]);
 

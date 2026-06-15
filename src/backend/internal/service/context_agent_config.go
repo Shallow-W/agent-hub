@@ -35,7 +35,7 @@ func BuildAgentConfigText(agent *model.Agent, contextStr string, taskText string
 		sb.WriteString(agent.ToolsConfig)
 		sb.WriteString("\n\n")
 	}
-	if skillCtx := BuildAgentSkillContext(agent.CustomSkills, taskText); skillCtx != "" {
+	if skillCtx := BuildAgentSkillContext(agent.CustomSkills); skillCtx != "" {
 		sb.WriteString(skillCtx)
 		if !strings.HasSuffix(skillCtx, "\n\n") {
 			sb.WriteString("\n\n")

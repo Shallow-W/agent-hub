@@ -299,6 +299,7 @@ func Setup(r *gin.Engine, deps Deps) {
 	// Tool definitions and builtin templates (public, no auth)
 	r.GET("/api/tools/definitions", deps.ToolDefHandler.ListDefinitions)
 	r.GET("/api/tools/builtin-templates", deps.ToolDefHandler.ListBuiltinTemplates)
+	r.GET("/api/tools/builtin-skill-templates", deps.ToolDefHandler.BuiltinSkillTemplates)
 	r.GET("/api/tools/categories", deps.ToolCategoryHandler.List)
 }
 

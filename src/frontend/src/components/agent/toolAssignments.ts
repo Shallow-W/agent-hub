@@ -78,10 +78,22 @@ export interface BuiltinTemplate {
   tool_names: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Builtin skill templates (sourced from GET /api/tools/builtin-skill-templates)
+// ---------------------------------------------------------------------------
+
+export interface BuiltinSkillTemplate {
+  name: string;
+  label: string;
+  description: string;
+  skill_categories: string[];
+}
+
 // Module-level mutable cache (populated by fetch functions).
 let _toolCatalog: ToolCatalogItem[] = [];
 let _toolsetTemplates: Record<string, string[]> = {};
 let _builtinTemplates: BuiltinTemplate[] = [];
+let _skillTemplates: BuiltinSkillTemplate[] = [];
 
 let _fetchPromise: Promise<void> | null = null;
 
@@ -89,13 +101,15 @@ async function ensureLoaded(): Promise<void> {
   if (_fetchPromise) return _fetchPromise;
   _fetchPromise = (async () => {
     try {
-      const [definitions, templates, categories] = await Promise.all([
+      const [definitions, templates, categories, skillTemplates] = await Promise.all([
         get<ToolCatalogItem[]>('/api/tools/definitions'),
         get<BuiltinTemplate[]>('/api/tools/builtin-templates'),
         get<ToolCategory[]>('/api/tools/categories'),
+        get<BuiltinSkillTemplate[]>('/api/tools/builtin-skill-templates'),
       ]);
       _toolCatalog = definitions ?? [];
       _builtinTemplates = templates ?? [];
+      _skillTemplates = skillTemplates ?? [];
       if (Array.isArray(categories)) {
         _toolCategories = [...categories].sort((a, b) => a.sort_order - b.sort_order);
       }
@@ -120,6 +134,22 @@ export function getToolsetTemplatesSync(): Record<string, string[]> {
 
 export function getBuiltinTemplatesSync(): BuiltinTemplate[] {
   return _builtinTemplates;
+}
+
+export function getSkillTemplatesSync(): BuiltinSkillTemplate[] {
+  return _skillTemplates;
+}
+
+export function getSkillTemplateOptions(): { value: string; label: string }[] {
+  return [
+    ..._skillTemplates.map((tpl) => ({ value: tpl.name, label: tpl.label })),
+    { value: 'custom', label: '自定义' },
+  ];
+}
+
+export function getTemplateSkillCategories(name: string): string[] {
+  const tpl = _skillTemplates.find((t) => t.name === name);
+  return tpl?.skill_categories ?? [];
 }
 
 /**
@@ -223,4 +253,42 @@ export function toolsConfigToJSON(toolset: string, allowedTools: string[]): stri
     toolset: toolset === 'custom' ? '' : toolset,
     allowed_tools: allowedTools,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Management tools helpers (moved here from the deleted @/config/catalogConfig).
+//
+// Management membership comes from the API (`is_management` flag on tool
+// definitions). These helpers accept an optional `managementSet` parameter so
+// updated callers can pass the dynamic set returned by `getManagementTools()`.
+// Callers that haven't been migrated yet get the legacy fallback set so the
+// function still produces a sensible result before the catalog finishes loading.
+// ---------------------------------------------------------------------------
+
+const fallbackManagementTools = new Set([
+  'create_agent',
+  'update_agent',
+  'delete_agent',
+]);
+
+export function hasManagementToolsInArray(
+  tools: string[],
+  managementSet?: Set<string>,
+): boolean {
+  const set = managementSet ?? fallbackManagementTools;
+  return tools.some((tool) => set.has(tool));
+}
+
+export function hasManagementToolsInConfig(
+  toolsConfig: string,
+  managementSet?: Set<string>,
+): boolean {
+  try {
+    const cfg = JSON.parse(toolsConfig) as { allowed_tools?: unknown };
+    const set = managementSet ?? fallbackManagementTools;
+    return Array.isArray(cfg.allowed_tools)
+      && cfg.allowed_tools.some((tool) => typeof tool === 'string' && set.has(tool));
+  } catch {
+    return false;
+  }
 }

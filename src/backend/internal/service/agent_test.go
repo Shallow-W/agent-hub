@@ -388,7 +388,7 @@ func TestUpdateCustomSkillsNormalizesAndScopesUser(t *testing.T) {
 
 func TestBuildAgentSkillContextUsesIndexAndLookupTool(t *testing.T) {
 	raw := `[{"name":"代码审查","description":"检查 bug 和测试缺口","trigger":"review, bug","detail":"逐项检查边界、权限和测试。"},{"name":"文档撰写","description":"写说明","detail":"不要命中"}]`
-	got := BuildAgentSkillContext(raw, "请 review 这个工具权限 bug")
+	got := BuildAgentSkillContext(raw)
 	if !strings.Contains(got, "[平台 Skills]") {
 		t.Fatal("expected skill context section")
 	}
