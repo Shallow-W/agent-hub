@@ -3,20 +3,51 @@ import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
 const agentTypingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// ---------------------------------------------------------------------------
+// 泛化 WS 事件发布/订阅
+// 替代之前为 task.changed / conversation.role_changed 手写的独立 pubsub。
+// 新增事件类型只需 onWsEvent('type', handler) 订阅。
+// ---------------------------------------------------------------------------
+
+type WsEventHandler = (data: unknown) => void;
+const eventListeners = new Map<string, Set<WsEventHandler>>();
+
+/** 订阅一个 WS 事件类型。返回取消订阅函数。 */
+export function onWsEvent(eventType: string, handler: WsEventHandler): () => void {
+  if (!eventListeners.has(eventType)) {
+    eventListeners.set(eventType, new Set());
+  }
+  eventListeners.get(eventType)!.add(handler);
+  return () => { eventListeners.get(eventType)?.delete(handler); };
+}
+
+/** 向所有订阅者分发一个 WS 事件。由 useWebSocket 调用。 */
+export function dispatchWsEvent(eventType: string, data: unknown): void {
+  const handlers = eventListeners.get(eventType);
+  if (handlers) {
+    handlers.forEach((h) => {
+      try { h(data); } catch (e) { console.warn('WS event handler error', eventType, e); }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 向后兼容的薄包装——已有消费者无需修改。
+// ---------------------------------------------------------------------------
+
 type TaskChangedListener = (conversationId: string) => void;
-const taskChangedListeners = new Set<TaskChangedListener>();
 
 export function onTaskChanged(fn: TaskChangedListener): () => void {
-  taskChangedListeners.add(fn);
-  return () => { taskChangedListeners.delete(fn); };
+  return onWsEvent('task.changed', (data) => {
+    fn((data as { conversationId?: string })?.conversationId ?? '');
+  });
 }
 
 export function notifyTaskChanged(conversationId: string): void {
-  taskChangedListeners.forEach((fn) => fn(conversationId));
+  dispatchWsEvent('task.changed', { conversationId });
 }
 
 // conversation.role_changed 事件载荷：服务端在群聊内 Agent 角色变更后广播。
-// 任何订阅者（如 GroupMemberPanel）收到事件后可按 conversationId 决定是否刷新本地视图。
 export interface RoleChangedPayload {
   conversationId: string;
   agentId: string;
@@ -26,15 +57,15 @@ export interface RoleChangedPayload {
 }
 
 type RoleChangedListener = (payload: RoleChangedPayload) => void;
-const roleChangedListeners = new Set<RoleChangedListener>();
 
 export function onConversationRoleChanged(fn: RoleChangedListener): () => void {
-  roleChangedListeners.add(fn);
-  return () => { roleChangedListeners.delete(fn); };
+  return onWsEvent('conversation.role_changed', (data) => {
+    fn(data as RoleChangedPayload);
+  });
 }
 
 export function notifyConversationRoleChanged(payload: RoleChangedPayload): void {
-  roleChangedListeners.forEach((fn) => fn(payload));
+  dispatchWsEvent('conversation.role_changed', payload);
 }
 
 export interface TypingUser {

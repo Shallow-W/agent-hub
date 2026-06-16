@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { useWsStore, notifyTaskChanged, notifyConversationRoleChanged } from '@/store/wsStore';
+import { useWsStore, dispatchWsEvent } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
@@ -61,6 +61,10 @@ export function useWebSocket() {
 
     const handleMessage = (msg: StreamMessage) => {
       if (!msg.data) return;
+
+      // 泛化事件分发——所有订阅者通过 onWsEvent / useWsEventHandler 接收。
+      dispatchWsEvent(msg.type, msg.data);
+
       const { conversationId, conversation_id, messageId, content } = msg.data;
       const convId = conversationId ?? conversation_id;
 
@@ -156,29 +160,8 @@ export function useWebSocket() {
           }
           break;
         }
-        case 'task.changed': {
-          const taskConvId = msg.data.conversation_id ?? msg.data.conversationId;
-          if (taskConvId) {
-            notifyTaskChanged(taskConvId);
-          }
-          break;
-        }
-        case 'conversation.role_changed': {
-          // 服务端 EventBroadcaster 推送：某会话内 Agent 角色被改，让所有订阅方刷新本地视图。
-          // convId 来自顶部已有的解析（conversation_id 已被读取），agent_id / role 等字段单独取。
-          const agentId = msg.data.agent_id;
-          const roleValue = msg.data.role;
-          if (convId && agentId && roleValue) {
-            notifyConversationRoleChanged({
-              conversationId: convId,
-              agentId,
-              role: roleValue,
-              actorId: msg.data.actor_id ?? '',
-              demotedAgentId: msg.data.demoted_agent_id || undefined,
-            });
-          }
-          break;
-        }
+        // task.changed 和 conversation.role_changed 已由泛化 pubsub 处理
+        // （dispatchWsEvent 在函数顶部统一分发），无需在此 switch 中处理。
         case 'error': {
           const errMsg = msg.data.message || '连接发生错误';
           console.error('WebSocket error:', errMsg);

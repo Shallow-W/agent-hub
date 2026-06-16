@@ -105,6 +105,25 @@ function flushPendingTaskCompletions() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// WS 消息处理器注册表
+// 替代旧的 if-ladder 分发。新增消息类型只需 registerWsHandler('type', fn)。
+// ---------------------------------------------------------------------------
+
+const wsHandlers = new Map();
+
+function registerWsHandler(type, handler) {
+  wsHandlers.set(type, handler);
+}
+
+function dispatchWsMessage(ws, envelope) {
+  const handler = wsHandlers.get(envelope.type);
+  if (handler) {
+    return handler(ws, envelope.data || {});
+  }
+  return false;
+}
+
 function onWebSocket(ws, eventName, handler) {
   if (typeof ws.on === 'function') {
     ws.on(eventName, handler);
@@ -2090,6 +2109,114 @@ function handleAgentRestart(ws, payload) {
   handleAgentStart(ws, payload);
 }
 
+// ---------------------------------------------------------------------------
+// task.dispatch 处理器（从 connectWS 内联代码提取）
+// ---------------------------------------------------------------------------
+
+async function handleTaskDispatch(ws, data) {
+  const task = {
+    id: data.task_id,
+    cli_tool: data.cli_tool,
+    prompt: data.prompt,
+    context_messages: data.context_messages,
+    agent_id: data.agent_id,
+    conversation_id: data.conversation_id,
+    user_id: data.user_id,
+  };
+  if (!task.id) {
+    logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
+    return true;
+  }
+
+  const { systemPrompt, userPrompt } = buildPromptParts(task);
+
+  logFlow('info', 'task.dispatch_received', {
+    task_id: task.id,
+    cli_tool: task.cli_tool || 'unknown',
+    agent_id: task.agent_id,
+    conversation_id: task.conversation_id,
+    user_id: task.user_id,
+    prompt_len: typeof task.prompt === 'string' ? task.prompt.length : 0,
+    context_len: typeof task.context_messages === 'string' ? task.context_messages.length : 0,
+    system_prompt_len: systemPrompt.length,
+    user_prompt_len: userPrompt.length,
+  });
+  try {
+    let result;
+    if (
+      task.cli_tool === 'claude' &&
+      task.agent_id &&
+      task.conversation_id &&
+      process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
+    ) {
+      logFlow('info', 'task.execution_start', {
+        task_id: task.id,
+        cli_tool: task.cli_tool,
+        agent_id: task.agent_id,
+        conversation_id: task.conversation_id,
+        mode: 'claude_slot',
+      });
+      result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
+    } else {
+      logFlow('info', 'task.execution_start', {
+        task_id: task.id,
+        cli_tool: task.cli_tool,
+        agent_id: task.agent_id,
+        conversation_id: task.conversation_id,
+        mode: 'legacy_spawn',
+      });
+      result = await executeTaskOnce(task);
+      if (result === null) return true;
+    }
+    const artifacts = parseArtifacts(result);
+    sendTaskComplete({ task_id: task.id, result, artifacts });
+    logFlow('info', 'task.execution_completed', {
+      task_id: task.id,
+      cli_tool: task.cli_tool,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+      result_len: typeof result === 'string' ? result.length : 0,
+      artifact_count: artifacts.length,
+    });
+  } catch (error) {
+    sendTaskComplete({
+      task_id: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    logFlow('error', 'task.execution_failed', {
+      task_id: task.id,
+      cli_tool: task.cli_tool,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+      error: errorMessage(error),
+    });
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// 注册 WS 消息处理器——新增消息类型只需在此处加一行 registerWsHandler。
+// ---------------------------------------------------------------------------
+
+registerWsHandler('pong', () => true); // no-op
+registerWsHandler('ping', (ws) => { safeSend(ws, JSON.stringify({ type: 'pong' })); return true; });
+registerWsHandler('agent.start', (ws, data) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.start', agent_id: data.agent_id, cli_tool: data.cli_tool });
+  enqueueAgentStart(ws, data);
+  return true;
+});
+registerWsHandler('agent.stop', (ws, data) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.stop', agent_id: data.agent_id });
+  handleAgentStop(ws, data);
+  return true;
+});
+registerWsHandler('agent.restart', (ws, data) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.restart', agent_id: data.agent_id, cli_tool: data.cli_tool });
+  handleAgentRestart(ws, data);
+  return true;
+});
+registerWsHandler('task.dispatch', handleTaskDispatch);
+
 async function connectWS(serverURL, apiKey) {
   if (!WebSocket) {
     logFlow('warn', 'ws.unavailable_fallback_to_polling', {
@@ -2161,123 +2288,7 @@ async function connectWS(serverURL, apiKey) {
         return;
       }
 
-      if (envelope.type === 'pong') return;
-
-      if (envelope.type === 'ping') {
-        safeSend(ws, JSON.stringify({ type: 'pong' }));
-        return;
-      }
-
-      if (envelope.type === 'agent.start') {
-        logFlow('info', 'ws.control_received', {
-          type: envelope.type,
-          agent_id: envelope.data && envelope.data.agent_id,
-          cli_tool: envelope.data && envelope.data.cli_tool,
-        });
-        enqueueAgentStart(ws, envelope.data);
-        return;
-      }
-      if (envelope.type === 'agent.stop') {
-        logFlow('info', 'ws.control_received', {
-          type: envelope.type,
-          agent_id: envelope.data && envelope.data.agent_id,
-        });
-        handleAgentStop(ws, envelope.data);
-        return;
-      }
-      if (envelope.type === 'agent.restart') {
-        logFlow('info', 'ws.control_received', {
-          type: envelope.type,
-          agent_id: envelope.data && envelope.data.agent_id,
-          cli_tool: envelope.data && envelope.data.cli_tool,
-        });
-        handleAgentRestart(ws, envelope.data);
-        return;
-      }
-
-      if (envelope.type === 'task.dispatch') {
-        const d = envelope.data || {};
-        const task = {
-          id: d.task_id,
-          cli_tool: d.cli_tool,
-          prompt: d.prompt,
-          context_messages: d.context_messages,
-          agent_id: d.agent_id,
-          conversation_id: d.conversation_id,
-          user_id: d.user_id,
-        };
-        if (!task.id) {
-          logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
-          return;
-        }
-
-        const { systemPrompt, userPrompt } = buildPromptParts(task);
-
-        logFlow('info', 'task.dispatch_received', {
-          task_id: task.id,
-          cli_tool: task.cli_tool || 'unknown',
-          agent_id: task.agent_id,
-          conversation_id: task.conversation_id,
-          user_id: task.user_id,
-          prompt_len: typeof task.prompt === 'string' ? task.prompt.length : 0,
-          context_len: typeof task.context_messages === 'string' ? task.context_messages.length : 0,
-          system_prompt_len: systemPrompt.length,
-          user_prompt_len: userPrompt.length,
-        });
-        try {
-          let result;
-          if (
-            task.cli_tool === 'claude' &&
-            task.agent_id &&
-            task.conversation_id &&
-            process.env.AGENTHUB_DAEMON_DISABLE_STREAM_SLOT !== '1'
-          ) {
-            // Unified stream-json slot path with conversation isolation
-            logFlow('info', 'task.execution_start', {
-              task_id: task.id,
-              cli_tool: task.cli_tool,
-              agent_id: task.agent_id,
-              conversation_id: task.conversation_id,
-              mode: 'claude_slot',
-            });
-            result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
-          } else {
-            // Non-claude or missing info — use legacy per-task spawn
-            logFlow('info', 'task.execution_start', {
-              task_id: task.id,
-              cli_tool: task.cli_tool,
-              agent_id: task.agent_id,
-              conversation_id: task.conversation_id,
-              mode: 'legacy_spawn',
-            });
-            result = await executeTaskOnce(task);
-            if (result === null) return;
-          }
-          const artifacts = parseArtifacts(result);
-          sendTaskComplete({ task_id: task.id, result, artifacts });
-          logFlow('info', 'task.execution_completed', {
-            task_id: task.id,
-            cli_tool: task.cli_tool,
-            agent_id: task.agent_id,
-            conversation_id: task.conversation_id,
-            result_len: typeof result === 'string' ? result.length : 0,
-            artifact_count: artifacts.length,
-          });
-        } catch (error) {
-          sendTaskComplete({
-            task_id: task.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          logFlow('error', 'task.execution_failed', {
-            task_id: task.id,
-            cli_tool: task.cli_tool,
-            agent_id: task.agent_id,
-            conversation_id: task.conversation_id,
-            error: errorMessage(error),
-          });
-        }
-        return;
-      }
+      if (dispatchWsMessage(ws, envelope)) return;
 
       logFlow('warn', 'ws.unknown_message', { type: envelope.type });
     });
