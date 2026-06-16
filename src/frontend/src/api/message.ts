@@ -94,3 +94,17 @@ export async function getMessageReplies(
 ): Promise<Message[]> {
   return get<Message[]>(`/api/conversations/${conversationId}/messages/${messageId}/replies`);
 }
+
+export async function hideMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  return post<void>(`/api/conversations/${conversationId}/messages/${messageId}/hide`);
+}
+
+export async function unhideMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  return del<void>(`/api/conversations/${conversationId}/messages/${messageId}/hide`);
+}

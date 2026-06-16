@@ -15,6 +15,7 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
   onPinChanged?: () => void;
   onOpenThread?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
   conversationAgents?: ConversationAgent[];
 }
 
@@ -78,6 +79,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   onForward,
   onPinChanged,
   onOpenThread,
+  onDelete,
   conversationAgents = [],
 }) => {
   const {
@@ -247,6 +249,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                   onForward={onForward}
                   onTogglePin={handleTogglePin}
                   onRecall={isOwn ? handleRecall : undefined}
+                  onDelete={onDelete}
                   conversationAgents={conversationAgents}
                   replyCount={replyCounts[msg.id]}
                   onOpenThread={onOpenThread}

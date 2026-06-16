@@ -5,6 +5,7 @@ import type { MenuProps } from 'antd';
 import {
   CloseOutlined,
   CopyOutlined,
+  DeleteOutlined,
   DownOutlined,
   ForwardOutlined,
   MessageOutlined,
@@ -277,6 +278,7 @@ interface MessageBubbleProps {
   isOwn?: boolean;
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
   conversationAgents?: ConversationAgent[];
@@ -320,6 +322,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   isOwn = false,
   onReply,
   onRecall,
+  onDelete,
   onForward,
   onTogglePin,
   conversationAgents = [],
@@ -457,6 +460,14 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           icon: <RollbackOutlined />,
           label: '撤回',
           onClick: () => onRecall(message.id),
+        }]
+      : []),
+    ...(onDelete
+      ? [{
+          key: 'delete' as const,
+          icon: <DeleteOutlined />,
+          label: '删除',
+          onClick: () => onDelete(message.id),
         }]
       : []),
   ];

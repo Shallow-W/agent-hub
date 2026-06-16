@@ -32,6 +32,7 @@ interface MessageState {
     agentId?: string,
   ) => Promise<void>;
   recall: (conversationId: string, messageId: string) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   toggleMessagePin: (conversationId: string, messageId: string, pinned: boolean) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
   updateStreaming: (
@@ -223,6 +224,19 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     } catch (err) {
       console.error('recall failed:', err);
       antdMessage.error('撤回失败，请重试');
+    }
+  },
+
+  deleteMessage: async (conversationId, messageId) => {
+    try {
+      await msgApi.hideMessage(conversationId, messageId);
+      set((state) => {
+        const list = (state.messages[conversationId] ?? []).filter((m) => m.id !== messageId);
+        return { messages: { ...state.messages, [conversationId]: list } };
+      });
+    } catch (err) {
+      console.error('delete message failed:', err);
+      antdMessage.error('删除失败，请重试');
     }
   },
 

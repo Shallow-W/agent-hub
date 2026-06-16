@@ -299,6 +299,38 @@ func (h *MessageHandler) Unpin(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// HideMessage 当前用户隐藏消息（仅对自己不可见，其他用户仍可见）。
+func (h *MessageHandler) HideMessage(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40050, "缺少对话 ID 或消息 ID")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if err := h.svc.HideMessage(c.Request.Context(), userID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50035, "隐藏消息失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}
+
+// UnhideMessage 取消隐藏消息。
+func (h *MessageHandler) UnhideMessage(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40051, "缺少对话 ID 或消息 ID")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if err := h.svc.UnhideMessage(c.Request.Context(), userID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50036, "取消隐藏失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}
+
 // PinnedContext 查询当前会话共享上下文黑板中的用户 Pin 上下文。
 func (h *MessageHandler) PinnedContext(c *gin.Context) {
 	convID := c.Param("id")

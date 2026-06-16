@@ -32,6 +32,9 @@ type MessageStore interface {
 	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
 	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 	ListReplies(ctx context.Context, messageID string) ([]model.Message, error)
+	HideMessage(ctx context.Context, userID, messageID string) error
+	UnhideMessage(ctx context.Context, userID, messageID string) error
+	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
 }
 
 // ConvStore is the canonical interface for conversation persistence.

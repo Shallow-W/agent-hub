@@ -128,7 +128,7 @@ func (r *MessageRepo) MarkConversationRead(ctx context.Context, conversationID, 
 	return nil
 }
 
-// ListByConversation 分页查询对话消息，支持 before 游标
+// ListByConversation 分页查询对话消息，支持 before 游标。
 func (r *MessageRepo) ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error) {
 	var list []model.Message
 
@@ -293,6 +293,52 @@ func (r *MessageRepo) SoftDelete(ctx context.Context, messageID string) error {
 		return fmt.Errorf("soft delete message: %w", err)
 	}
 	return nil
+}
+
+// HideMessage 对当前用户隐藏消息（per-user 软删除）。
+// 其他用户仍可见。幂等：重复隐藏不会报错。
+func (r *MessageRepo) HideMessage(ctx context.Context, userID, messageID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO message_hides (user_id, message_id) VALUES ($1, $2)
+		 ON CONFLICT (user_id, message_id) DO NOTHING`,
+		userID, messageID,
+	)
+	if err != nil {
+		return fmt.Errorf("hide message: %w", err)
+	}
+	return nil
+}
+
+// UnhideMessage 取消隐藏（恢复显示）。
+func (r *MessageRepo) UnhideMessage(ctx context.Context, userID, messageID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM message_hides WHERE user_id = $1 AND message_id = $2`,
+		userID, messageID,
+	)
+	if err != nil {
+		return fmt.Errorf("unhide message: %w", err)
+	}
+	return nil
+}
+
+// GetHiddenMessageIDs 返回指定用户在某会话中隐藏的消息 ID 集合。
+// 服务层在 ListByConversation / GetUnreadMessages 后用此集合做内存过滤。
+func (r *MessageRepo) GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error) {
+	var ids []string
+	err := r.db.SelectContext(ctx, &ids,
+		`SELECT mh.message_id FROM message_hides mh
+		 JOIN messages m ON m.id = mh.message_id
+		 WHERE mh.user_id = $1 AND m.conversation_id = $2`,
+		userID, conversationID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get hidden message ids: %w", err)
+	}
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set, nil
 }
 
 // PinMessage adds a message to the conversation's shared pinned context.

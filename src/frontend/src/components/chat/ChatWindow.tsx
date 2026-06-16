@@ -592,6 +592,7 @@ export const ChatWindow: React.FC = () => {
         onForward={setForwardMessage}
         onPinChanged={handlePinnedMessageChange}
         onOpenThread={setThreadMessage}
+        onDelete={(messageId) => useMessageStore.getState().deleteMessage(activeConv.id, messageId)}
         conversationAgents={conversationAgents}
       />
       {otherTyping.length > 0 && (

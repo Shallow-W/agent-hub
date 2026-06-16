@@ -54,6 +54,9 @@ type MsgRepo interface {
 	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
 	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 	ListReplies(ctx context.Context, messageID string) ([]model.Message, error)
+	HideMessage(ctx context.Context, userID, messageID string) error
+	UnhideMessage(ctx context.Context, userID, messageID string) error
+	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -407,9 +410,42 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	// 过滤当前用户已隐藏的消息
+	messages = s.filterHidden(ctx, messages, convID, userID)
 	s.ensureParsedArtifacts(ctx, messages)
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
+}
+
+// filterHidden 从消息列表中移除当前用户已隐藏的消息。
+func (s *MessageService) filterHidden(ctx context.Context, messages []model.Message, convID, userID string) []model.Message {
+	if userID == "" || len(messages) == 0 {
+		return messages
+	}
+	hidden, err := s.msgRepo.GetHiddenMessageIDs(ctx, userID, convID)
+	if err != nil {
+		return messages // 查询失败不阻塞，返回完整列表
+	}
+	if len(hidden) == 0 {
+		return messages
+	}
+	filtered := messages[:0]
+	for _, m := range messages {
+		if !hidden[m.ID] {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
+}
+
+// HideMessage 对当前用户隐藏消息。
+func (s *MessageService) HideMessage(ctx context.Context, userID, messageID string) error {
+	return s.msgRepo.HideMessage(ctx, userID, messageID)
+}
+
+// UnhideMessage 取消隐藏。
+func (s *MessageService) UnhideMessage(ctx context.Context, userID, messageID string) error {
+	return s.msgRepo.UnhideMessage(ctx, userID, messageID)
 }
 
 // GetUnreadMessages 获取离线/未读消息
@@ -451,6 +487,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
+	messages = s.filterHidden(ctx, messages, convID, userID)
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
