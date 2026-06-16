@@ -354,12 +354,22 @@
 .bubbleAssistant .replyBtn { order: 3; }
 .bubbleAssistant .pinBtn { order: 4; }
 .bubbleAssistant .recallBtn { order: 5; }
+.bubbleAssistant .deleteBtn { order: 6; }
 
 .bubbleUser .chatAvatar { order: 0; }
 .bubbleUser .content { order: 1; }
 .bubbleUser .replyBtn { order: 2; }
 .bubbleUser .pinBtn { order: 3; }
 .bubbleUser .recallBtn { order: 4; }
+.bubbleUser .deleteBtn { order: 5; }
+
+.deleteBtn {
+  color: var(--color-text-secondary);
+}
+
+.deleteBtn:hover {
+  color: #e5484d !important;
+}
 
 .pinBtn {
   color: var(--color-text-secondary);

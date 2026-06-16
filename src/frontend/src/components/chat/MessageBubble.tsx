@@ -567,6 +567,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             />
           </Tooltip>
         )}
+        {!isSystem && onDelete && (
+          <Tooltip title="删除">
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              className={`${styles.replyBtn} ${styles.deleteBtn}`}
+              onClick={() => onDelete(message.id)}
+            />
+          </Tooltip>
+        )}
         <div className={styles.content}>
           {showAvatar && (
             <div className={styles.meta}>
