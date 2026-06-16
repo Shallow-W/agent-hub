@@ -302,6 +302,7 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 		h.logger.Warn("invalid task.complete data", "error", err)
 		return
 	}
+	h.logger.Info("handleTaskComplete ENTER", "task_id", req.TaskID, "result_len", len(req.Result), "has_error", req.Error != "")
 	// Resolve WS promise first (for orchestrator channel-based wait)
 	h.daemonHub.ResolveTask(req.TaskID, &ws.TaskResult{
 		TaskID:    req.TaskID,

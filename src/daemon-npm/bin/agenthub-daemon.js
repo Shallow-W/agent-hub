@@ -77,6 +77,12 @@ function safeSend(ws, data) {
 function sendTaskComplete(data) {
   const taskId = data && data.task_id;
   if (!taskId) return;
+  logFlow('info', 'task.complete_SEND_CALLED', {
+    task_id: taskId,
+    has_error: Boolean(data.error),
+    result_len: typeof data.result === 'string' ? data.result.length : 0,
+    already_pending: pendingTaskCompletions.has(taskId),
+  });
   const envelope = JSON.stringify({ type: 'task.complete', data });
   if (safeSend(currentDaemonWs, envelope)) {
     pendingTaskCompletions.delete(taskId);

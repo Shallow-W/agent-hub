@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -17,6 +18,10 @@ import (
 
 const maxMessageLen = 10000 // 10KB
 const maxBlackboardManualContextLen = 8000
+
+// agentReplyInFlight 防止同一源消息触发重复 agent dispatch。
+// key = replyTo (source message ID)。
+var agentReplyInFlight sync.Map
 
 const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 
@@ -889,6 +894,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(task.ID)
+	slog.Info("createAgentReply: BEFORE SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "reply_to", stringValue(replyTo))
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
 		Data: map[string]interface{}{
@@ -903,6 +909,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
+	slog.Info("createAgentReply: AFTER SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID)
 
 	ch := s.daemonHub.AwaitTaskResult(task.ID)
 	if ch == nil {
@@ -984,12 +991,17 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, sourceMessageID, c
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
+// asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
 func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment, replyTo *string) {
+	slog.Info("asyncAgentReply ENTER", "conversation_id", convID, "agent_id", agentID, "reply_to", stringValue(replyTo), "goroutine", "started")
+
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
 		}
 	}()
+
+	slog.Info("asyncAgentReply CALL createAgentReply", "conversation_id", convID, "agent_id", agentID)
 
 	s.broadcastAgentTyping(convID, true)
 	defer s.broadcastAgentTyping(convID, false)
