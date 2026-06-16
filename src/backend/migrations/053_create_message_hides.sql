@@ -3,8 +3,8 @@
 -- 未来可扩展为 per-user 消息状态（稍后处理/归档/标记重要等）。
 
 CREATE TABLE IF NOT EXISTS message_hides (
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     hidden_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (user_id, message_id)
 );
