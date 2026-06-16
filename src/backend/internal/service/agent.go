@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -638,7 +640,9 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	if serverURL == "" {
 		serverURL = "http://localhost:8080" // fallback when not configured
 	}
-	command := fmt.Sprintf("npx @agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
+	// 使用本地 file: 路径运行 daemon（@agenthub/daemon 未发布到 npm）。
+	npmPath := resolveDaemonNPMPath()
+	command := fmt.Sprintf("npx \"@agenthub/daemon@file:%s\" --server-url %s --api-key %s", npmPath, serverURL, apiKey)
 	return command, machine, apiKey, nil
 }
 
@@ -659,4 +663,27 @@ func generateMachineAPIKey() (string, error) {
 func hashMachineAPIKey(apiKey string) string {
 	sum := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(sum[:])
+}
+
+// resolveDaemonNPMPath 查找本地 daemon-npm 目录的绝对路径。
+// @agenthub/daemon 未发布到 npm，必须用 file: 协议指向本地包。
+func resolveDaemonNPMPath() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "./src/daemon-npm"
+	}
+	candidates := []string{
+		filepath.Join(wd, "..", "daemon-npm"),
+		filepath.Join(wd, "src", "daemon-npm"),
+		filepath.Join(wd, "..", "..", "src", "daemon-npm"),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+			if abs, err := filepath.Abs(candidate); err == nil {
+				return abs
+			}
+			return candidate
+		}
+	}
+	return "./src/daemon-npm"
 }
