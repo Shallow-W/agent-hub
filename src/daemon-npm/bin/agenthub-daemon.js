@@ -1960,18 +1960,30 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   // 不同对话也复用同一进程——stream-json 模式支持多 turn，
   // 杀进程会导致其他对话的任务失败。
   if (slot?.sendPrompt) {
-    logFlow('info', 'agent.reuse_slot', {
-      agent_id: agentId,
-      conversation_id: conversationId,
-      current_conversation_id: slot.currentConversationId,
-      same_conv: slot.currentConversationId === conversationId,
-    });
-    // 更新当前对话 ID（用于日志追踪）
-    slot.currentConversationId = conversationId;
-    // 复用已有进程执行 prompt
-    const response = await slot.sendPrompt(userPrompt);
-    if (response.error) throw new Error(response.error);
-    return response.result;
+    // 检查进程是否还活着，如果已退出则清理并走 spawn 路径
+    if (slot.process && slot.process.exitCode !== null) {
+      logFlow('warn', 'agent.process_dead_reuse', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        exit_code: slot.process.exitCode,
+      });
+      runningAgents.delete(agentId);
+      agentTurnStates.delete(agentId);
+      // 落入下面的 spawn 逻辑
+    } else {
+      logFlow('info', 'agent.reuse_slot', {
+        agent_id: agentId,
+        conversation_id: conversationId,
+        current_conversation_id: slot.currentConversationId,
+        same_conv: slot.currentConversationId === conversationId,
+      });
+      // 更新当前对话 ID（用于日志追踪）
+      slot.currentConversationId = conversationId;
+      // 复用已有进程执行 prompt
+      const response = await slot.sendPrompt(userPrompt);
+      if (response.error) throw new Error(response.error);
+      return response.result;
+    }
   }
 
   // 没有已有进程——spawn 新的

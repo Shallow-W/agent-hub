@@ -17,6 +17,9 @@ type OrchSender struct {
 	Avatar string
 }
 
+// fanoutDedup 防止同一 orchTaskID 的 startWorkersAndWait 被并发调用两次。
+var fanoutDedup sync.Map
+
 // dispatchOrchWorker dispatches a single worker task using the unified dispatchAndWait path.
 // Runs in a goroutine: synchronously waits for the WS result, creates message, pushes to user,
 // then updates OrchTask worker state and triggers summary if all workers are done.
@@ -202,6 +205,14 @@ func (s *OrchestratorService) startWorkersAndWait(ctx context.Context, convID, u
 			}
 		}
 	}()
+
+	// Dedup guard：防止同一 orchTaskID 的 worker fanout 被重复触发
+	dedupKey := "fanout:" + orchTaskID
+	if _, loaded := fanoutDedup.LoadOrStore(dedupKey, true); loaded {
+		slog.Warn(orchFlowLog, "stage", "worker_fanout.dedup_skip", "orch_task_id", orchTaskID, "reason", "already running")
+		return
+	}
+	defer fanoutDedup.Delete(dedupKey)
 
 	slog.Info(orchFlowLog, "stage", "worker_fanout.start", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_count", len(plan.Tasks), "unknown_count", len(plan.UnknownTasks), "workers", resolvedDispatchLogNames(plan.Tasks), "summary_enabled", orchTaskID != "")
 	for _, unknown := range plan.UnknownTasks {
