@@ -185,7 +185,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					})
 				}
 			}
-		case "typing_start":
+		case "typing_start", "user.typing_start":
 			var payload struct {
 				ConversationID string `json:"conversation_id"`
 			}
@@ -205,7 +205,7 @@ func (h *WebSocketHandler) readLoop(ctx context.Context, client *ws.Client) {
 					},
 				})
 			}
-		case "typing_stop":
+		case "typing_stop", "user.typing_stop":
 			var payload struct {
 				ConversationID string `json:"conversation_id"`
 			}
