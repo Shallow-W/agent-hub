@@ -185,8 +185,8 @@ export const AgentList: React.FC<AgentListProps> = ({
                 className={styles.machineHeader}
                 type="button"
                 onClick={() => {
+                  // 点击中间区域：选中 machine（显示机器界面）
                   onSelectMachine(group.id);
-                  handleToggleMachine(group.id);
                 }}
                 aria-expanded={isExpanded}
               >
@@ -208,7 +208,14 @@ export const AgentList: React.FC<AgentListProps> = ({
                     </span>
                   </div>
                 </div>
-                <div className={styles.machineActions}>
+                <div
+                  className={styles.machineActions}
+                  onClick={(e) => {
+                    // 点击展开图标区域：只切换 agent 列表展开/折叠
+                    e.stopPropagation();
+                    handleToggleMachine(group.id);
+                  }}
+                >
                   <span className={styles.machineCount}>{group.agents.length}</span>
                   <span className={styles.expandIcon}>
                     {isExpanded ? <DownOutlined /> : <RightOutlined />}

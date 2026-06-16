@@ -400,7 +400,7 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	}
 
 	if limit <= 0 {
-		limit = 50
+		limit = 25
 	}
 	if limit > 200 {
 		limit = 200

@@ -24,7 +24,7 @@ export const STORAGE_KEYS = {
 // ---------------------------------------------------------------------------
 
 /** 单次拉取的消息条数（游标分页） */
-export const PAGE_SIZE = 200;
+export const PAGE_SIZE = 25;
 
 /** 单个会话在内存中保留的最大消息条数 */
 export const MAX_MESSAGES = 200;

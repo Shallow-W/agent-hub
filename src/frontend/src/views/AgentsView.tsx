@@ -33,6 +33,11 @@ const AgentsView: React.FC = () => {
     setSelectedAgent(agent.id);
   }, [setSelectedAgent]);
 
+  const handleSelectMachine = useCallback((machineId: string) => {
+    setSelectedMachine(machineId);
+    setSelectedAgent(null); // 切换 machine 时清除 agent 选择，显示机器界面
+  }, [setSelectedMachine, setSelectedAgent]);
+
   const handleStartAgentChat = useCallback(async (agent: Agent) => {
     const existing = conversations.find(
       (c) => c.type === 'agent' && c.peer_id === agent.id,
@@ -65,7 +70,7 @@ const AgentsView: React.FC = () => {
             selectedAgentId={selectedAgentId}
             selectedMachineId={selectedMachineId}
             onSelect={handleSelectAgent}
-            onSelectMachine={setSelectedMachine}
+            onSelectMachine={handleSelectMachine}
           />
         </div>
       </div>
