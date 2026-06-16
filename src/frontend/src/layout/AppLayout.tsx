@@ -1,53 +1,36 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Outlet,
-  useNavigate,
-  useLocation } from 'react-router-dom';
-import { Alert,
-} from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
+import { Alert } from 'antd';
 import { message as antMessage } from '@/utils/message';
-import {
-  LeftOutlined,
-  RightOutlined,
-} from '@ant-design/icons';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import SettingsPanel from '@/components/settings/SettingsPanel';
 import GroupCreateModal from '@/components/groups/GroupCreateModal';
 import { createGroup } from '@/api/group';
-import {
-  addConversationAgent,
-  getOrCreateAgentChat,
-  getOrCreatePrivateChat,
-} from '@/api/conversation';
+import { addConversationAgent } from '@/api/conversation';
 import { useConversationStore } from '@/store/conversationStore';
 import { useConversation } from '@/hooks/useConversation';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { useMessageStore } from '@/store/messageStore';
-import { useFriendStore } from '@/store/friendStore';
-import { useAgentStore } from '@/store/agentStore';
-import { useKnowledgeStore } from '@/store/knowledgeStore';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
-import MiddlePanel from './MiddlePanel';
 import NewConversationModal from './NewConversationModal';
-import { AgentProfile } from '@/components/agent/AgentProfile';
-import { AgentSkillsPanel } from '@/components/agent/AgentSkillsPanel';
-import { ComputerProfile } from '@/components/agent/ComputerProfile';
-import KnowledgeFilePreview from '@/components/knowledge/KnowledgeFilePreview';
-import { syncSelectedKnowledgeFile } from '@/components/knowledge/knowledgePreviewState.mjs';
 import TitleBar from '@/components/common/TitleBar';
-import type { Agent } from '@/types/agent';
-import type { KnowledgeFile } from '@/types/knowledge';
 import styles from './AppLayout.module.css';
 
+/**
+ * AppLayout — 轻量 layout shell。
+ *
+ * 职责：侧边栏导航 + 全局 modals + WS 连接 + bootstrap。
+ * 不再管理 activeNav / display:none 切换——每个视图通过 React Router
+ * 独立路由渲染，自行管理左面板和右面板。
+ */
 const AppLayout: React.FC = () => {
   useAppBootstrap();
 
   const navigate = useNavigate();
-  const location = useLocation();
-  const { create, conversations } = useConversation();
+  const { create } = useConversation();
   const fetchConversations = useConversationStore((s) => s.fetchConversations);
   const setActive = useConversationStore((s) => s.setActive);
-  const bindDirectAgentChat = useConversationStore((s) => s.bindDirectAgentChat);
   const { status } = useWebSocket();
   const wasConnectedRef = useRef(false);
   useEffect(() => {
@@ -56,127 +39,43 @@ const AppLayout: React.FC = () => {
   const showDisconnectAlert = status === 'disconnected' && wasConnectedRef.current;
   const { user, logout: handleLogout } = useAuth();
 
-  const fetchFriends = useFriendStore((s) => s.fetchFriends);
-  const fetchPending = useFriendStore((s) => s.fetchPending);
-  const [activeNav, setActiveNav] = useState('chat');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [newConvModalOpen, setNewConvModalOpen] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
-  const [selectedKnowledgeFile, setSelectedKnowledgeFile] = useState<KnowledgeFile | null>(null);
-  const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
-  const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
-  const creatingAgentChatRef = useRef<string | null>(null);
-
-  const handleNavChange = useCallback((key: string) => {
-    setActiveNav(key);
-    // 切换面板时清除知识库文件选中
-    if (key !== 'knowledge') {
-      setSelectedKnowledgeFile(null);
-      setSelectedKbId(null);
-    }
-    if (key === 'settings') {
-      navigate('/settings');
-      return;
-    }
-    if (key === 'workspace') {
-      navigate('/tasks');
-      return;
-    }
-    if (location.pathname !== '/') {
-      navigate('/');
-    }
-  }, [navigate, location.pathname]);
-
-  // 仅在路由变化时同步 activeNav（不依赖 activeNav 本身，避免循环覆盖用户点击）
-  useEffect(() => {
-    if (location.pathname.startsWith('/tasks')) {
-      setActiveNav('workspace');
-    } else if (location.pathname.startsWith('/settings')) {
-      setActiveNav('settings');
-    } else {
-      // Only reset route-based navs (workspace/settings) to 'chat';
-      // preserve overlay navs (skills, knowledge, models, contacts, chat)
-      setActiveNav((prev) => {
-        if (prev === 'workspace' || prev === 'settings') return 'chat';
-        return prev;
-      });
-    }
-  }, [location.pathname]);
-
-  // 切换到联系人页时自动拉取数据
-  useEffect(() => {
-    if (activeNav === 'contacts') {
-      fetchFriends();
-      fetchPending();
-    }
-  }, [activeNav, fetchFriends, fetchPending]);
 
   const totalUnread = useMessageStore((s) =>
     Object.values(s.unreadCounts).reduce((sum, c) => sum + c, 0),
   );
 
   useEffect(() => {
-    if (totalUnread > 0) {
-      document.title = `(${totalUnread}) AgentHub`;
-    } else {
-      document.title = 'AgentHub';
-    }
+    document.title = totalUnread > 0 ? `(${totalUnread}) AgentHub` : 'AgentHub';
   }, [totalUnread]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable;
-
       if (e.key === 'Escape') {
-        const memberPanelOpen = useConversationStore.getState().memberPanelOpen;
-        if (memberPanelOpen) {
-          useConversationStore.getState().setMemberPanelOpen(false);
-          return;
-        }
         if (newConvModalOpen) { setNewConvModalOpen(false); return; }
         if (groupModalOpen) { setGroupModalOpen(false); return; }
         return;
       }
-
       if (isInput) return;
-
       const mod = e.metaKey || e.ctrlKey;
-
       if (mod && e.key === 'k') {
         e.preventDefault();
         document.querySelector<HTMLInputElement>('[data-conv-search] input')?.focus();
         return;
       }
-
       if (mod && e.key === 'n') {
         e.preventDefault();
-        handleCreate();
+        setNewConvModalOpen(true);
         return;
       }
     };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [groupModalOpen, newConvModalOpen]);
-
-  const handleCreate = () => {
-    setNewConvModalOpen(true);
-  };
-
-  const handleRefreshContacts = useCallback(async () => {
-    await Promise.all([
-      fetchFriends(),
-      fetchPending(),
-      fetchConversations(),
-    ]);
-  }, [fetchFriends, fetchPending, fetchConversations]);
-
-  const handleUpload = () => {
-    antMessage.info('请在当前对话输入框左侧添加附件');
-  };
 
   const handleGroupCreate = async (name: string, memberIds: string[]) => {
     try {
@@ -187,73 +86,12 @@ const AppLayout: React.FC = () => {
       if (conv?.id) {
         setActive(conv.id);
         useConversationStore.getState().setMemberPanelOpen(true);
+        navigate('/');
       }
     } catch {
       antMessage.error('创建群聊失败');
     }
   };
-
-  const handleStartChat = useCallback(async (friendId: string) => {
-    try {
-      const conv = await getOrCreatePrivateChat(friendId);
-      await fetchConversations();
-      setActive(conv.id);
-      setActiveNav('chat');
-    } catch {
-      antMessage.error('创建私聊失败');
-    }
-  }, [fetchConversations, setActive]);
-
-  const handleStartAgentChat = useCallback(async (agent: Agent) => {
-    if (creatingAgentChatRef.current === agent.id) return;
-    creatingAgentChatRef.current = agent.id;
-    try {
-      const conv = await getOrCreateAgentChat(agent.id);
-      bindDirectAgentChat(conv.id, agent.id);
-      await fetchConversations();
-      setActive(conv.id);
-      setActiveNav('chat');
-    } catch {
-      antMessage.error('创建智能体对话失败');
-    } finally {
-      creatingAgentChatRef.current = null;
-    }
-  }, [bindDirectAgentChat, fetchConversations, setActive]);
-
-  const agents = useAgentStore((s) => s.agents);
-  const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null;
-
-  const handleSelectAgent = useCallback((agent: Agent) => {
-    setSelectedAgentId(agent.id);
-    if (agent.machine_id) {
-      setSelectedMachineId(agent.machine_id);
-    }
-  }, []);
-
-  const handleSelectMachine = useCallback((machineId: string) => {
-    setSelectedMachineId(machineId);
-    setSelectedAgentId(null);
-  }, []);
-
-  const handleKnowledgeFileSelect = useCallback((file: KnowledgeFile, kbId: string) => {
-    setSelectedKnowledgeFile(file);
-    setSelectedKbId(kbId);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedKnowledgeFile || !selectedKbId) return;
-    const synced = syncSelectedKnowledgeFile({
-      selectedFile: selectedKnowledgeFile,
-      selectedKbId,
-      knowledgeBases,
-    });
-    if (synced.selectedFile?.id !== selectedKnowledgeFile.id || synced.selectedFile !== selectedKnowledgeFile) {
-      setSelectedKnowledgeFile(synced.selectedFile);
-    }
-    if (synced.selectedKbId !== selectedKbId) {
-      setSelectedKbId(synced.selectedKbId);
-    }
-  }, [knowledgeBases, selectedKnowledgeFile, selectedKbId]);
 
   return (
     <div className={styles.container}>
@@ -277,9 +115,7 @@ const AppLayout: React.FC = () => {
             username={user?.username ?? ''}
             onLogout={handleLogout}
             wsStatus={status}
-            onNavChange={handleNavChange}
-            activeKey={activeNav}
-            onCreate={handleCreate}
+            onCreate={() => setNewConvModalOpen(true)}
             collapsed={settingsCollapsed}
           />
         </div>
@@ -294,74 +130,9 @@ const AppLayout: React.FC = () => {
           {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
         </button>
 
-        <div className={styles.convPanel}>
-          <MiddlePanel
-            activeNav={activeNav}
-            conversations={conversations}
-            onCreate={handleCreate}
-            onCreateGroup={() => setGroupModalOpen(true)}
-            onRefresh={() => fetchConversations()}
-            onUpload={handleUpload}
-            onStartChat={handleStartChat}
-            onStartAgentChat={handleStartAgentChat}
-            onSwitchChat={() => setActiveNav('chat')}
-            onSwitchContacts={() => setActiveNav('contacts')}
-            onRefreshContacts={handleRefreshContacts}
-            selectedAgentId={selectedAgentId}
-            selectedMachineId={selectedMachineId}
-            onSelectAgent={handleSelectAgent}
-            onSelectMachine={handleSelectMachine}
-            onKnowledgeFileSelect={handleKnowledgeFileSelect}
-            selectedFileId={selectedKnowledgeFile?.id ?? null}
-            selectedKbId={selectedKbId}
-          />
-        </div>
-
-        {/* 右侧：聊天区域 / 智能体详情 */}
-        <div className={`${styles.chatPanel} ${activeNav === 'workspace' ? styles.taskPanel : ''}`}>
-          {/* Chat view: always mounted to preserve state across tab switches */}
-          <div style={activeNav === 'knowledge' || activeNav === 'skills' || activeNav === 'models' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <Outlet />
-          </div>
-
-          {/* Knowledge overlay — always mounted to avoid re-fetch */}
-          <div style={activeNav !== 'knowledge' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {selectedKnowledgeFile && selectedKbId ? (
-              <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
-            ) : (
-              <div className={styles.emptyRightPanel}>
-                <div className={styles.emptyRightIcon}>📚</div>
-                <div className={styles.emptyRightTitle}>知识库管理</div>
-                <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
-              </div>
-            )}
-          </div>
-
-          {/* Skills overlay — always mounted to avoid re-fetch */}
-          <div style={activeNav !== 'skills' ? { display: 'none' } : { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {selectedAgent ? (
-              <AgentSkillsPanel agent={selectedAgent} />
-            ) : (
-              <div className={styles.skillsEmptyPanel}>
-                <div className={styles.emptyRightTitle}>选择一个 Agent 管理技能</div>
-                <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
-              </div>
-            )}
-          </div>
-
-          {/* Models overlay */}
-          {activeNav === 'models' && (
-            selectedAgent ? (
-              <AgentProfile agent={selectedAgent} onMessage={handleStartAgentChat} />
-            ) : (
-              <ComputerProfile
-                machineId={selectedMachineId}
-                selectedAgentId={selectedAgentId}
-                onSelectAgent={handleSelectAgent}
-                onClearSelection={() => setSelectedMachineId(null)}
-              />
-            )
-          )}
+        {/* 右侧：React Router Outlet 渲染当前路由对应的视图 */}
+        <div className={styles.chatPanel}>
+          <Outlet />
         </div>
       </div>
 
@@ -383,20 +154,14 @@ const AppLayout: React.FC = () => {
               const failed = results.filter((result) => result.status === 'rejected').length;
               await fetchConversations();
               setActive(conv.id);
-              setActiveNav('chat');
-              if (location.pathname !== '/') {
-                navigate('/');
-              }
+              navigate('/');
               useConversationStore.getState().setMemberPanelOpen(true);
               if (failed > 0) {
                 antMessage.warning(`对话已创建，${failed} 个智能体拉入失败`);
               }
             } else {
               await create('single', title);
-              setActiveNav('chat');
-              if (location.pathname !== '/') {
-                navigate('/');
-              }
+              navigate('/');
             }
             setNewConvModalOpen(false);
           } catch {

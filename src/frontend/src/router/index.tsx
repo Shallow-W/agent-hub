@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
+import { Spin } from 'antd';
 import {
   createBrowserRouter,
   Navigate,
@@ -8,10 +9,21 @@ import AppLayout from '@/layout/AppLayout';
 import { useAuthStore } from '@/store/authStore';
 import LoginView from '@/views/LoginView';
 import RegisterView from '@/views/RegisterView';
-import ChatView from '@/views/ChatView';
 import NotFoundView from '@/views/NotFoundView';
-import SettingsView from '@/views/SettingsView';
-import TaskBoardView from '@/views/TaskBoardView';
+
+const ChatView = lazy(() => import('@/views/ChatView'));
+const ContactsView = lazy(() => import('@/views/ContactsView'));
+const AgentsView = lazy(() => import('@/views/AgentsView'));
+const SkillsView = lazy(() => import('@/views/SkillsView'));
+const KnowledgeView = lazy(() => import('@/views/KnowledgeView'));
+const TaskBoardView = lazy(() => import('@/views/TaskBoardView'));
+const SettingsView = lazy(() => import('@/views/SettingsView'));
+
+const withSuspense = (el: React.ReactNode) => (
+  <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><Spin /></div>}>
+    {el}
+  </Suspense>
+);
 
 /** 检查是否已登录，未登录则重定向到登录页 */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -48,18 +60,13 @@ const routes: RouteObject[] = [
       </ProtectedRoute>
     ),
     children: [
-      {
-        index: true,
-        element: <ChatView />,
-      },
-      {
-        path: 'settings',
-        element: <SettingsView />,
-      },
-      {
-        path: 'tasks',
-        element: <TaskBoardView />,
-      },
+      { index: true, element: withSuspense(<ChatView />) },
+      { path: 'contacts', element: withSuspense(<ContactsView />) },
+      { path: 'agents', element: withSuspense(<AgentsView />) },
+      { path: 'skills', element: withSuspense(<SkillsView />) },
+      { path: 'knowledge', element: withSuspense(<KnowledgeView />) },
+      { path: 'tasks', element: withSuspense(<TaskBoardView />) },
+      { path: 'settings', element: withSuspense(<SettingsView />) },
     ],
   },
   {
