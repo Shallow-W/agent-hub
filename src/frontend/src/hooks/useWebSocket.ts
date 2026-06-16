@@ -68,6 +68,14 @@ export function useWebSocket() {
       const { conversationId, conversation_id, messageId, content } = msg.data;
       const convId = conversationId ?? conversation_id;
 
+      // error 事件不需要 convId，提前处理
+      if (msg.type === 'error') {
+        const errMsg = msg.data.message || '连接发生错误';
+        console.error('WebSocket error:', errMsg);
+        message.error(errMsg);
+        return;
+      }
+
       if (!convId) return;
 
       const activeId = useConversationStore.getState().activeConversationId;
@@ -162,12 +170,7 @@ export function useWebSocket() {
         }
         // task.changed 和 conversation.role_changed 已由泛化 pubsub 处理
         // （dispatchWsEvent 在函数顶部统一分发），无需在此 switch 中处理。
-        case 'error': {
-          const errMsg = msg.data.message || '连接发生错误';
-          console.error('WebSocket error:', errMsg);
-          message.error(errMsg);
-          break;
-        }
+        // error 事件已在 convId guard 之前处理。
       }
     };
 

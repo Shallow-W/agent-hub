@@ -39,7 +39,8 @@ type TaskChangedListener = (conversationId: string) => void;
 
 export function onTaskChanged(fn: TaskChangedListener): () => void {
   return onWsEvent('task.changed', (data) => {
-    fn((data as { conversationId?: string })?.conversationId ?? '');
+    const d = data as Record<string, unknown>;
+    fn(String(d.conversationId ?? d.conversation_id ?? ''));
   });
 }
 
@@ -60,7 +61,14 @@ type RoleChangedListener = (payload: RoleChangedPayload) => void;
 
 export function onConversationRoleChanged(fn: RoleChangedListener): () => void {
   return onWsEvent('conversation.role_changed', (data) => {
-    fn(data as RoleChangedPayload);
+    const d = data as Record<string, unknown>;
+    fn({
+      conversationId: String(d.conversationId ?? d.conversation_id ?? ''),
+      agentId: String(d.agentId ?? d.agent_id ?? ''),
+      role: String(d.role ?? ''),
+      actorId: String(d.actorId ?? d.actor_id ?? ''),
+      demotedAgentId: d.demotedAgentId != null ? String(d.demotedAgentId) : (d.demoted_agent_id != null ? String(d.demoted_agent_id) : undefined),
+    });
   });
 }
 
