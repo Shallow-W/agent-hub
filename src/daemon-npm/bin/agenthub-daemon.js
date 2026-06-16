@@ -149,6 +149,16 @@ function dispatchWsMessage(ws, envelope) {
 const bus = new EventEmitter();
 bus.setMaxListeners(50); // 横切监听器可能较多
 
+// Task dispatch dedup：同一 agent + prompt 在 3 秒内不重复执行。
+const recentDispatches = new Map();
+// 定期清理过期条目
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of recentDispatches) {
+    if (now - val.ts > 10000) recentDispatches.delete(key);
+  }
+}, 10000).unref();
+
 // 结构化日志：所有 daemon 事件自动写入 logFlow
 bus.on('agent.started', (info) =>
   logFlow('info', 'agent.started', info),
@@ -2184,6 +2194,23 @@ async function handleTaskDispatch(ws, data) {
     logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
     return true;
   }
+
+  // Dedup guard：同一 agent + prompt 在 3 秒内只执行一次。
+  // 防止后端重复 dispatch（HTTP + WS 竞态等）导致 LLM 被调用两次。
+  const dedupKey = `${task.agent_id}:${task.conversation_id}`;
+  const now = Date.now();
+  const lastDispatch = recentDispatches.get(dedupKey);
+  if (lastDispatch && lastDispatch.prompt === task.prompt && (now - lastDispatch.ts) < 3000) {
+    logFlow('warn', 'task.dispatch_dedup_skip', {
+      task_id: task.id,
+      agent_id: task.agent_id,
+      conversation_id: task.conversation_id,
+      reason: 'duplicate within 3s',
+      delta_ms: now - lastDispatch.ts,
+    });
+    return true;
+  }
+  recentDispatches.set(dedupKey, { prompt: task.prompt, ts: now });
 
   const { systemPrompt, userPrompt } = buildPromptParts(task);
 
