@@ -1,4 +1,5 @@
 import type { StreamMessage } from '@/types/message';
+import { WS_RETRY_DELAY_MS, WS_MAX_RETRY_DELAY_MS, WS_RETRY_JITTER_MS, WS_REJECTION_BACKOFF_MS } from '@/config/constants';
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -7,8 +8,8 @@ type MessageHandler = (msg: StreamMessage) => void;
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url = '';
-  private retryDelay = 1000;
-  private maxRetryDelay = 30000;
+  private retryDelay = WS_RETRY_DELAY_MS;
+  private maxRetryDelay = WS_MAX_RETRY_DELAY_MS;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: string[] = [];
   private intentionalClose = false;
@@ -83,7 +84,7 @@ export class WebSocketClient {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
-      this.retryDelay = 1000;
+      this.retryDelay = WS_RETRY_DELAY_MS;
       this.setStatus('connected');
       // 重连后发送缓存的消息
       this.flushQueue();
@@ -105,7 +106,7 @@ export class WebSocketClient {
       if (!this.intentionalClose) {
         if (event.code === 1008) {
           // Server rejected (e.g. max connections) — long backoff to avoid storm
-          this.retryDelay = 30_000;
+          this.retryDelay = WS_REJECTION_BACKOFF_MS;
         }
         this.scheduleReconnect();
       }
@@ -117,7 +118,7 @@ export class WebSocketClient {
   }
 
   private scheduleReconnect(): void {
-    const jitter = Math.random() * 500;
+    const jitter = Math.random() * WS_RETRY_JITTER_MS;
     this.retryTimer = setTimeout(() => {
       this.doConnect();
     }, this.retryDelay + jitter);

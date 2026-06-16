@@ -586,6 +586,7 @@ export const ChatWindow: React.FC = () => {
         />
       )}
       <MessageList
+        key={activeConv.id}
         conversationId={activeConv.id}
         onReply={setReplyTo}
         onForward={setForwardMessage}

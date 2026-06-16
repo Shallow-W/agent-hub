@@ -4,11 +4,8 @@ import { getUnreadMessages } from '@/api/message';
 import { markConversationRead } from '@/api/conversation';
 import type { OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
+import { CACHE_TTL_MS, MAX_MESSAGES, UNREAD_FETCH_LIMIT } from '@/config/constants';
 
-/** Cache duration: skip re-fetch if loaded within last 30 seconds */
-const CACHE_TTL_MS = 30_000;
-/** Max messages kept per conversation */
-const MAX_MESSAGES = 200;
 /** Per-conversation last fetch timestamp */
 const lastFetchedAt: Record<string, number> = {};
 const EMPTY_MESSAGES_ARRAY: import('@/types/message').Message[] = [];
@@ -67,7 +64,7 @@ export function useMessages(conversationId: string | null) {
 
       // 拉取离线/未读消息并合并（必须在 markConversationRead 之前，否则 last_read_at 已更新导致查不到未读）
       try {
-        const unread = await getUnreadMessages(currentId, 200);
+        const unread = await getUnreadMessages(currentId, UNREAD_FETCH_LIMIT);
         if (currentFetchId !== fetchIdRef.current) return;
         if (unread && unread.length > 0) {
           const store = useMessageStore.getState();

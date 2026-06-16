@@ -3,6 +3,7 @@ import { message as antdMessage } from '@/utils/message';
 import type { Message, OptimisticMessage, ReplyToPreview } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
+import { PAGE_SIZE, MAX_MESSAGES, RECALL_DEDUP_TTL_MS } from '@/config/constants';
 
 interface MessageState {
   /** conversationId → 消息列表 */
@@ -51,9 +52,9 @@ interface MessageState {
   handleRecallPush: (conversationId: string, messageId: string) => void;
 }
 
-const PAGE_SIZE = 200;
+
 /** Max messages kept per conversation to prevent unbounded memory growth */
-const MAX_MESSAGES = 200;
+
 
 let tempIdCounter = 0;
 function generateTempId(): string {
@@ -61,12 +62,11 @@ function generateTempId(): string {
 }
 
 const recentlyRecalled = new Map<string, number>();
-const RECALL_DEDUP_TTL = 30_000;
 
 function isRecentlyRecalled(messageId: string): boolean {
   const ts = recentlyRecalled.get(messageId);
   if (!ts) return false;
-  if (Date.now() - ts > RECALL_DEDUP_TTL) {
+  if (Date.now() - ts > RECALL_DEDUP_TTL_MS) {
     recentlyRecalled.delete(messageId);
     return false;
   }
@@ -77,7 +77,7 @@ function isRecentlyRecalled(messageId: string): boolean {
 setInterval(() => {
   const now = Date.now();
   for (const [id, ts] of recentlyRecalled) {
-    if (now - ts > RECALL_DEDUP_TTL) {
+    if (now - ts > RECALL_DEDUP_TTL_MS) {
       recentlyRecalled.delete(id);
     }
   }

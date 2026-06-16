@@ -66,3 +66,12 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     await get().fetchKnowledgeBases(true);
   },
 }));
+
+export function resetKnowledgeStore(): void {
+  useKnowledgeStore.setState({
+    knowledgeBases: [],
+    loading: false,
+    error: null,
+    loaded: false,
+  });
+}

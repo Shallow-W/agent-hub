@@ -16,6 +16,7 @@ const HEARTBEAT_INTERVAL_MS = 30000;
 const WS_RECONNECT_DELAY_MS = 3000;
 const WS_PING_INTERVAL_MS = 30000;
 const INBOUND_WATCHDOG_MS = 70000;
+const POLL_INTERVAL_MS = 3000;
 const DAEMON_LOG_EVENT = 'daemon_flow';
 
 function logValue(value) {

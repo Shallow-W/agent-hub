@@ -96,6 +96,20 @@ export const MessageList: React.FC<MessageListProps> = ({
   const recall = useMessageStore((s) => s.recall);
   const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
 
+  // Stable callbacks to preserve React.memo on MessageBubble.
+  // Inline arrow functions bust memo on every parent re-render.
+  const handleTogglePin = useCallback(
+    (message: Message) => {
+      void toggleMessagePin(conversationId, message.id, !!message.pinned)
+        .finally(() => onPinChanged?.());
+    },
+    [conversationId, toggleMessagePin, onPinChanged],
+  );
+  const handleRecall = useCallback(
+    (messageId: string) => recall(conversationId, messageId),
+    [conversationId, recall],
+  );
+
   const replyCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const msg of messages) {
@@ -231,11 +245,8 @@ export const MessageList: React.FC<MessageListProps> = ({
                   isOwn={isOwn}
                   onReply={onReply}
                   onForward={onForward}
-                  onTogglePin={(message) => {
-                    void toggleMessagePin(conversationId, message.id, !!message.pinned)
-                      .finally(() => onPinChanged?.());
-                  }}
-                  onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
+                  onTogglePin={handleTogglePin}
+                  onRecall={isOwn ? handleRecall : undefined}
                   conversationAgents={conversationAgents}
                   replyCount={replyCounts[msg.id]}
                   onOpenThread={onOpenThread}
