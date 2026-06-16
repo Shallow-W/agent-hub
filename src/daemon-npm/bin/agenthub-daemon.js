@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync, spawn, spawnSync } = require('node:child_process');
+const { EventEmitter } = require('node:events');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -123,6 +124,44 @@ function dispatchWsMessage(ws, envelope) {
   }
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// 事件总线
+// 解耦 WS 消息接收 → 业务执行 → 结果回传的链条。
+// 每一步通过 bus.emit / bus.on 通信，新增横切逻辑（metrics/审计/重试）
+// 只需加监听器，不改核心流程。
+//
+// 事件清单：
+//   ws.connected         — WS 连接成功
+//   ws.disconnected      — WS 断开
+//   ws.message           — 收到任意 WS 消息（raw envelope）
+//   agent.start_request  — 后端要求启动 agent
+//   agent.stop_request   — 后端要求停止 agent
+//   agent.restart_request— 后端要求重启 agent
+//   agent.started        — agent 进程已启动
+//   agent.stopped        — agent 进程已退出
+//   task.dispatch        — 收到任务派发
+//   task.completed       — 任务执行成功
+//   task.failed          — 任务执行失败
+//   daemon.ready         — daemon 完成初始化
+// ---------------------------------------------------------------------------
+
+const bus = new EventEmitter();
+bus.setMaxListeners(50); // 横切监听器可能较多
+
+// 结构化日志：所有 daemon 事件自动写入 logFlow
+bus.on('agent.started', (info) =>
+  logFlow('info', 'agent.started', info),
+);
+bus.on('agent.stopped', (info) =>
+  logFlow('info', 'agent.stopped', info),
+);
+bus.on('task.completed', (info) =>
+  logFlow('info', 'task.completed', info),
+);
+bus.on('task.failed', (info) =>
+  logFlow('error', 'task.failed', info),
+);
 
 function onWebSocket(ws, eventName, handler) {
   if (typeof ws.on === 'function') {
@@ -2169,26 +2208,21 @@ async function handleTaskDispatch(ws, data) {
       if (result === null) return true;
     }
     const artifacts = parseArtifacts(result);
-    sendTaskComplete({ task_id: task.id, result, artifacts });
-    logFlow('info', 'task.execution_completed', {
+    bus.emit('task.completed', {
       task_id: task.id,
       cli_tool: task.cli_tool,
       agent_id: task.agent_id,
       conversation_id: task.conversation_id,
-      result_len: typeof result === 'string' ? result.length : 0,
-      artifact_count: artifacts.length,
+      result,
+      artifacts,
     });
   } catch (error) {
-    sendTaskComplete({
-      task_id: task.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    logFlow('error', 'task.execution_failed', {
+    bus.emit('task.failed', {
       task_id: task.id,
       cli_tool: task.cli_tool,
       agent_id: task.agent_id,
       conversation_id: task.conversation_id,
-      error: errorMessage(error),
+      error: error instanceof Error ? error.message : String(error),
     });
   }
   return true;
@@ -2201,21 +2235,59 @@ async function handleTaskDispatch(ws, data) {
 registerWsHandler('pong', () => true); // no-op
 registerWsHandler('ping', (ws) => { safeSend(ws, JSON.stringify({ type: 'pong' })); return true; });
 registerWsHandler('agent.start', (ws, data) => {
-  logFlow('info', 'ws.control_received', { type: 'agent.start', agent_id: data.agent_id, cli_tool: data.cli_tool });
-  enqueueAgentStart(ws, data);
+  bus.emit('agent.start_request', { ws, data });
   return true;
 });
 registerWsHandler('agent.stop', (ws, data) => {
-  logFlow('info', 'ws.control_received', { type: 'agent.stop', agent_id: data.agent_id });
-  handleAgentStop(ws, data);
+  bus.emit('agent.stop_request', { ws, data });
   return true;
 });
 registerWsHandler('agent.restart', (ws, data) => {
-  logFlow('info', 'ws.control_received', { type: 'agent.restart', agent_id: data.agent_id, cli_tool: data.cli_tool });
-  handleAgentRestart(ws, data);
+  bus.emit('agent.restart_request', { ws, data });
   return true;
 });
-registerWsHandler('task.dispatch', handleTaskDispatch);
+registerWsHandler('task.dispatch', (ws, data) => {
+  bus.emit('task.dispatch', { ws, data });
+  return true;
+});
+
+// ---------------------------------------------------------------------------
+// 事件订阅者——业务逻辑与 WS 接收解耦
+// ---------------------------------------------------------------------------
+
+// agent 生命周期：start/stop/restart 请求 → 实际执行
+bus.on('agent.start_request', ({ ws, data }) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.start', agent_id: data.agent_id, cli_tool: data.cli_tool });
+  enqueueAgentStart(ws, data);
+});
+bus.on('agent.stop_request', ({ ws, data }) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.stop', agent_id: data.agent_id });
+  handleAgentStop(ws, data);
+});
+bus.on('agent.restart_request', ({ ws, data }) => {
+  logFlow('info', 'ws.control_received', { type: 'agent.restart', agent_id: data.agent_id, cli_tool: data.cli_tool });
+  handleAgentRestart(ws, data);
+});
+
+// task 执行：dispatch → execute → completed/failed
+bus.on('task.dispatch', async ({ ws, data }) => {
+  await handleTaskDispatch(ws, data);
+});
+
+// task 结果回传——独立于执行逻辑，方便未来加重试/metrics
+bus.on('task.completed', (info) => {
+  sendTaskComplete({
+    task_id: info.task_id,
+    result: info.result,
+    artifacts: info.artifacts,
+  });
+});
+bus.on('task.failed', (info) => {
+  sendTaskComplete({
+    task_id: info.task_id,
+    error: info.error,
+  });
+});
 
 async function connectWS(serverURL, apiKey) {
   if (!WebSocket) {
