@@ -1956,19 +1956,25 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
     return response.result;
   }
 
-  // Kill existing process if serving a different conversation
-  if (slot?.process) {
-    logFlow('info', 'agent.conversation_switch', {
+  // 如果已有持久进程在运行且属于同一会话，直接复用（fast path）。
+  // 不同对话也复用同一进程——stream-json 模式支持多 turn，
+  // 杀进程会导致其他对话的任务失败。
+  if (slot?.sendPrompt) {
+    logFlow('info', 'agent.reuse_slot', {
       agent_id: agentId,
-      from_conversation_id: slot.currentConversationId,
-      to_conversation_id: conversationId,
-      previous_session_id: slot.sessionId,
+      conversation_id: conversationId,
+      current_conversation_id: slot.currentConversationId,
+      same_conv: slot.currentConversationId === conversationId,
     });
-    stopAgentProcess(agentId);
-    await sleep(500);
+    // 更新当前对话 ID（用于日志追踪）
+    slot.currentConversationId = conversationId;
+    // 复用已有进程执行 prompt
+    const response = await slot.sendPrompt(userPrompt);
+    if (response.error) throw new Error(response.error);
+    return response.result;
   }
 
-  // Spawn with --resume if we have a saved session, otherwise fresh
+  // 没有已有进程——spawn 新的
   let result;
   if (validSessionId) {
     try {
