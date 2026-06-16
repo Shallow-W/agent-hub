@@ -640,9 +640,15 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	if serverURL == "" {
 		serverURL = "http://localhost:8080" // fallback when not configured
 	}
-	// 使用本地 file: 路径运行 daemon（@agenthub/daemon 未发布到 npm）。
+	// 生成两条连接命令：
+	// 1. 本地测试命令——直接 node 执行，无需 npm，方便开发调试
+	// 2. 通用 npx 命令——发布到 npm 后其他电脑可用
 	npmPath := resolveDaemonNPMPath()
-	command := fmt.Sprintf("npx \"@agenthub/daemon@file:%s\" --server-url %s --api-key %s", npmPath, serverURL, apiKey)
+	localCommand := fmt.Sprintf("node %s/bin/agenthub-daemon.js --server-url %s --api-key %s", npmPath, serverURL, apiKey)
+	npxCommand := fmt.Sprintf("npx @hust-agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
+	// 主命令用本地测试（当前未发布到 npm）
+	command := localCommand
+	_ = npxCommand // 保留，后续前端可展示两条命令
 	return command, machine, apiKey, nil
 }
 
