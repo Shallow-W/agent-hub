@@ -70,16 +70,18 @@ const AgentsView: React.FC = () => {
         </div>
       </div>
       {/* 右侧面板 */}
-      {selectedAgent ? (
-        <AgentProfile agent={selectedAgent} onMessage={handleStartAgentChat} />
-      ) : (
-        <ComputerProfile
-          machineId={selectedMachineId}
-          selectedAgentId={selectedAgentId}
-          onSelectAgent={handleSelectAgent}
-          onClearSelection={() => setSelectedMachine(null)}
-        />
-      )}
+      <div className={styles.rightPanel}>
+        {selectedAgent ? (
+          <AgentProfile agent={selectedAgent} onMessage={handleStartAgentChat} />
+        ) : (
+          <ComputerProfile
+            machineId={selectedMachineId}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={handleSelectAgent}
+            onClearSelection={() => setSelectedMachine(null)}
+          />
+        )}
+      </div>
     </div>
   );
 };

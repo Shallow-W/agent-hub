@@ -41,15 +41,17 @@ const ChatView: React.FC<ChatViewProps> = ({ onCreate, onUpload }) => {
         <ConversationList onNavigateContacts={() => {}} />
       </div>
       {/* 右侧栏：聊天窗口 */}
-      {activeId ? (
-        <ChatWindow />
-      ) : (
-        <div className={viewStyles.empty}>
-          <span className={viewStyles.icon} role="img" aria-label="chat">🤖</span>
-          <div className={viewStyles.title}>欢迎使用 AgentHub</div>
-          <div className={viewStyles.subtitle}>选择一个对话或创建新对话开始聊天</div>
-        </div>
-      )}
+      <div className={styles.rightPanel}>
+        {activeId ? (
+          <ChatWindow />
+        ) : (
+          <div className={viewStyles.empty}>
+            <span className={viewStyles.icon} role="img" aria-label="chat">🤖</span>
+            <div className={viewStyles.title}>欢迎使用 AgentHub</div>
+            <div className={viewStyles.subtitle}>选择一个对话或创建新对话开始聊天</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

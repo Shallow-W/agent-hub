@@ -171,13 +171,29 @@
   flex: 1;
   display: flex;
   flex-direction: row;
+  gap: 12px;
   overflow: hidden;
   height: 100%;
-  background-color: var(--color-bg-chat);
-  border-radius: var(--border-radius-lg);
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+/* 右侧内容面板——ChatWindow / AgentProfile / ComputerProfile 等 */
+.rightPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  min-width: 0;
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-card);
-  animation: panelEnter 0.55s ease 0.16s both;
 }
 
 .taskPanel {
@@ -250,6 +266,11 @@
 
 :global(html.dark) .chatPanel {
   background-color: var(--color-bg-chat);
+}
+
+:global(html.dark) .rightPanel {
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 
 :global(html.dark) .taskPanel {

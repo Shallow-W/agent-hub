@@ -30,15 +30,17 @@ const KnowledgeView: React.FC = () => {
         selectedKbId={selectedKbId}
       />
       {/* 右侧面板 */}
-      {selectedKnowledgeFile && selectedKbId ? (
-        <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
-      ) : (
-        <div className={styles.emptyRightPanel}>
-          <div className={styles.emptyRightIcon}>📚</div>
-          <div className={styles.emptyRightTitle}>知识库管理</div>
-          <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
-        </div>
-      )}
+      <div className={styles.rightPanel}>
+        {selectedKnowledgeFile && selectedKbId ? (
+          <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
+        ) : (
+          <div className={styles.emptyRightPanel}>
+            <div className={styles.emptyRightIcon}>📚</div>
+            <div className={styles.emptyRightTitle}>知识库管理</div>
+            <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
