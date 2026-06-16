@@ -23,7 +23,7 @@ const KnowledgeView: React.FC = () => {
   }, [knowledgeBases, selectedKnowledgeFile, selectedKbId, setSelectedKnowledgeFile]);
 
   return (
-    <>
+    <div className={styles.chatPanel}>
       <KnowledgePanel
         onFileSelect={setSelectedKnowledgeFile}
         selectedFileId={selectedKnowledgeFile?.id ?? null}
@@ -39,7 +39,7 @@ const KnowledgeView: React.FC = () => {
           <div className={styles.emptyRightDesc}>在左侧面板中管理你的知识库和文件</div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

@@ -52,21 +52,23 @@ const ContactsView: React.FC = () => {
   }, [fetchFriends, fetchPending, fetchConversations]);
 
   return (
-    <>
-      <div className={styles.convPanelHeader}>
-        <span className={styles.convPanelTitle}>联系人</span>
-        <div className={styles.convPanelTools}>
-          <Button type="text" icon={<PlusOutlined />} aria-label="新建群聊" onClick={() => navigate('/')} />
-          <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={handleRefresh} />
+    <div className={styles.chatPanel}>
+      <div className={styles.convPanel}>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>联系人</span>
+          <div className={styles.convPanelTools}>
+            <Button type="text" icon={<PlusOutlined />} aria-label="新建群聊" onClick={() => navigate('/')} />
+            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={handleRefresh} />
+          </div>
         </div>
+        <ContactsPanel
+          conversations={conversations}
+          onStartChat={handleStartChat}
+          onStartAgentChat={handleStartAgentChat}
+          onSwitchChat={() => navigate('/')}
+        />
       </div>
-      <ContactsPanel
-        conversations={conversations}
-        onStartChat={handleStartChat}
-        onStartAgentChat={handleStartAgentChat}
-        onSwitchChat={() => navigate('/')}
-      />
-    </>
+    </div>
   );
 };
 

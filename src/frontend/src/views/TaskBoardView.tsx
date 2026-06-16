@@ -481,7 +481,7 @@ const TaskBoardView: React.FC = () => {
   const emptyDescription = activeConversationId ? '当前对话暂无任务' : '请先在左侧选择一个对话';
 
   return (
-    <section className={styles.page}>
+    <div className={styles.page}>
       <header className={styles.workspaceHeader}>
         <div className={styles.workspaceIcon}><TeamOutlined /></div>
         <div className={styles.workspaceMeta}>
@@ -573,7 +573,7 @@ const TaskBoardView: React.FC = () => {
         visible={detailTask !== null}
         onClose={() => setDetailTask(null)}
       />
-    </section>
+    </div>
   );
 };
 

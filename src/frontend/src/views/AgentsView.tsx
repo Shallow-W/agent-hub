@@ -52,20 +52,22 @@ const AgentsView: React.FC = () => {
   }, [fetchAgents, fetchDaemonMachines]);
 
   return (
-    <>
-      <div className={styles.convPanelHeader}>
-        <span className={styles.convPanelTitle}>智能体</span>
-        <div className={styles.convPanelTools}>
-          <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={handleRefresh} />
+    <div className={styles.chatPanel}>
+      <div className={styles.convPanel}>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>智能体</span>
+          <div className={styles.convPanelTools}>
+            <Button type="text" icon={<ReloadOutlined />} aria-label="刷新" onClick={handleRefresh} />
+          </div>
         </div>
-      </div>
-      <div className={styles.middleScroll}>
-        <AgentList
-          selectedAgentId={selectedAgentId}
-          selectedMachineId={selectedMachineId}
-          onSelect={handleSelectAgent}
-          onSelectMachine={setSelectedMachine}
-        />
+        <div className={styles.middleScroll}>
+          <AgentList
+            selectedAgentId={selectedAgentId}
+            selectedMachineId={selectedMachineId}
+            onSelect={handleSelectAgent}
+            onSelectMachine={setSelectedMachine}
+          />
+        </div>
       </div>
       {/* 右侧面板 */}
       {selectedAgent ? (
@@ -78,7 +80,7 @@ const AgentsView: React.FC = () => {
           onClearSelection={() => setSelectedMachine(null)}
         />
       )}
-    </>
+    </div>
   );
 };
 

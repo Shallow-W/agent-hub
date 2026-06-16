@@ -130,8 +130,9 @@ const AppLayout: React.FC = () => {
           {settingsCollapsed ? <RightOutlined /> : <LeftOutlined />}
         </button>
 
-        {/* 右侧：React Router Outlet 渲染当前路由对应的视图 */}
-        <div className={styles.chatPanel}>
+        {/* 右侧：React Router Outlet 渲染当前路由对应的视图。
+            各视图自带 chatPanel 容器，这里只需 flex:1 占满剩余空间。 */}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', height: '100%' }}>
           <Outlet />
         </div>
       </div>

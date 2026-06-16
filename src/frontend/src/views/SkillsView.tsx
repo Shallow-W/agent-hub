@@ -41,11 +41,12 @@ const SkillsView: React.FC = () => {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
 
   return (
-    <>
-      <div className={styles.convPanelHeader}>
-        <span className={styles.convPanelTitle}>技能</span>
-      </div>
-      <div className={listStyles.list}>
+    <div className={styles.chatPanel}>
+      <div className={styles.convPanel}>
+        <div className={styles.convPanelHeader}>
+          <span className={styles.convPanelTitle}>技能</span>
+        </div>
+        <div className={listStyles.list}>
         <div className={listStyles.searchWrap}>
           <Input
             prefix={<SearchOutlined />}
@@ -80,6 +81,7 @@ const SkillsView: React.FC = () => {
             })}
           </div>
         </div>
+        </div>
       </div>
       {/* 右侧面板 */}
       {selectedAgent ? (
@@ -90,7 +92,7 @@ const SkillsView: React.FC = () => {
           <div className={styles.emptyRightDesc}>左侧会展示每个 Agent 的已分配 Skills 和底座 Skills 数量</div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 
