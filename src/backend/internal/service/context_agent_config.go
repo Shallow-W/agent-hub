@@ -59,6 +59,16 @@ func BuildAgentConfigText(agent *model.Agent, contextStr string, taskText string
 			sb.WriteString("\n\n")
 		}
 	}
+
+	// render_card 工具使用说明
+	sb.WriteString("[卡片渲染工具]\n")
+	sb.WriteString("调用 render_card 工具在聊天中渲染交互式卡片：\n")
+	sb.WriteString("- 方案选择：render_card(card_type=\"plan_selection\", title=\"标题\", options=[{id,label,description,recommended}])\n")
+	sb.WriteString("- 审批确认：render_card(card_type=\"approval\", title=\"标题\", content=\"需要确认的内容\")\n")
+	sb.WriteString("- 任务进度：render_card(card_type=\"task_status\", title=\"标题\", tasks=[{name,status}])\n")
+	sb.WriteString("- 信息展示：render_card(card_type=\"info\", title=\"标题\", fields={key:value})\n")
+	sb.WriteString("卡片会自动出现在聊天界面，用户可直接交互。\n\n")
+
 	sb.WriteString(contextStr)
 	return sb.String()
 }

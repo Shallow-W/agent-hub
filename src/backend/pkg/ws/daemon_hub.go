@@ -20,6 +20,7 @@ type TaskResult struct {
 	Result    string           `json:"result"`
 	Error     string           `json:"error"`
 	Artifacts []ArtifactResult `json:"artifacts,omitempty"`
+	Cards     []map[string]any `json:"cards,omitempty"` // render_card 工具渲染的交互式卡片
 }
 
 // ArtifactResult daemon 解析出的结构化产物（随 task.complete 上行）。

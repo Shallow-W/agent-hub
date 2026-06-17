@@ -20,6 +20,24 @@ const INBOUND_WATCHDOG_MS = 70000;
 const POLL_INTERVAL_MS = 3000;
 const DAEMON_LOG_EVENT = 'daemon_flow';
 
+// 当前任务的卡片文件路径——spawnStreamJsonProcess 设置，handleTaskDispatch 完成后读取
+let currentCardFile = null;
+
+// 读取 MCP 子进程通过 render_card 工具写入的卡片，并清理临时文件
+function readRenderedCards() {
+  if (!currentCardFile) return [];
+  try {
+    const data = fs.readFileSync(currentCardFile, 'utf8');
+    fs.unlinkSync(currentCardFile); // 清理临时文件
+    currentCardFile = null;
+    const cards = JSON.parse(data);
+    return Array.isArray(cards) ? cards : [];
+  } catch {
+    currentCardFile = null;
+    return [];
+  }
+}
+
 function logValue(value) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -246,19 +264,20 @@ const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 // buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
 // AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
 // group context, matching Claude Code's per-task injection behavior.
-function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
+function buildPlatformMcpServerArgs(conversationId, userId, agentId, cardFile) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
   if (agentId) mcpServerArgs.push('--agent-id', agentId);
+  if (cardFile) mcpServerArgs.push('--card-file', cardFile);
   return mcpServerArgs;
 }
 
 // buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
-function buildPlatformMcpArgs(conversationId, userId, agentId) {
-  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+function buildPlatformMcpArgs(conversationId, userId, agentId, cardFile) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId, cardFile);
   if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
@@ -1790,7 +1809,10 @@ function stopAgentProcess(agent_id) {
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
+  // 为此任务创建临时卡片文件，MCP 子进程通过 --card-file 写入渲染的卡片
+  const cardFile = path.join(os.tmpdir(), `agenthub-cards-${agentId}-${Date.now()}.json`);
+  currentCardFile = cardFile;
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId, cardFile);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -2259,6 +2281,8 @@ async function handleTaskDispatch(ws, data) {
       if (result === null) return true;
     }
     const artifacts = parseArtifacts(result);
+    // 读取 MCP 子进程通过 render_card 工具写入的卡片文件
+    const cards = readRenderedCards();
     bus.emit('task.completed', {
       task_id: task.id,
       cli_tool: task.cli_tool,
@@ -2266,6 +2290,7 @@ async function handleTaskDispatch(ws, data) {
       conversation_id: task.conversation_id,
       result,
       artifacts,
+      cards,
     });
   } catch (error) {
     bus.emit('task.failed', {
@@ -2331,6 +2356,7 @@ bus.on('task.completed', (info) => {
     task_id: info.task_id,
     result: info.result,
     artifacts: info.artifacts,
+    cards: info.cards || [],
   });
 });
 bus.on('task.failed', (info) => {
@@ -3106,12 +3132,115 @@ const MCP_TOOLS = [
       });
     },
   },
+  {
+    name: 'render_card',
+    description: '渲染交互式卡片到聊天消息中。用于：方案选择(plan_selection)、审批确认(approval)、任务进度(task_status)、信息展示(info)。卡片会自动出现在聊天界面，用户可直接交互。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        card_type: {
+          type: 'string',
+          description: '卡片类型：plan_selection（方案选择）、approval（审批确认）、task_status（任务进度）、info（信息展示）',
+        },
+        title: { type: 'string', description: '卡片标题' },
+        // plan_selection
+        options: {
+          type: 'array',
+          description: '方案选项列表（plan_selection 类型必填）',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: '选项唯一标识' },
+              label: { type: 'string', description: '选项名称' },
+              description: { type: 'string', description: '选项描述' },
+              recommended: { type: 'boolean', description: '是否推荐选项' },
+            },
+          },
+        },
+        // approval
+        content: { type: 'string', description: '需要确认的内容描述（approval 类型必填）' },
+        actions: {
+          type: 'array',
+          description: '操作按钮列表（approval 类型可选，默认允许/拒绝）',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              label: { type: 'string' },
+              style: { type: 'string', enum: ['primary', 'danger'] },
+            },
+          },
+        },
+        // task_status
+        tasks: {
+          type: 'array',
+          description: '任务步骤列表（task_status 类型必填）',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              status: { type: 'string', enum: ['done', 'running', 'pending', 'failed'] },
+            },
+          },
+        },
+        // info
+        fields: {
+          type: 'object',
+          description: '键值对信息（info 类型，展示为表格）',
+          additionalProperties: true,
+        },
+      },
+      required: ['card_type', 'title'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      const card = {
+        type: args.card_type,
+        id: crypto.randomUUID(),
+        title: args.title,
+      };
+      // 按类型填充 payload
+      if (args.card_type === 'plan_selection' && args.options) {
+        card.options = args.options;
+      } else if (args.card_type === 'approval') {
+        card.message = args.content || '';
+        card.actions = args.actions || [
+          { id: 'allow', label: '允许', style: 'primary' },
+          { id: 'deny', label: '拒绝', style: 'danger' },
+        ];
+      } else if (args.card_type === 'task_status' && args.tasks) {
+        card.tasks = args.tasks;
+      } else if (args.card_type === 'info' && args.fields) {
+        card.fields = args.fields;
+      }
+
+      // 通过 --card-file 参数或环境变量指定的文件写入卡片（跨进程通信）
+      const cardFile = readArg('--card-file') || process.env.AGENTHUB_CARD_FILE;
+      if (cardFile) {
+        try {
+          let existing = [];
+          try { existing = JSON.parse(fs.readFileSync(cardFile, 'utf8')); } catch { /* first card */ }
+          existing.push(card);
+          fs.writeFileSync(cardFile, JSON.stringify(existing));
+        } catch (e) {
+          logFlow('warn', 'card.write_failed', { card_type: args.card_type, error: errorMessage(e) });
+        }
+      }
+
+      return {
+        rendered: true,
+        card_type: args.card_type,
+        message: `卡片已渲染：${args.title}`,
+      };
+    },
+  },
 ];
 
 const DEFAULT_AGENT_TOOLS = [
   'list_group_agents',
   'get_messages',
   'get_agent_skill',
+  'render_card', // 卡片渲染工具——所有 agent 默认可用
   'list_tasks',
   'create_task',
   'update_task',

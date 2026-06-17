@@ -997,10 +997,17 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
 
-	// 从 agent 回复中提取交互式卡片 JSON（plan/progress/confirm 等）
-	if cardsJSON := parseCardsFromResult(result.Result); cardsJSON != "" {
+	// 存储交互式卡片——优先使用 render_card 工具渲染的 cards（可靠），
+	// 回退到从文本中解析的 cards（容错）。
+	if len(result.Cards) > 0 {
+		cardsJSON, _ := json.Marshal(result.Cards)
+		if err := s.msgRepo.SetMessageCards(ctx, msg.ID, string(cardsJSON)); err != nil {
+			slog.Warn("set message cards (tool) failed", "message_id", msg.ID, "error", err)
+		}
+		msg.CardsJSON = string(cardsJSON)
+	} else if cardsJSON := parseCardsFromResult(result.Result); cardsJSON != "" {
 		if err := s.msgRepo.SetMessageCards(ctx, msg.ID, cardsJSON); err != nil {
-			slog.Warn("set message cards failed", "message_id", msg.ID, "error", err)
+			slog.Warn("set message cards (parsed) failed", "message_id", msg.ID, "error", err)
 		}
 		msg.CardsJSON = cardsJSON
 	}
