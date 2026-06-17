@@ -1,0 +1,125 @@
+.card {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 8px 0;
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.02));
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.cardIcon {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.cardTitle {
+  font-size: 14px;
+  flex: 1;
+}
+
+.cardBadge {
+  font-size: 12px;
+}
+
+.cardFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Plan card */
+.radioGroup {
+  width: 100%;
+}
+
+.radioItem {
+  align-items: flex-start;
+  padding: 6px 0;
+}
+
+.optionRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.optionLabel {
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recommended {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.optionDesc {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.optionTasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.taskChip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--color-text-secondary);
+}
+
+/* Progress card */
+.taskList {
+  margin-top: 8px;
+}
+
+.progressTask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.progressTaskName {
+  font-size: 13px;
+}
+
+/* Confirm card */
+.confirmMessage {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(250, 173, 20, 0.06);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Dark mode */
+:global(html.dark) .card {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:global(html.dark) .taskChip {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .confirmMessage {
+  background: rgba(250, 173, 20, 0.1);
+}

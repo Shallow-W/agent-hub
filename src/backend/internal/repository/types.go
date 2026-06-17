@@ -26,6 +26,8 @@ type MessageStore interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+	SetMessageCards(ctx context.Context, messageID, cardsJSON string) error
+	UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)

@@ -27,7 +27,9 @@ type Message struct {
 	Attachments    []MessageAttachment `json:"attachments,omitempty" db:"-"`
 	Artifacts      []Artifact          `json:"artifacts,omitempty" db:"-"` // 结构化产物（独立 artifacts 表关联加载，不占用 artifacts_json）
 	ReplyToMessage *ReplyToPreview     `json:"reply_to_message,omitempty" db:"-"`
-	Mentions       []string            `json:"mentions,omitempty" db:"-"` // JSON array of user IDs, stored in mentions TEXT column
+	Mentions       []string            `json:"mentions,omitempty" db:"-"`  // JSON array of user IDs, stored in mentions TEXT column
+	CardsJSON      string              `json:"cards_json,omitempty" db:"cards_json"`
+	Cards          []map[string]any    `json:"cards,omitempty" db:"-"` // 交互式卡片（plan/progress/confirm/result），从 cards_json 反序列化
 }
 
 // MessagePin represents a message pinned into the shared conversation context.

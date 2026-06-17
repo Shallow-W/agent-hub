@@ -1,7 +1,10 @@
-import React, { useState, useMemo, type ReactNode } from 'react';
+import React, { useState, useMemo, useCallback, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
+import { renderCards } from './cards/CardRegistry';
+import type { InteractiveCard } from '@/types/card';
+import { useMessageStore } from '@/store/messageStore';
 import {
   CloseOutlined,
   CopyOutlined,
@@ -415,6 +418,34 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const collapsed = shouldCollapse && !expanded;
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
 
+  // 解析交互式卡片
+  const parsedCards = useMemo<InteractiveCard[]>(() => {
+    if (!message.cards_json) return [];
+    try {
+      const parsed = JSON.parse(message.cards_json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      // 尝试从 message.cards 解析（后端返回结构化数据时）
+      if (message.cards && Array.isArray(message.cards)) return message.cards;
+      return [];
+    }
+  }, [message.cards_json, message.cards]);
+
+  // 卡片交互回调——用户选择方案/确认操作后发送消息给 Agent
+  const handleCardAction = useCallback((_cardId: string, action: string, data?: Record<string, unknown>) => {
+    // 构造人类可读的消息内容（Agent 能理解的格式）
+    let content = '';
+    if (action === 'select_plan' && data?.option_id) {
+      content = `[选择方案 ${data.option_id}]`;
+    } else if (action === 'confirm' && data?.action_id) {
+      content = `[确认操作: ${data.action_id}]`;
+    } else {
+      content = `[卡片交互: ${action}]`;
+    }
+    // 发送为普通消息（Agent 通过 session 上下文理解上下文）
+    void useMessageStore.getState().sendMessage(message.conversation_id, content);
+  }, [message.conversation_id]);
+
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content ?? '').then(() => {
       antMessage.success('已复制');
@@ -640,6 +671,11 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {deployment && (
               <div className={styles.deployCard}>
                 <DeployStatusCard deployment={deployment} />
+              </div>
+            )}
+            {parsedCards.length > 0 && (
+              <div className={styles.cardsContainer}>
+                {renderCards(parsedCards, message.conversation_id, message.id, handleCardAction)}
               </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}

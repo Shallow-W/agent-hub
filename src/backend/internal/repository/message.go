@@ -28,6 +28,7 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *A
 // messageCols 通用消息查询列（含 JOIN users + agents 获取 username）
 const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
 COALESCE(a.name, u.username, '') AS username,
+COALESCE(m.cards_json, '') AS cards_json,
 EXISTS (
 	SELECT 1 FROM message_pins mp
 	WHERE mp.message_id = m.id AND mp.conversation_id = m.conversation_id AND mp.enabled = TRUE
@@ -103,6 +104,14 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	// 填充 mentions（直接从内存设置，无需再查 DB）
 	m.Mentions = mentions
 
+	// 反序列化 cards_json
+	if m.CardsJSON != "" {
+		var cards []map[string]any
+		if err := json.Unmarshal([]byte(m.CardsJSON), &cards); err == nil {
+			m.Cards = cards
+		}
+	}
+
 	return &m, nil
 }
 
@@ -113,6 +122,33 @@ func (r *MessageRepo) SaveArtifacts(ctx context.Context, messageID string, artif
 		return nil
 	}
 	return r.artifactRepo.CreateArtifacts(ctx, messageID, artifacts)
+}
+
+// UpdateMessageCards 更新消息的 cards_json 字段（用户选择方案/确认操作后调用）。
+func (r *MessageRepo) UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE messages SET cards_json = $2 WHERE id = $1`,
+		messageID, cardsJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("update message cards: %w", err)
+	}
+	return nil
+}
+
+// SetMessageCards 在消息创建后设置 cards_json（agent 回复携带卡片时调用）。
+func (r *MessageRepo) SetMessageCards(ctx context.Context, messageID, cardsJSON string) error {
+	if cardsJSON == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE messages SET cards_json = $2 WHERE id = $1`,
+		messageID, cardsJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("set message cards: %w", err)
+	}
+	return nil
 }
 
 // MarkConversationRead 更新会话成员的已读时间戳

@@ -515,6 +515,10 @@
   max-width: 460px;
 }
 
+.cardsContainer {
+  margin-top: 8px;
+}
+
 .threadBtn {
   display: inline-flex;
   align-items: center;

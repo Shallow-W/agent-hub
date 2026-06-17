@@ -113,6 +113,7 @@ func Setup(r *gin.Engine, deps Deps) {
 			convRoutes.POST("/:id/messages/:messageId/hide", deps.MsgHandler.HideMessage)
 			convRoutes.DELETE("/:id/messages/:messageId/hide", deps.MsgHandler.UnhideMessage)
 			convRoutes.GET("/:id/messages/:messageId/replies", deps.MsgHandler.Replies)
+			convRoutes.PATCH("/:id/messages/:messageId/cards", deps.MsgHandler.UpdateCard)
 		}
 		apiGroup.GET("/conversations/:id/agents", deps.ConvHandler.ListAgents)
 		apiGroup.POST("/conversations/agent", deps.ConvHandler.GetOrCreateAgentPrivate)

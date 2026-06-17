@@ -49,6 +49,8 @@ export interface Message {
   reply_to?: string | null;
   reply_to_message?: ReplyToPreview | null;
   mentions?: string[];
+  cards_json?: string;
+  cards?: import('./card').InteractiveCard[];
 }
 
 export interface PinnedMessage {

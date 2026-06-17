@@ -299,6 +299,28 @@ func (h *MessageHandler) Unpin(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// UpdateCard 更新消息中的交互式卡片状态（用户选择方案/确认操作/进度更新）。
+func (h *MessageHandler) UpdateCard(c *gin.Context) {
+	messageID := c.Param("messageId")
+	if messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40052, "缺少消息 ID")
+		return
+	}
+	var req struct {
+		CardsJSON string `json:"cards_json"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40053, "参数错误")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if err := h.svc.UpdateMessageCards(c.Request.Context(), messageID, userID, req.CardsJSON); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50037, "更新卡片失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}
+
 // HideMessage 当前用户隐藏消息（仅对自己不可见，其他用户仍可见）。
 func (h *MessageHandler) HideMessage(c *gin.Context) {
 	convID := c.Param("id")

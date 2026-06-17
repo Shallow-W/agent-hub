@@ -53,6 +53,8 @@ type MsgRepo interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+	SetMessageCards(ctx context.Context, messageID, cardsJSON string) error
+	UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
@@ -95,12 +97,57 @@ func artifactsFromTaskResultOrMarkdown(results []ws.ArtifactResult, content stri
 }
 
 func hasCodeArtifact(artifacts []model.Artifact) bool {
-	for _, artifact := range artifacts {
-		if artifact.Type == "code" {
+	for _, a := range artifacts {
+		if a.Type == "code" {
 			return true
 		}
 	}
 	return false
+}
+
+// parseCardsFromResult 从 agent 的回复文本中提取结构化卡片 JSON。
+// Agent 可以在回复中嵌入 ```json{"cards":[...]}``` 代码块，
+// 或直接返回 JSON {"cards":[...]}。
+func parseCardsFromResult(content string) string {
+	// 尝试解析整个 content 为 JSON（agent 可能只返回 JSON）
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(content), &probe); err == nil {
+		if cards, ok := probe["cards"]; ok {
+			if b, err := json.Marshal(cards); err == nil {
+				return string(b)
+			}
+		}
+	}
+
+	// 尝试从 markdown 代码块中提取
+	lines := strings.Split(content, "\n")
+	inJSONBlock := false
+	var jsonBuf strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "```json" || trimmed == "```JSON" {
+			inJSONBlock = true
+			jsonBuf.Reset()
+			continue
+		}
+		if inJSONBlock && trimmed == "```" {
+			inJSONBlock = false
+			var probe2 map[string]any
+			if err := json.Unmarshal([]byte(jsonBuf.String()), &probe2); err == nil {
+				if cards, ok := probe2["cards"]; ok {
+					if b, err := json.Marshal(cards); err == nil {
+						return string(b)
+					}
+				}
+			}
+			continue
+		}
+		if inJSONBlock {
+			jsonBuf.WriteString(line)
+			jsonBuf.WriteString("\n")
+		}
+	}
+	return ""
 }
 
 func codeArtifactsFromMarkdown(content string) []model.Artifact {
@@ -451,6 +498,11 @@ func (s *MessageService) HideMessage(ctx context.Context, userID, messageID stri
 // UnhideMessage 取消隐藏。
 func (s *MessageService) UnhideMessage(ctx context.Context, userID, messageID string) error {
 	return s.msgRepo.UnhideMessage(ctx, userID, messageID)
+}
+
+// UpdateMessageCards 更新消息的卡片状态（用户交互后调用）。
+func (s *MessageService) UpdateMessageCards(ctx context.Context, messageID, userID, cardsJSON string) error {
+	return s.msgRepo.UpdateMessageCards(ctx, messageID, cardsJSON)
 }
 
 // GetUnreadMessages 获取离线/未读消息
@@ -943,6 +995,14 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, replyTo, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
+	}
+
+	// 从 agent 回复中提取交互式卡片 JSON（plan/progress/confirm 等）
+	if cardsJSON := parseCardsFromResult(result.Result); cardsJSON != "" {
+		if err := s.msgRepo.SetMessageCards(ctx, msg.ID, cardsJSON); err != nil {
+			slog.Warn("set message cards failed", "message_id", msg.ID, "error", err)
+		}
+		msg.CardsJSON = cardsJSON
 	}
 
 	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
