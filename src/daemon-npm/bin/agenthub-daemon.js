@@ -20,20 +20,23 @@ const INBOUND_WATCHDOG_MS = 70000;
 const POLL_INTERVAL_MS = 3000;
 const DAEMON_LOG_EVENT = 'daemon_flow';
 
-// 当前任务的卡片文件路径——spawnStreamJsonProcess 设置，handleTaskDispatch 完成后读取
+  // 当前任务的卡片文件路径——spawnStreamJsonProcess 设置，handleTaskDispatch 完成后读取
 let currentCardFile = null;
+
+// 重置卡片文件（清空内容），用于每次 sendPrompt 前调用
+function resetCardFile(cardFile) {
+  if (!cardFile) return;
+  try { fs.writeFileSync(cardFile, '[]'); } catch { /* ignore */ }
+}
 
 // 读取 MCP 子进程通过 render_card 工具写入的卡片，并清理临时文件
 function readRenderedCards() {
   if (!currentCardFile) return [];
   try {
     const data = fs.readFileSync(currentCardFile, 'utf8');
-    fs.unlinkSync(currentCardFile); // 清理临时文件
-    currentCardFile = null;
     const cards = JSON.parse(data);
     return Array.isArray(cards) ? cards : [];
   } catch {
-    currentCardFile = null;
     return [];
   }
 }
@@ -1989,6 +1992,8 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
         session_id: slot.sessionId,
       });
     }
+    // 重置卡片文件，复用进程执行 prompt
+    if (slot.cardFile) { resetCardFile(slot.cardFile); currentCardFile = slot.cardFile; }
     const response = await slot.sendPrompt(prompt);
     if (response.error) throw new Error(response.error);
     return response.result;
@@ -2018,6 +2023,7 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       // 更新当前对话 ID（用于日志追踪）
       slot.currentConversationId = conversationId;
       // 复用已有进程执行 prompt
+      if (slot.cardFile) { resetCardFile(slot.cardFile); currentCardFile = slot.cardFile; }
       const response = await slot.sendPrompt(userPrompt);
       if (response.error) throw new Error(response.error);
       return response.result;
@@ -2070,9 +2076,10 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   runningAgents.set(agentId, {
     process: child,
     sessionId,
-    currentConversationId: conversationId,
+    currentConversationVersion: conversationId,
     cliTool: 'claude',
     sendPrompt,
+    cardFile, // MCP 子进程写入卡片的临时文件路径
   });
   idleAgentConfigs.set(agentId, { cliTool: 'claude', sessionId, systemPrompt: systemPrompt || '' });
   agentTurnStates.set(agentId, 'idle');
@@ -2089,7 +2096,8 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
     resumed: Boolean(validSessionId),
   });
 
-  // Send the prompt
+  // Send the prompt (currentCardFile was set in spawnStreamJsonProcess)
+  resetCardFile(currentCardFile);
   const response = await sendPrompt(prompt);
   if (response.error) throw new Error(response.error);
   return response.result;
