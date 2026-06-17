@@ -41,6 +41,8 @@ export interface PlanOption {
 export interface PlanCard extends BaseCard {
   type: 'plan';
   options: PlanOption[];
+  /** 用户已选择的选项 ID（state=resolved 时由后端持久化） */
+  selected_option?: string;
 }
 
 /** 执行进度卡片 */
@@ -65,6 +67,8 @@ export interface ConfirmCard extends BaseCard {
   type: 'confirm';
   message: string;
   actions: ConfirmAction[];
+  /** 用户已选择的操作 ID（state=resolved 时由后端持久化） */
+  selected_action?: string;
 }
 
 /** 结果展示卡片 */

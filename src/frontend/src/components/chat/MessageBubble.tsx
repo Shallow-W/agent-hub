@@ -4,6 +4,7 @@ import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
 import { renderCards } from './cards/CardRegistry';
 import type { InteractiveCard } from '@/types/card';
+import { updateMessageCards as updateMessageCardsAPI } from '@/api/message';
 import { useMessageStore } from '@/store/messageStore';
 import {
   CloseOutlined,
@@ -431,12 +432,36 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     }
   }, [message.cards_json, message.cards]);
 
+  // 本地卡片状态（用户交互后乐观更新）
+  const [parsedCardsLocal, setParsedCardsLocal] = useState<InteractiveCard[]>(parsedCards);
+
   // 卡片交互回调——用户选择方案/确认操作后发送消息给 Agent
   const handleCardAction = useCallback((_cardId: string, action: string, data?: Record<string, unknown>) => {
-    // 构造人类可读的消息内容（Agent 能理解的格式）
+    // 1. 更新原消息的卡片状态（持久化用户选择）
+    if (parsedCards.length > 0) {
+      const updatedCards = parsedCards.map((c) => {
+        if (c.id !== _cardId) return c;
+        if (action === 'select_plan' && data?.option_id) {
+          return { ...c, state: 'resolved', selected_option: String(data.option_id) } as InteractiveCard;
+        }
+        if (action === 'confirm' && data?.action_id) {
+          return { ...c, state: 'resolved', selected_action: String(data.action_id) } as InteractiveCard;
+        }
+        return c;
+      });
+      const cardsJSON = JSON.stringify(updatedCards);
+      // 局部更新 UI（乐观）
+      setParsedCardsLocal(updatedCards);
+      // 持久化到 DB
+      void updateMessageCardsAPI(message.conversation_id, message.id, cardsJSON);
+    }
+
+    // 2. 构造人类可读的消息内容（Agent 能理解的格式）
     let content = '';
     if (action === 'select_plan' && data?.option_id) {
-      content = `[选择方案 ${data.option_id}]`;
+      const card = parsedCards.find((c) => c.id === _cardId);
+      const option = card && card.type === 'plan' ? card.options.find((o) => o.id === data.option_id) : undefined;
+      content = option ? `[选择方案 ${data.option_id}] ${option.label}` : `[选择方案 ${data.option_id}]`;
     } else if (action === 'confirm' && data?.action_id) {
       content = `[确认操作: ${data.action_id}]`;
     } else {
@@ -444,7 +469,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     }
     // 发送为普通消息（Agent 通过 session 上下文理解上下文）
     void useMessageStore.getState().sendMessage(message.conversation_id, content);
-  }, [message.conversation_id]);
+  }, [parsedCards, message.conversation_id, message.id]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content ?? '').then(() => {
@@ -675,7 +700,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             )}
             {parsedCards.length > 0 && (
               <div className={styles.cardsContainer}>
-                {renderCards(parsedCards, message.conversation_id, message.id, handleCardAction)}
+                {renderCards(parsedCardsLocal, message.conversation_id, message.id, handleCardAction)}
               </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}

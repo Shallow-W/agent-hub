@@ -4,9 +4,13 @@ import { ExclamationCircleOutlined } from '@ant-design/icons';
 import type { CardProps, ConfirmCard } from '@/types/card';
 import styles from './Cards.module.css';
 
-/** 确认操作卡片——用户点击允许/拒绝后通过 onAction 通知后端 */
+/** 确认操作卡片——用户点击允许/拒绝后通过 onAction 通知后端。
+ *  支持已解决状态（card.state === 'resolved'）——历史消息中显示已处理。 */
 export const ConfirmCardView: React.FC<CardProps<ConfirmCard>> = ({ card, onAction }) => {
-  const [resolved, setResolved] = useState<string>('');
+  const isResolved = card.state === 'resolved';
+  const persistedAction = card.selected_action;
+
+  const [resolved, setResolved] = useState<string>(persistedAction || '');
 
   const handleAction = (actionId: string) => {
     setResolved(actionId);
@@ -23,10 +27,17 @@ export const ConfirmCardView: React.FC<CardProps<ConfirmCard>> = ({ card, onActi
             {card.title || '操作确认'}
           </Typography.Text>
           <Typography.Text type={action?.style === 'danger' ? 'danger' : 'success'}>
-            {action?.label || '已处理'}
+            {isResolved ? '已处理' : '已确认'}
           </Typography.Text>
         </div>
         <Typography.Text type="secondary">{card.message}</Typography.Text>
+        {action && (
+          <div style={{ marginTop: 8 }}>
+            <Typography.Text type={action.style === 'danger' ? 'danger' : 'success'}>
+              {action.label}
+            </Typography.Text>
+          </div>
+        )}
       </div>
     );
   }

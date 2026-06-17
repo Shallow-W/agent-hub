@@ -108,3 +108,13 @@ export async function unhideMessage(
 ): Promise<void> {
   return del<void>(`/api/conversations/${conversationId}/messages/${messageId}/hide`);
 }
+
+export async function updateMessageCards(
+  conversationId: string,
+  messageId: string,
+  cardsJSON: string,
+): Promise<void> {
+  return put<void>(`/api/conversations/${conversationId}/messages/${messageId}/cards`, {
+    cards_json: cardsJSON,
+  });
+}
