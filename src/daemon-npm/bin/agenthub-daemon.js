@@ -3330,9 +3330,18 @@ async function resolveAllowedTools(ctx) {
     }
     tools = [...toolSet];
   }
+  // 平台内置工具始终注入（render_card 等），不受 tools_config 控制
+  const toolSet = new Set(tools);
+  for (const pt of PLATFORM_TOOL_NAMES) {
+    toolSet.add(pt);
+  }
+  tools = [...toolSet];
   ctx.allowedTools = tools;
   return ctx.allowedTools;
 }
+
+// 平台内置工具——所有 Agent 默认可用，不可通过 tools_config 禁用
+const PLATFORM_TOOL_NAMES = ['render_card'];
 
 async function isToolAllowed(ctx, toolName) {
   const allowed = await resolveAllowedTools(ctx);
