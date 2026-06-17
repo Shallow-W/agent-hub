@@ -2651,7 +2651,7 @@ const MCP_TOOLS = [
       type: 'object',
       properties: {
         conversation_id: { type: 'string', description: '会话 ID（默认为当前会话）' },
-        status: { type: 'string', description: '按状态过滤（todo/in_progress/done/cancelled）' },
+        status: { type: 'string', description: '按状态过滤（todo/in_progress/blocked/done/cancelled）' },
       },
       additionalProperties: false,
     },
@@ -2721,7 +2721,7 @@ const MCP_TOOLS = [
       type: 'object',
       properties: {
         id: { type: 'string', description: '任务 ID' },
-        status: { type: 'string', description: '目标状态（todo/in_progress/done/cancelled）' },
+        status: { type: 'string', description: '目标状态（todo/in_progress/blocked/done/cancelled）' },
       },
       required: ['id', 'status'],
       additionalProperties: false,
@@ -2815,19 +2815,18 @@ const MCP_TOOLS = [
       if (!agentId) throw new Error('agent_id is required');
       const systemPrompt = args.system_prompt;
       if (!systemPrompt) throw new Error('system_prompt is required');
-      // 先获取当前完整信息
-      const res = await ctx.callMcpApi('GET', `/mcp/agents`);
-      const agents = res && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
-      const agent = agents.find((a) => a && a.id === agentId);
+      // 用 detail 端点获取完整信息（list 端点会裁剪 tools_config/custom_skills 等字段）
+      const res = await ctx.callMcpApi('GET', `/mcp/agents/${encodeURIComponent(agentId)}`);
+      const agent = res && res.data ? res.data : res;
       if (!agent) throw new Error(`agent not found: ${agentId}`);
-      // 只改 system_prompt，其他字段原样传回
+      // 只改 system_prompt，其他字段原样传回。
+      // 不转发 capabilities_json——detail 端点会清空它，写回会覆盖实际值。
       return ctx.callMcpApi('PUT', `/mcp/agents/${encodeURIComponent(agentId)}`, {
         body: {
           name: agent.name,
           cli_tool: agent.cli_tool,
           system_prompt: systemPrompt,
           tools_config: agent.tools_config,
-          capabilities_json: agent.capabilities_json,
           custom_skills: agent.custom_skills,
           enable_management_tools: agent.enable_management_tools,
         },
@@ -3002,7 +3001,7 @@ const MCP_TOOLS = [
         cli_tool: agent.cli_tool,
         system_prompt: agent.system_prompt,
         tools_config: agent.tools_config,
-        capabilities_json: agent.capabilities_json,
+        // 不转发 capabilities_json——detail 端点清空它，写回会覆盖实际值
         custom_skills: agent.custom_skills,
         enable_management_tools: agent.enable_management_tools,
       };
@@ -3048,15 +3047,18 @@ const MCP_TOOLS = [
     name: 'list_toolsets',
     description: '列出可用的工具模板及其描述，用于创建或更新 Agent 时选择合适的工具配置。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    run: () => [
-      { name: 'none', label: '无工具', description: '不分配任何平台工具' },
-      { name: 'basic', label: '基础群聊', description: '包含群 Agent 列表、消息读取、Skill 查看等基础工具' },
-      { name: 'tasks', label: '任务协作', description: '包含任务看板的完整增删改查能力' },
-      { name: 'orchestrator', label: 'Orchestrator', description: '编排器模板，包含会话、任务、群组管理和知识库搜索' },
-      { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 发现、详情查询、创建和更新工具' },
-      { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 详情、配置更新、提示词修改、启停和删除' },
-      { name: 'knowledge', label: '知识库', description: '知识库列表、文件列表和关键词搜索' },
-    ],
+    run: () => {
+      if (TOOLSET_TEMPLATES && TOOLSET_TEMPLATES.length > 0) return TOOLSET_TEMPLATES;
+      return [
+        { name: 'none', label: '无工具', description: '不分配任何平台工具' },
+        { name: 'basic', label: '基础群聊', description: '基础群聊工具' },
+        { name: 'tasks', label: '任务协作', description: '任务看板 CRUD' },
+        { name: 'orchestrator', label: 'Orchestrator', description: '编排器模板' },
+        { name: 'agent_builder', label: 'Agent 创建', description: 'Agent 创建工具' },
+        { name: 'agent_manager', label: 'Agent 管理', description: 'Agent 管理工具' },
+        { name: 'knowledge', label: '知识库', description: '知识库工具' },
+      ];
+    },
   },
   {
     name: 'deploy_artifact',

@@ -77,10 +77,10 @@ func RegisterTaskTools(r *Registry, api *APIClient) {
 			RouteDef{Method: "PUT", Path: "/mcp/tasks/{id}", Required: []string{"id"}, Optional: []string{"title", "description", "priority", "assignee_id", "agent_id"}},
 		},
 		RouteEntry{
-			T("move_task_status", "流转任务状态。可选值：todo、in_progress、blocked、done",
+			T("move_task_status", "流转任务状态。可选值：todo、in_progress、blocked、done、cancelled",
 				Schema(map[string]map[string]interface{}{
 					"id":     Prop("任务ID（必填）"),
-					"status": EnumProp("目标状态（必填）", "todo", "in_progress", "blocked", "done"),
+					"status": EnumProp("目标状态（必填）", "todo", "in_progress", "blocked", "done", "cancelled"),
 				}, "id", "status")),
 			RouteDef{Method: "POST", Path: "/mcp/tasks/{id}/status", Required: []string{"id", "status"}},
 		},
