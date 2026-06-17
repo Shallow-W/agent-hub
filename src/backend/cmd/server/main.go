@@ -483,6 +483,9 @@ func registerAllToolSpecs(registry *service.ToolRegistry) {
 	// Skill tools (new)
 	mustRegister(ctx, registry, tool_specs.GetAgentSkill())
 	mustRegister(ctx, registry, tool_specs.ListPlatformSkills())
+
+	// Platform infrastructure tools（所有 Agent 默认可用，不可禁用）
+	mustRegister(ctx, registry, tool_specs.RenderCard())
 }
 
 func mustRegister(ctx context.Context, registry *service.ToolRegistry, spec port.MCPToolSpec) {

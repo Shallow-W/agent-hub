@@ -38,7 +38,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [toolset, setToolset] = useState('tasks');
-  const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
+  const [selectedTools, setSelectedTools] = useState<string[]>([...getTemplateTools('tasks'), 'render_card']);
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
@@ -78,7 +78,7 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       .then(() => {
         setCatalogReady(true);
         setToolset('tasks');
-        setSelectedTools(getTemplateTools('tasks'));
+        setSelectedTools([...getTemplateTools('tasks'), 'render_card']);
       })
       .catch(() => {});
   }, [open, candidates]);
@@ -120,13 +120,16 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const handleToolsetChange = (value: string) => {
     setToolset(value);
     if (value !== 'custom') {
-      setSelectedTools(getTemplateTools(value));
+      // 平台内置工具始终包含
+      setSelectedTools([...getTemplateTools(value), 'render_card']);
     }
   };
 
   const handleToolsChange = (values: string[]) => {
+    // 确保 render_card 始终被选中（平台内置不可取消）
+    const tools = values.includes('render_card') ? values : [...values, 'render_card'];
     setToolset('custom');
-    setSelectedTools(values);
+    setSelectedTools(tools);
   };
 
   const handleSkillTemplateChange = (value: string) => {
@@ -289,9 +292,10 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
               {filteredTools.map((tool) => {
                 const isSelected = selectedTools.includes(tool.name);
                 const meta = categoryMeta[tool.category];
+                const isPlatform = tool.category === 'platform';
                 return (
-                  <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''}`} key={tool.name}>
-                    <Checkbox value={tool.name} />
+                  <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''} ${isPlatform ? styles.toolCardPlatform : ''}`} key={tool.name}>
+                    <Checkbox value={tool.name} disabled={isPlatform} />
                     <div className={styles.toolCardContent}>
                       <span className={styles.toolCardName}>{tool.label}</span>
                       <span className={styles.toolCardDesc}>{tool.description}</span>
