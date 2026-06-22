@@ -287,14 +287,15 @@ var (
 
 // MessageService 消息业务逻辑
 type MessageService struct {
-	msgRepo   MsgRepo
-	convRepo  ConvRepoForMsg
-	agentRepo AgentRepoForMsg
-	notifier  MessageNotifier
-	delivery  MessageDeliveryState
-	orchSvc   *OrchestratorService
-	daemonHub port.DaemonDispatcher
-	fileURLs  *FileURLBuilder
+	msgRepo       MsgRepo
+	convRepo      ConvRepoForMsg
+	agentRepo     AgentRepoForMsg
+	notifier      MessageNotifier
+	delivery      MessageDeliveryState
+	orchSvc       *OrchestratorService
+	daemonHub     port.DaemonDispatcher
+	fileURLs      *FileURLBuilder
+	taskCardQueue *TaskCardQueue // 收集 MCP subprocess 工具 emit 的卡片，按 task_id 索引
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -343,6 +344,12 @@ func (s *MessageService) SetFileURLBuilder(builder *FileURLBuilder) {
 		builder = NewFileURLBuilder("")
 	}
 	s.fileURLs = builder
+}
+
+// SetTaskCardQueue 注入 MCP subprocess 卡片队列。daemon 主进程在 createAgentReply
+// 时会 Drain task_id 对应的卡片，合并到 message.cards_json。
+func (s *MessageService) SetTaskCardQueue(q *TaskCardQueue) {
+	s.taskCardQueue = q
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -1140,8 +1147,19 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	// 用户可见正文里剥离掉（替换为 [CARD:<id>] 占位符）。
 	agentCards, strippedContent, _ := extractCardsFromContent(result.Result)
 
-	// 合并 daemon emitted cards（如 deploy_project 成功的 info 卡）+ agent 文本卡
+	// 合并 daemon emitted cards：
+	//   1) result.Cards —— daemon 主进程通过 WS task.complete 上行的卡片（已不常用，
+	//      保留兼容）
+	//   2) taskCardQueue 里 drain 出的 subprocess 卡片（如 MCP 工具 deploy_project
+	//      成功的 info 卡——子进程通过 POST /api/internal/task-cards 上报）
+	//   3) agentCards —— agent 在回复正文写的 ```json{"cards":[...]}``` block
+	// 顺序：daemon 主进程卡 → subprocess 卡 → agent 文本卡。
 	allCards := append([]map[string]any{}, result.Cards...)
+	if s.taskCardQueue != nil {
+		if subprocessCards := s.taskCardQueue.Drain(task.ID); len(subprocessCards) > 0 {
+			allCards = append(allCards, subprocessCards...)
+		}
+	}
 	allCards = append(allCards, agentCards...)
 
 	msg, err := s.msgRepo.Create(ctx, convID, "assistant", strippedContent, string(artifacts), nil, replyTo, nil, nil)

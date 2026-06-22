@@ -116,10 +116,6 @@ class TaskContext {
     this.userId = task && task.user_id;
     // name → collector。collector 由 OutputCollector 工厂创建。
     this.outputs = new Map();
-    // daemon 内部生成的卡片（如 deploy_project 成功 info 卡）。
-    // 与 outputs（来自子进程 IPC）不同，这里走内存队列：
-    // daemon 主进程直接 push，task.completed 时 drain 并随结果回传。
-    this.daemonCards = [];
   }
 
   /** 由 handleTaskDispatch 调用：用注册的工厂实例化所有 collector 挂到本任务。 */
@@ -147,20 +143,6 @@ class TaskContext {
       try { if (typeof collector.cleanup === 'function') collector.cleanup(); } catch { /* ignore */ }
     }
     this.outputs.clear();
-  }
-
-  /** daemon 内部 push 卡片（替代旧 IPC 写文件）。自动补 id。 */
-  pushDaemonCard(card) {
-    if (!card) return;
-    if (!card.id) card.id = crypto.randomUUID();
-    this.daemonCards.push(card);
-  }
-
-  /** 取出所有 daemon 卡片（task.completed emit 时调用），并清空队列。 */
-  drainDaemonCards() {
-    const cards = this.daemonCards;
-    this.daemonCards = [];
-    return cards;
   }
 }
 
@@ -1065,19 +1047,23 @@ const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 // buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
 // AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
 // group context, matching Claude Code's per-task injection behavior.
-function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
+//
+// taskId 用于 MCP subprocess emit 卡片时回传 task_id 给后端
+// （POST /api/internal/task-cards）。不传则卡片 emit 无效——subprocess 拿不到 task 标识。
+function buildPlatformMcpServerArgs(conversationId, userId, agentId, taskId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
   if (agentId) mcpServerArgs.push('--agent-id', agentId);
+  if (taskId) mcpServerArgs.push('--task-id', taskId);
   return mcpServerArgs;
 }
 
 // buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
-function buildPlatformMcpArgs(conversationId, userId, agentId) {
-  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+function buildPlatformMcpArgs(conversationId, userId, agentId, taskId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId, taskId);
   if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
@@ -1349,11 +1335,13 @@ function resolveOpenCodeCommand() {
 }
 
 function resolveCommand(cliTool) {
-  if (cliTool === 'codex') {
-    return resolveCodexCommand();
-  }
-  if (cliTool === 'opencode') {
-    return resolveOpenCodeCommand();
+  // Switch 1: 委托给 CliToolSpec.resolveCommand（每个 spec 内部实现多路径 fallback）。
+  // 未注册的 cli_tool 退化为字面量，与原 if-else 链未匹配分支行为一致。
+  // 注：resolveCodexCommand / resolveOpenCodeCommand 函数定义保留（spec 内部依赖 ctx
+  // 间接调用同类逻辑；本函数不再直接调用），Step 5 清理。
+  const spec = cliTools.getCliTool(cliTool);
+  if (spec && typeof spec.resolveCommand === 'function') {
+    return spec.resolveCommand(initCliToolsCtx);
   }
   return cliTool;
 }
@@ -1803,6 +1791,11 @@ function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId
 // initCliToolsCtx 是传给 CliToolSpec 工厂的依赖注入对象。
 // 包含 spec 实现需要的全部 daemon 辅助函数（避免 spec 直接 require 主文件造成循环依赖）。
 // 新增 spec 时若需要新辅助函数，在此对象补一个键即可。
+//
+// === Step 2 扩展（agent-adapter 重构） ===
+// 下面带 // step2 注释的字段是为 Step 2-3 新增的 spec 方法（resolveCommand / parseResult /
+// spawnPersistent）准备的依赖。Step 2-3 阶段 spec 方法是 dormant 的（没有 call site 调用），
+// 此处只是预先 wire 好；Step 4 才会切换 call site 去调用 spec 方法。
 const initCliToolsCtx = {
   // 通用工具
   pathJoin: path.join,
@@ -1816,6 +1809,26 @@ const initCliToolsCtx = {
   commandVersion,
   processSpec,
   spawnSync,
+  // step2: spawn（persistent 进程启动，给 spec.spawnPersistent 用）
+  spawn,
+  // step2: fs / crypto（outputFile 读取 / sessionId 生成）
+  fs,
+  crypto,
+  // step2: truncateStr（spec.spawnPersistent 的 stderr 日志截断）
+  truncateStr,
+  // step2: EXEC_TIMEOUT_MS（spec.spawnPersistent 的 turn timeout）
+  EXEC_TIMEOUT_MS,
+  // step2: existingFile（spec.resolveCommand 的路径校验）
+  existingFile,
+  // step2: codex 路径辅助（spec.codex.resolveCommand 用）
+  codexLocalInstallPaths,
+  codexExtensionPath,
+  // step2: saveSessionMap（spec.opencode.parseResult 持久化 session 用）
+  saveSessionMap,
+  // step2: agentTurnStates（spec.claude.spawnPersistent 同步 turn 状态）
+  agentTurnStates,
+  // step2: createAsyncQueue（spec.claude.spawnPersistent 构造事件队列）
+  createAsyncQueue: require('../cli/events').createAsyncQueue,
   // prompt / context 辅助
   buildPlatformMcpArgs,
   buildAgentHubContextEnv,
@@ -1952,25 +1965,29 @@ async function executeTask(task, taskCtx) {
       return text;
     }
   }
-  if (spec.resultFormat === 'openclaw-json') {
-    const parsed = parseOpenClawOutput(stdout);
-    logFlow('info', 'task.result_ready', { ...taskMeta, source: 'openclaw_json', result_len: parsed.length });
-    return parsed;
-  }
-  if (spec.resultFormat === 'opencode-json') {
-    const parsed = parseOpenCodeOutput(stdout);
-    if (spec.persistSessionKey && parsed.sessionId) {
-      conversationSessions.set(spec.persistSessionKey, parsed.sessionId);
-      saveSessionMap();
+  // Switch 2: 委托给 CliToolSpec.parseResult —— 替代原 openclaw-json / opencode-json / stdio
+  // 三分支。spec.parseResult 可能返回 string（claude/openclaw/codex）或 { text, sessionId }
+  // 对象（opencode，保留原 parseOpenCodeOutput 结构化返回）；opencode 的 session 持久化副作用
+  // 已在 spec 内部完成，daemon 不再手动 set/saveSessionMap。
+  const cliSpec = cliTools.getCliTool(task.cli_tool);
+  if (cliSpec && typeof cliSpec.parseResult === 'function') {
+    const parsed = cliSpec.parseResult(
+      { stdout, stderr, outputFile: spec.outputFile, meta: { persistSessionKey: spec.persistSessionKey, task } },
+      initCliToolsCtx,
+    );
+    if (parsed && typeof parsed === 'object' && typeof parsed.text === 'string') {
+      logFlow('info', 'task.result_ready', {
+        ...taskMeta,
+        source: 'spec_parse_result',
+        result_len: parsed.text.length,
+        session_id: parsed.sessionId,
+        session_persisted: Boolean(spec.persistSessionKey && parsed.sessionId),
+      });
+      return parsed.text || '(Agent CLI 没有返回内容)';
     }
-    logFlow('info', 'task.result_ready', {
-      ...taskMeta,
-      source: 'opencode_json',
-      result_len: parsed.text.length,
-      session_id: parsed.sessionId,
-      session_persisted: Boolean(spec.persistSessionKey && parsed.sessionId),
-    });
-    return parsed.text;
+    const text = typeof parsed === 'string' ? parsed : String(parsed || '');
+    logFlow('info', 'task.result_ready', { ...taskMeta, source: 'spec_parse_result', result_len: text.length });
+    return text || '(Agent CLI 没有返回内容)';
   }
   const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
   logFlow('info', 'task.result_ready', { ...taskMeta, source: 'stdio', result_len: text.length });
@@ -2608,7 +2625,8 @@ function stopAgentProcess(agent_id) {
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx) {
   const command = resolveCommand('claude');
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
+  const taskId = (taskCtx && taskCtx.taskId) || null;
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId, taskId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -2755,12 +2773,18 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
 }
 
 /**
- * Unified claude dispatch: per-agent process slot with conversation isolation.
+ * Unified persistent dispatch: per-agent process slot with conversation isolation.
  * - Same conversation → stdin inject (fast path)
  * - Cross-conversation → reuse live process (stream-json 支持多 turn)
  * - Dead / no process → spawn fresh
  *
  * taskCtx 随调用链传入，承载本任务的执行上下文（含 daemon 内部卡片队列等）。
+ *
+ * Switch 5 注：函数名保留 dispatchToClaudeSlot，因目前只有 Claude spec 实现 persistent
+ * 支持（Switch 4 后 spawnStreamJsonProcess 才委托给 spec.spawnPersistent；未完成前函数体仍
+ * 为 Claude-specific 的 stream-json 逻辑）。待 Switch 4 落地 + 其它 spec 实现 spawnPersistent
+ * 后，可改名为 dispatchToPersistentSlot。当前函数体依赖 spawnStreamJsonProcess wrapper，
+ * 后者内部还是原 Claude stream-json 路径（Switch 4 未完成）。
  */
 async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx) {
   const sessionKey = `${agentId}:${conversationId}`;
@@ -2930,7 +2954,11 @@ async function handleAgentStart(ws, payload) {
   });
   stopAgentProcess(agent_id);
 
-  if (cli_tool !== 'claude') {
+  // Switch 6: 泛化 persistent-mode 检查 —— 任何实现了 spawnPersistent 的 spec 都允许启动。
+  // 当前只有 claude spec 实现，所以语义与原 `cli_tool !== 'claude'` 等价，但不再 hardcode 字符串。
+  // 未来给其它 spec 加上 spawnPersistent 即自动支持 persistent 模式。
+  const startSpec = cliTools.getCliTool(cli_tool);
+  if (!startSpec || typeof startSpec.spawnPersistent !== 'function') {
     logFlow('warn', 'agent.start_unsupported', { agent_id, cli_tool });
     safeSend(ws, JSON.stringify({ type: 'agent.started', data: { agent_id, error: `${cli_tool} does not support persistent mode` } }));
     return;
@@ -3087,10 +3115,11 @@ async function handleTaskDispatch(ws, data) {
       if (result === null) return true;
     }
     const artifacts = parseArtifacts(result);
-    // 收集 daemon 内部生成的卡片（如 deploy_project 成功 info 卡）。
-    // agent 通过 MCP 工具产出的卡片不再走 IPC——agent 直接在回复正文写 fenced JSON block，
-    // 由前端解析；daemon 只回传本进程内 push 的卡片。
-    const cards = taskCtx.drainDaemonCards();
+    // MCP subprocess（如 deploy_project）产出的卡片已通过 ctx.emitCard →
+    // POST /api/internal/task-cards 直接上报后端 TaskCardQueue，
+    // daemon 主进程不再参与卡片收集。
+    // cards 字段保留为空数组以兼容老的 task.complete WS 协议（后端 handleTaskComplete 仍读它）。
+    const cards = [];
     bus.emit('task.completed', {
       task_id: task.id,
       cli_tool: task.cli_tool,
@@ -3960,11 +3989,10 @@ const MCP_TOOLS = [
         expiresAt,
       });
 
-      // 6. 部署成功卡片走内存队列（如 daemon 主进程能触达 taskContext 则 push）。
-      // 注意：deploy_project 在 MCP 子进程里执行（与 daemon 主进程分离），
-      // 这里 ctx.taskContext 通常不存在——卡片实际由 tool 返回值（deploy_id/url/...）
-      // 经 agent 回复正文回传给用户。仅当未来该工具改为 daemon 主进程内直接调用时，
-      // 此分支才会真正生效。
+      // 6. 部署成功卡片通过 ctx.emitCard 上报后端 task-card 队列，
+      // daemon 主进程 createAgentReply 时 drain 合并到 message.cards_json。
+      // 与旧的 ctx.taskContext.pushDaemonCard 不同，emitCard 走 HTTP
+      // 跨进程传给后端，不依赖 daemon 主进程内存共享。
       const expiresLocal = new Date(expiresAt).toLocaleString('zh-CN', { hour12: false });
       const card = {
         type: 'info',
@@ -3976,8 +4004,8 @@ const MCP_TOOLS = [
           '部署 ID': deployId,
         },
       };
-      if (ctx && ctx.taskContext && typeof ctx.taskContext.pushDaemonCard === 'function') {
-        ctx.taskContext.pushDaemonCard(card);
+      if (ctx && typeof ctx.emitCard === 'function') {
+        await ctx.emitCard(card);
       }
 
       logFlow('info', 'deploy.tool_done', { deploy_id: deployId, url: result.url, expires_at: expiresLocal });
@@ -4207,10 +4235,34 @@ async function runMcpServer(serverURL, apiKey) {
     conversationId: readArg('--conversation-id') || process.env.AGENTHUB_CONVERSATION_ID || null,
     userId: readArg('--user-id') || process.env.AGENTHUB_USER_ID || null,
     agentId: readArg('--agent-id') || process.env.AGENTHUB_AGENT_ID || null,
+    taskId: readArg('--task-id') || process.env.AGENTHUB_TASK_ID || null,
     allowedTools: null,
     currentAgent: undefined,
     callApi: (method, pathname, options) => callApi(serverURL, apiKey, method, pathname, options),
     callMcpApi: (method, pathname, options) => callMcpApi(serverURL, daemonToken, method, pathname, options, ctx.userId),
+    // emitCard 把 MCP subprocess 工具产出的卡片推到后端 task-card 队列，
+    // daemon 主进程 createAgentReply 时 Drain 合并到 message.cards_json。
+    // 抽象点：工具不需要知道后端怎么传——只管把 card 对象给到 ctx。
+    // 缺 taskId（CLI 未注入 --task-id）时仅记日志，不抛错，保证工具不因此失败。
+    emitCard: async (card) => {
+      if (!card) return;
+      if (!ctx.taskId) {
+        logFlow('warn', 'card.emit_no_task', { card_type: card.type || 'unknown' });
+        return;
+      }
+      try {
+        await callMcpApi(serverURL, daemonToken, 'POST', '/api/internal/task-cards', {
+          body: { task_id: ctx.taskId, card },
+        }, ctx.userId);
+      } catch (err) {
+        // 上报失败不应让工具失败——卡片是辅助产物，工具主结果仍应返回
+        logFlow('warn', 'card.emit_failed', {
+          task_id: ctx.taskId,
+          card_type: card.type || 'unknown',
+          error: errorMessage(err),
+        });
+      }
+    },
   };
   const toolMap = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
 

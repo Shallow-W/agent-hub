@@ -35,6 +35,7 @@ type Deps struct {
 	ArtifactHandler            *handler.ArtifactHandler
 	DeploymentHandler          *handler.DeploymentHandler
 	KnowledgeHandler           *handler.KnowledgeHandler
+	InternalHandler            *handler.InternalHandler
 
 	// Config values needed for route setup
 	JWTSecret   string
@@ -253,6 +254,17 @@ func Setup(r *gin.Engine, deps Deps) {
 	r.GET("/daemon/tasks", deps.DaemonHandler.WithMachine(deps.DaemonHandler.ClaimTask))
 	r.POST("/daemon/tasks/:id/complete", deps.DaemonHandler.WithMachine(deps.DaemonHandler.CompleteTask))
 	r.POST("/daemon/tasks/:id/heartbeat", deps.DaemonHandler.WithMachine(deps.DaemonHandler.Heartbeat))
+
+	// Internal routes (daemon-token auth, called by MCP subprocess tools like
+	// deploy_project to push cards/results back to backend). Shares the same
+	// auth scheme as /mcp/* — daemon-token Bearer.
+	if deps.InternalHandler != nil {
+		internalGroup := r.Group("/api/internal")
+		internalGroup.Use(middleware.MCPAuth(deps.DaemonToken))
+		{
+			internalGroup.POST("/task-cards", deps.InternalHandler.PushTaskCard)
+		}
+	}
 
 	// MCP routes (daemon-token auth, no JWT)
 	mcpGroup := r.Group("/mcp")

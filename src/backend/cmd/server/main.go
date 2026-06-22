@@ -217,6 +217,12 @@ func main() {
 	agentSvc.SetDaemonHub(daemonHub)
 	msgSvc.SetDaemonHub(daemonHub)
 
+	// TaskCardQueue: 收集 MCP subprocess 工具 emit 的卡片（如 deploy_project info 卡），
+	// 按 task_id 索引。daemon subprocess 通过 POST /api/internal/task-cards 上报。
+	// 在 createAgentReply 时 drain 合并到 message.cards_json。
+	taskCardQueue := service.NewTaskCardQueue()
+	msgSvc.SetTaskCardQueue(taskCardQueue)
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc, roleSvc)
@@ -242,6 +248,7 @@ func main() {
 	artifactHandler.SetOrchestratorService(orchSvc)
 	deploymentHandler := handler.NewDeploymentHandler(deploymentSvc)
 	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, repository.NewGroupRepo(db))
+	internalHandler := handler.NewInternalHandler(taskCardQueue)
 
 	// 路由设置
 	gin.SetMode(gin.ReleaseMode)
@@ -312,6 +319,7 @@ func main() {
 		ArtifactHandler:            artifactHandler,
 		DeploymentHandler:          deploymentHandler,
 		KnowledgeHandler:           knowledgeHandler,
+		InternalHandler:            internalHandler,
 		JWTSecret:                  cfg.JWT.Secret,
 		DaemonToken:                cfg.Daemon.Token,
 		UploadDir:                  cfg.Upload.Dir,
@@ -326,6 +334,8 @@ func main() {
 	go hub.Run(ctx)
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
+	// 启动 TaskCardQueue 的 TTL 清理 goroutine（每小时扫一次过期 entry，防泄漏）。
+	taskCardQueue.StartCleanup(ctx)
 
 	// 零配置内网穿透
 	if os.Getenv("PUBLIC_BASE_URL") == "" && !isFalsy(os.Getenv("AUTO_TUNNEL")) {
@@ -475,10 +485,6 @@ func registerAllToolSpecs(registry *service.ToolRegistry) {
 	mustRegister(ctx, registry, tool_specs.ListKnowledgeFiles())
 	mustRegister(ctx, registry, tool_specs.SearchKnowledge())
 	mustRegister(ctx, registry, tool_specs.ReadKnowledgeFile())
-
-	// Deployment tools (new)
-	mustRegister(ctx, registry, tool_specs.DeployArtifact())
-	mustRegister(ctx, registry, tool_specs.DeployArtifactGitHub())
 
 	// Skill tools (new)
 	mustRegister(ctx, registry, tool_specs.GetAgentSkill())
