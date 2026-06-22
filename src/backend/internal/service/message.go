@@ -769,6 +769,77 @@ func (s *MessageService) GetMessageByID(ctx context.Context, conversationID, mes
 	return msg, nil
 }
 
+// CancelStreamingMessage 向 daemon 发送 task.cancel 控制消息，异步中断流式生成。
+//
+// 设计：
+//   - 不等 daemon 响应——返回 202 Accepted，UI 立即 disable 按钮。
+//   - daemon 侧（未来实现）收到 task.cancel 后 SIGINT Claude 进程，触发 task.complete with error，
+//     后端 watchdog FinalizeStreaming 切到 canceled/error 并广播 message.complete。
+//   - 当前 PR3 只负责 backend → daemon 的下发链路；daemon 侧 SIGINT 在另一个 PR 补全。
+//
+// agent_id 从 artifacts_json 解析；task_id 优先从参数读取（前端从 message.streaming
+// payload 拿到 task_id 回传），缺省时只能告警——无 task_id daemon 无法定位流。
+func (s *MessageService) CancelStreamingMessage(ctx context.Context, conversationID, messageID, taskID string) error {
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrMsgNotFound
+		}
+		return fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return ErrMsgNotFound
+	}
+	if msg.ConversationID != conversationID {
+		return ErrMsgReplyWrongConv
+	}
+	if msg.Status != "" && msg.Status != model.MessageStatusStreaming {
+		// 非流式状态——幂等返回 nil，前端显示已是终态。
+		slog.Info("cancel streaming: message not in streaming state", "message_id", messageID, "status", msg.Status)
+		return nil
+	}
+
+	// 从 artifacts_json 解析 agent_id（预创建 streaming message 时写入）。
+	var meta struct {
+		AgentID string `json:"agent_id"`
+	}
+	if msg.ArtifactsJSON != "" {
+		_ = json.Unmarshal([]byte(msg.ArtifactsJSON), &meta) // 解析失败忽略——下面 agent_id 为空会返回错误
+	}
+	if meta.AgentID == "" {
+		return fmt.Errorf("cancel streaming: agent_id missing in artifacts_json for message %s", messageID)
+	}
+	agent, err := s.agentRepo.GetByID(ctx, meta.AgentID)
+	if err != nil {
+		return fmt.Errorf("get agent: %w", err)
+	}
+	if agent == nil {
+		return ErrAgentNotFound
+	}
+	if agent.MachineID == nil || *agent.MachineID == "" {
+		return ErrMsgAgentOffline
+	}
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return ErrMsgAgentOffline
+	}
+	if taskID == "" {
+		return fmt.Errorf("cancel streaming: task_id required for message %s", messageID)
+	}
+	// 异步发送 task.cancel——不等 daemon 响应，UI 收到 202 立即 disable。
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.cancel",
+		Data: map[string]interface{}{
+			"task_id":         taskID,
+			"agent_id":        agent.ID,
+			"message_id":      messageID,
+			"conversation_id": conversationID,
+		},
+	}); err != nil {
+		return fmt.Errorf("send task.cancel: %w", err)
+	}
+	return nil
+}
+
 func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
 	for i := range messages {
 		s.enrichMessageFileURLs(&messages[i])

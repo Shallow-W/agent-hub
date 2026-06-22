@@ -23,7 +23,7 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
-import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
+import type { Message, OptimisticStatus, Artifact, MessageArtifacts, MessageBlock } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import type { ConversationAgent } from '@/types/conversation';
 import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
@@ -32,6 +32,12 @@ import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { DeployStatusCard } from './DeployStatusCard';
+import { StopButton } from './StopButton';
+import { TextBlock } from './blocks/TextBlock';
+import { ThinkingBlock } from './blocks/ThinkingBlock';
+import { ToolCallBlock } from './blocks/ToolCallBlock';
+import { ToolResultBlock } from './blocks/ToolResultBlock';
+import { ErrorBlock } from './blocks/ErrorBlock';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
@@ -329,6 +335,9 @@ MarkdownRenderer.displayName = 'MarkdownRenderer';
 interface MessageBubbleProps {
   message: Message;
   streaming?: boolean;
+  /** 流式期间外部注入的 block 列表（来自 store.streamingBlocks[message.id]）。
+   *  优先于 message.blocks——流式期间 store 中的副本更新更频繁。 */
+  streamingBlocks?: MessageBlock[];
   showAvatar?: boolean;
   isGrouped?: boolean;
   optimisticStatus?: OptimisticStatus;
@@ -373,6 +382,7 @@ function fallbackAttachmentName(value: unknown, filePath: unknown): string {
 const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
+  streamingBlocks,
   showAvatar = true,
   isGrouped = false,
   optimisticStatus,
@@ -486,6 +496,25 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
       return [];
     }
   }, [message.cards_json, message.cards]);
+
+  // 流式 block——存在时优先于 content 渲染。
+  // 来源优先级：
+  //   1) streamingBlocks prop（来自 store.streamingBlocks[message.id]，流式期间实时更新）
+  //   2) message.blocks（store appendDeltas 累积 / FinalizeStreaming 后服务端权威副本）
+  //   3) message.blocks_json（刷新页面后从 DB 还原）
+  const parsedBlocks = useMemo<MessageBlock[]>(() => {
+    if (streamingBlocks && streamingBlocks.length > 0) return streamingBlocks;
+    if (message.blocks && message.blocks.length > 0) return message.blocks;
+    if (!message.blocks_json) return [];
+    try {
+      const parsed = JSON.parse(message.blocks_json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [streamingBlocks, message.blocks, message.blocks_json]);
+  const hasBlocks = parsedBlocks.length > 0;
+  const isStreaming = message.status === 'streaming' || streaming;
 
   // 本地卡片状态：用户交互后的乐观覆盖层。
   // 采用 override 模式而非直接镜像 parsedCards——外部推送（其他用户解决卡片、
@@ -739,7 +768,29 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {displayAttachments.length > 0 && (
               <MessageAttachmentView attachments={displayAttachments} />
             )}
-            {displayContent && (
+            {hasBlocks ? (
+              <div className={styles.markdownBody}>
+                {parsedBlocks.map((block, i) => {
+                  // 最后一个 block（且属于可累积 kind）在 streaming 时显示光标
+                  const isLast = i === parsedBlocks.length - 1;
+                  const showCursor = isStreaming && isLast;
+                  switch (block.kind) {
+                    case 'text':
+                      return <TextBlock key={block.index ?? i} block={block} streaming={showCursor} />;
+                    case 'thinking':
+                      return <ThinkingBlock key={block.index ?? i} block={block} streaming={showCursor} />;
+                    case 'tool_use':
+                      return <ToolCallBlock key={block.index ?? i} block={block} streaming={showCursor} />;
+                    case 'tool_result':
+                      return <ToolResultBlock key={block.index ?? i} block={block} />;
+                    case 'error':
+                      return <ErrorBlock key={block.index ?? i} block={block} />;
+                    default:
+                      return null;
+                  }
+                })}
+              </div>
+            ) : displayContent ? (
               <div className={styles.markdownBody}>
                 {/* 按 [CARD:id] 占位符分段渲染：markdown 段走 MarkdownRenderer，卡片段走 renderCards。
                     没有占位符时 segments 只有一段（全部 content），行为等同改之前。 */}
@@ -756,7 +807,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                   );
                 })}
               </div>
-            )}
+            ) : null}
             {cardArtifacts.length > 0 && (
               <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} conversationId={message.conversation_id} />
             )}
@@ -772,11 +823,18 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}
-            {streaming && <span className={styles.streamingCursor} />}
+            {(streaming || (hasBlocks && isStreaming)) && <span className={styles.streamingCursor} aria-hidden />}
             {isOptimisticSending && (
               <Spin size="small" className={styles.sendingSpin} />
             )}
           </div>
+          {isStreaming && !isOptimisticSending && !isOptimisticFailed && (
+            <StopButton
+              conversationId={message.conversation_id}
+              messageId={message.id}
+              taskId={message.task_id}
+            />
+          )}
           {replyCount > 0 && onOpenThread && (
             <button
               className={styles.threadBtn}

@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client';
+import { get, post, put, patch, del } from './client';
 import type { ConversationBlackboard, Message, PinnedMessage, SendMessageResult, MessageRole } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 
@@ -114,7 +114,22 @@ export async function updateMessageCards(
   messageId: string,
   cardsJSON: string,
 ): Promise<void> {
-  return put<void>(`/api/conversations/${conversationId}/messages/${messageId}/cards`, {
+  // 后端路由是 PATCH（见 router.go），必须用 patch 而非 put，否则 404 状态丢失。
+  return patch<void>(`/api/conversations/${conversationId}/messages/${messageId}/cards`, {
     cards_json: cardsJSON,
+  });
+}
+
+/**
+ * 取消正在流式生成的 assistant 消息——后端异步向 daemon 发 task.cancel，
+ * 返回 202 Accepted，不等 daemon 响应。
+ */
+export async function cancelStreamingMessage(
+  conversationId: string,
+  messageId: string,
+  taskId?: string,
+): Promise<void> {
+  return post<void>(`/api/conversations/${conversationId}/messages/${messageId}/cancel`, {
+    ...(taskId ? { task_id: taskId } : {}),
   });
 }

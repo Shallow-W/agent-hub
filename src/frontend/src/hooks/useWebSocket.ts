@@ -49,6 +49,7 @@ export function useWebSocket() {
   const connect = useWsStore((s) => s.connect);
   const wsClient = useWsStore((s) => s.wsClient);
   const updateStreaming = useMessageStore((s) => s.updateStreaming);
+  const appendDeltas = useMessageStore((s) => s.appendDeltas);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
   const addMessage = useMessageStore((s) => s.addMessage);
@@ -81,11 +82,20 @@ export function useWebSocket() {
       const activeId = useConversationStore.getState().activeConversationId;
 
       switch (msg.type) {
-        case 'message.streaming':
-          if (messageId && content) {
+        case 'message.streaming': {
+          // 新路径：daemon 透传 AgentEvent[]，前端按 kind 聚合渲染。
+          // 旧路径兼容：仍然会携带 content，但若有 deltas 则优先用 deltas。
+          const msgId = msg.data.message_id ?? msg.data.messageId ?? messageId;
+          if (msgId && msg.data.deltas && msg.data.deltas.length > 0) {
+            appendDeltas(convId, msgId, msg.data.deltas, {
+              taskId: msg.data.task_id,
+              agentId: msg.data.agent_id,
+            });
+          } else if (messageId && content) {
             updateStreaming(convId, messageId, content);
           }
           break;
+        }
         case 'message.complete': {
           const msgId = msg.data.id ?? messageId;
           const msgContent = msg.data.content;
@@ -106,6 +116,10 @@ export function useWebSocket() {
               username: msg.data.username,
               reply_to: msg.data.reply_to ?? null,
               reply_to_message: msg.data.reply_to_message ?? null,
+              // 交互式卡片——Agent 回复通过 render_card 渲染时随消息推送，
+              // 免去刷新页面即可在聊天中显示卡片。
+              cards_json: msg.data.cards_json,
+              cards: msg.data.cards,
             });
           } else if (messageId && content) {
             // Streaming completion

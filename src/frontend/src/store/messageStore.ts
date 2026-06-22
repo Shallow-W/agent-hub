@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { message as antdMessage } from '@/utils/message';
-import type { Message, OptimisticMessage, ReplyToPreview } from '@/types/message';
+import type { Message, MessageBlock, OptimisticMessage, ReplyToPreview, AgentEvent } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
 import { PAGE_SIZE, MAX_MESSAGES, RECALL_DEDUP_TTL_MS } from '@/config/constants';
@@ -8,8 +8,12 @@ import { PAGE_SIZE, MAX_MESSAGES, RECALL_DEDUP_TTL_MS } from '@/config/constants
 interface MessageState {
   /** conversationId → 消息列表 */
   messages: Record<string, Message[]>;
-  /** conversationId → 流式拼接的临时内容 */
+  /** conversationId → 流式拼接的临时内容（旧路径，仅字符串覆盖场景使用） */
   streamingContent: Record<string, string>;
+  /** messageId → 流式累积的 block 列表（新路径，支持 text/thinking/tool_use/tool_result/error） */
+  streamingBlocks: Record<string, MessageBlock[]>;
+  /** messageId → 流式占位消息（携带 task_id / status='streaming'，供 MessageList 渲染） */
+  streamingMessages: Record<string, Message>;
   /** conversationId → 是否还有更早的消息可加载 */
   hasMore: Record<string, boolean>;
   /** conversationId → 是否正在加载 */
@@ -39,6 +43,13 @@ interface MessageState {
     conversationId: string,
     messageId: string,
     content: string,
+  ) => void;
+  /** 新路径：把 daemon 透传的 AgentEvent[] 按 kind 聚合累积到 streamingBlocks。 */
+  appendDeltas: (
+    conversationId: string,
+    messageId: string,
+    deltas: AgentEvent[],
+    meta?: { taskId?: string; agentId?: string },
   ) => void;
   completeStreaming: (
     conversationId: string,
@@ -87,6 +98,8 @@ setInterval(() => {
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
   streamingContent: {},
+  streamingBlocks: {},
+  streamingMessages: {},
   hasMore: {},
   loading: {},
   optimisticMessages: {},
@@ -317,25 +330,169 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
-  completeStreaming: (conversationId, _messageId, fullMessage) => {
+  appendDeltas: (conversationId, messageId, deltas, meta) => {
+    if (!deltas || deltas.length === 0) return;
+    set((state) => {
+      const prevBlocks = state.streamingBlocks[messageId] ?? [];
+      const next = [...prevBlocks];
+      // 用于判断最近一个 block 是否可累积：必须是相同 kind 且非 tool_result/error
+      // （这两种 block 一次性产出，不再累积）。
+      const appendableKind = (kind: string): boolean =>
+        kind === 'text' || kind === 'thinking' || kind === 'tool_use';
+
+      for (const ev of deltas) {
+        if (!ev) continue;
+        const last = next[next.length - 1];
+        switch (ev.type) {
+          case 'text': {
+            const text = ev.content ?? '';
+            if (!text) break;
+            if (last && last.kind === 'text') {
+              next[next.length - 1] = { ...last, text: last.text + text };
+            } else {
+              next.push({ index: next.length, kind: 'text', text });
+            }
+            break;
+          }
+          case 'thinking': {
+            const text = ev.content ?? '';
+            if (!text) break;
+            if (last && last.kind === 'thinking') {
+              next[next.length - 1] = { ...last, text: last.text + text };
+            } else {
+              next.push({ index: next.length, kind: 'thinking', text });
+            }
+            break;
+          }
+          case 'tool_use': {
+            const toolName = ev.tool ?? '';
+            if (toolName) {
+              // 工具名非空 → 开启一个新 tool_use block（输入参数后续 delta 会追加）
+              next.push({
+                index: next.length,
+                kind: 'tool_use',
+                text: '',
+                tool_name: toolName,
+                tool_use_id: ev.tool_use_id,
+              });
+            } else if (last && last.kind === 'tool_use') {
+              // 空工具名 → input_json_delta，追加到当前 tool_use block
+              const inputDelta = ev.content ?? '';
+              if (inputDelta) {
+                next[next.length - 1] = { ...last, text: last.text + inputDelta };
+              }
+            }
+            break;
+          }
+          case 'tool_result': {
+            // tool_result 始终是新 block（同一工具调用的结果与输入分开展示）
+            next.push({
+              index: next.length,
+              kind: 'tool_result',
+              text: ev.output ?? '',
+              is_error: ev.isError === true,
+            });
+            break;
+          }
+          case 'error': {
+            next.push({
+              index: next.length,
+              kind: 'error',
+              text: ev.message ?? '生成失败',
+              is_error: true,
+            });
+            break;
+          }
+          case 'turn_end':
+            // turn_end 触发 completeStreaming，由调用方处理。
+            break;
+          default:
+            // 未知 kind 忽略，不破坏流。
+            break;
+        }
+        // 触发 React 状态更新——每次 append 都返回新数组引用，React.memo 的 block 组件
+        // 仅在自身 block 引用变化时 re-render，相邻 block 不受影响。
+        // （此处用 next 局部变量，最终在 set 一次性提交。）
+        void appendableKind;
+      }
+
+      // 占位 streaming message：首次见到 delta 时创建，后续保留。
+      // MessageList 渲染时把它当作额外的 assistant message（status=streaming），
+      // 让 StopButton 能取到 task_id 并发 HTTP 取消。
+      const prevPlaceholder = state.streamingMessages[messageId];
+      let placeholder: Message;
+      if (prevPlaceholder) {
+        placeholder = prevPlaceholder;
+      } else {
+        placeholder = {
+          id: messageId,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: '',
+          artifacts_json: null,
+          created_at: new Date().toISOString(),
+          status: 'streaming',
+          ...(meta?.taskId ? { task_id: meta.taskId } : {}),
+        };
+      }
+
+      return {
+        streamingBlocks: {
+          ...state.streamingBlocks,
+          [messageId]: next,
+        },
+        streamingMessages: {
+          ...state.streamingMessages,
+          [messageId]: placeholder,
+        },
+      };
+    });
+  },
+
+  completeStreaming: (conversationId, messageId, fullMessage) => {
     set((state) => {
       const existing = state.messages[conversationId] ?? [];
+      // 流式累积的 block 落到 message.blocks，刷新页面前的最后一帧快照。
+      // 服务端推送的 fullMessage 若已包含 blocks/blocks_json 则优先用服务端权威副本。
+      const streamedBlocks = state.streamingBlocks[messageId];
+      const mergedMessage: Message =
+        streamedBlocks && streamedBlocks.length > 0 && !fullMessage.blocks && !fullMessage.blocks_json
+          ? { ...fullMessage, blocks: streamedBlocks, status: fullMessage.status ?? 'complete' }
+          : { ...fullMessage, status: fullMessage.status ?? 'complete' };
       // 按 ID 去重
       if (existing.some((m) => m.id === fullMessage.id)) {
-        const next = { ...state.streamingContent };
-        delete next[conversationId];
-        return { streamingContent: next };
+        const merged = existing.map((m) =>
+          m.id === fullMessage.id ? { ...m, ...mergedMessage } : m,
+        );
+        const nextStreamingBlocks = { ...state.streamingBlocks };
+        delete nextStreamingBlocks[messageId];
+        const nextStreamingMessages = { ...state.streamingMessages };
+        delete nextStreamingMessages[messageId];
+        const nextStreamingContent = { ...state.streamingContent };
+        delete nextStreamingContent[conversationId];
+        return {
+          messages: { ...state.messages, [conversationId]: merged },
+          streamingBlocks: nextStreamingBlocks,
+          streamingMessages: nextStreamingMessages,
+          streamingContent: nextStreamingContent,
+        };
       }
-      const next = { ...state.streamingContent };
-      delete next[conversationId];
-      const appended = [...existing, fullMessage];
+      const nextStreamingBlocks = { ...state.streamingBlocks };
+      delete nextStreamingBlocks[messageId];
+      const nextStreamingMessages = { ...state.streamingMessages };
+      delete nextStreamingMessages[messageId];
+      const nextStreamingContent = { ...state.streamingContent };
+      delete nextStreamingContent[conversationId];
+      const appended = [...existing, mergedMessage];
       const trimmed = appended.length > MAX_MESSAGES ? appended.slice(appended.length - MAX_MESSAGES) : appended;
       return {
         messages: {
           ...state.messages,
           [conversationId]: trimmed,
         },
-        streamingContent: next,
+        streamingBlocks: nextStreamingBlocks,
+        streamingMessages: nextStreamingMessages,
+        streamingContent: nextStreamingContent,
       };
     });
   },
@@ -466,6 +623,8 @@ export function resetMessageStore() {
   useMessageStore.setState({
     messages: {},
     streamingContent: {},
+    streamingBlocks: {},
+    streamingMessages: {},
     hasMore: {},
     loading: {},
     optimisticMessages: {},

@@ -357,6 +357,29 @@ func TestRecall_MissingIDs_Returns400(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Handler tests: MessageHandler.CancelStreaming
+// ---------------------------------------------------------------------------
+
+// TestCancelStreaming_MissingParams_Returns400 verifies the handler rejects
+// requests missing conversation/message id. svc is nil because we short-circuit
+// before touching the service layer.
+func TestCancelStreaming_MissingParams_Returns400(t *testing.T) {
+	handler := &MessageHandler{svc: nil}
+
+	c, w := newTestContext(http.MethodPost, "/x", gin.H{"task_id": "task-1"})
+	// Do NOT set params "id" or "messageId"
+	handler.CancelStreaming(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	resp := decodeResponse(t, w)
+	if resp.Code != 40060 {
+		t.Errorf("code = %d, want 40060", resp.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Fake repo implementations for handler-level tests
 // These satisfy the repo interfaces that service.MessageService depends on.
 // ---------------------------------------------------------------------------
@@ -446,6 +469,29 @@ func (r *fakeMsgRepoForHandler) UpsertConversationBlackboard(_ context.Context, 
 
 func (r *fakeMsgRepoForHandler) ListReplies(_ context.Context, _ string) ([]model.Message, error) {
 	return r.messages, nil
+}
+
+// UpdateMessageCards / HideMessage / UnhideMessage / GetHiddenMessageIDs ——
+// 卡片更新与 message_hides 功能的 no-op 桩，满足 service.MsgRepo 接口。
+func (r *fakeMsgRepoForHandler) UpdateMessageCards(_ context.Context, _, _ string) error { return nil }
+func (r *fakeMsgRepoForHandler) HideMessage(_ context.Context, _, _ string) error       { return nil }
+func (r *fakeMsgRepoForHandler) UnhideMessage(_ context.Context, _, _ string) error     { return nil }
+func (r *fakeMsgRepoForHandler) GetHiddenMessageIDs(_ context.Context, _, _ string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+// streaming-related methods (MsgRepo interface extension for PR1/PR2):
+func (r *fakeMsgRepoForHandler) CreateStreaming(_ context.Context, conversationID, role string, _ *string, replyTo *string) (*model.Message, error) {
+	return &model.Message{ID: "streaming-1", ConversationID: conversationID, Role: role, ReplyTo: replyTo, Status: model.MessageStatusStreaming, CreatedAt: time.Now()}, nil
+}
+func (r *fakeMsgRepoForHandler) FinalizeStreaming(_ context.Context, _, _, _, _, _ string) error {
+	return nil
+}
+func (r *fakeMsgRepoForHandler) ListStreaming(_ context.Context) ([]model.Message, error) {
+	return nil, nil
+}
+func (r *fakeMsgRepoForHandler) MarkStaleStreaming(_ context.Context, _ time.Duration) (int, error) {
+	return 0, nil
 }
 
 // fakeConvRepoForHandler satisfies service.ConvRepoForMsg

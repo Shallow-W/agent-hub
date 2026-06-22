@@ -326,6 +326,49 @@ func (h *MessageHandler) UpdateCard(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// CancelStreaming 取消正在流式生成的 assistant 消息。
+//
+// 流程：解析 task_id（前端从 message.streaming payload 回传）→ 调 service 层
+// CancelStreamingMessage → 向 daemon 发 task.cancel WS 控制消息。
+//
+// 返回 202 Accepted——不等 daemon 响应（daemon 收到后 SIGINT Claude 进程，
+// 触发 task.complete with error，后端 watchdog FinalizeStreaming 切到 canceled）。
+func (h *MessageHandler) CancelStreaming(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40060, "缺少对话 ID 或消息 ID")
+		return
+	}
+	// body 可选——允许空 body 时从 query 兜底
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.TaskID == "" {
+		req.TaskID = c.Query("task_id")
+	}
+	if err := h.svc.CancelStreamingMessage(c.Request.Context(), convID, messageID, req.TaskID); err != nil {
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40440, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgReplyWrongConv) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40061, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotFound) || errors.Is(err, service.ErrMsgAgentOffline) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40062, err.Error())
+			return
+		}
+		slog.Error("cancel streaming failed", "error", err, "convID", convID, "messageID", messageID)
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50040, "取消流式生成失败")
+		return
+	}
+	// 202 Accepted——UI 立即 disable 按钮，等流式 watchdog 广播 message.complete。
+	c.JSON(http.StatusAccepted, gin.H{"ok": true})
+}
+
 // HideMessage 当前用户隐藏消息（仅对自己不可见，其他用户仍可见）。
 func (h *MessageHandler) HideMessage(c *gin.Context) {
 	convID := c.Param("id")

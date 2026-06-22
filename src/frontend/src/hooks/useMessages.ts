@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useMemo } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { getUnreadMessages } from '@/api/message';
 import { markConversationRead } from '@/api/conversation';
@@ -23,6 +23,9 @@ export function useMessages(conversationId: string | null) {
   const streaming = useMessageStore(
     (s) => (conversationId ? s.streamingContent[conversationId] : undefined),
   );
+  // 当前对话的流式占位消息（按 message_id 索引）。新路径——每条流式 assistant
+  // 消息携带 task_id 与 status='streaming'，供 MessageList 渲染 StopButton。
+  const streamingMessagesMap = useMessageStore((s) => s.streamingMessages);
   const hasMoreEntry = useMessageStore(
     (s) => (conversationId ? s.hasMore[conversationId] : undefined),
   );
@@ -37,6 +40,13 @@ export function useMessages(conversationId: string | null) {
 
   const messages = conversationMessages ?? EMPTY_MESSAGES_ARRAY;
   const streamingContent = streaming ?? '';
+  // 仅保留当前对话的流式消息——其它对话的占位消息与本对话无关。
+  const streamingMessages = useMemo(
+    () => Object.values(streamingMessagesMap).filter(
+      (m) => !conversationId || m.conversation_id === conversationId,
+    ),
+    [streamingMessagesMap, conversationId],
+  );
   const hasMore = hasMoreEntry === true;
   const optimisticMessages: OptimisticMessage[] = optimisticEntry ?? EMPTY_OPTIMISTIC_ARRAY;
 
@@ -133,6 +143,7 @@ export function useMessages(conversationId: string | null) {
   return {
     messages,
     streamingContent,
+    streamingMessages,
     loading: !!loadingEntry,
     loadMore,
     send,
