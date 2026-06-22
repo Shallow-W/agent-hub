@@ -323,8 +323,17 @@ func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, e
 	if err != nil {
 		return nil, fmt.Errorf("get message by id: %w", err)
 	}
-	// 补齐 cards_json → Cards 结构化（与列表读路径保持一致）
-	fillCards([]model.Message{m})
+	// 补齐所有关联字段：cards（JSON 反序列化）、attachments、artifacts、reply preview、mentions。
+	// 这些字段 db:"-"，StructScan 不填；必须走 fillAttachmentsAndReply 统一补齐。
+	// Bug 历史：原本只补 cards，导致 postPersist 广播的 msg 缺 reply_to_message，
+	// 前端收到 message.complete 后 replyQuote 不渲染（只有刷新页面走 ListByConversation 才显示）。
+	filled, err := r.fillAttachmentsAndReply(ctx, []model.Message{m})
+	if err != nil {
+		return nil, fmt.Errorf("fill message relations: %w", err)
+	}
+	if len(filled) > 0 {
+		return &filled[0], nil
+	}
 	return &m, nil
 }
 
