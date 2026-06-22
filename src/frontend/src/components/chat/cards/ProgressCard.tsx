@@ -6,7 +6,7 @@ import {
   CloseCircleOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import type { CardProps, ProgressCard, ProgressTask } from '@/types/card';
+import type { CardProps, ProgressCard as ProgressCardData, ProgressTask } from '@/types/card';
 import styles from './Cards.module.css';
 
 const statusIcon: Record<ProgressTask['status'], React.ReactNode> = {
@@ -16,8 +16,9 @@ const statusIcon: Record<ProgressTask['status'], React.ReactNode> = {
   failed: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
 };
 
-/** 执行进度卡片——显示 task list + 状态图标 + 完成百分比 */
-export const ProgressCardView: React.FC<CardProps<ProgressCard>> = ({ card }) => {
+/** 任务进度卡片（card_type=progress）——显示 task list + 状态图标 + 完成百分比。
+ *  组件名 ProgressCard 与接口同名（约定），内部用 ProgressCardData 别名规避合并冲突。 */
+export const ProgressCard: React.FC<CardProps<ProgressCardData>> = ({ card }) => {
   const total = card.tasks.length;
   const done = card.tasks.filter((t) => t.status === 'done').length;
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;

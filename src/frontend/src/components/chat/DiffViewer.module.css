@@ -1,0 +1,82 @@
+/* DiffViewer：单文件 git diff 对比弹窗。
+ * 布局：顶部双栏标题（旧版本/新版本）+ 下方 CodeMirror MergeView 双栏对比。
+ * 旧版遗留的 fileTree/versionBar 等类名已随重构删除。 */
+
+.viewerBody {
+  display: flex;
+  flex-direction: column;
+  height: 78vh;
+  gap: 0;
+}
+
+/* 双栏对比的外层包装：栏头 + 对比面板纵向排列 */
+.diffWrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+/* 双栏标题：左旧右新，与下方 MergeView 两栏对齐 */
+.diffColHeader {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+  background: var(--color-surface-muted, #fafafa);
+}
+
+.colHeaderOld,
+.colHeaderNew {
+  flex: 1;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.colHeaderOld {
+  color: #8c8c8c;
+  border-right: 1px solid var(--color-border, #e5e7eb);
+}
+
+.colHeaderNew {
+  color: #16a34a;
+}
+
+/* MergeView 容器：撑满剩余高度，圆角衔接栏头 */
+.diffPanel {
+  flex: 1;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.hintArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: var(--color-text-secondary, #8c8c8c);
+  font-size: 14px;
+  gap: 8px;
+}
+
+/* Dark mode */
+:global(html.dark) .diffColHeader {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(html.dark) .colHeaderOld {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(html.dark) .diffPanel {
+  border-color: rgba(255, 255, 255, 0.1);
+}

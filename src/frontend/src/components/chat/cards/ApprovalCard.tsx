@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Button, Typography } from 'antd';
 import { ExclamationCircleOutlined } from '@ant-design/icons';
-import type { CardProps, ConfirmCard } from '@/types/card';
+import type { CardProps, ApprovalCard as ApprovalCardData } from '@/types/card';
 import styles from './Cards.module.css';
 
-/** 确认操作卡片——用户点击允许/拒绝后通过 onAction 通知后端。
- *  支持已解决状态（card.state === 'resolved'）——历史消息中显示已处理。 */
-export const ConfirmCardView: React.FC<CardProps<ConfirmCard>> = ({ card, onAction }) => {
+/** 审批确认卡片（card_type=approval）——用户点击允许/拒绝后通过 onAction 通知后端。
+ *  支持已解决状态（card.state === 'resolved'）——历史消息中显示已处理。
+ *  组件名 ApprovalCard 与接口同名（约定），内部用 ApprovalCardData 别名规避合并冲突。 */
+export const ApprovalCard: React.FC<CardProps<ApprovalCardData>> = ({ card, onAction }) => {
   const isResolved = card.state === 'resolved';
   const persistedAction = card.selected_action;
 

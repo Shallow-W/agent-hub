@@ -69,6 +69,63 @@
   line-height: 1.4;
 }
 
+/* Plan card —— 多问题翻页（新版） */
+.planPager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+
+.planPagerTitle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.planPagerInfo {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.planNavBtn {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.optionList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.optionItem {
+  align-items: flex-start;
+  padding: 6px 0;
+  width: 100%;
+}
+
+.optionContent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.recommendBadge {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+}
+
 .optionTasks {
   display: flex;
   flex-wrap: wrap;
@@ -111,6 +168,102 @@
   line-height: 1.5;
 }
 
+/* Info card */
+.infoFieldTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.infoFieldRow td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.infoFieldRow:last-child td {
+  border-bottom: none;
+}
+
+.infoFieldKey {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  width: 1%; /* 收缩到内容宽度，让 value 占满剩余 */
+}
+
+.infoFieldValue {
+  word-break: break-word;
+}
+
+/* Diff card */
+.diffChangeList {
+  margin-top: 4px;
+}
+
+.diffChangeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.diffChangeRow:hover {
+  background: rgba(22, 119, 255, 0.06);
+}
+
+.diffChangeIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.diffChangeAdded {
+  color: #52c41a;
+}
+
+.diffChangeModified {
+  color: #faad14;
+}
+
+.diffChangeDeleted {
+  color: #ff4d4f;
+}
+
+.diffChangePath {
+  flex: 1;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffChangeBadge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.diffBadgeAdded {
+  background: rgba(82, 196, 26, 0.1);
+  color: #52c41a;
+}
+
+.diffBadgeModified {
+  background: rgba(250, 173, 20, 0.1);
+  color: #faad14;
+}
+
+.diffBadgeDeleted {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
 /* Dark mode */
 :global(html.dark) .card {
   background: rgba(255, 255, 255, 0.03);
@@ -122,4 +275,158 @@
 
 :global(html.dark) .confirmMessage {
   background: rgba(250, 173, 20, 0.1);
+}
+
+/* project 卡片：agent 上报的项目目录入口 */
+.projectCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.02));
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.projectCard:hover {
+  border-color: rgba(22, 119, 255, 0.5);
+  background: rgba(22, 119, 255, 0.04);
+}
+
+.projectIcon {
+  font-size: 22px;
+  color: #faad14;
+  flex-shrink: 0;
+}
+
+.projectMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.projectTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectPath {
+  font-size: 12px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectSummary {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(html.dark) .projectCard {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:global(html.dark) .projectCard:hover {
+  background: rgba(22, 119, 255, 0.08);
+}
+
+/* diff 卡片：文件变更清单 */
+.diffCard {
+  margin: 8px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.02));
+  overflow: hidden;
+}
+
+.diffHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diffCount {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.diffLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 14px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.diffList {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.diffItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  transition: background 0.12s;
+}
+
+.diffItem:last-child {
+  border-bottom: none;
+}
+
+.diffItem:hover {
+  background: rgba(22, 119, 255, 0.06);
+}
+
+.diffPath {
+  flex: 1;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffBadge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.badge_added { background: rgba(82, 196, 26, 0.12); color: #52c41a; }
+.badge_modified { background: rgba(250, 173, 20, 0.12); color: #faad14; }
+.badge_deleted { background: rgba(255, 77, 79, 0.12); color: #ff4d4f; }
+
+.iconAdded { color: #52c41a; flex-shrink: 0; }
+.iconModified { color: #faad14; flex-shrink: 0; }
+.iconDeleted { color: #ff4d4f; flex-shrink: 0; }
+
+:global(html.dark) .diffCard {
+  background: rgba(255, 255, 255, 0.03);
 }

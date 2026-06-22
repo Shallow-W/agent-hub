@@ -134,6 +134,7 @@ func Setup(r *gin.Engine, deps Deps) {
 		apiGroup.POST("/agents/:id/restart", deps.AgentHandler.RestartAgent)
 		apiGroup.POST("/agents/:id/stop", deps.AgentHandler.StopAgent)
 		apiGroup.POST("/agents/:id/skills/open-location", deps.AgentHandler.OpenSkillLocation)
+		apiGroup.GET("/agents/:id/files/browse", deps.AgentHandler.BrowseFiles)
 
 		// Platform skills
 		apiGroup.GET("/platform-skills", deps.PlatformSkillHandler.List)

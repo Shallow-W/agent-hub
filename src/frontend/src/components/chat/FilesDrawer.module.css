@@ -1,0 +1,255 @@
+.drawerBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface, #fff);
+}
+
+.toolbarPath {
+  flex: 1;
+  font-size: 12px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contentSplit {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+.fileTree {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  overflow-y: auto;
+  background: var(--color-surface, #fff);
+  display: flex;
+  flex-direction: column;
+}
+
+.treeSection {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.treeSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.02));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.treeSectionHeader:hover {
+  background: rgba(22, 119, 255, 0.04);
+}
+
+.treeSectionCount {
+  font-weight: 400;
+  color: var(--color-text-tertiary, #999);
+}
+
+.changedList {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.changedItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 20px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  transition: background 0.15s;
+}
+
+.changedItem:hover {
+  background: rgba(22, 119, 255, 0.04);
+}
+
+.changedItemActive {
+  background: rgba(22, 119, 255, 0.1);
+}
+
+.dirTree {
+  padding: 4px 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.filePanel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface, #fff);
+}
+
+.filePanelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.filePanelContent {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.hintArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  gap: 8px;
+}
+
+.textPreview {
+  padding: 12px 16px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--color-text);
+}
+
+.markdownPreview {
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.codePreviewWrap {
+  height: 100%;
+}
+
+.treeNode {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+
+.treeNode:hover {
+  background: rgba(22, 119, 255, 0.04);
+}
+
+.treeNodeActive {
+  background: rgba(22, 119, 255, 0.1);
+}
+
+.treeNodeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.treeNodeSize {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-tertiary, #999);
+  flex-shrink: 0;
+}
+
+.iconDir { color: #faad14; flex-shrink: 0; }
+.iconFile { color: var(--color-text-tertiary, #999); flex-shrink: 0; }
+.iconAdded { color: #52c41a; flex-shrink: 0; }
+.iconModified { color: #faad14; flex-shrink: 0; }
+.iconDeleted { color: #ff4d4f; flex-shrink: 0; }
+
+.fileBadge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.badge_added { background: rgba(82, 196, 26, 0.12); color: #52c41a; }
+.badge_modified { background: rgba(250, 173, 20, 0.12); color: #faad14; }
+.badge_deleted { background: rgba(255, 77, 79, 0.12); color: #ff4d4f; }
+
+/* Dark mode */
+:global(html.dark) .fileTree,
+:global(html.dark) .filePanel {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(html.dark) .treeSectionHeader {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global(html.dark) .textPreview {
+  color: var(--color-text);
+}
+
+:global(html.dark) .toolbar,
+:global(html.dark) .filePanelHeader {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* git 历史对比模式：commit 对选择器 */
+.historyBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.historyArrow {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.filePanelPath {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
