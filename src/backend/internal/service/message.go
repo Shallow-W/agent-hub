@@ -1223,11 +1223,21 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if err := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusComplete, strippedContent, "", string(artifacts)); err != nil {
 		return nil, fmt.Errorf("finalize streaming message: %w", err)
 	}
-	// 用最终字段补全内存中的 streamingMsg（供后续 postPersist 广播和返回值使用）
-	streamingMsg.Content = strippedContent
-	streamingMsg.ArtifactsJSON = string(artifacts)
-	streamingMsg.Status = model.MessageStatusComplete
-	msg := streamingMsg
+	// FinalizeStreaming 只 UPDATE 字段，不重查关联。重查一次拿完整的 reply_to_message /
+	// attachments / cards 等关联字段，否则 postPersist 广播的 message 会缺失 reply preview。
+	fullMsg, err := s.msgRepo.GetByID(ctx, streamingMsg.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload finalized message: %w", err)
+	}
+	var msg *model.Message
+	if fullMsg != nil {
+		msg = fullMsg
+	} else {
+		streamingMsg.Content = strippedContent
+		streamingMsg.ArtifactsJSON = string(artifacts)
+		streamingMsg.Status = model.MessageStatusComplete
+		msg = streamingMsg
+	}
 
 	// 持久化合并后的卡片状态（如果任意一方产出卡片）。
 	// 同时填充 msg.Cards 结构化字段，使 WS 广播（postPersist）和返回值携带一致形状。
