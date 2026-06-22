@@ -1,6 +1,10 @@
 import type { MessageAttachment } from './attachment';
 import type { AttachmentPayload } from './attachment';
 import type { Deployment } from './deployment';
+import type { AgentEvent } from './agentEvent';
+
+// 重新导出，保持现有 `import { AgentEvent } from '@/types/message'` 的兼容性。
+export type { AgentEvent, AgentEventType, AgentEventEnvelope } from './agentEvent';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -126,25 +130,6 @@ export interface MessageArtifacts {
   cli_tool?: string;
   /** 聊天「部署」指令回执：存在时前端在该消息内联渲染部署状态卡片 */
   deployment?: Deployment;
-}
-
-/** daemon 上报的单个流式事件——字段对齐后端 stream-json AgentEvent 透传。 */
-export interface AgentEvent {
-  type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn_end' | 'error';
-  /** text/thinking 内容片段 */
-  content?: string;
-  /** tool_use：工具名（首次 delta 非空，后续 input_json_delta 为空字符串） */
-  tool?: string;
-  /** tool_use：工具调用的唯一 id（可与 tool_result 对齐） */
-  tool_use_id?: string;
-  /** tool_result：工具输出 */
-  output?: string;
-  /** tool_result/error：是否为错误 */
-  isError?: boolean;
-  /** turn_end：最终汇总文本（可选） */
-  result?: string;
-  /** error：错误原因 */
-  message?: string;
 }
 
 export interface StreamMessage {
