@@ -43,4 +43,9 @@ type DaemonDispatcher interface {
 	// RemoveTaskPromise removes the result channel for taskID, typically
 	// called after the task result has been consumed or on timeout.
 	RemoveTaskPromise(taskID string)
+
+	// RegisterTaskMessage stores a taskID → messageID mapping so
+	// handleTaskProgress can resolve the streaming message when the
+	// daemon omits the message_id field in task.progress messages.
+	RegisterTaskMessage(taskID, messageID string)
 }

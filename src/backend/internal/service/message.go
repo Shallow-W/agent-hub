@@ -64,7 +64,7 @@ type MsgRepo interface {
 	HideMessage(ctx context.Context, userID, messageID string) error
 	UnhideMessage(ctx context.Context, userID, messageID string) error
 	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
-	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error)
+	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string, artifactsJSON string) (*model.Message, error)
 	FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error
 	ListStreaming(ctx context.Context) ([]model.Message, error)
 	MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error)
@@ -1189,7 +1189,20 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	// senderID 传 nil——messages.sender_id 外键指向 users 表（不是 agents），
 	// assistant message 的 agent 身份存在 artifacts_json（agent_id/agent_name/cli_tool）。
 	// 这与原 Create 路径行为一致（见下行 msgRepo.Create(... nil, nil, nil)）。
-	streamingMsg, err := s.msgRepo.CreateStreaming(ctx, convID, "assistant", nil, replyTo)
+	//
+	// PR3：预创建时即写入 artifacts_json（含 agent_name），让前端 placeholder 在流式期间
+	// 就能显示真实 agent name（而非 fallback 到"助手"）。daemon 的 task.progress 会再
+	// 通过 WS payload 透传 agent_name，双保险——即便 artifacts_json 未取到，前端仍能
+	// 从 WS 拿到。
+	streamingArtifacts, err := json.Marshal(map[string]string{
+		"agent_id":   agent.ID,
+		"agent_name": agent.Name,
+		"cli_tool":   agent.CLITool,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal streaming artifacts: %w", err)
+	}
+	streamingMsg, err := s.msgRepo.CreateStreaming(ctx, convID, "assistant", nil, replyTo, string(streamingArtifacts))
 	if err != nil {
 		return nil, fmt.Errorf("create streaming message: %w", err)
 	}
@@ -1203,6 +1216,16 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(task.ID)
+	// 注册 task→message 映射：daemon 发回的 task.progress 可能丢失 message_id 字段
+	// （WS JSON parse 根因未定位，但 stream_decision 证实 data.message_id undefined）。
+	// handleTaskProgress 通过此映射反查，保证流式路由不中断。
+	s.daemonHub.RegisterTaskMessage(task.ID, streamingMsg.ID)
+	// PR3：同步注册 task→agent_name 映射，让 handleTaskProgress 广播 message.streaming 时
+	// 能携带 agent_name（前端 placeholder 用作 username，避免 fallback 到"助手"）。
+	// 与 RegisterTaskMessage 同构——清理时机一致（FinalizeStreaming 后 DeleteTaskAgent）。
+	if dh, ok := s.daemonHub.(*ws.DaemonHub); ok {
+		dh.RegisterTaskAgent(task.ID, agent.Name)
+	}
 	slog.Info("createAgentReply: BEFORE SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "message_id", streamingMsg.ID, "reply_to", stringValue(replyTo))
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
@@ -1233,6 +1256,11 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("daemon not connected for task %s", task.ID)
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
+	// PR3：流式结束后清理 taskAgents 映射（与 RemoveTaskPromise 同位置 defer）。
+	// 防止 sync.Map 无限增长——taskMessages 留给 PR5 统一清理（已有泄漏，本 PR 不引入新的）。
+	if dh, ok := s.daemonHub.(*ws.DaemonHub); ok {
+		defer dh.DeleteTaskAgent(task.ID)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
@@ -1264,6 +1292,8 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if err != nil {
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
+	// PR3 起 CreateStreaming 已在预创建时写入相同的 artifacts_json（agent_id/name/cli_tool），
+	// 这里再次传入是为了在 FinalizeStreaming 时更新（理论上两值相同，覆盖无副作用）。
 
 	// 提取 agent 在正文 ```json {"cards":[...]}``` block 里写的卡片，同时把 block 从
 	// 用户可见正文里剥离掉（替换为 [CARD:<id>] 占位符）。

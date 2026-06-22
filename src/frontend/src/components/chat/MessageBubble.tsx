@@ -333,9 +333,6 @@ MarkdownRenderer.displayName = 'MarkdownRenderer';
 interface MessageBubbleProps {
   message: Message;
   streaming?: boolean;
-  /** 流式期间外部注入的 block 列表（来自 store.streamingBlocks[message.id]）。
-   *  优先于 message.blocks——流式期间 store 中的副本更新更频繁。 */
-  streamingBlocks?: MessageBlock[];
   showAvatar?: boolean;
   isGrouped?: boolean;
   optimisticStatus?: OptimisticStatus;
@@ -380,7 +377,6 @@ function fallbackAttachmentName(value: unknown, filePath: unknown): string {
 const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   message,
   streaming = false,
-  streamingBlocks,
   showAvatar = true,
   isGrouped = false,
   optimisticStatus,
@@ -496,12 +492,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   }, [message.cards_json, message.cards]);
 
   // 流式 block——存在时优先于 content 渲染。
-  // 来源优先级：
-  //   1) streamingBlocks prop（来自 store.streamingBlocks[message.id]，流式期间实时更新）
-  //   2) message.blocks（store appendDeltas 累积 / FinalizeStreaming 后服务端权威副本）
-  //   3) message.blocks_json（刷新页面后从 DB 还原）
+  // PR3：直接从 message.blocks 取（store appendDeltas 累积在 messages 数组里的 placeholder，
+  // 与 completeStreaming 落库的权威副本走同一字段）；刷新页面后从 message.blocks_json 还原。
   const parsedBlocks = useMemo<MessageBlock[]>(() => {
-    if (streamingBlocks && streamingBlocks.length > 0) return streamingBlocks;
     if (message.blocks && message.blocks.length > 0) return message.blocks;
     if (!message.blocks_json) return [];
     try {
@@ -510,7 +503,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     } catch {
       return [];
     }
-  }, [streamingBlocks, message.blocks, message.blocks_json]);
+  }, [message.blocks, message.blocks_json]);
   const hasBlocks = parsedBlocks.length > 0;
   const isStreaming = message.status === 'streaming' || streaming;
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/middleware"
@@ -24,6 +25,9 @@ type DaemonHandler struct {
 	allowedOrigins []string
 	daemonHub      *ws.DaemonHub
 	userHub        *ws.Hub
+	// taskMessageMap：taskID → messageID 映射，用于 handleTaskProgress 时补齐 daemon
+	// 透传丢失的 message_id（daemon 侧 WS JSON parse 会丢掉 message_id 字段——根因不明）。
+	taskMessageMap *sync.Map
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
@@ -36,6 +40,7 @@ func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.Orchestra
 		allowedOrigins: allowedOrigins,
 		daemonHub:      daemonHub,
 		userHub:        userHub,
+		taskMessageMap: &sync.Map{},
 	}
 }
 
@@ -342,36 +347,60 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 // FinalizeStreaming 一次性落库最终 content/blocks_json。
 func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
-		TaskID        string          `json:"task_id"`
-		MessageID     string          `json:"message_id"`
-		ConversationID string         `json:"conversation_id"`
-		AgentID       string          `json:"agent_id"`
-		Events        json.RawMessage `json:"events"`
+		TaskID         string          `json:"task_id"`
+		MessageID      string          `json:"message_id"`
+		ConversationID string          `json:"conversation_id"`
+		AgentID        string          `json:"agent_id"`
+		AgentName      string          `json:"agent_name"`
+		Events         json.RawMessage `json:"events"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid task.progress data", "error", err)
 		return
 	}
+	// daemon 侧 WS JSON parse 会莫名丢失 message_id 字段（根因待查）。
+	// 这里通过 daemonHub.taskMessages 补齐 mapping，保证流式路由不中断。
+	if req.MessageID == "" {
+		req.MessageID = h.daemonHub.GetTaskMessage(req.TaskID)
+	}
 	if req.MessageID == "" || len(req.Events) == 0 {
-		// 没有 message_id 说明 backend dispatch 时未预创建 streaming message
-		// （例如旧路径 / orchestrator / 非 agent reply）。事件无法路由，丢弃。
 		h.logger.Debug("task.progress missing message_id or events, dropping",
 			"task_id", req.TaskID, "event_bytes", len(req.Events))
 		return
 	}
+	// PR3：从 daemonHub 反查 agent_name，透传给前端 placeholder 显示真实 username。
+	// createAgentReply 预创建 streaming message 时同步注册，流式期间被读取，
+	// FinalizeStreaming 后清理（见 service/message.go）。
+	agentName := req.AgentName
+	if agentName == "" {
+		agentName = h.daemonHub.GetTaskAgent(req.TaskID)
+	}
 	if h.userHub == nil {
 		return
 	}
+	payload := map[string]interface{}{
+		"message_id":      req.MessageID,
+		"conversation_id": req.ConversationID,
+		"task_id":         req.TaskID,
+		"agent_id":        req.AgentID,
+		"deltas":          json.RawMessage(req.Events), // 透传 AgentEvent[]，前端按 kind 渲染
+	}
+	if agentName != "" {
+		payload["agent_name"] = agentName
+	}
 	h.userHub.Broadcast(ws.WSMessage{
 		Type: ws.TypeMessageStreaming,
-		Data: map[string]interface{}{
-			"message_id":      req.MessageID,
-			"conversation_id": req.ConversationID,
-			"task_id":         req.TaskID,
-			"agent_id":        req.AgentID,
-			"deltas":          json.RawMessage(req.Events), // 透传 AgentEvent[]，前端按 kind 渲染
-		},
+		Data: payload,
 	})
+}
+
+// RegisterTaskMessage 注册 task_id → message_id 映射。
+// createAgentReply 在预创建 streaming message 后调用，保证 daemon 发回的
+// task.progress 可以通过 task_id 反查 message_id（兜底 daemon 丢字段）。
+func (h *DaemonHandler) RegisterTaskMessage(taskID, messageID string) {
+	if taskID != "" && messageID != "" {
+		h.taskMessageMap.Store(taskID, messageID)
+	}
 }
 
 func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {

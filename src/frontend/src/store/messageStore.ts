@@ -1,19 +1,16 @@
 import { create } from 'zustand';
 import { message as antdMessage } from '@/utils/message';
-import type { Message, MessageBlock, OptimisticMessage, ReplyToPreview, AgentEvent } from '@/types/message';
+import type { Message, MessageBlock, OptimisticMessage, ReplyToPreview, AgentEvent, MessageStatus } from '@/types/message';
 import type { AttachmentPayload } from '@/types/attachment';
 import * as msgApi from '@/api/message';
 import { PAGE_SIZE, MAX_MESSAGES, RECALL_DEDUP_TTL_MS } from '@/config/constants';
+import { reduceEvents, initialStreamingState } from './streamingReducer';
 
 interface MessageState {
-  /** conversationId → 消息列表 */
+  /** conversationId → 消息列表（含 streaming placeholder，单一数据源） */
   messages: Record<string, Message[]>;
-  /** conversationId → 流式拼接的临时内容（旧路径，仅字符串覆盖场景使用） */
-  streamingContent: Record<string, string>;
-  /** messageId → 流式累积的 block 列表（新路径，支持 text/thinking/tool_use/tool_result/error） */
-  streamingBlocks: Record<string, MessageBlock[]>;
-  /** messageId → 流式占位消息（携带 task_id / status='streaming'，供 MessageList 渲染） */
-  streamingMessages: Record<string, Message>;
+  /** messageId → task_id（StopButton 取消时回传后端定位 daemon task） */
+  streamingTaskIds: Record<string, string>;
   /** conversationId → 是否还有更早的消息可加载 */
   hasMore: Record<string, boolean>;
   /** conversationId → 是否正在加载 */
@@ -39,22 +36,22 @@ interface MessageState {
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   toggleMessagePin: (conversationId: string, messageId: string, pinned: boolean) => Promise<void>;
   addMessage: (conversationId: string, message: Message) => void;
-  updateStreaming: (
-    conversationId: string,
-    messageId: string,
-    content: string,
-  ) => void;
-  /** 新路径：把 daemon 透传的 AgentEvent[] 按 kind 聚合累积到 streamingBlocks。 */
+  /** 新路径：把 daemon 透传的 AgentEvent[] 按 kind 聚合累积到 messages 数组里的 placeholder。 */
   appendDeltas: (
     conversationId: string,
     messageId: string,
     deltas: AgentEvent[],
-    meta?: { taskId?: string; agentId?: string },
+    meta?: { taskId?: string; agentId?: string; agentName?: string },
   ) => void;
   completeStreaming: (
     conversationId: string,
     messageId: string,
     fullMessage: Message,
+  ) => void;
+  /** StopButton 取消时：把 placeholder 状态切到 canceled，清理 streamingTaskIds。 */
+  cancelStreaming: (
+    conversationId: string,
+    messageId: string,
   ) => void;
   retryOptimistic: (conversationId: string, tempId: string) => Promise<void>;
   removeOptimistic: (conversationId: string, tempId: string) => void;
@@ -97,9 +94,7 @@ setInterval(() => {
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: {},
-  streamingContent: {},
-  streamingBlocks: {},
-  streamingMessages: {},
+  streamingTaskIds: {},
   hasMore: {},
   loading: {},
   optimisticMessages: {},
@@ -288,8 +283,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         // 合并服务端推送的字段——卡片更新（UpdateMessageCardsAndBroadcast）
         // 会通过 message.complete 推送新的 cards_json/cards，必须覆盖本地。
         // reply_to_message 仅在本地缺失时补齐（避免覆盖已有数据）。
+        // blocks：本地 placeholder 累积的 blocks 优先（保留流式期间已渲染的内容），
+        // 除非服务端推送了权威 blocks/blocks_json（PR4 后落库）。
         const merged: Message = {
           ...dup,
+          ...message,
           ...(message.cards_json !== undefined && message.cards_json !== null
             ? { cards_json: message.cards_json, cards: message.cards ?? dup.cards }
             : {}),
@@ -301,6 +299,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           ...(message.reply_to_message && !dup.reply_to_message
             ? { reply_to_message: message.reply_to_message }
             : {}),
+          // blocks：本地已有 blocks 时优先保留本地（前端权威），除非服务端明确推送。
+          // PR3：placeholder 在流式期间已累积 blocks，task.complete 广播的 message
+          // 会把 status 切到 complete，此时保留本地 blocks（已渲染过的 token）。
+          blocks: dup.blocks && dup.blocks.length > 0 && !(message.blocks && message.blocks.length > 0)
+            ? dup.blocks
+            : (message.blocks ?? dup.blocks),
         };
         const next = [...existing];
         next[dupIdx] = merged;
@@ -318,133 +322,79 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
-  updateStreaming: (conversationId, _messageId, content) => {
-    set((state) => {
-      const prev = state.streamingContent[conversationId] ?? '';
-      return {
-        streamingContent: {
-          ...state.streamingContent,
-          [conversationId]: prev + content,
-        },
-      };
-    });
-  },
-
   appendDeltas: (conversationId, messageId, deltas, meta) => {
     if (!deltas || deltas.length === 0) return;
     set((state) => {
-      const prevBlocks = state.streamingBlocks[messageId] ?? [];
-      const next = [...prevBlocks];
-      // 用于判断最近一个 block 是否可累积：必须是相同 kind 且非 tool_result/error
-      // （这两种 block 一次性产出，不再累积）。
-      const appendableKind = (kind: string): boolean =>
-        kind === 'text' || kind === 'thinking' || kind === 'tool_use';
+      const existing = state.messages[conversationId] ?? [];
+      const placeholderIdx = existing.findIndex((m) => m.id === messageId);
 
-      for (const ev of deltas) {
-        if (!ev) continue;
-        const last = next[next.length - 1];
-        switch (ev.type) {
-          case 'text': {
-            const text = ev.content ?? '';
-            if (!text) break;
-            if (last && last.kind === 'text') {
-              next[next.length - 1] = { ...last, text: last.text + text };
-            } else {
-              next.push({ index: next.length, kind: 'text', text });
-            }
-            break;
-          }
-          case 'thinking': {
-            const text = ev.content ?? '';
-            if (!text) break;
-            if (last && last.kind === 'thinking') {
-              next[next.length - 1] = { ...last, text: last.text + text };
-            } else {
-              next.push({ index: next.length, kind: 'thinking', text });
-            }
-            break;
-          }
-          case 'tool_use': {
-            const toolName = ev.tool ?? '';
-            if (toolName) {
-              // 工具名非空 → 开启一个新 tool_use block（输入参数后续 delta 会追加）
-              next.push({
-                index: next.length,
-                kind: 'tool_use',
-                text: '',
-                tool_name: toolName,
-                tool_use_id: ev.tool_use_id,
-              });
-            } else if (last && last.kind === 'tool_use') {
-              // 空工具名 → input_json_delta，追加到当前 tool_use block
-              const inputDelta = ev.content ?? '';
-              if (inputDelta) {
-                next[next.length - 1] = { ...last, text: last.text + inputDelta };
-              }
-            }
-            break;
-          }
-          case 'tool_result': {
-            // tool_result 始终是新 block（同一工具调用的结果与输入分开展示）
-            next.push({
-              index: next.length,
-              kind: 'tool_result',
-              text: ev.output ?? '',
-              is_error: ev.isError === true,
-            });
-            break;
-          }
-          case 'error': {
-            next.push({
-              index: next.length,
-              kind: 'error',
-              text: ev.message ?? '生成失败',
-              is_error: true,
-            });
-            break;
-          }
-          case 'turn_end':
-            // turn_end 触发 completeStreaming，由调用方处理。
-            break;
-          default:
-            // 未知 kind 忽略，不破坏流。
-            break;
-        }
-        // 触发 React 状态更新——每次 append 都返回新数组引用，React.memo 的 block 组件
-        // 仅在自身 block 引用变化时 re-render，相邻 block 不受影响。
-        // （此处用 next 局部变量，最终在 set 一次性提交。）
-        void appendableKind;
-      }
+      // 用 prev blocks 作为 reducer 起点（流式期间持续累积）。
+      // PR1 后统一走 reduceEvents，消除 inline switch-case 的 dual-implementation drift。
+      const prevBlocks: MessageBlock[] = placeholderIdx >= 0
+        ? (existing[placeholderIdx]!.blocks ?? [])
+        : [];
+      const reduced = reduceEvents(deltas, {
+        ...initialStreamingState,
+        blocks: prevBlocks,
+        taskId: meta?.taskId,
+        agentId: meta?.agentId,
+      });
+      const next = reduced.blocks;
 
-      // 占位 streaming message：首次见到 delta 时创建，后续保留。
-      // MessageList 渲染时把它当作额外的 assistant message（status=streaming），
-      // 让 StopButton 能取到 task_id 并发 HTTP 取消。
-      const prevPlaceholder = state.streamingMessages[messageId];
-      let placeholder: Message;
-      if (prevPlaceholder) {
-        placeholder = prevPlaceholder;
-      } else {
-        placeholder = {
+      // 创建或更新 placeholder——首次见到 delta 时创建，后续更新 blocks。
+      // PR3：从 WS payload 的 meta.agentName 取真实 username，避免 fallback 到"助手"。
+      // 双保险：meta.agentName 来自后端 daemonHub.taskAgents 反查；同时 artifacts_json
+      // 在预创建时已写入相同 agent_name（backend createAgentReply）。
+      let nextMessages: Record<string, Message[]>;
+      let nextTaskIds = state.streamingTaskIds;
+
+      const agentArtifacts = meta?.agentName || meta?.agentId
+        ? JSON.stringify({
+            ...(meta?.agentId ? { agent_id: meta.agentId } : {}),
+            ...(meta?.agentName ? { agent_name: meta.agentName } : {}),
+          })
+        : undefined;
+
+      if (placeholderIdx < 0) {
+        const placeholder: Message = {
           id: messageId,
           conversation_id: conversationId,
           role: 'assistant',
           content: '',
-          artifacts_json: null,
+          artifacts_json: agentArtifacts ?? null,
           created_at: new Date().toISOString(),
-          status: 'streaming',
+          status: 'streaming' as MessageStatus,
+          blocks: next,
           ...(meta?.taskId ? { task_id: meta.taskId } : {}),
+          ...(meta?.agentName ? { username: meta.agentName } : {}),
+        };
+        nextMessages = {
+          ...state.messages,
+          [conversationId]: [...existing, placeholder],
+        };
+        if (meta?.taskId) {
+          nextTaskIds = { ...state.streamingTaskIds, [messageId]: meta.taskId };
+        }
+      } else {
+        nextMessages = {
+          ...state.messages,
+          [conversationId]: existing.map((m, i) => {
+            if (i !== placeholderIdx) return m;
+            // 合并 meta 字段：保留已有 username/artifacts_json 除非 meta 有更新。
+            // 首次创建时已写入，后续 delta 批次一般不携带 meta——不覆盖。
+            return {
+              ...m,
+              blocks: next,
+              ...(m.task_id === undefined && meta?.taskId ? { task_id: meta.taskId } : {}),
+              // 不覆盖 username——首次设置后保留（防止后续批次 meta 为空时把 username 清掉）。
+            };
+          }),
         };
       }
 
       return {
-        streamingBlocks: {
-          ...state.streamingBlocks,
-          [messageId]: next,
-        },
-        streamingMessages: {
-          ...state.streamingMessages,
-          [messageId]: placeholder,
-        },
+        messages: nextMessages,
+        streamingTaskIds: nextTaskIds,
       };
     });
   },
@@ -452,47 +402,63 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   completeStreaming: (conversationId, messageId, fullMessage) => {
     set((state) => {
       const existing = state.messages[conversationId] ?? [];
-      // 流式累积的 block 落到 message.blocks，刷新页面前的最后一帧快照。
-      // 服务端推送的 fullMessage 若已包含 blocks/blocks_json 则优先用服务端权威副本。
-      const streamedBlocks = state.streamingBlocks[messageId];
-      const mergedMessage: Message =
-        streamedBlocks && streamedBlocks.length > 0 && !fullMessage.blocks && !fullMessage.blocks_json
-          ? { ...fullMessage, blocks: streamedBlocks, status: fullMessage.status ?? 'complete' }
-          : { ...fullMessage, status: fullMessage.status ?? 'complete' };
-      // 按 ID 去重
+      // 找到 placeholder（之前 appendDeltas 创建），与服务端 fullMessage 合并。
+      // PR3：保留本地 placeholder 累积的 blocks（除非服务端推送权威 blocks/blocks_json）；
+      // status 切到 fullMessage.status ?? 'complete'；username 优先保留本地（防 fallback）。
+      const placeholder = existing.find((m) => m.id === messageId);
+      const placeholderBlocks = placeholder?.blocks;
+      const placeholderUsername = placeholder?.username;
+
+      const mergedMessage: Message = {
+        ...fullMessage,
+        // 本地 blocks 优先（流式期间累积），除非服务端明确推送权威副本。
+        blocks: (placeholderBlocks && placeholderBlocks.length > 0 && !fullMessage.blocks && !fullMessage.blocks_json)
+          ? placeholderBlocks
+          : (fullMessage.blocks ?? placeholderBlocks),
+        status: (fullMessage.status ?? 'complete') as MessageStatus,
+        // username 保留 placeholder 中的（完整名字），防止服务端广播未带 username 时 fallback。
+        ...(placeholderUsername && !fullMessage.username ? { username: placeholderUsername } : {}),
+      };
+
+      let nextMessages: Record<string, Message[]>;
       if (existing.some((m) => m.id === fullMessage.id)) {
-        const merged = existing.map((m) =>
-          m.id === fullMessage.id ? { ...m, ...mergedMessage } : m,
-        );
-        const nextStreamingBlocks = { ...state.streamingBlocks };
-        delete nextStreamingBlocks[messageId];
-        const nextStreamingMessages = { ...state.streamingMessages };
-        delete nextStreamingMessages[messageId];
-        const nextStreamingContent = { ...state.streamingContent };
-        delete nextStreamingContent[conversationId];
-        return {
-          messages: { ...state.messages, [conversationId]: merged },
-          streamingBlocks: nextStreamingBlocks,
-          streamingMessages: nextStreamingMessages,
-          streamingContent: nextStreamingContent,
+        nextMessages = {
+          ...state.messages,
+          [conversationId]: existing.map((m) =>
+            m.id === fullMessage.id ? { ...m, ...mergedMessage } : m,
+          ),
         };
-      }
-      const nextStreamingBlocks = { ...state.streamingBlocks };
-      delete nextStreamingBlocks[messageId];
-      const nextStreamingMessages = { ...state.streamingMessages };
-      delete nextStreamingMessages[messageId];
-      const nextStreamingContent = { ...state.streamingContent };
-      delete nextStreamingContent[conversationId];
-      const appended = [...existing, mergedMessage];
-      const trimmed = appended.length > MAX_MESSAGES ? appended.slice(appended.length - MAX_MESSAGES) : appended;
-      return {
-        messages: {
+      } else {
+        const appended = [...existing, mergedMessage];
+        const trimmed = appended.length > MAX_MESSAGES ? appended.slice(appended.length - MAX_MESSAGES) : appended;
+        nextMessages = {
           ...state.messages,
           [conversationId]: trimmed,
-        },
-        streamingBlocks: nextStreamingBlocks,
-        streamingMessages: nextStreamingMessages,
-        streamingContent: nextStreamingContent,
+        };
+      }
+
+      // 清理 streamingTaskIds
+      const nextTaskIds = { ...state.streamingTaskIds };
+      delete nextTaskIds[messageId];
+
+      return {
+        messages: nextMessages,
+        streamingTaskIds: nextTaskIds,
+      };
+    });
+  },
+
+  cancelStreaming: (conversationId, messageId) => {
+    set((state) => {
+      const existing = state.messages[conversationId] ?? [];
+      const updated = existing.map((m) =>
+        m.id === messageId ? { ...m, status: 'canceled' as MessageStatus } : m
+      );
+      const nextTaskIds = { ...state.streamingTaskIds };
+      delete nextTaskIds[messageId];
+      return {
+        messages: { ...state.messages, [conversationId]: updated },
+        streamingTaskIds: nextTaskIds,
       };
     });
   },
@@ -622,9 +588,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 export function resetMessageStore() {
   useMessageStore.setState({
     messages: {},
-    streamingContent: {},
-    streamingBlocks: {},
-    streamingMessages: {},
+    streamingTaskIds: {},
     hasMore: {},
     loading: {},
     optimisticMessages: {},

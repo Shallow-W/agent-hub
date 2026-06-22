@@ -84,8 +84,6 @@ export const MessageList: React.FC<MessageListProps> = ({
 }) => {
   const {
     messages,
-    streamingContent,
-    streamingMessages,
     loading,
     loadMore,
     hasMore,
@@ -98,9 +96,6 @@ export const MessageList: React.FC<MessageListProps> = ({
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
   const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
-  // 订阅 streamingBlocks——流式期间 blocks 变化触发 MessageList 重新渲染并透传给
-  // 各 MessageBubble（每条流式 message 只关心自己的 blocks 切片）。
-  const streamingBlocksMap = useMessageStore((s) => s.streamingBlocks);
 
   // Stable callbacks to preserve React.memo on MessageBubble.
   // Inline arrow functions bust memo on every parent re-render.
@@ -179,7 +174,7 @@ export const MessageList: React.FC<MessageListProps> = ({
       setShowNewMsgBtn(true);
       setUnreadSinceScroll((n) => n + 1);
     }
-  }, [messages, streamingContent, streamingMessages, streamingBlocksMap, optimisticMessages]);
+  }, [messages, optimisticMessages]);
 
   // Skeleton loading state
   if (loading && messages.length === 0) {
@@ -204,7 +199,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     );
   }
 
-  const isEmpty = messages.length === 0 && !streamingContent && streamingMessages.length === 0 && optimisticMessages.length === 0;
+  const isEmpty = messages.length === 0 && optimisticMessages.length === 0;
 
   return (
     <div className={styles.container} ref={containerRef} onScroll={handleScroll}>
@@ -273,33 +268,6 @@ export const MessageList: React.FC<MessageListProps> = ({
               onRemove={optMsg.optimisticStatus === 'failed' ? () => removeOpt(optMsg.id) : undefined}
             />
           ))}
-          {/* Streaming placeholder messages (new block-based path). */}
-          {streamingMessages.map((streamMsg) => {
-            const blocks = streamingBlocksMap[streamMsg.id];
-            return (
-              <MessageBubble
-                key={`__streaming_${streamMsg.id}`}
-                message={streamMsg}
-                streamingBlocks={blocks}
-                streaming
-                isOwn={false}
-              />
-            );
-          })}
-          {streamingContent && (
-            <MessageBubble
-              message={{
-                id: `__streaming_${conversationId}`,
-                conversation_id: conversationId,
-                role: 'assistant',
-                content: streamingContent,
-                artifacts_json: null,
-                created_at: new Date().toISOString(),
-              }}
-              streaming
-              isOwn={false}
-            />
-          )}
         </>
       )}
       {showNewMsgBtn && unreadSinceScroll > 0 && (

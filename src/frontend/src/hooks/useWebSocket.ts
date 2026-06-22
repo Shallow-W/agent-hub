@@ -48,7 +48,6 @@ export function useWebSocket() {
   const status = useWsStore((s) => s.status);
   const connect = useWsStore((s) => s.connect);
   const wsClient = useWsStore((s) => s.wsClient);
-  const updateStreaming = useMessageStore((s) => s.updateStreaming);
   const appendDeltas = useMessageStore((s) => s.appendDeltas);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
@@ -83,16 +82,28 @@ export function useWebSocket() {
 
       switch (msg.type) {
         case 'message.streaming': {
-          // 新路径：daemon 透传 AgentEvent[]，前端按 kind 聚合渲染。
-          // 旧路径兼容：仍然会携带 content，但若有 deltas 则优先用 deltas。
+          // PR3：daemon 透传 AgentEvent[]，前端 appendDeltas 累积到 messages 数组里的
+          // placeholder。meta.agent_name 来自后端 daemonHub.taskAgents 反查，让
+          // placeholder 在流式期间就能显示真实 agent name（消除"助手"fallback bug）。
           const msgId = msg.data.message_id ?? msg.data.messageId ?? messageId;
           if (msgId && msg.data.deltas && msg.data.deltas.length > 0) {
             appendDeltas(convId, msgId, msg.data.deltas, {
               taskId: msg.data.task_id,
               agentId: msg.data.agent_id,
+              agentName: msg.data.agent_name,
             });
           } else if (messageId && content) {
-            updateStreaming(convId, messageId, content);
+            // 旧路径兼容（非 block 流式）——直接 addMessage 占位。
+            // 这里保留兼容但不再写入 streamingContent（已删除）。
+            addMessage(convId, {
+              id: messageId,
+              conversation_id: convId,
+              role: 'assistant',
+              content,
+              artifacts_json: null,
+              created_at: new Date().toISOString(),
+              status: 'streaming',
+            });
           }
           break;
         }

@@ -140,15 +140,18 @@ func (r *MessageRepo) UpdateMessageCards(ctx context.Context, messageID, cardsJS
 // CreateStreaming 预创建一条 streaming 状态的 assistant 消息（D5 ADR）。
 // task.dispatch 前调用，message_id 透传给 daemon，daemon 在 task.progress 原样回传。
 // task.complete 时 FinalizeStreaming 把 content/blocks_json 写入并切到 complete/error。
-func (r *MessageRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error) {
+//
+// PR3: artifactsJSON 预写入（含 agent_id/agent_name/cli_tool），让前端 placeholder 在
+// 流式期间就能从 artifacts_json 解析出 agent_name 显示，避免 fallback 到"助手"。
+func (r *MessageRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string, artifactsJSON string) (*model.Message, error) {
 	var m model.Message
 	err := r.db.QueryRowxContext(ctx,
-		`INSERT INTO messages (conversation_id, role, content, sender_id, reply_to, status)
-		 VALUES ($1, $2, '', $3, $4, 'streaming')
+		`INSERT INTO messages (conversation_id, role, content, sender_id, reply_to, status, artifacts_json)
+		 VALUES ($1, $2, '', $3, $4, 'streaming', NULLIF($5, ''))
 		 RETURNING id, conversation_id, role, content,
 		 COALESCE(blocks_json, '') AS blocks_json,
 		 COALESCE(NULLIF(status, ''), 'complete') AS status, created_at`,
-		conversationID, role, senderID, replyTo,
+		conversationID, role, senderID, replyTo, artifactsJSON,
 	).StructScan(&m)
 	if err != nil {
 		return nil, fmt.Errorf("create streaming message: %w", err)
