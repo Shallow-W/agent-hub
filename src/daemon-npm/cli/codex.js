@@ -97,6 +97,42 @@ function createCodexCliSpec(ctx) {
     onResolvedCommand(command) {
       console.log(`Codex command resolved: ${command}`);
     },
+
+    // === Step 2 扩展（agent-adapter 重构） ===
+
+    // resolveCommand：把 daemon.js 中 resolveCodexCommand 的多路径 fallback 搬进来。
+    // 依赖 ctx 暴露的 existingFile / codexLocalInstallPaths / codexExtensionPath /
+    // commandVersion 辅助函数（由 initCliToolsCtx 注入）。
+    // 等价原行为：
+    //   - AGENTHUB_CODEX_COMMAND 环境变量优先
+    //   - 本地安装路径（codexLocalInstallPaths）
+    //   - Windows VSCode 扩展路径
+    //   - 'codex' 字面量兜底
+    resolveCommand(_taskOrCtx) {
+      const candidates = [
+        ctx.existingFile(process.env.AGENTHUB_CODEX_COMMAND),
+        ...ctx.codexLocalInstallPaths(),
+        ctx.codexExtensionPath(),
+        'codex',
+      ].filter(Boolean);
+      for (const candidate of candidates) {
+        if (ctx.commandVersion(candidate) !== null) return candidate;
+      }
+      return 'codex';
+    },
+
+    // parseResult：codex 优先读 outputFile（--output-last-message 已经把 last message
+    // 写入文件），fallback 到 stdio 组合。等价于 daemon.js executeTask 中
+    // spec.outputFile + 最后的 `${stdout}${stderr}`.trim() 分支组合。
+    parseResult({ stdout, stderr, outputFile } = {}, _daemonCtx) {
+      if (outputFile && ctx.fs.existsSync(outputFile)) {
+        const text = ctx.fs.readFileSync(outputFile, 'utf8').trim();
+        ctx.fs.rmSync(outputFile, { force: true });
+        if (text) return text;
+      }
+      const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
+      return text || '(Agent CLI 没有返回内容)';
+    },
   };
 }
 

@@ -1,14 +1,17 @@
 {
-  "name": "@agenthub/daemon",
+  "name": "@hust-agenthub/daemon",
   "version": "0.1.0",
   "bin": {
     "agenthub-daemon": "./bin/agenthub-daemon.js"
   },
   "files": [
-    "bin"
+    "bin/agenthub-daemon.js"
   ],
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test 'cli/__tests__/*.test.js'"
   },
   "dependencies": {
     "ws": "^8.21.0"

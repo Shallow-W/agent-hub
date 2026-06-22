@@ -10,7 +10,6 @@ const {
   executeTaskOnce,
   ensureOpenCodeMcpConfig,
   onWebSocket,
-  parseOpenCodeOutput,
 } = require('./agenthub-daemon.js');
 
 test('onWebSocket supports ws EventEmitter clients', () => {
@@ -135,34 +134,11 @@ test('commandForTask runs codex with non-interactive MCP-capable execution', () 
   });
 });
 
-test('parseOpenCodeOutput extracts assistant text and session id from message events', () => {
-  const stdout = [
-    JSON.stringify({ type: 'session.created', sessionID: 'session-1' }),
-    JSON.stringify({
-      type: 'message',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'hello' }, { type: 'text', text: ' world' }],
-      },
-    }),
-  ].join('\n');
-
-  assert.deepEqual(parseOpenCodeOutput(stdout), {
-    text: 'hello world',
-    sessionId: 'session-1',
-  });
-});
-
-test('parseOpenCodeOutput prefers latest updated text parts', () => {
-  const stdout = [
-    JSON.stringify({ type: 'part.updated', session: { id: 'session-2' }, part: { id: 'p1', type: 'text', text: 'hel' } }),
-    JSON.stringify({ type: 'part.updated', part: { id: 'p1', type: 'text', text: 'hello' } }),
-  ].join('\n');
-
-  assert.deepEqual(parseOpenCodeOutput(stdout), {
-    text: 'hello',
-    sessionId: 'session-2',
-  });
+test('parseOpenCodeOutput tests removed — superseded by cli/__tests__/opencode.test.js (Switch 7)', () => {
+  // parseOpenCodeOutput was deleted from daemon.js; its logic lives in
+  // OpenCodeCliSpec.parseResult, fully covered by cli/__tests__/opencode.test.js
+  // (text extraction, sessionId extraction, part.updated handling, multi-line stream).
+  assert.ok(true);
 });
 
 test('ensureOpenCodeMcpConfig preserves existing config and writes AgentHub server', () => {

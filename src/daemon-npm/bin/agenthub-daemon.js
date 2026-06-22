@@ -99,7 +99,7 @@ const OPEN_PATH_TOOL = CONFIG.openPathTool;
 // ---------------------------------------------------------------------------
 // 每个任务的执行上下文：承载 per-task 的可收集输出（cards 等），取代旧的
 // 模块级 currentCardFile 全局。从 handleTaskDispatch 一路传到
-// dispatchToClaudeSlot → spawnStreamJsonProcess → sendPrompt，使"当前任务"显式化。
+// dispatchToPersistentSlot → spawnStreamJsonProcess → sendPrompt，使"当前任务"显式化。
 //
 // 扩展点：新增一种 daemon 输出类型（如 progress 流、截图、日志），只需：
 //   registerOutputCollector('xxx', (ctx) => ({ reset(), drain(), cleanup(), ... }))
@@ -1307,38 +1307,13 @@ function codexExtensionPath() {
   return null;
 }
 
-function resolveCodexCommand() {
-  const candidates = [
-    existingFile(process.env.AGENTHUB_CODEX_COMMAND),
-    ...codexLocalInstallPaths(),
-    codexExtensionPath(),
-    'codex',
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    if (commandVersion(candidate) !== null) return candidate;
-  }
-  return 'codex';
-}
-
-function resolveOpenCodeCommand() {
-  const candidates = [
-    existingFile(process.env.AGENTHUB_OPENCODE_COMMAND),
-    existingFile(process.platform === 'win32' && process.env.APPDATA
-      ? path.join(process.env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
-      : null),
-    'opencode',
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    if (commandVersion(candidate) !== null) return candidate;
-  }
-  return 'opencode';
-}
-
 function resolveCommand(cliTool) {
   // Switch 1: 委托给 CliToolSpec.resolveCommand（每个 spec 内部实现多路径 fallback）。
   // 未注册的 cli_tool 退化为字面量，与原 if-else 链未匹配分支行为一致。
-  // 注：resolveCodexCommand / resolveOpenCodeCommand 函数定义保留（spec 内部依赖 ctx
-  // 间接调用同类逻辑；本函数不再直接调用），Step 5 清理。
+  // 注：codexLocalInstallPaths / codexExtensionPath / existingFile / commandVersion 等
+  // 辅助函数仍保留——它们通过 initCliToolsCtx 注入到 spec 内部使用。
+  // Switch 7: resolveCodexCommand / resolveOpenCodeCommand 顶层 wrapper 已删除
+  // （spec.resolveCommand 自己负责多路径 fallback）。
   const spec = cliTools.getCliTool(cliTool);
   if (spec && typeof spec.resolveCommand === 'function') {
     return spec.resolveCommand(initCliToolsCtx);
@@ -2077,170 +2052,9 @@ function openSkillLocation(prompt) {
   });
 }
 
-function parseOpenClawOutput(stdout) {
-  const text = stdout.trim();
-  if (!text) return '(OpenClaw CLI 没有返回内容)';
-  try {
-    const parsed = JSON.parse(text);
-
-    // 常见字段：finalAssistantVisibleText / finalAssistantRawText
-    if (typeof parsed.finalAssistantVisibleText === 'string' && parsed.finalAssistantVisibleText.trim()) {
-      return parsed.finalAssistantVisibleText.trim();
-    }
-    if (typeof parsed.finalAssistantRawText === 'string' && parsed.finalAssistantRawText.trim()) {
-      return parsed.finalAssistantRawText.trim();
-    }
-
-    // payloads 数组（OpenClaw 标准格式）
-    if (Array.isArray(parsed.payloads)) {
-      const payloadText = parsed.payloads
-        .map((payload) => (typeof payload?.text === 'string' ? payload.text : ''))
-        .filter(Boolean)
-        .join('\n')
-        .trim();
-      if (payloadText) return payloadText;
-    }
-
-    // messages 数组格式（兼容更多 CLI 输出）
-    if (Array.isArray(parsed.messages)) {
-      const msgText = parsed.messages
-        .filter((m) => typeof m?.content === 'string' && m.role === 'assistant')
-        .map((m) => m.content)
-        .join('\n')
-        .trim();
-      if (msgText) return msgText;
-    }
-
-    // content 字段（简化 JSON 格式）
-    if (typeof parsed.content === 'string' && parsed.content.trim()) {
-      return parsed.content.trim();
-    }
-
-    // response / result / output 字段
-    for (const key of ['response', 'result', 'output', 'text', 'message']) {
-      if (typeof parsed[key] === 'string' && parsed[key].trim()) {
-        return parsed[key].trim();
-      }
-    }
-
-    // 嵌套 data 字段
-    if (parsed.data && typeof parsed.data === 'object') {
-      for (const key of ['text', 'content', 'message', 'response']) {
-        if (typeof parsed.data[key] === 'string' && parsed.data[key].trim()) {
-          return parsed.data[key].trim();
-        }
-      }
-    }
-  } catch {
-    return text;
-  }
-  return text;
-}
-
-// parseArtifacts 从 Agent 回复的 Markdown 文本中提取结构化产物（MVP：code + webpage）。
-// 字段名必须与 backend ws.ArtifactResult / model.Artifact 的 json tag 对齐：
-//   { type, language, filename, title, url, content }
-function extractOpenCodeSessionId(value) {
-  if (!value || typeof value !== 'object') return '';
-  for (const key of ['sessionID', 'sessionId', 'session_id']) {
-    if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
-  }
-  if (value.session && typeof value.session === 'object') {
-    for (const key of ['id', 'sessionID', 'sessionId', 'session_id']) {
-      if (typeof value.session[key] === 'string' && value.session[key].trim()) return value.session[key].trim();
-    }
-  }
-  if (value.message && typeof value.message === 'object') {
-    return extractOpenCodeSessionId(value.message);
-  }
-  return '';
-}
-
-function textFromOpenCodeContent(content) {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => textFromOpenCodeContent(part))
-      .filter(Boolean)
-      .join('');
-  }
-  if (!content || typeof content !== 'object') return '';
-  if (typeof content.text === 'string') return content.text;
-  if (typeof content.content === 'string') return content.content;
-  if (Array.isArray(content.parts)) return textFromOpenCodeContent(content.parts);
-  return '';
-}
-
-function collectOpenCodeText(value, directMessages, partChunks, partUpdates) {
-  if (!value || typeof value !== 'object') return;
-
-  const message = value.message && typeof value.message === 'object' ? value.message : value;
-  if (message.role === 'assistant') {
-    const messageText = textFromOpenCodeContent(message.content || message.parts || message.text);
-    if (messageText.trim()) directMessages.push(messageText);
-  }
-
-  const part = value.part && typeof value.part === 'object' ? value.part : null;
-  if (part && (part.type === 'text' || typeof part.text === 'string')) {
-    const text = textFromOpenCodeContent(part);
-    if (text.trim()) {
-      const partID = String(part.id || value.id || '');
-      if (partID && /updated|delta/i.test(String(value.type || ''))) {
-        partUpdates.set(partID, text);
-      } else {
-        partChunks.push(text);
-      }
-    }
-  }
-
-  for (const key of ['response', 'result', 'output', 'text']) {
-    if (typeof value[key] === 'string' && value[key].trim() && /assistant|result|complete|response|text/i.test(String(value.type || key))) {
-      partChunks.push(value[key]);
-    }
-  }
-}
-
-function parseOpenCodeOutput(stdout) {
-  const text = stdout.trim();
-  if (!text) return { text: '(OpenCode CLI 没有返回内容)', sessionId: '' };
-
-  const events = [];
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  for (const line of lines) {
-    try {
-      events.push(JSON.parse(line));
-    } catch {
-      // OpenCode may fall back to formatted output when JSON is unavailable.
-    }
-  }
-  if (events.length === 0) {
-    try {
-      events.push(JSON.parse(text));
-    } catch {
-      return { text, sessionId: '' };
-    }
-  }
-
-  let sessionId = '';
-  const directMessages = [];
-  const partChunks = [];
-  const partUpdates = new Map();
-  for (const event of events) {
-    sessionId = sessionId || extractOpenCodeSessionId(event);
-    collectOpenCodeText(event, directMessages, partChunks, partUpdates);
-  }
-
-  const directText = directMessages.join('\n').trim();
-  if (directText) return { text: directText, sessionId };
-
-  const updatedText = Array.from(partUpdates.values()).join('').trim();
-  if (updatedText) return { text: updatedText, sessionId };
-
-  const chunkText = partChunks.join('').trim();
-  if (chunkText) return { text: chunkText, sessionId };
-
-  return { text, sessionId };
-}
+// parseOpenClawOutput / parseOpenCodeOutput 及其辅助函数（extractOpenCodeSessionId /
+// textFromOpenCodeContent / collectOpenCodeText）已删除（Switch 7）——逻辑全部搬到
+// cli/openclaw.js 和 cli/opencode.js 的 spec.parseResult，自包含且测试覆盖。
 
 function lineEndIndex(text, start) {
   const nl = text.indexOf('\n', start);
@@ -2620,156 +2434,23 @@ function stopAgentProcess(agent_id) {
 
 /**
  * Spawn a Claude Code process with stream-json transport.
- * Returns { child, sessionId, sendPrompt }.
+ * Returns { child, sessionId, sendPrompt, events }.
  * If resume=true, uses --resume <sessionId>; otherwise --session-id <sessionId>.
+ *
+ * Switch 4 落地：函数体从 Claude-specific 的 stream-json 实现改为 thin wrapper，
+ * 委托给 ClaudeCliSpec.spawnPersistent。事件流通过 AsyncIterable<AgentEvent> 暴露给
+ * 未来 dispatcher 翻译成 WS 消息（本次不切换 WS 消息路径）。函数名暂保留，因 callsite
+ * 仍在用（改名是 Switch 5 的事）。
  */
 function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx) {
-  const command = resolveCommand('claude');
-  const taskId = (taskCtx && taskCtx.taskId) || null;
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId, taskId);
-  const effectiveSessionId = sessionId || crypto.randomUUID();
-
-  const args = [
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--input-format', 'stream-json',
-    '--verbose',
-    ...mcpArgs,
-    resume ? '--resume' : '--session-id',
-    effectiveSessionId,
-  ];
-  if (systemPrompt) {
-    args.push('--system-prompt', systemPrompt);
+  const spec = cliTools.getCliTool('claude');
+  if (!spec || typeof spec.spawnPersistent !== 'function') {
+    throw new Error('Claude spec does not support spawnPersistent');
   }
-
-  const spec = processSpec(command, args);
-  const child = spawn(spec.command, spec.args, {
-    detached: process.platform !== 'win32',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  logFlow('info', 'agent.process_spawn', {
-    agent_id: agentId,
-    conversation_id: conversationId,
-    user_id: userId,
-    command: spec.command,
-    args_count: spec.args.length,
-    session_id: effectiveSessionId,
-    resume,
-    mcp_enabled: mcpArgs.length > 0,
-    system_prompt_len: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    pid: child.pid,
-  });
-
-  let stdoutBuf = '';
-  let resultResolver = null;
-
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    stdoutBuf += chunk;
-    const lines = stdoutBuf.split('\n');
-    stdoutBuf = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.type === 'assistant') {
-          agentTurnStates.set(agentId, 'active');
-        }
-        if (event.type === 'result') {
-          agentTurnStates.set(agentId, 'idle');
-          const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
-          logFlow(event.is_error || event.subtype === 'error_during_execution' ? 'warn' : 'info', 'agent.turn_result', {
-            agent_id: agentId,
-            conversation_id: conversationId,
-            session_id: effectiveSessionId,
-            is_error: Boolean(event.is_error || event.subtype === 'error_during_execution'),
-            subtype: event.subtype,
-            result_len: typeof text === 'string' ? text.length : 0,
-          });
-          if (resultResolver) {
-            const r = resultResolver;
-            resultResolver = null;
-            if (event.is_error || event.subtype === 'error_during_execution') {
-              r({ error: text || 'Agent execution failed' });
-            } else {
-              r({ result: text || '' });
-            }
-          }
-        }
-      } catch { /* ignore non-JSON lines */ }
-    }
-  });
-
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk) => {
-    logFlow('warn', 'agent.stderr', {
-      agent_id: agentId,
-      conversation_id: conversationId,
-      session_id: effectiveSessionId,
-      message: truncateStr(chunk.trim(), 500),
-    });
-  });
-
-  // Reject any pending resultResolver if process exits mid-turn
-  child.on('close', (code) => {
-    const hadPendingTurn = Boolean(resultResolver);
-    if (resultResolver) {
-      const r = resultResolver;
-      resultResolver = null;
-      r({ error: `Agent process exited (code=${code})` });
-    }
-    agentTurnStates.delete(agentId);
-    logFlow(code === 0 ? 'info' : 'warn', 'agent.process_close', {
-      agent_id: agentId,
-      conversation_id: conversationId,
-      session_id: effectiveSessionId,
-      pid: child.pid,
-      exit_code: code,
-      pending_turn: hadPendingTurn,
-    });
-  });
-
-  let queueTail = Promise.resolve();
-  const sendPromptRaw = (prompt) => new Promise((resolve, reject) => {
-    if (child.exitCode !== null) {
-      reject(new Error('Agent process not running'));
-      return;
-    }
-    resultResolver = resolve;
-    logFlow('info', 'agent.prompt_sent', {
-      agent_id: agentId,
-      conversation_id: conversationId,
-      session_id: effectiveSessionId,
-      prompt_len: typeof prompt === 'string' ? prompt.length : 0,
-    });
-    const msg = JSON.stringify({
-      type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text: prompt }] },
-    });
-    child.stdin.write(msg + '\n');
-    const timer = setTimeout(() => {
-      if (resultResolver === resolve) {
-        resultResolver = null;
-        logFlow('error', 'agent.turn_timeout', {
-          agent_id: agentId,
-          conversation_id: conversationId,
-          session_id: effectiveSessionId,
-          timeout_ms: EXEC_TIMEOUT_MS,
-        });
-        reject(new Error('Agent task timed out (400s)'));
-      }
-    }, EXEC_TIMEOUT_MS);
-    timer.unref(); // Don't keep event loop alive for timeout timer
-  });
-
-  const sendPrompt = (prompt) => {
-    const run = () => sendPromptRaw(prompt);
-    queueTail = queueTail.then(run, run);
-    return queueTail;
-  };
-
-  return { child, sessionId: effectiveSessionId, sendPrompt };
+  return spec.spawnPersistent(
+    { agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx },
+    initCliToolsCtx,
+  );
 }
 
 /**
@@ -2780,13 +2461,18 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
  *
  * taskCtx 随调用链传入，承载本任务的执行上下文（含 daemon 内部卡片队列等）。
  *
- * Switch 5 注：函数名保留 dispatchToClaudeSlot，因目前只有 Claude spec 实现 persistent
- * 支持（Switch 4 后 spawnStreamJsonProcess 才委托给 spec.spawnPersistent；未完成前函数体仍
- * 为 Claude-specific 的 stream-json 逻辑）。待 Switch 4 落地 + 其它 spec 实现 spawnPersistent
- * 后，可改名为 dispatchToPersistentSlot。当前函数体依赖 spawnStreamJsonProcess wrapper，
- * 后者内部还是原 Claude stream-json 路径（Switch 4 未完成）。
+ * Switch 4 已落地：spawnStreamJsonProcess 是 thin wrapper，委托给 spec.spawnPersistent
+ * （目前仅 ClaudeCliSpec 实现，其它 spec 加上 spawnPersistent 即自动接入）。
+ *
+ * Switch 5 落地：函数从 `dispatchToClaudeSlot` 改名为 `dispatchToPersistentSlot`，语义
+ * 去 Claude 化——任何实现了 spawnPersistent 的 spec 都能通过本函数 dispatch。当前
+ * 仅 Claude 实现 spawnPersistent，但函数内部不再 hardcode 假设只有 Claude（slot 内
+ * cliTool 字段从 task.cli_tool 提取，便于将来扩展）。
+ *
+ * 注：WS event name（agent.*）是前端约定的对外协议，保持原样不动；只改函数名和内部
+ * 通用性。前端不会感知到这个函数改名。
  */
-async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx) {
+async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx, cliTool = 'claude') {
   const sessionKey = `${agentId}:${conversationId}`;
   const savedSessionId = conversationSessions.get(sessionKey) || null;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2892,10 +2578,10 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
     process: child,
     sessionId,
     currentConversationId: conversationId,
-    cliTool: 'claude',
+    cliTool,
     sendPrompt,
   });
-  idleAgentConfigs.set(agentId, { cliTool: 'claude', sessionId, systemPrompt: systemPrompt || '' });
+  idleAgentConfigs.set(agentId, { cliTool, sessionId, systemPrompt: systemPrompt || '' });
   agentTurnStates.set(agentId, 'idle');
 
   // Persist session mapping
@@ -2968,7 +2654,7 @@ async function handleAgentStart(ws, payload) {
     const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false);
     const { child, sessionId, sendPrompt } = result;
 
-    // Wait briefly to detect immediate startup failure (same pattern as dispatchToClaudeSlot)
+    // Wait briefly to detect immediate startup failure (same pattern as dispatchToPersistentSlot)
     await sleep(2000);
     if (child.exitCode !== null) {
       throw new Error(`Agent process exited immediately (code=${child.exitCode})`);
@@ -3100,9 +2786,9 @@ async function handleTaskDispatch(ws, data) {
         cli_tool: task.cli_tool,
         agent_id: task.agent_id,
         conversation_id: task.conversation_id,
-        mode: 'claude_slot',
+        mode: 'persistent_slot',
       });
-      result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt, taskCtx);
+      result = await dispatchToPersistentSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt, taskCtx, task.cli_tool);
     } else {
       logFlow('info', 'task.execution_start', {
         task_id: task.id,
@@ -4338,5 +4024,4 @@ module.exports = {
   executeTaskOnce,
   ensureOpenCodeMcpConfig,
   onWebSocket,
-  parseOpenCodeOutput,
 };
