@@ -1846,6 +1846,7 @@ function commandForTask(task, taskCtx) {
       systemPrompt,
       userPrompt,
       runningAgents,
+      taskId: (taskCtx && taskCtx.taskId) || null,
     });
   }
   return { command, args: [userPrompt] };
