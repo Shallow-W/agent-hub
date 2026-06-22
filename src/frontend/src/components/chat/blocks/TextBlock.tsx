@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { MessageBlock } from '@/types/message';
 import styles from './Blocks.module.css';
+import { registerBlock } from './BlockRegistry';
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -30,3 +31,9 @@ function TextBlockInner({ block, streaming = false }: TextBlockProps) {
 }
 
 export const TextBlock = React.memo(TextBlockInner);
+
+// ---------------------------------------------------------------------------
+// 自注册：import './TextBlock'（经 blocks/index.ts）触发 registerBlock 副作用。
+// 组件定义与注册信息内聚在同一文件，便于维护。
+// ---------------------------------------------------------------------------
+registerBlock('text', { component: TextBlock });

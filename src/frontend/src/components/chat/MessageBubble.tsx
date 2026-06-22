@@ -33,11 +33,9 @@ import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { DeployStatusCard } from './DeployStatusCard';
 import { StopButton } from './StopButton';
-import { TextBlock } from './blocks/TextBlock';
-import { ThinkingBlock } from './blocks/ThinkingBlock';
-import { ToolCallBlock } from './blocks/ToolCallBlock';
-import { ToolResultBlock } from './blocks/ToolResultBlock';
-import { ErrorBlock } from './blocks/ErrorBlock';
+// blocks/index.ts 触发各 block 组件的 registerBlock 自注册副作用，
+// MessageBubble 只依赖 renderBlock 抽象，不直接 import 具体组件。
+import { renderBlock } from './blocks';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
@@ -771,23 +769,15 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {hasBlocks ? (
               <div className={styles.markdownBody}>
                 {parsedBlocks.map((block, i) => {
-                  // 最后一个 block（且属于可累积 kind）在 streaming 时显示光标
+                  // 最后一个 block（且属于可累积 kind）在 streaming 时显示光标。
+                  // renderBlock 内部把 streaming prop 传给组件（tool_result / error 忽略之）。
                   const isLast = i === parsedBlocks.length - 1;
                   const showCursor = isStreaming && isLast;
-                  switch (block.kind) {
-                    case 'text':
-                      return <TextBlock key={block.index ?? i} block={block} streaming={showCursor} />;
-                    case 'thinking':
-                      return <ThinkingBlock key={block.index ?? i} block={block} streaming={showCursor} />;
-                    case 'tool_use':
-                      return <ToolCallBlock key={block.index ?? i} block={block} streaming={showCursor} />;
-                    case 'tool_result':
-                      return <ToolResultBlock key={block.index ?? i} block={block} />;
-                    case 'error':
-                      return <ErrorBlock key={block.index ?? i} block={block} />;
-                    default:
-                      return null;
-                  }
+                  return (
+                    <React.Fragment key={block.index ?? i}>
+                      {renderBlock(block, showCursor)}
+                    </React.Fragment>
+                  );
                 })}
               </div>
             ) : displayContent ? (

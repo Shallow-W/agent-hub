@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import type { MessageBlock } from '@/types/message';
 import styles from './Blocks.module.css';
+import { registerBlock } from './BlockRegistry';
 
 interface ThinkingBlockProps {
   block: MessageBlock;
@@ -47,3 +48,6 @@ function ThinkingBlockInner({ block, defaultExpanded = false, streaming = false 
 }
 
 export const ThinkingBlock = React.memo(ThinkingBlockInner);
+
+// 自注册：思考块——默认折叠，streaming 时显示光标
+registerBlock('thinking', { component: ThinkingBlock });

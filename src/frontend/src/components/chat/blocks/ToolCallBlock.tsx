@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { DownOutlined, RightOutlined, ToolOutlined } from '@ant-design/icons';
 import type { MessageBlock } from '@/types/message';
 import styles from './Blocks.module.css';
+import { registerBlock } from './BlockRegistry';
 
 interface ToolCallBlockProps {
   block: MessageBlock;
@@ -49,3 +50,6 @@ function ToolCallBlockInner({ block, defaultExpanded = false, streaming = false 
 }
 
 export const ToolCallBlock = React.memo(ToolCallBlockInner);
+
+// 自注册：工具调用块——工具名 chip + 流式累积的入参
+registerBlock('tool_use', { component: ToolCallBlock });
