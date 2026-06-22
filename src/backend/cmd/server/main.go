@@ -223,6 +223,13 @@ func main() {
 	taskCardQueue := service.NewTaskCardQueue()
 	msgSvc.SetTaskCardQueue(taskCardQueue)
 
+	// PR4: StreamingBuffer 在 backend 内存累积 task_id → StreamingState。
+	// daemon task.progress 时 handleTaskProgress 喂 events 给 buffer，
+	// task.complete 时 createAgentReply GetState 拿到权威 blocks 落 blocks_json。
+	// 单例：DaemonHandler 与 MessageService 共享同一实例。
+	streamingBuffer := service.NewStreamingBuffer()
+	msgSvc.SetStreamingBuffer(streamingBuffer)
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc, roleSvc)
@@ -241,7 +248,7 @@ func main() {
 	toolDefHandler.SetToolRegistry(toolRegistry)
 	toolCategoryHandler := handler.NewToolCategoryHandler(toolCategoryRepo)
 	catalogHandler := catalog.NewHandler(catalogSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub, streamingBuffer)
 	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)

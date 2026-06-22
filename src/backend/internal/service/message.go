@@ -291,15 +291,16 @@ var (
 
 // MessageService 消息业务逻辑
 type MessageService struct {
-	msgRepo       MsgRepo
-	convRepo      ConvRepoForMsg
-	agentRepo     AgentRepoForMsg
-	notifier      MessageNotifier
-	delivery      MessageDeliveryState
-	orchSvc       *OrchestratorService
-	daemonHub     port.DaemonDispatcher
-	fileURLs      *FileURLBuilder
-	taskCardQueue *TaskCardQueue // 收集 MCP subprocess 工具 emit 的卡片，按 task_id 索引
+	msgRepo         MsgRepo
+	convRepo        ConvRepoForMsg
+	agentRepo       AgentRepoForMsg
+	notifier        MessageNotifier
+	delivery        MessageDeliveryState
+	orchSvc         *OrchestratorService
+	daemonHub       port.DaemonDispatcher
+	fileURLs        *FileURLBuilder
+	taskCardQueue   *TaskCardQueue // 收集 MCP subprocess 工具 emit 的卡片，按 task_id 索引
+	streamingBuffer *StreamingBuffer // PR4: 累积 task_id 对应的 StreamingState，task.complete 时落权威 blocks_json
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -354,6 +355,15 @@ func (s *MessageService) SetFileURLBuilder(builder *FileURLBuilder) {
 // 时会 Drain task_id 对应的卡片，合并到 message.cards_json。
 func (s *MessageService) SetTaskCardQueue(q *TaskCardQueue) {
 	s.taskCardQueue = q
+}
+
+// SetStreamingBuffer 注入流式状态 buffer。
+//
+// PR4: daemon task.progress 时 handler 把 events 喂给 buffer 累积；
+// createAgentReply 在 task.complete 时 GetState 拿到权威 blocks 落库，
+// 然后 Delete 释放内存。nil 时 fallback 到空 blocks_json（兼容旧路径）。
+func (s *MessageService) SetStreamingBuffer(b *StreamingBuffer) {
+	s.streamingBuffer = b
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -1210,6 +1220,7 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	// Push via WS and wait for channel-based result
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
 		// daemon 未连接：直接把预创建 message 标 error，避免悬挂。
+		// 注：此处尚未注册 defer，直接调 deleteStreamingBuffer 兜底（幂等）。
 		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
 			slog.Warn("finalize streaming on daemon-disconnect failed", "message_id", streamingMsg.ID, "error", ferr)
 		}
@@ -1261,6 +1272,9 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	if dh, ok := s.daemonHub.(*ws.DaemonHub); ok {
 		defer dh.DeleteTaskAgent(task.ID)
 	}
+	// PR4：流式结束后释放 streamingBuffer entry（与 RemoveTaskPromise 同位置 defer）。
+	// 防止 sync.Map 无限增长。error/timeout/success 所有路径都走此 defer。
+	defer s.deleteStreamingBuffer(task.ID)
 
 	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
@@ -1318,10 +1332,11 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 
 	// D5 ADR：预创建模式下用 FinalizeStreaming UPDATE 而非 Create INSERT。
 	// content = strippedContent（剥离 cards 后的可见文本）
-	// blocks_json = 空（前端已通过流式 delta 累积出 block 结构，不需要后端再写；
-	//   未来可在 watchdog / message.complete 时用累积的 delta 落库作为权威副本）
+	// blocks_json = streamingBuffer 累积的权威 blocks（PR4 起填充，刷新页面后
+	//   仍能看到 thinking / tool_use / text 完整结构化展示）
 	// status = complete
-	if err := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusComplete, strippedContent, "", string(artifacts)); err != nil {
+	blocksJSON := s.snapshotBlocksJSON(task.ID)
+	if err := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusComplete, strippedContent, blocksJSON, string(artifacts)); err != nil {
 		return nil, fmt.Errorf("finalize streaming message: %w", err)
 	}
 	// FinalizeStreaming 只 UPDATE 字段，不重查关联。重查一次拿完整的 reply_to_message /
@@ -1511,4 +1526,42 @@ func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, co
 		return ""
 	}
 	return strings.TrimSpace(agents[0].AgentID)
+}
+
+// snapshotBlocksJSON 从 streamingBuffer 取出 taskID 累积的 blocks 并序列化为 JSON 字符串。
+//
+// 用于 createAgentReply 成功路径：FinalizeStreaming 时把权威 blocks 写入 messages.blocks_json，
+// 让刷新页面后仍能渲染 thinking / tool_use / text 完整结构化展示。
+//
+// 返回空串的场景（不破坏 FinalizeStreaming）：
+//   - streamingBuffer 未注入（兼容旧路径）
+//   - taskID 无累积状态（流式期间 daemon 未发任何 task.progress）
+//   - 累积 blocks 为空
+//   - JSON marshal 失败（理论上不应发生，model.MessageBlock 全基础类型）
+func (s *MessageService) snapshotBlocksJSON(taskID string) string {
+	if s.streamingBuffer == nil || taskID == "" {
+		return ""
+	}
+	state, ok := s.streamingBuffer.GetState(taskID)
+	if !ok || len(state.Blocks) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(state.Blocks)
+	if err != nil {
+		slog.Warn("snapshot blocks json failed", "task_id", taskID, "error", err)
+		return ""
+	}
+	return string(b)
+}
+
+// deleteStreamingBuffer 释放 taskID 对应的 streamingBuffer entry。
+//
+// 幂等：streamingBuffer 未注入 / taskID 不存在都是 no-op。
+// 用于 createAgentReply 所有终态路径（success / error / timeout / dispatch-fail），
+// 防止 sync.Map 无限增长。
+func (s *MessageService) deleteStreamingBuffer(taskID string) {
+	if s.streamingBuffer == nil || taskID == "" {
+		return
+	}
+	s.streamingBuffer.Delete(taskID)
 }

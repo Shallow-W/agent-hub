@@ -18,29 +18,31 @@ import (
 
 // DaemonHandler 处理本地守护进程连接
 type DaemonHandler struct {
-	agentSvc       *service.AgentService
-	orchSvc        *service.OrchestratorService
-	token          string
-	logger         *slog.Logger
-	allowedOrigins []string
-	daemonHub      *ws.DaemonHub
-	userHub        *ws.Hub
+	agentSvc        *service.AgentService
+	orchSvc         *service.OrchestratorService
+	token           string
+	logger          *slog.Logger
+	allowedOrigins  []string
+	daemonHub       *ws.DaemonHub
+	userHub         *ws.Hub
+	streamingBuffer *service.StreamingBuffer
 	// taskMessageMap：taskID → messageID 映射，用于 handleTaskProgress 时补齐 daemon
 	// 透传丢失的 message_id（daemon 侧 WS JSON parse 会丢掉 message_id 字段——根因不明）。
 	taskMessageMap *sync.Map
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
-func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub) *DaemonHandler {
+func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub, streamingBuffer *service.StreamingBuffer) *DaemonHandler {
 	return &DaemonHandler{
-		agentSvc:       agentSvc,
-		orchSvc:        orchSvc,
-		token:          token,
-		logger:         logger,
-		allowedOrigins: allowedOrigins,
-		daemonHub:      daemonHub,
-		userHub:        userHub,
-		taskMessageMap: &sync.Map{},
+		agentSvc:        agentSvc,
+		orchSvc:         orchSvc,
+		token:           token,
+		logger:          logger,
+		allowedOrigins:  allowedOrigins,
+		daemonHub:       daemonHub,
+		userHub:         userHub,
+		streamingBuffer: streamingBuffer,
+		taskMessageMap:  &sync.Map{},
 	}
 }
 
@@ -337,14 +339,15 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 
 // handleTaskProgress 处理 daemon 的流式增量上报。
 //
-// daemon 侧 StreamBuffer 50ms 批量 flush AgentEvent[]，这里把批量事件透传给前端：
-//   - WS 事件类型：TypeMessageStreaming ("message.streaming")
-//   - payload: { message_id, conversation_id, deltas: AgentEvent[] }
+// daemon 侧 StreamBuffer 50ms 批量 flush AgentEvent[]，这里把批量事件：
+//   - 喂给 streamingBuffer（in-memory 累积 reducer 状态，task.complete 时落权威 blocks_json）
+//   - 透传给前端（WS message.streaming），前端按 message_id 路由到 streaming reducer
 //
-// 前端按 message_id 路由到对应 streamingBlocks[messageId]，appendDelta 累积渲染。
+// payload: { message_id, conversation_id, deltas: AgentEvent[] }
 //
 // 注意：不写 DB（D3 ADR）——流式期间 backend 不 persist 增量，task.complete 时
-// FinalizeStreaming 一次性落库最终 content/blocks_json。
+// FinalizeStreaming 一次性落库最终 content/blocks_json。blocks_json 的内容来自
+// streamingBuffer 累积的状态（见 service/message.go createAgentReply）。
 func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
 		TaskID         string          `json:"task_id"`
@@ -367,6 +370,19 @@ func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.
 		h.logger.Debug("task.progress missing message_id or events, dropping",
 			"task_id", req.TaskID, "event_bytes", len(req.Events))
 		return
+	}
+	// PR4：把 events 喂给 streamingBuffer 累积。
+	// 解析失败静默跳过（events 已是合法 JSON 数组，但结构异常时不影响透传）。
+	// 同一 taskID 的 events 由 WS read loop 单 goroutine 串行调用 PushEvents，
+	// 满足 buffer 内部 *StreamingState 修改的并发安全约束。
+	if h.streamingBuffer != nil {
+		var events []model.AgentEvent
+		if err := json.Unmarshal(req.Events, &events); err == nil && len(events) > 0 {
+			h.streamingBuffer.PushEvents(req.TaskID, events)
+		} else if err != nil {
+			h.logger.Debug("task.progress events parse failed, skip buffer push",
+				"task_id", req.TaskID, "error", err)
+		}
 	}
 	// PR3：从 daemonHub 反查 agent_name，透传给前端 placeholder 显示真实 username。
 	// createAgentReply 预创建 streaming message 时同步注册，流式期间被读取，
