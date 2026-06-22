@@ -10,6 +10,7 @@ import { fileStatus, fileDiff, type DiffContent } from '@/api/files';
 import type { ChangeStatus } from '@/api/files';
 import { ApiError } from '@/api/client';
 import { message as antMessage } from '@/utils/message';
+import { asyncPool } from '@/utils/asyncPool';
 import { DiffViewer } from '@/components/chat/DiffViewer';
 import styles from './Cards.module.css';
 
@@ -72,14 +73,19 @@ export const DiffCard: React.FC<CardProps<DiffCardData>> = ({ card, agentId }) =
         if (!cancelled) setLoading(false);
       });
 
-    // 预取 diff：逐文件并行请求，各自落缓存后供 DiffViewer 打开时使用。
+    // 预取 diff：限制 3 并发，避免大改动（20+ 文件）瞬间打爆 daemon。
     // 失败静默——DiffViewer 打开时若缓存缺失会自行兜底再请求一次。
-    card.files.forEach((f) => {
-      fileDiff(agentId, card.workDir, f)
-        .then((content) => {
-          if (!cancelled) diffCacheRef.current.set(f, content);
-        })
-        .catch(() => { /* 预取失败不阻塞，点开时 DiffViewer 会重试 */ });
+    void asyncPool(
+      card.files,
+      (f) => fileDiff(agentId, card.workDir, f),
+      3,
+    ).then((results) => {
+      if (cancelled) return;
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          diffCacheRef.current.set(card.files[i]!, r.value);
+        }
+      });
     });
     return () => {
       cancelled = true;
