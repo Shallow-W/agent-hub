@@ -249,7 +249,12 @@ func main() {
 	toolCategoryHandler := handler.NewToolCategoryHandler(toolCategoryRepo)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub, streamingBuffer)
-	agentRepo.SetDaemonTaskDispatcher(daemonHandler.DispatchTask)
+	// 不再注册 SetDaemonTaskDispatcher：CreateDaemonTask 的每个合法 caller
+	// (createAgentReply / Dispatcher.dispatchCore / agent_browse / agent_skill_open)
+	// 都会自己调 SendToMachine(task.dispatch) 并按需携带 message_id。
+	// 若保留此回调，CreateDaemonTask 会同步触发 DispatchTask→SendToMachine，
+	// 与 caller 自己的 SendToMachine 形成重复 dispatch：第一条不带 message_id，
+	// 被 daemon 当作 shouldStream=false 处理，导致流式彻底失效（流式架构无 task.progress 事件）。
 	taskHandler := handler.NewTaskHandler(taskSvc, convRepo)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetOrchestratorService(orchSvc)
