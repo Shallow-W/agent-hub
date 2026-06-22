@@ -148,7 +148,12 @@ export interface StreamMessage {
     username?: string;
     done?: boolean;
     agentId?: string;
-    status?: 'thinking' | 'running' | 'idle';
+    /** WS payload status——overloaded:
+     *  - message.complete: 消息生命周期（complete/error/canceled/streaming）
+     *  - agent.status（历史遗留）: agent 运行态（thinking/running/idle）。
+     * 当前 agent.status case 使用 msg.data.agent_status，此字段在 agent.status 事件中未被读取，
+     * 保留仅为向后兼容；新代码按事件类型断言具体 union 分支。 */
+    status?: MessageStatus | 'thinking' | 'running' | 'idle';
     code?: string;
     message?: string;
     userId?: string;
@@ -158,6 +163,9 @@ export interface StreamMessage {
     reply_to_message?: ReplyToPreview | null;
     agent_id?: string;
     agent_status?: string;
+    /** PR3：message.streaming 携带的 agent_name——后端 daemonHub.taskAgents 反查后透传，
+     *  让前端 placeholder 在流式期间就能显示真实 agent name（非"助手"fallback）。 */
+    agent_name?: string;
     /** 交互式卡片——message.complete 推送时携带，免去刷新页面即可渲染 */
     cards_json?: string;
     cards?: import('./card').InteractiveCard[];
@@ -169,5 +177,9 @@ export interface StreamMessage {
     deltas?: AgentEvent[];
     /** message.streaming：关联的 task_id（用于 cancel 等场景） */
     task_id?: string;
+    /** message.complete：服务端权威 blocks_json（流式结构落库后回传）。
+     *  与本地 placeholder 累积的 blocks 互补——有则覆盖（服务端权威）。 */
+    blocks_json?: string;
+    blocks?: MessageBlock[];
   };
 }

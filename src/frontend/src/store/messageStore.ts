@@ -308,7 +308,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         };
         const next = [...existing];
         next[dupIdx] = merged;
-        return { messages: { ...state.messages, [conversationId]: next } };
+        // 当服务端推送终态 status（complete/error/canceled）时，清理 streamingTaskIds。
+        // message.complete 全量推送走 addMessage 而非 completeStreaming，若不在此清理，
+        // 占位符虽切到 complete，streamingTaskIds[messageId] 残留 → StopButton 不卸载。
+        const nextTaskIds = (message.status && message.status !== 'streaming' && state.streamingTaskIds[message.id])
+          ? (() => {
+              const tids = { ...state.streamingTaskIds };
+              delete tids[message.id];
+              return tids;
+            })()
+          : state.streamingTaskIds;
+        return {
+          messages: { ...state.messages, [conversationId]: next },
+          ...(nextTaskIds !== state.streamingTaskIds ? { streamingTaskIds: nextTaskIds } : {}),
+        };
       }
       const next = [...existing, message];
       // Trim oldest messages from the beginning if exceeding cap

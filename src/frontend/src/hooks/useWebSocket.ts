@@ -114,6 +114,9 @@ export function useWebSocket() {
 
           // Full message push from Hub (has id + conversation_id)
           if (msg.data.id && msg.data.conversation_id) {
+            // 关键：透传服务端权威 status / blocks_json / blocks。
+            // 后端 postPersist → PushToConversation 推送整个 model.Message（含 status:'complete'）。
+            // 若漏传 status，addMessage merge 时占位符会保留 'streaming'，UI 永远停在"传输中"。
             addMessage(convId, {
               id: msg.data.id,
               conversation_id: msg.data.conversation_id,
@@ -131,6 +134,12 @@ export function useWebSocket() {
               // 免去刷新页面即可在聊天中显示卡片。
               cards_json: msg.data.cards_json,
               cards: msg.data.cards,
+              // 流式 block：服务端落库的权威副本（PR4 起 FinalizeStreaming 写入 blocks_json）。
+              blocks_json: msg.data.blocks_json,
+              blocks: msg.data.blocks,
+              // 终态：服务端推送的 status 是真源（complete / error / canceled）。
+              // 缺省时按 'complete' 处理（message.complete 事件本身就是终态信号）。
+              status: (msg.data.status ?? 'complete') as import('@/types/message').MessageStatus,
             });
           } else if (messageId && content) {
             // Streaming completion
