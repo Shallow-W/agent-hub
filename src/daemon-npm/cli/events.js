@@ -12,12 +12,17 @@
 // 事件类型：
 //   text        —— 可展示给用户的文本片段 { content }
 //   thinking    —— 思考过程（可选展示） { content }
-//   tool_use    —— 工具调用开始 { tool, input }
+//   tool_use    —— 工具调用开始 { tool, input, toolUseID? }
 //   tool_result —— 工具调用结果     { tool, output, isError }
 //   card        —— 平台卡片         { cardType, payload }
 //   error       —— 错误（不终止会话） { message }
 //   turn_end    —— 一个 turn 结束   { result?, error? }
 //   session_end —— persistent 进程退出 { code?, signal? }
+//
+// PR5：所有 event factory 支持可选 seq 字段（daemon 上层维护 seqCounter 注入）。
+// 当前调用方不强制传 seq，保留 undefined 占位；未来用于 WS 重连断点续传。
+// PR5：toolUseEvent 增加 toolUseID 字段，从 Claude stream-json 的
+// content_block.tool_use.id 提取，未来并行工具调用必需。
 
 const EVENT_TYPES = Object.freeze({
   TEXT: 'text',
@@ -26,55 +31,82 @@ const EVENT_TYPES = Object.freeze({
   TOOL_RESULT: 'tool_result',
   CARD: 'card',
   ERROR: 'error',
+  CANCEL: 'cancel',
   TURN_END: 'turn_end',
   SESSION_END: 'session_end',
 });
 
-function textEvent(content) {
-  return { type: EVENT_TYPES.TEXT, content: String(content ?? '') };
+function textEvent(content, seq) {
+  const ev = { type: EVENT_TYPES.TEXT, content: String(content ?? '') };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function thinkingEvent(content) {
-  return { type: EVENT_TYPES.THINKING, content: String(content ?? '') };
+function thinkingEvent(content, seq) {
+  const ev = { type: EVENT_TYPES.THINKING, content: String(content ?? '') };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function toolUseEvent(tool, input) {
-  return { type: EVENT_TYPES.TOOL_USE, tool: String(tool ?? ''), input };
+function toolUseEvent(tool, input, toolUseID, seq) {
+  const ev = { type: EVENT_TYPES.TOOL_USE, tool: String(tool ?? ''), input };
+  if (toolUseID) ev.toolUseID = toolUseID;
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function toolResultEvent(tool, output, isError = false) {
-  return {
+function toolResultEvent(tool, output, isError = false, seq) {
+  const ev = {
     type: EVENT_TYPES.TOOL_RESULT,
     tool: String(tool ?? ''),
     output,
     isError: Boolean(isError),
   };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function cardEvent(cardType, payload) {
-  return {
+function cardEvent(cardType, payload, seq) {
+  const ev = {
     type: EVENT_TYPES.CARD,
     cardType: String(cardType ?? ''),
     payload,
   };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function errorEvent(message) {
-  return { type: EVENT_TYPES.ERROR, message: String(message ?? '') };
+function errorEvent(message, seq) {
+  const ev = { type: EVENT_TYPES.ERROR, message: String(message ?? '') };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
 }
 
-function turnEndEvent({ result, error, subtype } = {}) {
+// cancelEvent —— 用户取消生成时发送。reducer 据此切 status=canceled
+// （与 error 区分：error 是失败，cancel 是用户主动停止，UI 显示不同）。
+// PR5：reducer（前端 + Go）都有 case 'cancel' 分支，但此前 daemon 发的是
+// error + cancel flag，导致 reducer 走 error 分支切到 status=error 而非 canceled。
+// 这里补正：cancel 类型独立，与 plan `{ type: 'cancel', reason: ... }` 对齐。
+function cancelEvent(reason, seq) {
+  const ev = { type: EVENT_TYPES.CANCEL, reason: String(reason ?? '') };
+  if (seq !== undefined) ev.seq = seq;
+  return ev;
+}
+
+function turnEndEvent({ result, error, subtype, seq } = {}) {
   const ev = { type: EVENT_TYPES.TURN_END };
   if (result !== undefined) ev.result = result;
   if (error !== undefined) ev.error = error;
   if (subtype !== undefined) ev.subtype = subtype;
+  if (seq !== undefined) ev.seq = seq;
   return ev;
 }
 
-function sessionEndEvent({ code, signal } = {}) {
+function sessionEndEvent({ code, signal, seq } = {}) {
   const ev = { type: EVENT_TYPES.SESSION_END };
   if (code !== undefined) ev.code = code;
   if (signal !== undefined) ev.signal = signal;
+  if (seq !== undefined) ev.seq = seq;
   return ev;
 }
 
@@ -159,6 +191,7 @@ module.exports = {
   toolResultEvent,
   cardEvent,
   errorEvent,
+  cancelEvent,
   turnEndEvent,
   sessionEndEvent,
   createAsyncQueue,

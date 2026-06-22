@@ -132,6 +132,12 @@ function createOpenClawCliSpec(ctx) {
       }
       return text;
     },
+
+    // parseStreamEvent / parseStreamEventAll：占位（PR5留）。
+    // OpenClaw 是本项目内部 agent，当前走 one-shot `agent --json` 模式。
+    // 流式协议与 Claude 类似（猜测），待后续验证后在此补全。
+    parseStreamEvent(_line, _ctx) { return null; },
+    parseStreamEventAll(_line, _ctx) { return []; },
   };
 }
 

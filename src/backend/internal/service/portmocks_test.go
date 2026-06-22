@@ -129,6 +129,19 @@ func (f *fakeDaemonDispatcher) RemoveTaskPromise(taskID string) {
 	}
 }
 
+// RegisterTaskMessage 存储 taskID → messageID 映射（接口要求，测试无需断言）。
+func (f *fakeDaemonDispatcher) RegisterTaskMessage(taskID, messageID string) {
+	// no-op：测试不依赖此映射的调用记录；service.message.go createAgentReply 会调用，
+	// 满足 port.DaemonDispatcher 接口契约即可。
+	_ = taskID
+	_ = messageID
+}
+
+// DeleteTaskMessage 清理 taskID → messageID 映射（PR5：修复内存泄漏）。
+func (f *fakeDaemonDispatcher) DeleteTaskMessage(taskID string) {
+	_ = taskID
+}
+
 // 编译期保证 fakeDaemonDispatcher 满足 port.DaemonDispatcher 接口。
 // 这是 P8b port 抽象的核心契约断言：任何 port.DaemonDispatcher 的注入点
 // （Dispatcher / AgentService / MessageService）都可以用本 fake 替换 *ws.DaemonHub。

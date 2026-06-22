@@ -2475,10 +2475,10 @@ function stopAgentProcess(agent_id) {
  * 未来 dispatcher 翻译成 WS 消息（本次不切换 WS 消息路径）。函数名暂保留，因 callsite
  * 仍在用（改名是 Switch 5 的事）。
  */
-function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx, eventRef) {
-  const spec = cliTools.getCliTool('claude');
+function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx, eventRef, cliTool = 'claude') {
+  const spec = cliTools.getCliTool(cliTool);
   if (!spec || typeof spec.spawnPersistent !== 'function') {
-    throw new Error('Claude spec does not support spawnPersistent');
+    throw new Error(`CLI "${cliTool}" does not support spawnPersistent`);
   }
   return spec.spawnPersistent(
     { agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx, eventRef },
@@ -2581,7 +2581,7 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
   let result;
   if (validSessionId) {
     try {
-      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId, taskCtx, eventRef);
+      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId, taskCtx, eventRef, cliTool);
       // Wait briefly to detect immediate resume failure
       await sleep(2000);
       if (result.child.exitCode !== null) {
@@ -2594,10 +2594,10 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
         conversation_id: conversationId,
         session_id: validSessionId,
       });
-      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef);
+      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef, cliTool);
     }
   } else {
-    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef);
+    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef, cliTool);
   }
 
   const { child, sessionId, sendPrompt } = result;
@@ -2778,6 +2778,7 @@ async function handleTaskDispatch(ws, data) {
     agent_id: data.agent_id,
     conversation_id: data.conversation_id,
     user_id: data.user_id,
+    // message_id 由后端可选传入——有则流式（createAgentReply 路径），无则批处理（orchestrator / 文件浏览等）。
     message_id: data.message_id,
   };
   if (!task.id) {
@@ -2791,22 +2792,35 @@ async function handleTaskDispatch(ws, data) {
     return true;
   }
 
-  // Dedup guard：同一 agent + prompt 在 3 秒内只执行一次。
-  // 防止后端重复 dispatch（HTTP + WS 竞态等）导致 LLM 被调用两次。
-  const dedupKey = `${task.agent_id}:${task.conversation_id}`;
+  // Dedup guard：同一 task_id 在 3 秒内只执行一次。
+  // 但若新 dispatch 携带 message_id 而旧 dispatch 未携带（orchestrator vs createAgentReply
+  // 先后到达），则替换——以有 message_id 的 dispatch 为准，流式优先。
+  const dedupKey = `${task.id}`;
   const now = Date.now();
   const lastDispatch = recentDispatches.get(dedupKey);
-  if (lastDispatch && lastDispatch.prompt === task.prompt && (now - lastDispatch.ts) < 3000) {
-    logFlow('warn', 'task.dispatch_dedup_skip', {
-      task_id: task.id,
-      agent_id: task.agent_id,
-      conversation_id: task.conversation_id,
-      reason: 'duplicate within 3s',
-      delta_ms: now - lastDispatch.ts,
-    });
-    return true;
+  if (lastDispatch && (now - lastDispatch.ts) < 3000) {
+    if (task.message_id && !lastDispatch.hasMessageId) {
+      // 旧 dispatch 没有 message_id，新 dispatch 有——替换，用流式版本。
+      logFlow('info', 'task.dispatch_replace_for_streaming', {
+        task_id: task.id,
+        reason: 'new dispatch has message_id, old does not',
+        delta_ms: now - lastDispatch.ts,
+      });
+      // fall through（不 return，继续执行：新 dispatch 取代旧 dispatch 的 slot）
+      // 注：旧的 sendPrompt 已经在 queueTail 里排队，无法取消。
+      // 替换仅影响后续 eventRef.current —— 流式事件会路由到新 dispatch 的 onEvent。
+    } else {
+      logFlow('warn', 'task.dispatch_dedup_skip', {
+        task_id: task.id,
+        agent_id: task.agent_id,
+        conversation_id: task.conversation_id,
+        reason: 'duplicate within 3s',
+        delta_ms: now - lastDispatch.ts,
+      });
+      return true;
+    }
   }
-  recentDispatches.set(dedupKey, { prompt: task.prompt, ts: now });
+  recentDispatches.set(dedupKey, { ts: now, hasMessageId: Boolean(task.message_id) });
 
   const { systemPrompt, userPrompt } = buildPromptParts(task);
 
@@ -2816,6 +2830,7 @@ async function handleTaskDispatch(ws, data) {
     agent_id: task.agent_id,
     conversation_id: task.conversation_id,
     user_id: task.user_id,
+    message_id: task.message_id,
     prompt_len: typeof task.prompt === 'string' ? task.prompt.length : 0,
     context_len: typeof task.context_messages === 'string' ? task.context_messages.length : 0,
     system_prompt_len: systemPrompt.length,
@@ -2826,22 +2841,27 @@ async function handleTaskDispatch(ws, data) {
   const taskCtx = new TaskContext(task);
   taskCtx.attachCollectors();
 
-  // 流式输出：创建 StreamBuffer（50ms 节流），onFlush 时把批量 AgentEvent 通过
-  // bus.emit('task.progress') 转发到后端。仅 persistent slot 路径（Claude stream-json）
-  // 会往 buffer 推事件；legacy spawn（codex/opencode/openclaw）走批处理，buffer 始终空。
-  const streamBuffer = new StreamBuffer({
-    onFlush: (events) => {
-      if (!events || events.length === 0) return;
-      bus.emit('task.progress', {
-        task_id: task.id,
-        message_id: taskCtx.messageId,
-        agent_id: taskCtx.agentId,
-        conversation_id: taskCtx.conversationId,
-        events,
-      });
-    },
-  });
-  const onEvent = (ev) => streamBuffer.push(ev);
+  const hasMsgId = Boolean(taskCtx.messageId);
+  const shouldStream = hasMsgId;
+
+  // 流式输出：仅当 backend 传了 message_id（createAgentReply 路径）时启用。
+  // orchestrator / 文件浏览等路径不传 message_id，走批处理（不做流式），避免
+  // 多个 dispatch 共享同一 agent slot 时，无 message_id 的 dispatch 抢占流式通道。
+  const streamBuffer = shouldStream
+    ? new StreamBuffer({
+        onFlush: (events) => {
+          if (!events || events.length === 0) return;
+          bus.emit('task.progress', {
+            task_id: task.id,
+            message_id: taskCtx.messageId,
+            agent_id: taskCtx.agentId,
+            conversation_id: taskCtx.conversationId,
+            events,
+          });
+        },
+      })
+    : null;
+  const onEvent = shouldStream && streamBuffer ? (ev) => streamBuffer.push(ev) : null;
 
   try {
     let result;
@@ -2894,10 +2914,7 @@ async function handleTaskDispatch(ws, data) {
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
-    // 关闭流式 buffer：正常路径已无残留（turn_end 立即 flush），失败路径会 flush
-    // 已累积的增量事件，让前端看到错误前的部分输出。
-    streamBuffer.close();
-    // 清理本任务所有 collector 的临时资源（卡片临时文件等）
+    if (streamBuffer) streamBuffer.close();
     taskCtx.cleanup();
   }
   return true;
@@ -2980,6 +2997,12 @@ bus.on('task.progress', (info) => {
 
 // task 取消：前端"停止生成"按钮 → 后端发 task.cancel → daemon SIGINT agent 进程。
 // 取消是"尽力而为"——进程已被杀时无副作用。
+//
+// PR5：SIGINT 后通过 slot.eventRef.current 推一个 cancel 类型事件给 StreamBuffer，
+// 让前端 reducer 切到 status=canceled（而不是 error）。events.js 的 cancelEvent
+// 与 reducer（前端 + Go）的 case 'cancel' 分支对齐。
+// 注：eventRef.current 可能为 null（turn 已结束），此时静默跳过——后端
+// FinalizeStreaming 会通过 task.complete 路径正常收尾。
 bus.on('task.cancel', ({ data } = {}) => {
   const { task_id, agent_id } = data || {};
   logFlow('info', 'task.cancel_received', { task_id, agent_id });
@@ -2999,6 +3022,18 @@ bus.on('task.cancel', ({ data } = {}) => {
     logFlow('info', 'task.cancel_signal_sent', { task_id, agent_id, pid: slot.process.pid });
   } catch (err) {
     logFlow('warn', 'task.cancel_failed', { task_id, agent_id, error: errorMessage(err) });
+  }
+  // 通过 eventRef 推 cancel 事件，让 dispatcher（StreamBuffer）flush 一个 cancel
+  // 事件到后端，前端 reducer 据此切 status=canceled（与 backend watchdog
+  // 行为对齐）。eventRef.current 可能为 null（turn 已结束），此时静默跳过——后端
+  // FinalizeStreaming 会通过 task.complete 路径正常收尾。
+  if (slot.eventRef && typeof slot.eventRef.current === 'function') {
+    try {
+      const { cancelEvent } = require('../cli/events');
+      slot.eventRef.current(cancelEvent('用户取消生成'));
+    } catch {
+      /* onEvent 错误不阻塞 SIGINT 流程 */
+    }
   }
 });
 

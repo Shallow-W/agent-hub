@@ -179,6 +179,17 @@ func (dh *DaemonHub) DeleteTaskAgent(taskID string) {
 	dh.taskAgents.Delete(taskID)
 }
 
+// DeleteTaskMessage 清理 task_id → message_id 映射（FinalizeStreaming 后调用）。
+// PR5：修复历史内存泄漏——RegisterTaskMessage 只 Store 不 Delete，长跑后端会
+// 累积所有 taskID。与 DeleteTaskAgent 同构，createAgentReply 在所有终态路径
+// 统一调 defer daemonHub.DeleteTaskMessage(task.ID) 清理。
+func (dh *DaemonHub) DeleteTaskMessage(taskID string) {
+	if taskID == "" {
+		return
+	}
+	dh.taskMessages.Delete(taskID)
+}
+
 // Run 启动 DaemonHub 消息总线事件循环，应在独立 goroutine 中调用
 func (dh *DaemonHub) Run(ctx context.Context) {
 	for {

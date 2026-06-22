@@ -197,6 +197,26 @@ func (r *MessageRepo) ListStreaming(ctx context.Context) ([]model.Message, error
 	return list, nil
 }
 
+// ListStaleStreaming 返回创建时间早于 before 的所有 streaming message（watchdog 标记前查询）。
+//
+// PR5：watchdog 在 MarkStaleStreaming 之前调用本函数拿到受影响 messages 的元数据，
+// 标记后广播 message.complete（status=error）给对应 user，让前端立即感知 stale，
+// 不再永远 loading。返回值仅包含 id / conversation_id / sender_id 等元数据字段，
+// 不携带 content / blocks_json（避免把所有 streaming 内容拉到应用层）。
+func (r *MessageRepo) ListStaleStreaming(ctx context.Context, before time.Time) ([]model.Message, error) {
+	var list []model.Message
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT `+messageCols+` FROM `+messageFrom+
+			` WHERE m.deleted_at IS NULL
+			   AND COALESCE(NULLIF(m.status, ''), 'complete') = 'streaming'
+			   AND m.created_at < $1`,
+		before)
+	if err != nil {
+		return nil, fmt.Errorf("list stale streaming messages: %w", err)
+	}
+	return list, nil
+}
+
 // MarkStaleStreaming 把超过 maxAge 的 streaming message 标记为 error（watchdog 触发）。
 // 只改 status 和追加 error block 到 blocks_json，不动 content（保留已输出部分）。
 // 返回受影响行数，0 表示没有 stale message。

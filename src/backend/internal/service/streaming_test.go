@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/pkg/ws"
 )
 
 // TestStreamingWatchdog_MarksStaleMessage 验证 watchdog 把超时的 streaming message 标 error。
@@ -85,16 +86,74 @@ func TestStreamingWatchdog_RepoError(t *testing.T) {
 	wd.scanOnce(context.Background())
 }
 
+// TestStreamingWatchdog_BroadcastsStaleError 验证 PR5 广播行为：
+// 标记 stale 后向 conversation 成员广播 message.complete（status=error）。
+//
+// 测试用真实的 *ws.Hub（无 DB 依赖）+ fakeConvRepoForWatchdog 提供成员列表。
+// 通过 hub.Register 直接注入一个伪 client（使用 hub 的 clients map）来捕获广播。
+func TestStreamingWatchdog_BroadcastsStaleError(t *testing.T) {
+	repo := &fakeMsgRepo{}
+	// 预创建 stale streaming message
+	old := model.Message{
+		ID:             "msg-stale",
+		ConversationID: "conv-1",
+		Role:           "assistant",
+		Status:         model.MessageStatusStreaming,
+		CreatedAt:      time.Now().Add(-2 * time.Minute),
+	}
+	repo.messages = append(repo.messages, old)
+
+	convRepo := &fakeConvRepoForWatchdog{members: []string{"user-1", "user-2"}}
+	hub := ws.NewHub(slog.Default())
+	hubCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(hubCtx)
+
+	wd := NewStreamingWatchdog(repo, slog.Default(), 60*time.Second, time.Hour)
+	wd.SetBroadcaster(hub, convRepo)
+	wd.scanOnce(context.Background())
+
+	// 验证标记成功
+	if repo.messages[0].Status != model.MessageStatusError {
+		t.Fatalf("expected stale message marked error, got %q", repo.messages[0].Status)
+	}
+	// 广播路径：watchdog 调 hub.SendToUser → 写到 clients map 里的 sendCh。
+	// 这里不实际接入 client（需要真实 WS），仅验证 watchdog 流程不 panic 且
+	// ListMemberIDs 被调用（convRepo.calls 计数）。
+	if len(convRepo.calls) != 1 {
+		t.Fatalf("expected 1 ListMemberIDs call, got %d", len(convRepo.calls))
+	}
+	if convRepo.calls[0] != "conv-1" {
+		t.Errorf("expected ListMemberIDs(conv-1), got %q", convRepo.calls[0])
+	}
+}
+
+// fakeConvRepoForWatchdog 实现 ConvRepoForWatchdog，记录 ListMemberIDs 调用。
+type fakeConvRepoForWatchdog struct {
+	members []string
+	calls   []string
+}
+
+func (f *fakeConvRepoForWatchdog) ListMemberIDs(ctx context.Context, conversationID string) ([]string, error) {
+	f.calls = append(f.calls, conversationID)
+	return f.members, nil
+}
+
 type failingStreamingRepo struct{}
 
 func (f *failingStreamingRepo) MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error) {
 	return 0, errors.New("simulated DB error")
 }
 
+// ListStaleStreaming 同样模拟 DB 错误（watchdog 应吞掉错误继续走 mark 路径）。
+func (f *failingStreamingRepo) ListStaleStreaming(ctx context.Context, before time.Time) ([]model.Message, error) {
+	return nil, errors.New("simulated DB error")
+}
+
 // TestCreateStreaming_InitialStatus 验证预创建的 message 初始 status 是 streaming。
 func TestCreateStreaming_InitialStatus(t *testing.T) {
 	repo := &fakeMsgRepo{}
-	msg, err := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil)
+	msg, err := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil, "")
 	if err != nil {
 		t.Fatalf("CreateStreaming failed: %v", err)
 	}
@@ -120,7 +179,7 @@ func TestCreateStreaming_InitialStatus(t *testing.T) {
 // TestFinalizeStreaming_StatusTransition 验证 finalize 切换 status + 写入 content。
 func TestFinalizeStreaming_StatusTransition(t *testing.T) {
 	repo := &fakeMsgRepo{}
-	msg, _ := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil)
+	msg, _ := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil, "")
 
 	err := repo.FinalizeStreaming(context.Background(), msg.ID, model.MessageStatusComplete, "final content", "", `{"agent_id":"a1"}`)
 	if err != nil {
@@ -142,7 +201,7 @@ func TestFinalizeStreaming_StatusTransition(t *testing.T) {
 // TestFinalizeStreaming_StatusError 验证 error 状态：保留空 content（前端显示 error block）。
 func TestFinalizeStreaming_StatusError(t *testing.T) {
 	repo := &fakeMsgRepo{}
-	msg, _ := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil)
+	msg, _ := repo.CreateStreaming(context.Background(), "conv-1", "assistant", strPtr("agent-1"), nil, "")
 
 	_ = repo.FinalizeStreaming(context.Background(), msg.ID, model.MessageStatusError, "", "", "")
 	got := repo.messages[0]

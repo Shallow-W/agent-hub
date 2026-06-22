@@ -220,6 +220,12 @@ function createOpenCodeCliSpec(ctx) {
 
       return { text: finalText, sessionId };
     },
+
+    // parseStreamEvent / parseStreamEventAll：占位（PR5留）。
+    // OpenCode 目前是 one-shot run --format json，不支持 stream-json persistent 模式。
+    // 未来实现 OpenCodeStreamAdapter 时在此补全（待 sst/opencode 流式协议调研）。
+    parseStreamEvent(_line, _ctx) { return null; },
+    parseStreamEventAll(_line, _ctx) { return []; },
   };
 }
 

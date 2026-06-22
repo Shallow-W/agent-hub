@@ -37,9 +37,10 @@ type MessageStore interface {
 	HideMessage(ctx context.Context, userID, messageID string) error
 	UnhideMessage(ctx context.Context, userID, messageID string) error
 	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
-	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error)
+	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string, artifactsJSON string) (*model.Message, error)
 	FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error
 	ListStreaming(ctx context.Context) ([]model.Message, error)
+	ListStaleStreaming(ctx context.Context, before time.Time) ([]model.Message, error)
 	MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error)
 }
 

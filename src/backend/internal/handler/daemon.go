@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/middleware"
@@ -26,9 +25,6 @@ type DaemonHandler struct {
 	daemonHub       *ws.DaemonHub
 	userHub         *ws.Hub
 	streamingBuffer *service.StreamingBuffer
-	// taskMessageMap：taskID → messageID 映射，用于 handleTaskProgress 时补齐 daemon
-	// 透传丢失的 message_id（daemon 侧 WS JSON parse 会丢掉 message_id 字段——根因不明）。
-	taskMessageMap *sync.Map
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
@@ -42,7 +38,6 @@ func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.Orchestra
 		daemonHub:       daemonHub,
 		userHub:         userHub,
 		streamingBuffer: streamingBuffer,
-		taskMessageMap:  &sync.Map{},
 	}
 }
 
@@ -408,15 +403,6 @@ func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.
 		Type: ws.TypeMessageStreaming,
 		Data: payload,
 	})
-}
-
-// RegisterTaskMessage 注册 task_id → message_id 映射。
-// createAgentReply 在预创建 streaming message 后调用，保证 daemon 发回的
-// task.progress 可以通过 task_id 反查 message_id（兜底 daemon 丢字段）。
-func (h *DaemonHandler) RegisterTaskMessage(taskID, messageID string) {
-	if taskID != "" && messageID != "" {
-		h.taskMessageMap.Store(taskID, messageID)
-	}
 }
 
 func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {

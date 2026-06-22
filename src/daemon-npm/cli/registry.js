@@ -36,6 +36,27 @@
 //
 // 这些方法在 Step 2-3 阶段是 dormant 的（spec 上有定义但 daemon.js 还没切过去调用）。
 // Step 4 会逐个把 daemon.js 的硬编码分支替换为 spec.方法 调用。
+//
+// === CliStreamAdapter 契约（PR5 正式落地） ===
+// 每个 CLI spec 通过实现以下可选方法加入"流式适配器"层（统一 AgentEvent 输出）：
+//
+//   spec.parseStreamEvent(line, ctx) -> AgentEvent | AgentEvent[] | null
+//     解析 CLI 持久进程 stdout 的一行为 AgentEvent。非 JSON 或不可识别返回 null。
+//     调用方（spec.spawnPersistent 内部 stdout.on('data') 闭包）批量调用并喂给
+//     StreamBuffer，由 daemon 节流后转为 task.progress WS 消息。
+//
+//   spec.parseStreamEventAll(line, ctx) -> AgentEvent[]
+//     multi-event 版本（默认实现：调 parseStreamEvent 并 normalize 为数组）。
+//
+//   spec.spawnPersistent({ agentId, sessionId, systemPrompt, resume, conversationId,
+//                         userId, taskCtx, eventRef }, ctx) -> { child, sessionId, sendPrompt, events }
+//     启动 persistent 进程。eventRef 是 { current: fn | null } mutable 引用，
+//     dispatcher 把 onEvent 装入 eventRef.current，让 stdout 闭包透明读取。
+//     events 是 AsyncIterable<AgentEvent>（备用观察通道）。
+//
+// 未实现 parseStreamEvent 的 spec 被视为不支持流式（one-shot 模式，走 parseResult 路径）。
+// 目前仅 ClaudeCliSpec 完整实现，Codex/OpenCode/OpenClaw 提供占位（返回 null），
+// 未来接入时改实现即可，零修改 daemon 主流程。
 
 const CLI_TOOL_REGISTRY = new Map();
 

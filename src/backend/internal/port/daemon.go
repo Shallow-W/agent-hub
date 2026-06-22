@@ -48,4 +48,10 @@ type DaemonDispatcher interface {
 	// handleTaskProgress can resolve the streaming message when the
 	// daemon omits the message_id field in task.progress messages.
 	RegisterTaskMessage(taskID, messageID string)
+
+	// DeleteTaskMessage clears the taskID → messageID mapping after
+	// the streaming message is finalized. PR5: prevents the sync.Map
+	// from growing without bound across long-running backends.
+	// 对称于 RegisterTaskMessage；createAgentReply 在所有终态路径 defer 调用。
+	DeleteTaskMessage(taskID string)
 }

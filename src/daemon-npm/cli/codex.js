@@ -133,6 +133,16 @@ function createCodexCliSpec(ctx) {
       const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
       return text || '(Agent CLI 没有返回内容)';
     },
+
+    // parseStreamEvent / parseStreamEventAll：占位（PR5留）。
+    // Codex 当前是 one-shot 模式（exec --json），不走 stream-json 持久进程。
+    // 未来实现 CodexStreamAdapter（基于 Codex App Server JSON-RPC）时在此补全：
+    //   - item.output_text.delta → text event
+    //   - item.completed(type=reasoning) → thinking event
+    //   - item.started(type=function_call) → tool_use event
+    //   - item.completed(type=function_call_output) → tool_result event
+    parseStreamEvent(_line, _ctx) { return null; },
+    parseStreamEventAll(_line, _ctx) { return []; },
   };
 }
 

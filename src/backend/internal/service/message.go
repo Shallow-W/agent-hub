@@ -1268,10 +1268,12 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
 	// PR3：流式结束后清理 taskAgents 映射（与 RemoveTaskPromise 同位置 defer）。
-	// 防止 sync.Map 无限增长——taskMessages 留给 PR5 统一清理（已有泄漏，本 PR 不引入新的）。
+	// PR5：同步清理 taskMessages 映射——RegisterTaskMessage 在预创建时 Store，
+	// 此前无清理路径导致长跑后端 sync.Map 无限增长。与 DeleteTaskAgent 同构。
 	if dh, ok := s.daemonHub.(*ws.DaemonHub); ok {
 		defer dh.DeleteTaskAgent(task.ID)
 	}
+	defer s.daemonHub.DeleteTaskMessage(task.ID)
 	// PR4：流式结束后释放 streamingBuffer entry（与 RemoveTaskPromise 同位置 defer）。
 	// 防止 sync.Map 无限增长。error/timeout/success 所有路径都走此 defer。
 	defer s.deleteStreamingBuffer(task.ID)

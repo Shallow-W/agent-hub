@@ -148,13 +148,14 @@ func (r *fakeMsgRepo) GetHiddenMessageIDs(ctx context.Context, userID, conversat
 
 // streaming 相关桩：维护 messages slice 与真实 repo 行为一致，
 // 让 ListByConversation 能查到预创建的 streaming message（和 FinalizeStreaming 后的 complete message）。
-func (r *fakeMsgRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error) {
+func (r *fakeMsgRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string, artifactsJSON string) (*model.Message, error) {
 	msg := model.Message{
 		ID:             "msg-streaming",
 		ConversationID: conversationID,
 		Role:           role,
 		SenderID:       senderID,
 		ReplyTo:        replyTo,
+		ArtifactsJSON:  artifactsJSON,
 		Status:         model.MessageStatusStreaming,
 		CreatedAt:      time.Now(),
 	}
@@ -181,6 +182,17 @@ func (r *fakeMsgRepo) ListStreaming(ctx context.Context) ([]model.Message, error
 	var out []model.Message
 	for _, m := range r.messages {
 		if m.Status == model.MessageStatusStreaming {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+// ListStaleStreaming 返回 created_at < before 的 streaming message。
+// 用于 streaming watchdog 测试（PR5：stale 标记前查询元数据用于广播）。
+func (r *fakeMsgRepo) ListStaleStreaming(ctx context.Context, before time.Time) ([]model.Message, error) {
+	var out []model.Message
+	for _, m := range r.messages {
+		if m.Status == model.MessageStatusStreaming && m.CreatedAt.Before(before) {
 			out = append(out, m)
 		}
 	}

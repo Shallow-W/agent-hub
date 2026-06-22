@@ -135,8 +135,10 @@ function createClaudeCliSpec(ctx) {
         const block = event.content_block || {};
         // tool_use 在 start 时把 tool name 作为空字符串事件先推，让前端立即显示工具气泡。
         // 真正的入参通过后续 input_json_delta 累积。
+        // PR5：同步把 block.id（Claude 的 tool_use 稳定 ID）透传给 toolUseEvent，
+        // 供未来并行工具调用场景区分。
         if (block.type === 'tool_use') {
-          return [toolUseEvent(block.name || '', {})];
+          return [toolUseEvent(block.name || '', {}, block.id || '')];
         }
         return null;
       }
@@ -190,7 +192,7 @@ function createClaudeCliSpec(ctx) {
           } else if (part.type === 'thinking' && typeof part.thinking === 'string') {
             out.push(thinkingEvent(part.thinking));
           } else if (part.type === 'tool_use') {
-            out.push(toolUseEvent(part.name || '', part.input));
+            out.push(toolUseEvent(part.name || '', part.input, part.id || ''));
           }
         }
         // 兼容原 daemon spawnStreamJsonProcess: 任何 event.type === 'assistant' 行
