@@ -26,6 +26,9 @@ function createClaudeCliSpec(ctx) {
           : null);
       // Persistent agent (registered via agent.start) — sessionId 取自 runningAgents。
       const persistent = task.agent_id && deps.runningAgents.has(task.agent_id);
+      // 卡片文件路径来自 TaskContext 的 cards collector，注入到 MCP 子进程，
+      // 让 render_card 工具能写回本任务的卡片输出。
+      const cardFile = deps.cardFile;
 
       const args = [
         '-p',
@@ -33,7 +36,7 @@ function createClaudeCliSpec(ctx) {
         'text',
         '--thinking',
         'off',
-        ...ctx.buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id),
+        ...ctx.buildPlatformMcpArgs(task.conversation_id, task.user_id, task.agent_id, cardFile),
       ];
       if (persistent) {
         args.push('--dangerously-skip-permissions');

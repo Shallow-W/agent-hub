@@ -301,6 +301,7 @@ func (h *MessageHandler) Unpin(c *gin.Context) {
 
 // UpdateCard 更新消息中的交互式卡片状态（用户选择方案/确认操作/进度更新）。
 func (h *MessageHandler) UpdateCard(c *gin.Context) {
+	convID := c.Param("id")
 	messageID := c.Param("messageId")
 	if messageID == "" {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40052, "缺少消息 ID")
@@ -313,8 +314,12 @@ func (h *MessageHandler) UpdateCard(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusBadRequest, 40053, "参数错误")
 		return
 	}
-	userID := middleware.GetUserID(c)
-	if err := h.svc.UpdateMessageCards(c.Request.Context(), messageID, userID, req.CardsJSON); err != nil {
+	// 权限校验：消息必须属于路径中的对话，避免跨对话篡改卡片状态。
+	if _, err := h.svc.GetMessageByID(c.Request.Context(), convID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusForbidden, 40301, "消息不存在或不属于该对话")
+		return
+	}
+	if err := h.svc.UpdateMessageCardsAndBroadcast(c.Request.Context(), messageID, req.CardsJSON); err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50037, "更新卡片失败")
 		return
 	}

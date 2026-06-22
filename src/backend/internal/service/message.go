@@ -14,6 +14,7 @@ import (
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
+	"github.com/google/uuid"
 )
 
 const maxMessageLen = 10000 // 10KB
@@ -53,7 +54,6 @@ type MsgRepo interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
-	SetMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
@@ -105,49 +105,134 @@ func hasCodeArtifact(artifacts []model.Artifact) bool {
 	return false
 }
 
-// parseCardsFromResult 从 agent 的回复文本中提取结构化卡片 JSON。
-// Agent 可以在回复中嵌入 ```json{"cards":[...]}``` 代码块，
-// 或直接返回 JSON {"cards":[...]}。
-func parseCardsFromResult(content string) string {
-	// 尝试解析整个 content 为 JSON（agent 可能只返回 JSON）
-	var probe map[string]any
-	if err := json.Unmarshal([]byte(content), &probe); err == nil {
-		if cards, ok := probe["cards"]; ok {
-			if b, err := json.Marshal(cards); err == nil {
-				return string(b)
+// extractCardsFromContent 从 agent 回复文本里提取所有 ```json {"cards":[...]} ``` fenced block，
+// 合并所有 block 的 cards 为单一数组。同时生成 strippedContent：每个 block 替换为 N 个
+// `[CARD:<id>]` 占位符（N = block 内卡数，按数组顺序），保留卡片在正文中的位置。
+// 找不到 id 字段的卡用自动 UUID。
+//
+// 行为细则：
+//   - 只识别 fenced block（```json 或 ```JSON 开启，``` 闭合），不识别整段 content 为 JSON
+//     （避免 agent 整段 JSON 回复被误解析）
+//   - 多个 fenced block 全部识别并合并
+//   - block 内 JSON 解析失败：静默丢弃该 block，原文中该 block（含 fence 行）原样保留
+//   - block 无 cards 字段或 cards 不是数组：静默丢弃，原文中该 block 原样保留
+func extractCardsFromContent(content string) (cards []map[string]any, strippedContent string, cardsJSON string) {
+	lines := strings.Split(content, "\n")
+
+	// 第一遍：识别所有有效 block 的 (startLine, endLine, cards) 映射，便于第二遍精确替换。
+	type blockMatch struct {
+		startLine int // ```json 所在行号
+		endLine   int // ``` 闭合所在行号
+		cards     []map[string]any
+	}
+	var blocks []blockMatch
+
+	inBlock := false
+	blockStart := -1
+	var jsonBuf strings.Builder
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inBlock {
+			if trimmed == "```json" || trimmed == "```JSON" {
+				inBlock = true
+				blockStart = i
+				jsonBuf.Reset()
 			}
+			continue
+		}
+		// inBlock == true
+		if trimmed == "```" {
+			// 闭合 fence——尝试解析这个 block
+			var probe struct {
+				Cards []map[string]any `json:"cards"`
+			}
+			if err := json.Unmarshal([]byte(jsonBuf.String()), &probe); err == nil && probe.Cards != nil {
+				// 只接受 cards 为非空数组的 block；cards 缺失或为 null/非数组则丢弃
+				blocks = append(blocks, blockMatch{
+					startLine: blockStart,
+					endLine:   i,
+					cards:     probe.Cards,
+				})
+			}
+			inBlock = false
+			blockStart = -1
+			continue
+		}
+		jsonBuf.WriteString(line)
+		jsonBuf.WriteString("\n")
+	}
+
+	if len(blocks) == 0 {
+		return nil, content, ""
+	}
+
+	// 合并所有 block 的 cards，为缺失 id 的卡补 UUID。
+	cards = make([]map[string]any, 0, len(blocks))
+	for _, b := range blocks {
+		for _, c := range b.cards {
+			if c == nil {
+				continue
+			}
+			if _, ok := c["id"]; !ok {
+				c["id"] = uuid.NewString()
+			}
+			cards = append(cards, c)
 		}
 	}
 
-	// 尝试从 markdown 代码块中提取
-	lines := strings.Split(content, "\n")
-	inJSONBlock := false
-	var jsonBuf strings.Builder
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "```json" || trimmed == "```JSON" {
-			inJSONBlock = true
-			jsonBuf.Reset()
-			continue
+	if len(cards) == 0 {
+		return nil, content, ""
+	}
+
+	// 构建 strippedContent：用 [CARD:<id>] 占位符替换每个有效 block（含 fence 行）。
+	// 处理嵌套：在第一遍识别时 block 不会嵌套（一个 block 闭合前不会开启新的），所以
+	// 行区间不会重叠，可以按 startLine 升序逐个替换。
+	var out strings.Builder
+	cursor := 0
+	for _, b := range blocks {
+		// 写入 block 之前的原文行。
+		for i := cursor; i < b.startLine; i++ {
+			out.WriteString(lines[i])
+			out.WriteString("\n")
 		}
-		if inJSONBlock && trimmed == "```" {
-			inJSONBlock = false
-			var probe2 map[string]any
-			if err := json.Unmarshal([]byte(jsonBuf.String()), &probe2); err == nil {
-				if cards, ok := probe2["cards"]; ok {
-					if b, err := json.Marshal(cards); err == nil {
-						return string(b)
-					}
-				}
+		// 写入占位符——每张卡一行，按数组顺序。
+		for _, c := range b.cards {
+			if c == nil {
+				continue
 			}
-			continue
+			id, _ := c["id"].(string)
+			out.WriteString("[CARD:")
+			out.WriteString(id)
+			out.WriteString("]\n")
 		}
-		if inJSONBlock {
-			jsonBuf.WriteString(line)
-			jsonBuf.WriteString("\n")
+		cursor = b.endLine + 1
+	}
+	// 写入剩余行
+	for i := cursor; i < len(lines); i++ {
+		out.WriteString(lines[i])
+		out.WriteString("\n")
+	}
+
+	// strings.Split 在 content 非空时末尾会带一个空串元素，对应的 "\n" 会被上面循环写回；
+	// 为避免多余尾部换行，trim 等于原 content 末尾的内容。
+	stripped := out.String()
+	// 去掉由于循环统一加 "\n" 而多出来的末尾换行（与原 content 的末尾对齐）。
+	if strings.HasSuffix(stripped, "\n") {
+		stripped = strings.TrimSuffix(stripped, "\n")
+		if !strings.HasSuffix(content, "\n") {
+			// 原 content 不以换行结尾时，补一次移除（上面 split 会多一个空元素）
+		} else {
+			stripped += "\n"
 		}
 	}
-	return ""
+
+	b, err := json.Marshal(cards)
+	if err != nil {
+		// 极不可能发生（输入已经是 []map[string]any）
+		return cards, stripped, ""
+	}
+	return cards, stripped, string(b)
 }
 
 func codeArtifactsFromMarkdown(content string) []model.Artifact {
@@ -505,6 +590,40 @@ func (s *MessageService) UpdateMessageCards(ctx context.Context, messageID, user
 	return s.msgRepo.UpdateMessageCards(ctx, messageID, cardsJSON)
 }
 
+// UpdateMessageCardsAndBroadcast 更新卡片状态并向会话所有在线成员广播更新后的消息，
+// 使其他成员也能实时看到新状态（如用户提交 plan 选择后）。
+//
+// 与 UpdateMessageCards 的区别：后者只 UPDATE DB 列不广播，多成员场景下其他人看不到更新。
+// 本方法只走 PushToConversation（message.complete 事件），不触发离线队列/未读计数——
+// 卡片更新不是新消息，不应改变未读数。
+func (s *MessageService) UpdateMessageCardsAndBroadcast(ctx context.Context, messageID, cardsJSON string) error {
+	if err := s.msgRepo.UpdateMessageCards(ctx, messageID, cardsJSON); err != nil {
+		return fmt.Errorf("update cards: %w", err)
+	}
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("reload message: %w", err)
+	}
+	if msg == nil {
+		return ErrMsgNotFound
+	}
+	if err := json.Unmarshal([]byte(cardsJSON), &msg.Cards); err != nil {
+		slog.Warn("unmarshal cards after update", "message_id", messageID, "error", err)
+	}
+	msg.CardsJSON = cardsJSON
+
+	// 直接通过 notifier 广播 message.complete，避免 postPersist 的未读计数/离线入队副作用。
+	if s.notifier != nil {
+		memberIDs, err := s.convRepo.ListMemberIDs(ctx, msg.ConversationID)
+		if err != nil {
+			slog.Warn("list members for cards broadcast failed", "conversation_id", msg.ConversationID, "error", err)
+		} else if len(memberIDs) > 0 {
+			s.notifier.PushToConversation(msg.ConversationID, memberIDs, msg)
+		}
+	}
+	return nil
+}
+
 // GetUnreadMessages 获取离线/未读消息
 func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID string, limit int) ([]model.Message, error) {
 	conv, err := s.convRepo.GetByID(ctx, convID)
@@ -597,6 +716,31 @@ func (s *MessageService) GetReplies(ctx context.Context, conversationID, message
 	}
 	s.enrichMessagesFileURLs(replies)
 	return replies, nil
+}
+
+// GetMessageByID 取单条消息，校验其属于指定对话且未删除。
+// 供需要 message-level 权限校验的 handler（如 UpdateCard）使用——
+// 避免 handler 直接访问 repo，权限逻辑收敛在 service 层。
+func (s *MessageService) GetMessageByID(ctx context.Context, conversationID, messageID string) (*model.Message, error) {
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMsgNotFound
+		}
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return nil, ErrMsgNotFound
+	}
+	// 消息不属于当前对话
+	if msg.ConversationID != conversationID {
+		return nil, ErrMsgReplyWrongConv
+	}
+	// 消息已被软删除
+	if msg.DeletedAt != nil {
+		return nil, ErrMsgNotFound
+	}
+	return msg, nil
 }
 
 func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
@@ -992,28 +1136,34 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
 	}
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, replyTo, nil, nil)
+	// 提取 agent 在正文 ```json {"cards":[...]}``` block 里写的卡片，同时把 block 从
+	// 用户可见正文里剥离掉（替换为 [CARD:<id>] 占位符）。
+	agentCards, strippedContent, _ := extractCardsFromContent(result.Result)
+
+	// 合并 daemon emitted cards（如 deploy_project 成功的 info 卡）+ agent 文本卡
+	allCards := append([]map[string]any{}, result.Cards...)
+	allCards = append(allCards, agentCards...)
+
+	msg, err := s.msgRepo.Create(ctx, convID, "assistant", strippedContent, string(artifacts), nil, replyTo, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent reply: %w", err)
 	}
 
-	// 存储交互式卡片——优先使用 render_card 工具渲染的 cards（可靠），
-	// 回退到从文本中解析的 cards（容错）。
-	if len(result.Cards) > 0 {
-		cardsJSON, _ := json.Marshal(result.Cards)
-		if err := s.msgRepo.SetMessageCards(ctx, msg.ID, string(cardsJSON)); err != nil {
-			slog.Warn("set message cards (tool) failed", "message_id", msg.ID, "error", err)
+	// 持久化合并后的卡片状态（如果任意一方产出卡片）。
+	// 同时填充 msg.Cards 结构化字段，使 WS 广播（postPersist）和返回值携带一致形状。
+	if len(allCards) > 0 {
+		cardsJSON, _ := json.Marshal(allCards)
+		if err := s.msgRepo.UpdateMessageCards(ctx, msg.ID, string(cardsJSON)); err != nil {
+			slog.Warn("update message cards failed", "message_id", msg.ID, "error", err)
+		} else {
+			msg.CardsJSON = string(cardsJSON)
+			msg.Cards = allCards
 		}
-		msg.CardsJSON = string(cardsJSON)
-	} else if cardsJSON := parseCardsFromResult(result.Result); cardsJSON != "" {
-		if err := s.msgRepo.SetMessageCards(ctx, msg.ID, cardsJSON); err != nil {
-			slog.Warn("set message cards (parsed) failed", "message_id", msg.ID, "error", err)
-		}
-		msg.CardsJSON = cardsJSON
 	}
 
-	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
-	if arts := artifactsFromTaskResultOrMarkdown(result.Artifacts, result.Result); len(arts) > 0 {
+	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）。
+	// 注意用 strippedContent（已剥离 cards block），避免 Markdown 解析器把 cards JSON 当代码块。
+	if arts := artifactsFromTaskResultOrMarkdown(result.Artifacts, strippedContent); len(arts) > 0 {
 		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
 			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
 		} else {

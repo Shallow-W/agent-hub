@@ -12,38 +12,836 @@ const path = require('node:path');
 // skillRoots / scanAgents 四处分支点的 CLI 行为（claude/codex/opencode/openclaw）
 // 收敛为 spec 对象。新增 CLI 只需在 cli/index.js 加一个工厂，零修改分发函数。
 const cliTools = require('../cli');
-const EXEC_TIMEOUT_MS = 400000;
-const HEARTBEAT_INTERVAL_MS = 30000;
-const WS_RECONNECT_DELAY_MS = 3000;
-const WS_PING_INTERVAL_MS = 30000;
-const INBOUND_WATCHDOG_MS = 70000;
-const POLL_INTERVAL_MS = 3000;
+
+// ===========================================================================
+// CONFIG —— daemon 所有运行时配置集中在此，便于一处查看与调整。
+// 按功能分组：连接 / 任务执行 / MCP / 部署 / 文件浏览 / 技能 / 路径。
+// 单文件发布约束：不抽成独立文件（发布包只含 bin/agenthub-daemon.js）。
+// ===========================================================================
+const CONFIG = {
+  // —— 连接（WebSocket + 轮询）——
+  wsReconnectDelayMs: 3000,
+  wsPingIntervalMs: 30000,
+  inboundWatchdogMs: 70000,        // 无入站流量的最大静默期，超时强制断开重连
+  pollIntervalMs: 3000,            // WS 不可用时的 HTTP 轮询间隔
+  heartbeatIntervalMs: 30000,
+
+  // —— 任务执行 ——
+  execTimeoutMs: 400000,           // agent CLI 单次执行上限（~6.6 分钟）
+
+  // —— MCP ——
+  mcpProtocolVersion: '2024-11-05',
+
+  // —— 部署（Docker + cloudflared 隧道，agent 主导模式）——
+  deploy: {
+    stateDir: path.join(os.homedir(), '.agenthub', 'deploys'),
+    ttlMs: 4 * 60 * 60 * 1000,       // 部署有效期 4 小时，过期自动停止
+    buildTimeoutMs: 5 * 60 * 1000,   // docker build（含 npm install 等）
+    runTimeoutMs: 60 * 1000,         // docker run（启动容器）
+    stopTimeoutMs: 10 * 1000,        // docker stop
+    tunnelTimeoutMs: 30 * 1000,      // cloudflared 拿 URL 超时
+    cloudflaredDir: path.join(os.homedir(), '.agenthub', 'cloudflared'),
+    tunnelUrlRegex: /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i,
+  },
+
+  // —— 文件浏览 RPC（前端抽屉浏览 agent 机器文件）——
+  browse: {
+    toolName: '__agenthub_browse_files__',
+    gitTimeoutMs: 10000,             // git 命令单独超时，避免大仓库卡住
+    fileReadMaxSize: 2 * 1024 * 1024,// 单文件预览 2MB 上限
+    zipMaxTotalSize: 100 * 1024 * 1024, // 整目录打包 100MB 上限
+    excludeDirs: new Set(['node_modules', '.git', '.next', 'dist', 'build', '.cache', '.agenthub']),
+  },
+
+  // —— 技能 / Agent 管理 ——
+  openPathTool: '__agenthub_open_path__',
+  openPathTimeoutMs: 5000,
+  startQueueIntervalMs: 3000,
+  minDescriptionChars: 6,
+  sessionsFile: path.join(os.homedir(), '.agenthub', 'sessions.json'),
+};
+
+// 向后兼容别名（迁移期保留旧名引用，避免大范围改写；新代码请用 CONFIG.xxx）
+const EXEC_TIMEOUT_MS = CONFIG.execTimeoutMs;
+const HEARTBEAT_INTERVAL_MS = CONFIG.heartbeatIntervalMs;
+const WS_RECONNECT_DELAY_MS = CONFIG.wsReconnectDelayMs;
+const WS_PING_INTERVAL_MS = CONFIG.wsPingIntervalMs;
+const INBOUND_WATCHDOG_MS = CONFIG.inboundWatchdogMs;
+const POLL_INTERVAL_MS = CONFIG.pollIntervalMs;
 const DAEMON_LOG_EVENT = 'daemon_flow';
+// MCP
+const MCP_PROTOCOL_VERSION = CONFIG.mcpProtocolVersion;
+// cloudflared / 隧道
+const CLOUDFLARED_DIR = CONFIG.deploy.cloudflaredDir;
+const TUNNEL_URL_REGEX = CONFIG.deploy.tunnelUrlRegex;
+// 部署
+const DEPLOY_STATE_DIR = CONFIG.deploy.stateDir;
+const DEPLOY_TTL_MS = CONFIG.deploy.ttlMs;
+const DEPLOY_BUILD_TIMEOUT_MS = CONFIG.deploy.buildTimeoutMs;
+const DEPLOY_RUN_TIMEOUT_MS = CONFIG.deploy.runTimeoutMs;
+const DEPLOY_STOP_TIMEOUT_MS = CONFIG.deploy.stopTimeoutMs;
+const DEPLOY_TUNNEL_TIMEOUT_MS = CONFIG.deploy.tunnelTimeoutMs;
+// 文件浏览
+const BROWSE_FILES_TOOL = CONFIG.browse.toolName;
+const BROWSE_GIT_TIMEOUT_MS = CONFIG.browse.gitTimeoutMs;
+const BROWSE_FILE_READ_MAX_SIZE = CONFIG.browse.fileReadMaxSize;
+const BROWSE_ZIP_MAX_TOTAL_SIZE = CONFIG.browse.zipMaxTotalSize;
+const BROWSE_EXCLUDE_DIRS = CONFIG.browse.excludeDirs;
+// 技能 / Agent 管理
+const SESSIONS_FILE = CONFIG.sessionsFile;
+const START_QUEUE_INTERVAL_MS = CONFIG.startQueueIntervalMs;
+const OPEN_PATH_TIMEOUT_MS = CONFIG.openPathTimeoutMs;
+const MIN_DESCRIPTION_CHARS = CONFIG.minDescriptionChars;
+const OPEN_PATH_TOOL = CONFIG.openPathTool;
 
-  // 当前任务的卡片文件路径——spawnStreamJsonProcess 设置，handleTaskDispatch 完成后读取
-let currentCardFile = null;
+// ---------------------------------------------------------------------------
+// TaskContext + OutputCollector 注册表
+// ---------------------------------------------------------------------------
+// 每个任务的执行上下文：承载 per-task 的可收集输出（cards 等），取代旧的
+// 模块级 currentCardFile 全局。从 handleTaskDispatch 一路传到
+// dispatchToClaudeSlot → spawnStreamJsonProcess → sendPrompt，使"当前任务"显式化。
+//
+// 扩展点：新增一种 daemon 输出类型（如 progress 流、截图、日志），只需：
+//   registerOutputCollector('xxx', (ctx) => ({ reset(), drain(), cleanup(), ... }))
+// handleTaskDispatch 主干不再需要改动。
 
-// 重置卡片文件（清空内容），用于每次 sendPrompt 前调用
-function resetCardFile(cardFile) {
-  if (!cardFile) return;
-  try { fs.writeFileSync(cardFile, '[]'); } catch { /* ignore */ }
+/**
+ * 单个任务的执行上下文。每个 task.dispatch 创建一个实例，随执行链路传递。
+ */
+class TaskContext {
+  constructor(task) {
+    this.taskId = task && task.id;
+    this.agentId = task && task.agent_id;
+    this.conversationId = task && task.conversation_id;
+    this.userId = task && task.user_id;
+    // name → collector。collector 由 OutputCollector 工厂创建。
+    this.outputs = new Map();
+    // daemon 内部生成的卡片（如 deploy_project 成功 info 卡）。
+    // 与 outputs（来自子进程 IPC）不同，这里走内存队列：
+    // daemon 主进程直接 push，task.completed 时 drain 并随结果回传。
+    this.daemonCards = [];
+  }
+
+  /** 由 handleTaskDispatch 调用：用注册的工厂实例化所有 collector 挂到本任务。 */
+  attachCollectors() {
+    for (const [name, factory] of outputCollectors) {
+      this.outputs.set(name, factory(this));
+    }
+  }
+
+  /** 取某个输出通道的 collector（如 'cards'）。不存在返回 undefined。 */
+  output(name) {
+    return this.outputs.get(name);
+  }
+
+  /** 结束一个输出通道：返回其 drain() 结果（通常为数组）。无 collector 返回 []。 */
+  finalize(name) {
+    const collector = this.outputs.get(name);
+    if (!collector) return [];
+    return typeof collector.drain === 'function' ? collector.drain() : (collector.items || []);
+  }
+
+  /** 任务结束后清理所有 collector 的临时资源（临时文件等）。 */
+  cleanup() {
+    for (const collector of this.outputs.values()) {
+      try { if (typeof collector.cleanup === 'function') collector.cleanup(); } catch { /* ignore */ }
+    }
+    this.outputs.clear();
+  }
+
+  /** daemon 内部 push 卡片（替代旧 IPC 写文件）。自动补 id。 */
+  pushDaemonCard(card) {
+    if (!card) return;
+    if (!card.id) card.id = crypto.randomUUID();
+    this.daemonCards.push(card);
+  }
+
+  /** 取出所有 daemon 卡片（task.completed emit 时调用），并清空队列。 */
+  drainDaemonCards() {
+    const cards = this.daemonCards;
+    this.daemonCards = [];
+    return cards;
+  }
 }
 
-// 读取 MCP 子进程通过 render_card 工具写入的卡片，并清理临时文件
-function readRenderedCards() {
-  if (!currentCardFile) return [];
+// name → factory(ctx) => collector。collector 接口：
+//   { reset(), drain() => any[], cleanup(), ... 任意自定义字段 }
+const outputCollectors = new Map();
+
+/**
+ * 注册一个输出收集器工厂。factory 收到 TaskContext，返回一个 collector 对象。
+ * collector 至少应实现 reset() / drain() / cleanup()；可携带任意附加字段。
+ *
+ * 扩展点：未来新增 daemon 输出类型（progress 流、截图、日志等）时在此注册。
+ * 当前没有内置 collector——卡片原由 'cards' collector 通过临时文件 IPC 收集，
+ * 已改为 agent 直接在回复正文写 fenced JSON block，daemon 不再参与卡片收集。
+ */
+function registerOutputCollector(name, factory) {
+  outputCollectors.set(name, factory);
+}
+
+// ---------------------------------------------------------------------------
+// Docker 检测 + 部署执行 + cloudflared 隧道
+// ---------------------------------------------------------------------------
+// daemon 侧的网页部署能力：收到后端的 deploy.request → 写文件树 → docker build/run
+// → cloudflared 穿透容器端口 → 回报公网 URL。
+// 与 task.dispatch 平行，是 daemon 的第二类执行能力。
+
+/** 检测本机 docker 是否可用（docker info 能跑即认为可用）。 */
+function detectDocker() {
   try {
-    const data = fs.readFileSync(currentCardFile, 'utf8');
-    const cards = JSON.parse(data);
-    return Array.isArray(cards) ? cards : [];
+    execFileSync('docker', ['info', '--format', '{{.ServerVersion}}'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 收集本机能力清单，用于 daemon.register 上报。后端据此选合适的 machine 部署。 */
+function detectCapabilities() {
+  const caps = [];
+  if (detectDocker()) caps.push('docker');
+  return caps;
+}
+
+/** 找一个空闲端口（用于 docker -p 端口映射）。 */
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = require('node:net').createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+// cloudflared 二进制管理：优先 PATH，找不到则下载到 ~/.agenthub/cloudflared。
+// 路径与隧道 URL 正则在顶部 CONFIG.deploy 配置；这里只有二进制文件名映射逻辑。
+
+function cloudflaredBinary() {
+  const platform = process.platform;
+  const arch = process.arch;
+  // 映射 (platform, arch) → cloudflared release 文件名
+  const osName = platform === 'darwin' ? 'darwin' : platform === 'win32' ? 'windows' : 'linux';
+  const archName = arch === 'arm64' ? 'arm64' : 'amd64';
+  const ext = osName === 'windows' ? '.exe' : '';
+  return path.join(CLOUDFLARED_DIR, `cloudflared-${osName}-${archName}${ext}`);
+}
+
+/** 确保 cloudflared 二进制存在：PATH 里有就用系统的，否则下载。返回可执行路径或 null。 */
+function ensureCloudflared() {
+  // 1. 先试 PATH 里的
+  try {
+    const which = process.platform === 'win32' ? 'where' : 'which';
+    const out = execFileSync(which, ['cloudflared'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    if (out) return out.split('\n')[0];
+  } catch { /* not in PATH */ }
+  // 2. 再试已下载的
+  const bin = cloudflaredBinary();
+  if (fs.existsSync(bin)) return bin;
+  // 3. 下载（首次）
+  return downloadCloudflared();
+}
+
+/** 下载 cloudflared 到 ~/.agenthub/cloudflared/。返回路径或 null（失败）。 */
+function downloadCloudflared() {
+  try {
+    fs.mkdirSync(CLOUDFLARED_DIR, { recursive: true });
+    const platform = process.platform;
+    const osName = platform === 'darwin' ? 'darwin' : platform === 'win32' ? 'windows' : 'linux';
+    const archName = process.arch === 'arm64' ? 'arm64' : 'amd64';
+    const ext = osName === 'windows' ? '.exe' : '';
+    // cloudflared 官方提供单文件二进制（非 tgz），直接下载即可
+    const url = `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${osName}-${archName}${ext}`;
+    logFlow('info', 'cloudflared.download_start', { url });
+    const binPath = cloudflaredBinary();
+    // 同步下载（execFileSync 调 curl/wget，避免 Node https 流式处理的复杂度）
+    const downloader = process.platform === 'win32' ? null : 'curl';
+    if (downloader === 'curl') {
+      execFileSync('curl', ['-sL', '-o', binPath, url], { stdio: 'ignore', timeout: 120000 });
+    } else {
+      // fallback: wget 或手动 https 下载
+      try { execFileSync('wget', ['-qO', binPath, url], { stdio: 'ignore', timeout: 120000 }); }
+      catch { return null; }
+    }
+    if (!fs.existsSync(binPath) || fs.statSync(binPath).size < 100000) return null;
+    fs.chmodSync(binPath, 0o755);
+    logFlow('info', 'cloudflared.download_done', { path: binPath });
+    return binPath;
+  } catch (e) {
+    logFlow('warn', 'cloudflared.download_failed', { error: errorMessage(e) });
+    return null;
+  }
+}
+
+/**
+ * 启动一个 cloudflared quick tunnel 穿透指定端口。
+ * 返回 Promise<{url, process, pid}>，url 形如 https://xxx.trycloudflare.com。
+ * 失败（超时 30s 未拿到 URL / 二进制不可用）则 reject。
+ * 返回的 process 会被调用方 unref 脱离父进程；pid 写入部署状态文件供停止时 kill。
+ */
+function startTunnel(port) {
+  return new Promise((resolve, reject) => {
+    const bin = ensureCloudflared();
+    if (!bin) {
+      reject(new Error('cloudflared 不可用：PATH 无且下载失败'));
+      return;
+    }
+    const child = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://localhost:${port}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true, // 独立进程组，父进程退出后 cloudflared 继续运行（部署需长驻 4h）
+    });
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        try { child.kill(); } catch { /* ignore */ }
+        reject(new Error(`cloudflared 隧道启动超时（${DEPLOY_TUNNEL_TIMEOUT_MS / 1000}s 未拿到 URL）`));
+      }
+    }, DEPLOY_TUNNEL_TIMEOUT_MS);
+
+    const scanUrl = (chunk) => {
+      if (resolved) return;
+      const text = chunk.toString();
+      const match = text.match(TUNNEL_URL_REGEX);
+      if (match) {
+        resolved = true;
+        clearTimeout(timer);
+        resolve({ url: match[0], process: child });
+      }
+    };
+    child.stdout.on('data', scanUrl);
+    child.stderr.on('data', scanUrl);
+    child.on('error', (e) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        reject(new Error(`cloudflared 启动失败: ${errorMessage(e)}`));
+      }
+    });
+    child.on('exit', (code) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        reject(new Error(`cloudflared 进程退出（code=${code}）`));
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 部署状态文件 IPC + TTL 管理
+// ---------------------------------------------------------------------------
+// 部署由 MCP 工具（deploy_project）在 MCP 子进程里发起，docker 容器和 cloudflared
+// 进程独立存活（detached）。状态通过 ~/.agenthub/deploys/<id>.json 文件传递给
+// daemon 主进程，由主进程负责 TTL 清理（4 小时后停止）。
+// 所有路径/超时/TTL 在顶部 CONFIG.deploy 配置。
+
+/** 部署状态文件路径。 */
+function deployStatePath(deployId) {
+  return path.join(DEPLOY_STATE_DIR, `${deployId}.json`);
+}
+
+/**
+ * 写部署状态文件。MCP 子进程部署成功后调用，供 daemon 主进程 TTL 清理。
+ * state: { deployId, containerName, port, tunnelPid, url, workDir, createdAt, expiresAt }
+ * workDir 是 agent 的代码目录（sourceDir），仅作记录，停止时不删除（代码属 agent）。
+ */
+function writeDeployState(state) {
+  try {
+    fs.mkdirSync(DEPLOY_STATE_DIR, { recursive: true });
+    fs.writeFileSync(deployStatePath(state.deployId), JSON.stringify(state));
+  } catch (e) {
+    logFlow('warn', 'deploy.state_write_failed', { deploy_id: state.deployId, error: errorMessage(e) });
+  }
+}
+
+/** 读单个部署状态文件。不存在返回 null。 */
+function readDeployState(deployId) {
+  try {
+    const raw = fs.readFileSync(deployStatePath(deployId), 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** 列出所有部署状态（扫 ~/.agenthub/deploys/）。 */
+function listDeployStates() {
+  try {
+    const files = fs.readdirSync(DEPLOY_STATE_DIR).filter((f) => f.endsWith('.json'));
+    const states = [];
+    for (const f of files) {
+      try {
+        const raw = fs.readFileSync(path.join(DEPLOY_STATE_DIR, f), 'utf8');
+        states.push(JSON.parse(raw));
+      } catch { /* 损坏文件跳过 */ }
+    }
+    return states;
   } catch {
     return [];
   }
 }
 
+/** 删除部署状态文件。 */
+function removeDeployState(deployId) {
+  try { fs.rmSync(deployStatePath(deployId), { force: true }); } catch { /* ignore */ }
+}
+
+/**
+ * 停止一个部署：杀 cloudflared 进程 + docker stop 容器 + 删状态文件。
+ * 供 stop_deploy MCP 工具和 TTL 扫描器调用。
+ *
+ * 部署都在 MCP 子进程发起，状态通过文件 IPC（~/.agenthub/deploys/<id>.json）传递，
+ * 故这里只读状态文件（不再有内存 runningDeploys——那是已废弃的 WS 部署路径遗留）。
+ *
+ * 注意：不删除 sourceDir（agent 的真实代码目录）——重构后部署直接用 sourceDir 作
+ * 构建上下文，代码属于 agent，平台无权删除。
+ */
+function stopDeploy(deployId) {
+  const info = readDeployState(deployId);
+  if (!info) return false;
+
+  logFlow('info', 'deploy.stop', { deploy_id: deployId, container: info.containerName });
+  // 杀 cloudflared 进程
+  if (info.tunnelPid) {
+    try { process.kill(info.tunnelPid); } catch { /* 进程已退出 */ }
+  }
+  // 停 docker 容器
+  if (info.containerName) {
+    try { execFileSync('docker', ['stop', info.containerName], { stdio: 'ignore', timeout: DEPLOY_STOP_TIMEOUT_MS }); } catch { /* ignore */ }
+  }
+  removeDeployState(deployId);
+  return true;
+}
+
+/**
+ * TTL 扫描器：检查所有部署状态文件，过期（createdAt + 4h < now）则停止。
+ * daemon 主进程启动时立即扫一次，之后每 5 分钟扫一次。
+ */
+function scanAndCleanupDeploys() {
+  const states = listDeployStates();
+  const now = Date.now();
+  for (const state of states) {
+    const expiresAt = state.expiresAt || (state.createdAt + DEPLOY_TTL_MS);
+    if (now >= expiresAt) {
+      logFlow('info', 'deploy.ttl_expired', { deploy_id: state.deployId, container: state.containerName });
+      stopDeploy(state.deployId);
+    }
+  }
+}
+
+/**
+ * 纯执行：校验 Dockerfile → docker build/run → cloudflared 隧道。
+ * 不依赖 ws，返回 { url, containerName, port, workDir, tunnelProcess }。
+ * 供 MCP 工具 deploy_project 调用（部署都在 MCP 子进程，状态走文件 IPC）。
+ *
+ * 注意：cloudflared 进程会 detached + unref，脱离父进程独立存活——
+ * MCP 子进程退出后隧道仍运行，由 daemon 主进程的 TTL 扫描器按 4h 清理。
+ */
+// 部署执行：纯平台职责（执行器 + 环境提供者）。
+// agent 主导模式——sourceDir 是 agent 的真实代码目录（workDir），Dockerfile 由 agent 写好放在里面。
+// 平台只做：校验 Dockerfile 存在 → docker build（用 sourceDir 作上下文）→ docker run（port 生效）→ 隧道。
+// 不做：文件收集、Dockerfile 生成、runtime 推断、URL 验证（这些是 agent 的职责）。
+async function executeDeploy(deployId, sourceDir, port = 80) {
+  if (!deployId || !sourceDir) {
+    throw new Error('参数缺失（deploy_id/source_dir）');
+  }
+  const containerName = `agenthub-deploy-${deployId.slice(0, 12)}`;
+  logFlow('info', 'deploy.start', { deploy_id: deployId, source_dir: sourceDir, port, container: containerName });
+
+  // 1. 校验 sourceDir 存在且是目录
+  if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
+    throw new Error(`source_dir 不存在或不是目录: ${sourceDir}`);
+  }
+
+  // 2. Dockerfile 必须存在（agent 负责，平台不兜底生成）
+  if (!fs.existsSync(path.join(sourceDir, 'Dockerfile'))) {
+    throw new Error('source_dir 缺少 Dockerfile。agent 必须先写好 Dockerfile（FROM + 业务构建步骤 + EXPOSE <端口>）再调用部署');
+  }
+
+  // 3. docker build（直接用 sourceDir 作构建上下文）
+  try {
+    execFileSync('docker', ['build', '-t', containerName, sourceDir], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: DEPLOY_BUILD_TIMEOUT_MS,
+    });
+  } catch (e) {
+    const stderr = e.stderr ? e.stderr.toString().slice(-2000) : errorMessage(e);
+    throw new Error(`docker build 失败：${stderr}`);
+  }
+
+  // 4. docker run（后台 -d，port 参数生效——映射到 agent Dockerfile 的 EXPOSE 端口）
+  const hostPort = await findFreePort();
+  let runOut;
+  try {
+    runOut = execFileSync('docker', ['run', '-d', '--rm', '-p', `${hostPort}:${port}`, '--name', containerName, containerName], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: DEPLOY_RUN_TIMEOUT_MS,
+    }).toString().trim();
+  } catch (e) {
+    const stderr = e.stderr ? e.stderr.toString().slice(-2000) : errorMessage(e);
+    throw new Error(`docker run 失败（端口 ${port}→${hostPort}）：${stderr}`);
+  }
+  logFlow('info', 'deploy.container_started', { deploy_id: deployId, container: containerName, port: hostPort, container_port: port, container_id: runOut.slice(0, 12) });
+
+  // 5. cloudflared 隧道穿透 hostPort
+  const tunnelInfo = await startTunnel(hostPort);
+  logFlow('info', 'deploy.tunnel_ready', { deploy_id: deployId, url: tunnelInfo.url });
+
+  // 6. cloudflared 进程 detached + unref，脱离父进程独立存活
+  try { tunnelInfo.process.unref(); } catch { /* ignore */ }
+
+  return { url: tunnelInfo.url, containerName, port: hostPort, workDir: sourceDir, tunnelProcess: tunnelInfo.process };
+}
+
+// ---------------------------------------------------------------------------
+// 文件浏览 RPC：让前端抽屉浏览 agent 所在机器上 git 工作区的文件。
+// 复用 OPEN_PATH 同步 RPC 通道（taskID promise + task.dispatch + task.complete）。
+// 后端发 task.dispatch(cli_tool=__agenthub_browse_files__)，prompt 是 JSON payload。
+// 这里只做只读 + git diff 识别改动文件，不做编辑/写入。
+// 所有工具名/超时/大小上限/排除目录在顶部 CONFIG.browse 配置。
+// ---------------------------------------------------------------------------
+
+
+// 同步跑 git 命令（带超时），返回 stdout 字符串；失败抛错。
+function runGitSync(cwd, args) {
+  try {
+    return execFileSync('git', args, {
+      cwd: cwd || undefined,
+      encoding: 'utf8',
+      timeout: BROWSE_GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    }).replace(/\r?\n$/, ''); // 只去尾部换行，不动行首空格（porcelain 首列可能是空格，trim 会吃掉）
+  } catch (err) {
+    throw new Error(`git ${args.join(' ')} failed: ${errorMessage(err)}`);
+  }
+}
+
+// 返回 git 仓库根目录绝对路径；非 git 仓库或出错返回 null。
+function gitRepoRoot(cwd) {
+  try {
+    const root = runGitSync(cwd, ['rev-parse', '--show-toplevel']);
+    return root || null;
+  } catch { return null; }
+}
+
+// 解析 git status 字母为前端统一的状态枚举。
+// 接受 porcelain 的两列状态码 "XY"（X=staged，Y=工作区），也可接受单字符（diff --name-status）。
+// 优先级：删除 > 新增 > 修改；未跟踪 "??" 归 added。两列任一非空格即取该状态。
+function parseGitStatus(code) {
+  if (!code) return 'modified';
+  const s = String(code).trim();
+  if (!s) return 'modified';
+  // "??" 未跟踪 → added（仅 porcelain 会出现）
+  if (s[0] === '?' || s[1] === '?') return 'added';
+  // 合并两列，逐字符判定，删除/新增优先于修改
+  const has = (ch) => s[0] === ch || s[1] === ch;
+  if (has('D')) return 'deleted';
+  if (has('A')) return 'added';
+  return 'modified'; // M/R/C/U/其他统一归为 modified
+}
+
+// 列出工作区改动文件（已暂存 + 未暂存 + 未跟踪）。
+// 返回 [{ path, status }]，path 为相对 repoRoot 的 posix 路径。
+function gitChangedFiles(cwd, rev) {
+  let lines;
+  if (rev) {
+    // 指定 base rev：对比 rev..HEAD 的已提交改动
+    const out = runGitSync(cwd, ['diff', '--name-status', `${rev}..HEAD`]);
+    lines = out ? out.split('\n') : [];
+  } else {
+    // 工作区 vs HEAD：含已暂存、未暂存、未跟踪（--porcelain 已覆盖这三种）
+    const out = runGitSync(cwd, ['status', '--porcelain', '--untracked-files=all']);
+    lines = out ? out.split('\n') : [];
+  }
+  const files = [];
+  for (const line of lines) {
+    if (!line) continue;
+    // porcelain 格式："XY filename"，XY 两列状态码
+    // name-status 格式："X\tpath" 或 "R100\told\tnew"（重命名取新路径）
+    if (line.length >= 3 && line[2] === ' ') {
+      // porcelain：XY filename —— 传两列状态码，parseGitStatus 合并 staged+工作区
+      files.push({ path: line.slice(3).trim(), status: parseGitStatus(line.slice(0, 2)) });
+    } else if (line.includes('\t')) {
+      // name-status：X\tpath（重命名取第二列）
+      const [code, ...rest] = line.split('\t');
+      const target = rest.length > 1 ? rest[rest.length - 1] : rest[0];
+      files.push({ path: target.trim(), status: parseGitStatus(code) });
+    }
+  }
+  return files;
+}
+
+// 列单层目录，过滤隐藏文件 + BROWSE_EXCLUDE_DIRS。
+// 返回 [{ name, type: 'file'|'dir', size? }]，size 仅文件提供（字节）。
+function listDirAbs(absDir) {
+  let entries;
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); }
+  catch { return []; }
+  const result = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    const isDir = entry.isDirectory();
+    const isFile = entry.isFile();
+    if (!isDir && !isFile) continue; // 跳过符号链接/设备等
+    if (isDir && BROWSE_EXCLUDE_DIRS.has(entry.name)) continue;
+    const item = { name: entry.name, type: isDir ? 'dir' : 'file' };
+    if (isFile) {
+      try { item.size = fs.statSync(path.join(absDir, entry.name)).size; } catch { /* 忽略 stat 失败 */ }
+    }
+    result.push(item);
+  }
+  // 目录在前，文件在后；同类按名称排序
+  result.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return result;
+}
+
+// 校验 target 是否在 repoRoot 内（防 ../ 越狱）。
+// 返回归一化后的绝对路径；非法返回 null。
+function safePathWithin(repoRoot, target) {
+  if (!target || !repoRoot) return null;
+  const resolved = path.resolve(repoRoot, target);
+  const rel = path.relative(repoRoot, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null; // 越狱或绝对路径外的
+  return resolved;
+}
+
+// 二进制检测：含 NUL 字节视为二进制（不预览）。
+function looksBinary(buf) {
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] === 0) return true;
+    if (i > 8192) break; // 只检查前 8KB，避免大文件全扫
+  }
+  return false;
+}
+
+// 解析 git log 自定义 format 输出（%x1e 记录分隔、%x1f 字段分隔）。
+// 返回 [{hash, timestamp, author, subject}]，按 git log 原序（最新在前）。
+function parseGitLog(out) {
+  if (!out) return [];
+  const records = out.split('\x1e');
+  const commits = [];
+  for (const rec of records) {
+    const trimmed = rec.replace(/^\n+|\n+$/g, '');
+    if (!trimmed) continue;
+    const [hash, ts, author, subject] = trimmed.split('\x1f');
+    if (!hash) continue;
+    commits.push({
+      hash,
+      timestamp: Number(ts) || 0,
+      author: author || '',
+      subject: subject || '',
+    });
+  }
+  return commits;
+}
+
+// 递归收集目录下所有文件（用于打包），返回 [{ absPath, relPath, size }]。
+// 排除隐藏文件 + BROWSE_EXCLUDE_DIRS；累计超 BROWSE_ZIP_MAX_TOTAL_SIZE 时停止。
+function collectForZip(rootDir) {
+  const files = [];
+  let total = 0;
+  let truncated = false;
+  const walk = (dir, relBase) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+    for (const entry of entries) {
+      if (truncated) return;
+      if (entry.name.startsWith('.')) continue;
+      const full = path.join(dir, entry.name);
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (BROWSE_EXCLUDE_DIRS.has(entry.name)) continue;
+        walk(full, rel);
+      } else if (entry.isFile()) {
+        try {
+          const stat = fs.statSync(full);
+          if (total + stat.size > BROWSE_ZIP_MAX_TOTAL_SIZE) { truncated = true; return; }
+          total += stat.size;
+          files.push({ absPath: full, relPath: rel, size: stat.size });
+        } catch { /* 忽略不可读文件 */ }
+      }
+    }
+  };
+  walk(rootDir, '');
+  return { files, truncated };
+}
+
+/**
+ * 文件浏览 RPC handler。prompt 是 JSON 字符串：{ cwd?, action, path?, rev? }
+ * action: 'tree' | 'list' | 'read' | 'zip'
+ *   tree —— 根目录快照 + git 改动文件清单（打开抽屉时调）
+ *   list —— 单层展开子目录（懒加载）
+ *   read —— 读单文件内容（点文件查看）
+ *   zip  —— 收集整目录文件数组（后端打包）
+ * 返回值会被 executeTask 当作 task 结果回传给后端（JSON 字符串）。
+ */
+function browseFiles(prompt) {
+  let payload = null;
+  try {
+    payload = JSON.parse(prompt);
+  } catch {
+    throw new Error('Invalid browse files payload');
+  }
+  const action = String(payload.action || '').trim();
+  // work_dir 来自前端 project 卡片（解耦：路径生产与文件浏览分离），不再 fallback process.cwd()。
+  const workDir = String(payload.work_dir || '').trim();
+  if (!workDir) throw new Error('work_dir is required');
+
+  // 非 git 仓库时只支持裸目录浏览（无 changedFiles / log / show）
+  const repoRoot = gitRepoRoot(workDir);
+  logFlow('info', 'browse.tree', { work_dir: workDir, repo_root: repoRoot, is_git: Boolean(repoRoot) });
+  if (action === 'tree') {
+    const root = repoRoot || path.resolve(workDir);
+    const rootEntries = listDirAbs(root);
+    logFlow('info', 'browse.tree_result', { root, entry_count: rootEntries.length });
+    return JSON.stringify({
+      repoRoot: root,
+      isGit: Boolean(repoRoot),
+      changedFiles: repoRoot ? gitChangedFiles(workDir, payload.rev) : [],
+      rootEntries,
+    });
+  }
+
+  // status 不需要单文件 path（用的是 files 数组），提前走自己的分支，避免被下方共享 path 校验挡住。
+  // 复用 gitChangedFiles 拿全部改动文件后按 wanted 过滤，避免重复 porcelain 解析逻辑。
+  if (action === 'status') {
+    if (!repoRoot) return JSON.stringify({ statuses: [] });
+    const rawFiles = payload.files;
+    const fileList = Array.isArray(rawFiles) ? rawFiles.map(String)
+      : (typeof rawFiles === 'string' && rawFiles ? rawFiles.split(',').map(s => s.trim()).filter(Boolean)
+        : []);
+    const wanted = new Set(fileList);
+    if (wanted.size === 0) return JSON.stringify({ statuses: [] });
+    const all = gitChangedFiles(repoRoot); // rev 不传 = 工作区状态（porcelain）
+    return JSON.stringify({ statuses: all.filter((f) => wanted.has(f.path)) });
+  }
+
+  // 以下 action 都要求 path 必须落在 repoRoot（或 workDir 兜底）内
+  const baseRoot = repoRoot || path.resolve(workDir);
+  const target = safePathWithin(baseRoot, payload.path);
+  if (!target) {
+    throw new Error('Invalid or out-of-root path');
+  }
+
+  if (action === 'list') {
+    let stat;
+    try { stat = fs.statSync(target); }
+    catch { throw new Error(`Path not found: ${payload.path}`); }
+    if (!stat.isDirectory()) throw new Error('Not a directory');
+    return JSON.stringify(listDirAbs(target));
+  }
+
+  if (action === 'read') {
+    let stat;
+    try { stat = fs.statSync(target); }
+    catch { throw new Error(`File not found: ${payload.path}`); }
+    if (!stat.isFile()) throw new Error('Not a file');
+    if (stat.size > BROWSE_FILE_READ_MAX_SIZE) {
+      return JSON.stringify({ path: payload.path, content: '', size: stat.size, binary: false, tooLarge: true });
+    }
+    const buf = fs.readFileSync(target);
+    if (looksBinary(buf)) {
+      return JSON.stringify({ path: payload.path, content: '', size: stat.size, binary: true });
+    }
+    return JSON.stringify({ path: payload.path, content: buf.toString('utf8'), size: stat.size, binary: false });
+  }
+
+  if (action === 'zip') {
+    // 不在此打包：返回文件数组（含 base64 内容），由后端 Go archive/zip 打包。
+    // 后端拿 rawBytes 太重，这里返回结构化数据，后端重建文件树写 zip。
+    let stat;
+    try { stat = fs.statSync(target); }
+    catch { throw new Error(`Path not found: ${payload.path}`); }
+    if (!stat.isDirectory()) throw new Error('Not a directory');
+    const { files, truncated } = collectForZip(target);
+    // 每个文件单独读，base64 编码（避免 JSON 里嵌二进制）
+    const encoded = files.map((f) => {
+      const content = fs.readFileSync(f.absPath);
+      return { path: f.relPath, content_b64: content.toString('base64'), size: f.size };
+    });
+    return JSON.stringify({ baseDir: payload.path, files: encoded, truncated });
+  }
+
+  // git 历史：某文件的 commit 列表（供前端版本切换）。
+  // 用 --follow 跟踪重命名；自定义 format 以 \x1e 分隔记录、\x1f 分隔字段。
+  // 注意 cwd 必须用 repoRoot 而非 workDir——rel 是相对 repoRoot 算的，
+  // 若 workDir 是仓库子目录，用 workDir 作 cwd 会导致路径偏移查错文件。
+  if (action === 'log') {
+    if (!repoRoot) return JSON.stringify({ commits: [] });
+    const target = safePathWithin(repoRoot, payload.path);
+    if (!target) throw new Error('Invalid or out-of-root path');
+    let stat;
+    try { stat = fs.statSync(target); } catch { throw new Error(`Path not found: ${payload.path}`); }
+    if (!stat.isFile()) throw new Error('Not a file');
+    const rel = path.relative(repoRoot, target);
+    const out = runGitSync(repoRoot, [
+      'log', '--follow', '--no-color', '-n', '50',
+      '--format=%H%x1f%ct%x1f%an%x1f%s%x1e', '--', rel,
+    ]);
+    return JSON.stringify({ commits: parseGitLog(out) });
+  }
+
+  // 读某 commit 下某文件的内容（git show <rev>:<path>）。同样用 repoRoot 作 cwd。
+  if (action === 'show') {
+    if (!repoRoot) throw new Error('Not a git repo');
+    if (!payload.rev) throw new Error('rev is required for show');
+    const target = safePathWithin(repoRoot, payload.path);
+    if (!target) throw new Error('Invalid or out-of-root path');
+    const rel = path.relative(repoRoot, target);
+    const out = runGitSync(repoRoot, ['show', `${payload.rev}:${rel}`]);
+    const buf = Buffer.from(out);
+    if (buf.length > BROWSE_FILE_READ_MAX_SIZE) {
+      return JSON.stringify({ path: payload.path, content: '', size: buf.length, binary: false, tooLarge: true });
+    }
+    if (looksBinary(buf)) {
+      return JSON.stringify({ path: payload.path, content: '', size: buf.length, binary: true });
+    }
+    return JSON.stringify({ path: payload.path, content: out, size: buf.length, binary: false });
+  }
+
+  // 拿某文件的前后内容（默认工作区 vs HEAD）——供 diff 卡片点击文件后做对比。
+  // 一次调用拿全 oldContent/newContent，前端不必分别 fileShow 两次。
+  if (action === 'diff') {
+    if (!repoRoot) throw new Error('Not a git repo');
+    const target = safePathWithin(repoRoot, payload.path);
+    if (!target) throw new Error('Invalid or out-of-root path');
+    const rel = path.relative(repoRoot, target);
+    const oldRev = payload.old_rev || 'HEAD';
+    const newRev = payload.new_rev || '';  // 空 = 工作区当前版本
+    // 旧版本：git show <rev>:<path>
+    let oldContent = '';
+    try { oldContent = runGitSync(repoRoot, ['show', `${oldRev}:${rel}`]); }
+    catch { /* 新增文件在 oldRev 不存在，oldContent 留空 */ }
+    // 新版本：默认读工作区文件；指定 rev 则 git show
+    let newContent = '';
+    if (!newRev) {
+      try {
+        const buf = fs.readFileSync(target);
+        newContent = looksBinary(buf) ? '' : buf.toString('utf8');
+      } catch { /* 文件已删除，newContent 留空 */ }
+    } else {
+      try { newContent = runGitSync(repoRoot, ['show', `${newRev}:${rel}`]); }
+      catch { /* rev 不存在该文件 */ }
+    }
+    return JSON.stringify({ path: payload.path, oldContent, newContent });
+  }
+
+  throw new Error(`Unknown browse action: ${action}`);
+}
+
 function logValue(value) {
   if (value === undefined || value === null) return '';
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return String(value);
   if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value);
   const text = String(value);
   return /^[A-Za-z0-9._:/@=-]+$/.test(text) ? text : JSON.stringify(text);
@@ -235,8 +1033,8 @@ const completedTaskIDs = new Set();
 const pendingTaskCompletions = new Map(); // taskID → task.complete data, flushed after WS reconnect
 
 // Per-conversation session mapping: `${agent_id}:${conversation_id}` → sessionId
+// 持久化路径在顶部 CONFIG.sessionsFile。
 const conversationSessions = new Map();
-const SESSIONS_FILE = path.join(os.homedir(), '.agenthub', 'sessions.json');
 
 function loadSessionMap() {
   try {
@@ -257,7 +1055,7 @@ function saveSessionMap() {
   }
 }
 
-const START_QUEUE_INTERVAL_MS = 3000;
+// agent 启动串行化队列（避免并发启动多个 CLI 实例冲突）；间隔在顶部 CONFIG.startQueueIntervalMs。
 let lastAgentStartAt = 0;
 const agentStartQueue = [];
 
@@ -267,20 +1065,19 @@ const daemonConn = { serverURL: '', apiKey: '', daemonToken: '' };
 // buildPlatformMcpServerArgs builds the daemon --mcp invocation for the current
 // AgentHub task. Passing conversation/user/agent IDs here gives MCP tools a default
 // group context, matching Claude Code's per-task injection behavior.
-function buildPlatformMcpServerArgs(conversationId, userId, agentId, cardFile) {
+function buildPlatformMcpServerArgs(conversationId, userId, agentId) {
   if (!daemonConn.serverURL || !daemonConn.apiKey) return [];
   const mcpServerArgs = [__filename, '--server-url', daemonConn.serverURL, '--api-key', daemonConn.apiKey, '--mcp'];
   if (daemonConn.daemonToken) mcpServerArgs.push('--daemon-token', daemonConn.daemonToken);
   if (conversationId) mcpServerArgs.push('--conversation-id', conversationId);
   if (userId) mcpServerArgs.push('--user-id', userId);
   if (agentId) mcpServerArgs.push('--agent-id', agentId);
-  if (cardFile) mcpServerArgs.push('--card-file', cardFile);
   return mcpServerArgs;
 }
 
 // buildPlatformMcpArgs generates Claude Code MCP injection args for this task.
-function buildPlatformMcpArgs(conversationId, userId, agentId, cardFile) {
-  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId, cardFile);
+function buildPlatformMcpArgs(conversationId, userId, agentId) {
+  const mcpServerArgs = buildPlatformMcpServerArgs(conversationId, userId, agentId);
   if (mcpServerArgs.length === 0) return [];
   const mcpConfig = JSON.stringify({
     mcpServers: {
@@ -359,9 +1156,7 @@ function killSessionProcess(sessionId) {
   activeSessions.delete(sessionId);
 }
 
-const OPEN_PATH_TIMEOUT_MS = 5000;
-const MIN_DESCRIPTION_CHARS = 6;
-const OPEN_PATH_TOOL = '__agenthub_open_path__';
+// OPEN_PATH 同步 RPC（打开 skill 所在目录）的工具名/超时/最小描述长度在顶部 CONFIG 配置。
 
 // CANDIDATES 现在由 CliToolSpec Registry 派生（见 initCliTools 调用点）。
 // 每次调用都重新映射，确保注册表变化（测试替换 spec）即时反映。
@@ -1047,7 +1842,7 @@ const initCliToolsCtx = {
 // 启动时注册 4 个 CLI spec。函数声明会被提升，此处所有辅助函数已可用。
 cliTools.initCliTools(initCliToolsCtx);
 
-function commandForTask(task) {
+function commandForTask(task, taskCtx) {
   const { systemPrompt, userPrompt } = buildPromptParts(task);
   const command = resolveCommand(task.cli_tool);
   // 委托给 CliToolSpec.buildCommand。未知 cli_tool 走 fallback（保留原 default 分支行为）。
@@ -1063,12 +1858,17 @@ function commandForTask(task) {
   return { command, args: [userPrompt] };
 }
 
-async function executeTask(task) {
+async function executeTask(task, taskCtx) {
   if (task.cli_tool === OPEN_PATH_TOOL) {
     logFlow('info', 'task.open_path_start', { task_id: task.id });
     return openSkillLocation(task.prompt);
   }
-  const spec = commandForTask(task);
+  if (task.cli_tool === BROWSE_FILES_TOOL) {
+    // 文件浏览同步 RPC：前端抽屉浏览该机器 git 工作区文件。
+    logFlow('info', 'task.browse_files_start', { task_id: task.id });
+    return browseFiles(task.prompt);
+  }
+  const spec = commandForTask(task, taskCtx);
   const taskMeta = {
     task_id: task.id,
     cli_tool: task.cli_tool || 'unknown',
@@ -1177,9 +1977,9 @@ async function executeTask(task) {
   return text || '(Agent CLI 没有返回内容)';
 }
 
-async function executeTaskOnce(task) {
+async function executeTaskOnce(task, taskCtx) {
   const taskID = task && task.id;
-  if (!taskID) return executeTask(task);
+  if (!taskID) return executeTask(task, taskCtx);
   if (activeTaskIDs.has(taskID) || completedTaskIDs.has(taskID)) {
     logFlow('warn', 'task.dispatch_duplicate_ignored', {
       task_id: taskID,
@@ -1191,7 +1991,7 @@ async function executeTaskOnce(task) {
   }
   activeTaskIDs.add(taskID);
   try {
-    const result = await executeTask(task);
+    const result = await executeTask(task, taskCtx);
     completedTaskIDs.add(taskID);
     if (completedTaskIDs.size > 1000) {
       completedTaskIDs.delete(completedTaskIDs.values().next().value);
@@ -1537,16 +2337,9 @@ function parseArtifacts(text) {
       content: embeddedMarkdown,
     }];
   }
-  if (looksLikeMarkdownDocument(text)) {
-    const content = text.trim();
-    return [{
-      type: 'document',
-      language: 'markdown',
-      filename: '',
-      title: markdownDocumentTitle(content),
-      content,
-    }];
-  }
+  // 注意：不把整段回复当 markdown 文档猜测（原 looksLikeMarkdownDocument(text) 逻辑已移除）。
+  // 产物协议约定 agent 必须用 ```markdown 显式标记才会识别为文档，
+  // 避免普通带标题+列表的回复被误判成 Document Preview 卡片。
 
   // 1) 提取围栏代码块 ```lang\n...\n```
   // 第一行可能是 "// file: xxx" 或 "# file: xxx" 形式的文件名提示
@@ -1566,8 +2359,10 @@ function parseArtifacts(text) {
     content = content.replace(/\s+$/, '');
     if (!content) continue;
 
-    // language 为 html 时归类为 webpage（完整 HTML 文档），否则为 code
-    if (language === 'html' && /<\s*(?:html|!doctype|body|head|div)\b/i.test(content)) {
+    // language 为 html 时归类为 webpage（iframe 预览），否则为 code。
+    // 只要标记为 html 即归类为 webpage——平台协议约定 agent 用 ```html 标记
+    // 可预览的网页内容，不强制要求完整文档结构（片段也可预览）。
+    if (language === 'html') {
       artifacts.push({ type: 'webpage', title: filename || 'HTML Preview', content });
     } else if (documentLanguages.has(language)) {
       artifacts.push({
@@ -1715,6 +2510,7 @@ async function register(serverURL, apiKey) {
   const res = await requestJSON('POST', apiURL(serverURL, apiKey, '/daemon/register'), {
     machine_id: os.hostname(),
     agents,
+    capabilities: detectCapabilities(),
   });
   if (res && res.data && res.data.daemon_token && !daemonConn.daemonToken) {
     daemonConn.daemonToken = res.data.daemon_token;
@@ -1810,12 +2606,9 @@ function stopAgentProcess(agent_id) {
  * Returns { child, sessionId, sendPrompt }.
  * If resume=true, uses --resume <sessionId>; otherwise --session-id <sessionId>.
  */
-function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId) {
+function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx) {
   const command = resolveCommand('claude');
-  // 为此任务创建临时卡片文件，MCP 子进程通过 --card-file 写入渲染的卡片
-  const cardFile = path.join(os.tmpdir(), `agenthub-cards-${agentId}-${Date.now()}.json`);
-  currentCardFile = cardFile;
-  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId, cardFile);
+  const mcpArgs = buildPlatformMcpArgs(conversationId, userId, agentId);
   const effectiveSessionId = sessionId || crypto.randomUUID();
 
   const args = [
@@ -1964,10 +2757,12 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
 /**
  * Unified claude dispatch: per-agent process slot with conversation isolation.
  * - Same conversation → stdin inject (fast path)
- * - Cross-conversation → kill + --resume restart
- * - No process → spawn fresh
+ * - Cross-conversation → reuse live process (stream-json 支持多 turn)
+ * - Dead / no process → spawn fresh
+ *
+ * taskCtx 随调用链传入，承载本任务的执行上下文（含 daemon 内部卡片队列等）。
  */
-async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt, systemPrompt) {
+async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx) {
   const sessionKey = `${agentId}:${conversationId}`;
   const savedSessionId = conversationSessions.get(sessionKey) || null;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1992,8 +2787,6 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
         session_id: slot.sessionId,
       });
     }
-    // 重置卡片文件，复用进程执行 prompt
-    if (slot.cardFile) { resetCardFile(slot.cardFile); currentCardFile = slot.cardFile; }
     const response = await slot.sendPrompt(prompt);
     if (response.error) throw new Error(response.error);
     return response.result;
@@ -2022,9 +2815,7 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
       });
       // 更新当前对话 ID（用于日志追踪）
       slot.currentConversationId = conversationId;
-      // 复用已有进程执行 prompt
-      if (slot.cardFile) { resetCardFile(slot.cardFile); currentCardFile = slot.cardFile; }
-      const response = await slot.sendPrompt(userPrompt);
+      const response = await slot.sendPrompt(prompt);
       if (response.error) throw new Error(response.error);
       return response.result;
     }
@@ -2034,7 +2825,7 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
   let result;
   if (validSessionId) {
     try {
-      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId);
+      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId, taskCtx);
       // Wait briefly to detect immediate resume failure
       await sleep(2000);
       if (result.child.exitCode !== null) {
@@ -2047,10 +2838,10 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
         conversation_id: conversationId,
         session_id: validSessionId,
       });
-      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
+      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx);
     }
   } else {
-    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId);
+    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx);
   }
 
   const { child, sessionId, sendPrompt } = result;
@@ -2072,14 +2863,13 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
     safeSend(currentDaemonWs, JSON.stringify({ type: 'agent.stopped', data: { agent_id: agentId, exit_code: code } }));
   });
 
-  // Register in runningAgents with conversation tracking
+  // Register in runningAgents with conversation tracking.
   runningAgents.set(agentId, {
     process: child,
     sessionId,
-    currentConversationVersion: conversationId,
+    currentConversationId: conversationId,
     cliTool: 'claude',
     sendPrompt,
-    cardFile, // MCP 子进程写入卡片的临时文件路径
   });
   idleAgentConfigs.set(agentId, { cliTool: 'claude', sessionId, systemPrompt: systemPrompt || '' });
   agentTurnStates.set(agentId, 'idle');
@@ -2096,8 +2886,6 @@ async function dispatchToClaudeSlot(ws, agentId, conversationId, userId, prompt,
     resumed: Boolean(validSessionId),
   });
 
-  // Send the prompt (currentCardFile was set in spawnStreamJsonProcess)
-  resetCardFile(currentCardFile);
   const response = await sendPrompt(prompt);
   if (response.error) throw new Error(response.error);
   return response.result;
@@ -2227,7 +3015,13 @@ async function handleTaskDispatch(ws, data) {
     user_id: data.user_id,
   };
   if (!task.id) {
-    logFlow('warn', 'task.dispatch_invalid', { reason: 'missing task_id' });
+    // task_id 缺失——几乎一定是后端发的字段名和 daemon 期望的不一致
+    // （历史 bug：后端发 data.id，daemon 读 data.task_id → 静默 return → 后端超时）。
+    // 打出实际收到的 keys，便于一眼定位字段名漂移。
+    logFlow('error', 'task.dispatch_missing_task_id', {
+      received_keys: Object.keys(data || {}),
+      hint: 'daemon 读 data.task_id；若后端发了 data.id 则字段名不匹配',
+    });
     return true;
   }
 
@@ -2261,6 +3055,10 @@ async function handleTaskDispatch(ws, data) {
     system_prompt_len: systemPrompt.length,
     user_prompt_len: userPrompt.length,
   });
+  // 创建本任务执行上下文：实例化所有注册的输出收集器（cards 等）。
+  // taskCtx 随执行链路传递，承载 per-task 的临时资源；任务结束统一清理。
+  const taskCtx = new TaskContext(task);
+  taskCtx.attachCollectors();
   try {
     let result;
     if (
@@ -2276,7 +3074,7 @@ async function handleTaskDispatch(ws, data) {
         conversation_id: task.conversation_id,
         mode: 'claude_slot',
       });
-      result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt);
+      result = await dispatchToClaudeSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt, taskCtx);
     } else {
       logFlow('info', 'task.execution_start', {
         task_id: task.id,
@@ -2285,12 +3083,14 @@ async function handleTaskDispatch(ws, data) {
         conversation_id: task.conversation_id,
         mode: 'legacy_spawn',
       });
-      result = await executeTaskOnce(task);
+      result = await executeTaskOnce(task, taskCtx);
       if (result === null) return true;
     }
     const artifacts = parseArtifacts(result);
-    // 读取 MCP 子进程通过 render_card 工具写入的卡片文件
-    const cards = readRenderedCards();
+    // 收集 daemon 内部生成的卡片（如 deploy_project 成功 info 卡）。
+    // agent 通过 MCP 工具产出的卡片不再走 IPC——agent 直接在回复正文写 fenced JSON block，
+    // 由前端解析；daemon 只回传本进程内 push 的卡片。
+    const cards = taskCtx.drainDaemonCards();
     bus.emit('task.completed', {
       task_id: task.id,
       cli_tool: task.cli_tool,
@@ -2308,6 +3108,9 @@ async function handleTaskDispatch(ws, data) {
       conversation_id: task.conversation_id,
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    // 清理本任务所有 collector 的临时资源（卡片临时文件等）
+    taskCtx.cleanup();
   }
   return true;
 }
@@ -2334,6 +3137,9 @@ registerWsHandler('task.dispatch', (ws, data) => {
   bus.emit('task.dispatch', { ws, data });
   return true;
 });
+
+// 部署已改为 MCP 工具（deploy_project / stop_deploy），不经 WS 下发。
+// daemon 主进程只负责 TTL 清理（scanAndCleanupDeploys，见 main()）。
 
 // ---------------------------------------------------------------------------
 // 事件订阅者——业务逻辑与 WS 接收解耦
@@ -2417,13 +3223,15 @@ async function connectWS(serverURL, apiKey) {
       resetWatchdog();
       // Send register message over WS
       const agents = scanAgents();
+      const capabilities = detectCapabilities();
       ws.send(JSON.stringify({
         type: 'daemon.register',
-        data: { machine_id: os.hostname(), agents },
+        data: { machine_id: os.hostname(), agents, capabilities },
       }));
       logFlow('info', 'ws.register_sent', {
         machine_id: os.hostname(),
         agent_count: agents.length,
+        capabilities,
         agents: agents.map((agent) => `${agent.name}:${agent.cli_tool}`),
       });
       flushPendingTaskCompletions();
@@ -2484,8 +3292,7 @@ async function connectWS(serverURL, apiKey) {
 // 以 stdio JSON-RPC（换行分隔）对外暴露一个 agenthub-platform MCP server，
 // 让本机 Agent（Claude Code / Codex 等）可通过 MCP 工具操作 AgentHub 平台。
 // 协议要求 stdout 只承载 JSON-RPC 报文，因此本模式所有日志改走 stderr。
-
-const MCP_PROTOCOL_VERSION = '2024-11-05';
+// MCP 协议版本在顶部 CONFIG.mcpProtocolVersion 配置。
 
 let cachedAgentJWT = null;
 let cachedAgentJWTExp = 0;
@@ -3095,150 +3902,117 @@ const MCP_TOOLS = [
     },
   },
   {
-    name: 'deploy_artifact',
-    description: '将当前会话中的 artifact（代码/网页/文档）部署为可公开访问的预览页面。通过内网穿透(tunnel)生成临时公网 URL。不指定 artifact_name 时部署最新 artifact。注意：webpage 类型的 artifact 需要包含完整的 HTML 内容（content 字段）才能正确部署预览，仅包含 localhost URL 的产物无法通过公网访问。',
+    name: 'deploy_project',
+    description: '在本机用 Docker 部署项目目录到公网（cloudflared 隧道）。要求 source_dir 必须含 Dockerfile（由你负责编写：FROM + 业务构建步骤 + EXPOSE <端口>）。平台执行 docker build/run + 公网隧道，返回 URL（4 小时后自动清理）。port 参数对应 Dockerfile 的 EXPOSE 端口（默认 80）。需要本机安装 Docker。',
     inputSchema: {
       type: 'object',
       properties: {
-        artifact_name: {
+        source_dir: {
           type: 'string',
-          description: '要部署的 artifact 名称（匹配 filename 或 title），不指定则部署最新',
+          description: '代码目录绝对路径（必填，必须含 Dockerfile）。',
+        },
+        port: {
+          type: 'number',
+          description: '容器监听端口，对应 Dockerfile 的 EXPOSE（默认 80）。',
         },
       },
+      required: ['source_dir'],
       additionalProperties: false,
     },
     run: async (args, ctx) => {
-      return ctx.callApi('POST', '/api/deployments/deploy', {
-        body: {
-          conversation_id: ctx.conversationId,
-          artifact_name: args.artifact_name || '',
-          mode: 'preview',
-        },
+      // 1. docker 可用性检查
+      if (!detectDocker()) {
+        return {
+          deployed: false,
+          error: '本机未安装 Docker 或 Docker 未运行。请先安装 Docker。',
+        };
+      }
+
+      // 2. 校验 source_dir（agent 的真实代码目录，Dockerfile 必须在里面）
+      const sourceDir = path.resolve(args.source_dir || '');
+      if (!sourceDir || !fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
+        return { deployed: false, error: `源码目录不存在或未指定: ${sourceDir || '(空)'}。必须传 source_dir 指明代码目录。` };
+      }
+      const port = Number(args.port) || 80;
+
+      // 3. 执行部署（平台纯执行器：build + run + 隧道；Dockerfile 由 agent 负责）
+      const deployId = crypto.randomUUID();
+      logFlow('info', 'deploy.tool_start', { deploy_id: deployId, source_dir: sourceDir, port });
+      let result;
+      try {
+        result = await executeDeploy(deployId, sourceDir, port);
+      } catch (e) {
+        logFlow('error', 'deploy.tool_failed', { deploy_id: deployId, error: errorMessage(e) });
+        return { deployed: false, deploy_id: deployId, error: errorMessage(e) };
+      }
+
+      // 5. 写状态文件（供 daemon 主进程 TTL 清理）
+      const createdAt = Date.now();
+      const expiresAt = createdAt + DEPLOY_TTL_MS;
+      writeDeployState({
+        deployId,
+        containerName: result.containerName,
+        port: result.port,
+        tunnelPid: result.tunnelProcess ? result.tunnelProcess.pid : null,
+        url: result.url,
+        workDir: result.workDir,
+        createdAt,
+        expiresAt,
       });
-    },
-  },
-  {
-    name: 'deploy_artifact_github',
-    description: '将 artifact 永久发布到 GitHub Pages。需要后端配置 GitHub Token。不指定 artifact_name 时部署最新 artifact。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        artifact_name: {
-          type: 'string',
-          description: '要发布的 artifact 名称（匹配 filename 或 title），不指定则发布最新',
-        },
-      },
-      additionalProperties: false,
-    },
-    run: async (args, ctx) => {
-      return ctx.callApi('POST', '/api/deployments/deploy', {
-        body: {
-          conversation_id: ctx.conversationId,
-          artifact_name: args.artifact_name || '',
-          mode: 'github',
-        },
-      });
-    },
-  },
-  {
-    name: 'render_card',
-    description: '渲染交互式卡片到聊天消息中。用于：方案选择(plan_selection)、审批确认(approval)、任务进度(task_status)、信息展示(info)。卡片会自动出现在聊天界面，用户可直接交互。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        card_type: {
-          type: 'string',
-          description: '卡片类型：plan_selection（方案选择）、approval（审批确认）、task_status（任务进度）、info（信息展示）',
-        },
-        title: { type: 'string', description: '卡片标题' },
-        // plan_selection
-        options: {
-          type: 'array',
-          description: '方案选项列表（plan_selection 类型必填）',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string', description: '选项唯一标识' },
-              label: { type: 'string', description: '选项名称' },
-              description: { type: 'string', description: '选项描述' },
-              recommended: { type: 'boolean', description: '是否推荐选项' },
-            },
-          },
-        },
-        // approval
-        content: { type: 'string', description: '需要确认的内容描述（approval 类型必填）' },
-        actions: {
-          type: 'array',
-          description: '操作按钮列表（approval 类型可选，默认允许/拒绝）',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              label: { type: 'string' },
-              style: { type: 'string', enum: ['primary', 'danger'] },
-            },
-          },
-        },
-        // task_status
-        tasks: {
-          type: 'array',
-          description: '任务步骤列表（task_status 类型必填）',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              status: { type: 'string', enum: ['done', 'running', 'pending', 'failed'] },
-            },
-          },
-        },
-        // info
-        fields: {
-          type: 'object',
-          description: '键值对信息（info 类型，展示为表格）',
-          additionalProperties: true,
-        },
-      },
-      required: ['card_type', 'title'],
-      additionalProperties: false,
-    },
-    run: async (args, ctx) => {
+
+      // 6. 部署成功卡片走内存队列（如 daemon 主进程能触达 taskContext 则 push）。
+      // 注意：deploy_project 在 MCP 子进程里执行（与 daemon 主进程分离），
+      // 这里 ctx.taskContext 通常不存在——卡片实际由 tool 返回值（deploy_id/url/...）
+      // 经 agent 回复正文回传给用户。仅当未来该工具改为 daemon 主进程内直接调用时，
+      // 此分支才会真正生效。
+      const expiresLocal = new Date(expiresAt).toLocaleString('zh-CN', { hour12: false });
       const card = {
-        type: args.card_type,
-        id: crypto.randomUUID(),
-        title: args.title,
+        type: 'info',
+        title: '部署完成',
+        fields: {
+          '访问地址': result.url,
+          '容器': result.containerName,
+          '有效期': `${expiresLocal}（4 小时后自动停止）`,
+          '部署 ID': deployId,
+        },
       };
-      // 按类型填充 payload
-      if (args.card_type === 'plan_selection' && args.options) {
-        card.options = args.options;
-      } else if (args.card_type === 'approval') {
-        card.message = args.content || '';
-        card.actions = args.actions || [
-          { id: 'allow', label: '允许', style: 'primary' },
-          { id: 'deny', label: '拒绝', style: 'danger' },
-        ];
-      } else if (args.card_type === 'task_status' && args.tasks) {
-        card.tasks = args.tasks;
-      } else if (args.card_type === 'info' && args.fields) {
-        card.fields = args.fields;
+      if (ctx && ctx.taskContext && typeof ctx.taskContext.pushDaemonCard === 'function') {
+        ctx.taskContext.pushDaemonCard(card);
       }
 
-      // 通过 --card-file 参数或环境变量指定的文件写入卡片（跨进程通信）
-      const cardFile = readArg('--card-file') || process.env.AGENTHUB_CARD_FILE;
-      if (cardFile) {
-        try {
-          let existing = [];
-          try { existing = JSON.parse(fs.readFileSync(cardFile, 'utf8')); } catch { /* first card */ }
-          existing.push(card);
-          fs.writeFileSync(cardFile, JSON.stringify(existing));
-        } catch (e) {
-          logFlow('warn', 'card.write_failed', { card_type: args.card_type, error: errorMessage(e) });
-        }
-      }
-
+      logFlow('info', 'deploy.tool_done', { deploy_id: deployId, url: result.url, expires_at: expiresLocal });
       return {
-        rendered: true,
-        card_type: args.card_type,
-        message: `卡片已渲染：${args.title}`,
+        deployed: true,
+        deploy_id: deployId,
+        url: result.url,
+        container: result.containerName,
+        expires_at: expiresLocal,
+      };
+    },
+  },
+  {
+    name: 'stop_deploy',
+    description: '停止一个正在运行的部署（docker stop + 关闭隧道）。传入 deploy_project 返回的 deploy_id。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        deploy_id: {
+          type: 'string',
+          description: '要停止的部署 ID（deploy_project 返回的 deploy_id）',
+        },
+      },
+      required: ['deploy_id'],
+      additionalProperties: false,
+    },
+    run: async (args, ctx) => {
+      if (!args.deploy_id) {
+        return { stopped: false, error: '缺少 deploy_id 参数' };
+      }
+      const stopped = stopDeploy(args.deploy_id);
+      return {
+        stopped,
+        deploy_id: args.deploy_id,
+        message: stopped ? '部署已停止' : '未找到该部署（可能已过期或已停止）',
       };
     },
   },
@@ -3248,7 +4022,6 @@ const DEFAULT_AGENT_TOOLS = [
   'list_group_agents',
   'get_messages',
   'get_agent_skill',
-  'render_card', // 卡片渲染工具——所有 agent 默认可用
   'list_tasks',
   'create_task',
   'update_task',
@@ -3338,18 +4111,9 @@ async function resolveAllowedTools(ctx) {
     }
     tools = [...toolSet];
   }
-  // 平台内置工具始终注入（render_card 等），不受 tools_config 控制
-  const toolSet = new Set(tools);
-  for (const pt of PLATFORM_TOOL_NAMES) {
-    toolSet.add(pt);
-  }
-  tools = [...toolSet];
   ctx.allowedTools = tools;
   return ctx.allowedTools;
 }
-
-// 平台内置工具——所有 Agent 默认可用，不可通过 tools_config 禁用
-const PLATFORM_TOOL_NAMES = ['render_card'];
 
 async function isToolAllowed(ctx, toolName) {
   const allowed = await resolveAllowedTools(ctx);
@@ -3499,6 +4263,11 @@ async function main() {
   daemonConn.apiKey = apiKey;
   daemonConn.daemonToken = readArg('--daemon-token') || process.env.AGENTHUB_DAEMON_TOKEN || '';
   loadSessionMap();
+  // 部署 TTL 管理：启动时清理上次遗留的过期部署，之后每 5 分钟扫一次。
+  // MCP 工具 deploy_project 发起的部署写状态文件到 ~/.agenthub/deploys/，
+  // 由这里负责 4 小时后自动停止（docker stop + kill cloudflared）。
+  scanAndCleanupDeploys();
+  setInterval(scanAndCleanupDeploys, 5 * 60 * 1000).unref();
   await register(serverURL, apiKey);
   ensureGlobalMcpConfigs(serverURL, apiKey);
   await connectWS(serverURL, apiKey);

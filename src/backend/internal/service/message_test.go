@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +121,29 @@ func (r *fakeMsgRepo) ListReplies(ctx context.Context, messageID string) ([]mode
 		}
 	}
 	return replies, nil
+}
+
+// UpdateMessageCards 记录最近一次写入的 cards_json（测试可断言）。
+// 同时把解析后的 cards 结构化字段写回 slice，便于测试从 msgRepo.messages 直接断言 .Cards。
+func (r *fakeMsgRepo) UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error {
+	for i := range r.messages {
+		if r.messages[i].ID == messageID {
+			r.messages[i].CardsJSON = cardsJSON
+			var parsed []map[string]any
+			if err := json.Unmarshal([]byte(cardsJSON), &parsed); err == nil {
+				r.messages[i].Cards = parsed
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// HideMessage / UnhideMessage / GetHiddenMessageIDs —— message_hides 功能的 no-op 桩。
+func (r *fakeMsgRepo) HideMessage(ctx context.Context, userID, messageID string) error     { return nil }
+func (r *fakeMsgRepo) UnhideMessage(ctx context.Context, userID, messageID string) error   { return nil }
+func (r *fakeMsgRepo) GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }
 
 type fakeConvRepoForMsg struct {
@@ -577,5 +602,216 @@ func TestSendMessageRejectsForeignAgent(t *testing.T) {
 	_, err := svc.createAgentReply(context.Background(), "conv-1", userID, "agent-1", "hello", "", nil)
 	if !errors.Is(err, ErrMsgAgentNoPerm) {
 		t.Fatalf("expected ErrMsgAgentNoPerm, got %v", err)
+	}
+}
+
+// TestExtractCardsFromContent 覆盖 fenced block 解析、合并、占位符剥离等行为。
+func TestExtractCardsFromContent(t *testing.T) {
+	cases := []struct {
+		name                      string
+		input                     string
+		expectedCardsLen          int
+		expectedStrippedContains  []string
+		expectedStrippedNotContain []string
+		expectedCardsJSONContains []string
+		expectCardIDNonEmpty      bool // for block_without_id case
+	}{
+		{
+			name: "single_block_single_card",
+			input: "我先解释一下：\n```json\n" +
+				`{"cards":[{"type":"info","id":"i1","fields":{}}]}` + "\n```\n尾文本",
+			expectedCardsLen:          1,
+			expectedStrippedContains:  []string{"[CARD:i1]", "我先解释一下：", "尾文本"},
+			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedCardsJSONContains: []string{`"type":"info"`, `"id":"i1"`},
+		},
+		{
+			name: "single_block_multi_card",
+			input: "开头\n```json\n" +
+				`{"cards":[{"type":"info","id":"c1"},{"type":"diff","id":"c2"}]}` + "\n```\n结尾",
+			expectedCardsLen:          2,
+			expectedStrippedContains:  []string{"[CARD:c1]", "[CARD:c2]"},
+			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedCardsJSONContains: []string{`"id":"c1"`, `"id":"c2"`},
+		},
+		{
+			name: "multi_block_multi_card",
+			input: "头部\n```json\n" +
+				`{"cards":[{"type":"info","id":"a1"}]}` + "\n```\n中间文字\n```JSON\n" +
+				`{"cards":[{"type":"diff","id":"b1"}]}` + "\n```\n尾部",
+			expectedCardsLen:          2,
+			expectedStrippedContains:  []string{"[CARD:a1]", "[CARD:b1]", "中间文字"},
+			expectedStrippedNotContain: []string{"```json", "```JSON", "\"cards\""},
+			expectedCardsJSONContains: []string{`"id":"a1"`, `"id":"b1"`},
+		},
+		{
+			name: "block_in_middle",
+			input: "前文说明\n```json\n" +
+				`{"cards":[{"type":"info","id":"mid1"}]}` + "\n```\n后文说明",
+			expectedCardsLen:          1,
+			expectedStrippedContains:  []string{"[CARD:mid1]", "前文说明", "后文说明"},
+			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedCardsJSONContains: []string{`"id":"mid1"`},
+		},
+		{
+			name: "block_without_id",
+			input: "```json\n" +
+				`{"cards":[{"type":"info","fields":{}}]}` + "\n```\n",
+			expectedCardsLen:         1,
+			expectCardIDNonEmpty:     true,
+			expectedStrippedContains: []string{"[CARD:"},
+		},
+		{
+			name: "invalid_json",
+			input: "开头\n```json\nthis is not json{]\n```\n结尾",
+			expectedCardsLen:          0,
+			expectedStrippedContains:  []string{"```json", "this is not json{]", "结尾"},
+			expectedStrippedNotContain: []string{"[CARD:"},
+		},
+		{
+			name: "no_block",
+			input:                     "纯文本回复，没有卡片",
+			expectedCardsLen:          0,
+			expectedStrippedContains:  []string{"纯文本回复，没有卡片"},
+			expectedStrippedNotContain: []string{"[CARD:"},
+		},
+		{
+			name: "whole_content_json_not_matched",
+			input:                     `{"cards":[{"type":"info","id":"x1"}]}`,
+			expectedCardsLen:          0,
+			expectedStrippedContains:  []string{`{"cards":[`},
+			expectedStrippedNotContain: []string{"[CARD:"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cards, stripped, cardsJSON := extractCardsFromContent(tc.input)
+			if len(cards) != tc.expectedCardsLen {
+				t.Fatalf("expected %d cards, got %d (cards=%v)", tc.expectedCardsLen, len(cards), cards)
+			}
+			for _, sub := range tc.expectedStrippedContains {
+				if !strings.Contains(stripped, sub) {
+					t.Errorf("stripped should contain %q, got: %s", sub, stripped)
+				}
+			}
+			for _, sub := range tc.expectedStrippedNotContain {
+				if strings.Contains(stripped, sub) {
+					t.Errorf("stripped should NOT contain %q, got: %s", sub, stripped)
+				}
+			}
+			if tc.expectedCardsLen > 0 {
+				if cardsJSON == "" {
+					t.Fatalf("expected non-empty cardsJSON")
+				}
+				for _, sub := range tc.expectedCardsJSONContains {
+					if !strings.Contains(cardsJSON, sub) {
+						t.Errorf("cardsJSON should contain %q, got: %s", sub, cardsJSON)
+					}
+				}
+			} else {
+				if cardsJSON != "" {
+					t.Errorf("expected empty cardsJSON for no cards case, got %q", cardsJSON)
+				}
+			}
+			if tc.expectCardIDNonEmpty {
+				if len(cards) == 0 {
+					t.Fatalf("expected at least 1 card")
+				}
+				id, _ := cards[0]["id"].(string)
+				if id == "" {
+					t.Errorf("expected auto-generated id, got empty")
+				}
+			}
+		})
+	}
+}
+
+// TestCreateAgentReplyMergesDaemonAndTextCards 验证 daemon 上行 cards（如 deploy info）
+// 与 agent 正文 ```json{"cards":[...]}``` block 解析出的卡片被合并、剥离后存入 DB。
+func TestCreateAgentReplyMergesDaemonAndTextCards(t *testing.T) {
+	userID := "user-1"
+	msgRepo := &fakeMsgRepo{}
+	convRepo := &fakeConvRepoForMsg{
+		conv: &model.Conversation{ID: "conv-1", UserID: userID, Type: "agent"},
+	}
+	agentRepo := &fakeAgentRepoForMsg{
+		agent:          &model.Agent{ID: "agent-1", UserID: &userID, Name: "Codex Agent", CLITool: "codex", MachineID: stringPtr("machine-1")},
+		inConversation: true,
+	}
+	svc := NewMessageService(msgRepo, convRepo, agentRepo)
+	daemonHub := ws.NewDaemonHub(slog.Default())
+	daemonHub.RegisterTestClient("machine-1", ws.NewDaemonClient(nil, "machine-1"))
+	svc.SetDaemonHub(daemonHub)
+
+	// daemon 上行的卡片（例如 deploy_project 成功的 info 卡）+ 正文里嵌的 diff 卡
+	daemonCards := []map[string]any{
+		{"type": "info", "id": "daemon-deploy", "fields": map[string]any{"url": "https://example.com"}},
+	}
+	textResult := "回复开头\n```json\n" + `{"cards":[{"type":"diff","id":"d1","title":"本次修改","workDir":"/repo","files":["App.tsx"]}]}` + "\n```\n尾文本"
+
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if agentRepo.task != nil && daemonHub.AwaitTaskResult(agentRepo.task.ID) != nil {
+				daemonHub.ResolveTask(agentRepo.task.ID, &ws.TaskResult{
+					TaskID: agentRepo.task.ID,
+					Result: textResult,
+					Cards:  daemonCards,
+				})
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	if _, err := svc.SendMessageWithReply(context.Background(), "conv-1", userID, "user", "hello", "", nil, nil, "agent-1", nil); err != nil {
+		t.Fatalf("send message failed: %v", err)
+	}
+
+	var agentMsg *model.Message
+	for i := 0; i < 20; i++ {
+		for j := range msgRepo.messages {
+			if msgRepo.messages[j].Role == "assistant" {
+				agentMsg = &msgRepo.messages[j]
+				break
+			}
+		}
+		if agentMsg != nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if agentMsg == nil {
+		t.Fatalf("expected async assistant reply, got %#v", msgRepo.messages)
+	}
+
+	// 合并后应有 2 张卡（daemon 1 张 + 文本 1 张）
+	if len(agentMsg.Cards) != 2 {
+		t.Fatalf("expected 2 merged cards (daemon+text), got %d: %+v", len(agentMsg.Cards), agentMsg.Cards)
+	}
+
+	// 正文里不应再出现原始 block 文本
+	if strings.Contains(agentMsg.Content, `{"cards"`) {
+		t.Errorf("content should not contain raw cards JSON block, got: %s", agentMsg.Content)
+	}
+	if strings.Contains(agentMsg.Content, "```json") {
+		t.Errorf("content should not contain fenced json block, got: %s", agentMsg.Content)
+	}
+
+	// 应含占位符 + 前后文字
+	if !strings.Contains(agentMsg.Content, "[CARD:d1]") {
+		t.Errorf("content should contain [CARD:d1] placeholder, got: %s", agentMsg.Content)
+	}
+	if !strings.Contains(agentMsg.Content, "回复开头") || !strings.Contains(agentMsg.Content, "尾文本") {
+		t.Errorf("content should preserve surrounding text, got: %s", agentMsg.Content)
+	}
+
+	// CardsJSON 应同时含两种 type
+	if !strings.Contains(agentMsg.CardsJSON, `"type":"info"`) {
+		t.Errorf("CardsJSON should contain daemon info card, got: %s", agentMsg.CardsJSON)
+	}
+	if !strings.Contains(agentMsg.CardsJSON, `"type":"diff"`) {
+		t.Errorf("CardsJSON should contain agent diff card, got: %s", agentMsg.CardsJSON)
 	}
 }

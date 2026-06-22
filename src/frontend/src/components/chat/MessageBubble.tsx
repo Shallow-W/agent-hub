@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useCallback, type ReactNode } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
-import { renderCards } from './cards/CardRegistry';
+import { renderCards, getCardSpec } from './cards/CardRegistry';
 import type { InteractiveCard } from '@/types/card';
 import { updateMessageCards as updateMessageCardsAPI } from '@/api/message';
 import { useMessageStore } from '@/store/messageStore';
@@ -40,6 +40,61 @@ const { Text } = Typography;
 const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
 const REPLY_PREVIEW_LIMIT = 50;
+
+// 卡片占位符：agent 在 markdown 正文里写独立一行 [CARD:<id>]，
+// MessageBubble 渲染时把 content 按占位符拆段，卡片渲染在占位符位置。
+// 占位符格式：单独一行，[CARD:] 后跟卡片 id（字母数字下划线短横）。
+const CARD_PLACEHOLDER_REGEX = /^[ \t]*\[CARD:([a-zA-Z0-9_-]+)\][ \t]*$/gm;
+
+type ContentSegment =
+  | { type: 'markdown'; content: string }
+  | { type: 'card'; card: InteractiveCard };
+
+/**
+ * 把 content 按卡片占位符拆成段。
+ * - markdown 段：不含占位符的文本，走 MarkdownRenderer
+ * - card 段：占位符匹配到的卡片
+ *
+ * 返回 segments + unmatchedCards（没有占位符对应的卡片，走末尾兜底渲染）。
+ * 向后兼容：content 无占位符时，segments 只有一段全部 content，unmatchedCards 是全部卡片。
+ */
+export function splitByCardPlaceholder(
+  content: string,
+  cards: InteractiveCard[],
+): { segments: ContentSegment[]; unmatchedCards: InteractiveCard[] } {
+  if (!content || cards.length === 0) {
+    // 无卡片：整段 markdown；或无内容：空段
+    return { segments: content ? [{ type: 'markdown', content }] : [], unmatchedCards: cards };
+  }
+  const matchedIds = new Set<string>();
+  const segments: ContentSegment[] = [];
+  let lastIndex = 0;
+  // 重置正则 lastIndex（全局正则复用安全）
+  CARD_PLACEHOLDER_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CARD_PLACEHOLDER_REGEX.exec(content)) !== null) {
+    const cardId = match[1]!;
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) continue; // 占位符无对应卡片，保留为普通文本（不拆段）
+    // 占位符前的 markdown 段
+    const before = content.slice(lastIndex, match.index);
+    if (before) segments.push({ type: 'markdown', content: before });
+    // 卡片段
+    segments.push({ type: 'card', card });
+    matchedIds.add(cardId);
+    lastIndex = match.index + match[0].length;
+  }
+  // 最后一段 markdown
+  const tail = content.slice(lastIndex);
+  if (tail) segments.push({ type: 'markdown', content: tail });
+
+  // 如果没拆出任何段（无占位符匹配），整段是一个 markdown 段
+  if (segments.length === 0) {
+    segments.push({ type: 'markdown', content });
+  }
+  const unmatchedCards = cards.filter((c) => !matchedIds.has(c.id));
+  return { segments, unmatchedCards };
+}
 
 // ── ReactMarkdown custom components ──
 
@@ -432,42 +487,41 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     }
   }, [message.cards_json, message.cards]);
 
-  // 本地卡片状态（用户交互后乐观更新）
-  const [parsedCardsLocal, setParsedCardsLocal] = useState<InteractiveCard[]>(parsedCards);
+  // 本地卡片状态：用户交互后的乐观覆盖层。
+  // 采用 override 模式而非直接镜像 parsedCards——外部推送（其他用户解决卡片、
+  // Agent 更新进度）刷新 parsedCards 时，通过 useEffect 丢弃过期覆盖，自动回流。
+  const [cardsOverride, setCardsOverride] = useState<InteractiveCard[] | null>(null);
+  const displayCards = cardsOverride ?? parsedCards;
+  useEffect(() => {
+    // parsedCards 变化（props/WS 推送）→ 丢弃本地覆盖，采用最新服务端状态
+    setCardsOverride(null);
+  }, [parsedCards]);
 
-  // 卡片交互回调——用户选择方案/确认操作后发送消息给 Agent
-  const handleCardAction = useCallback((_cardId: string, action: string, data?: Record<string, unknown>) => {
-    // 1. 更新原消息的卡片状态（持久化用户选择）
-    if (parsedCards.length > 0) {
-      const updatedCards = parsedCards.map((c) => {
-        if (c.id !== _cardId) return c;
-        if (action === 'select_plan' && data?.option_id) {
-          return { ...c, state: 'resolved', selected_option: String(data.option_id) } as InteractiveCard;
-        }
-        if (action === 'confirm' && data?.action_id) {
-          return { ...c, state: 'resolved', selected_action: String(data.action_id) } as InteractiveCard;
-        }
-        return c;
-      });
-      const cardsJSON = JSON.stringify(updatedCards);
-      // 局部更新 UI（乐观）
-      setParsedCardsLocal(updatedCards);
-      // 持久化到 DB
-      void updateMessageCardsAPI(message.conversation_id, message.id, cardsJSON);
+  // 占位符分段：把 content 按 [CARD:id] 独立行拆成 markdown 段 + 卡片段。
+  // agent 在回答里写占位符 → 卡片渲染在该位置；不写占位符的卡片走兜底末尾渲染。
+  const { segments, unmatchedCards } = useMemo(() => {
+    return splitByCardPlaceholder(displayContent, displayCards);
+  }, [displayContent, displayCards]);
+
+  // 卡片交互回调——委托给 CardSpec 的 reduceAction / actionToMessage。
+  // MessageBubble 不感知任何具体 action（select_plan/confirm/...），
+  // 新增交互卡片类型只需在组件文件里注册 reducer，此处零改动。
+  const handleCardAction = useCallback((cardId: string, action: string, data?: Record<string, unknown>) => {
+    const card = parsedCards.find((c) => c.id === cardId);
+    if (!card) return;
+    const spec = getCardSpec(card.type);
+
+    // 1. 持久化——只有声明了 reduceAction 的卡片才更新状态（只读卡片跳过）
+    if (spec?.reduceAction) {
+      const updatedCards = parsedCards.map((c) =>
+        c.id === cardId ? spec.reduceAction!(c, action, data) : c,
+      );
+      setCardsOverride(updatedCards); // 局部乐观更新
+      void updateMessageCardsAPI(message.conversation_id, message.id, JSON.stringify(updatedCards));
     }
 
-    // 2. 构造人类可读的消息内容（Agent 能理解的格式）
-    let content = '';
-    if (action === 'select_plan' && data?.option_id) {
-      const card = parsedCards.find((c) => c.id === _cardId);
-      const option = card && card.type === 'plan' ? card.options.find((o) => o.id === data.option_id) : undefined;
-      content = option ? `[选择方案 ${data.option_id}] ${option.label}` : `[选择方案 ${data.option_id}]`;
-    } else if (action === 'confirm' && data?.action_id) {
-      content = `[确认操作: ${data.action_id}]`;
-    } else {
-      content = `[卡片交互: ${action}]`;
-    }
-    // 发送为普通消息（Agent 通过 session 上下文理解上下文）
+    // 2. 发消息给 Agent——用 spec 翻译，无翻译器则用兜底文案
+    const content = spec?.actionToMessage?.(card, action, data) ?? `[卡片交互: ${action}]`;
     void useMessageStore.getState().sendMessage(message.conversation_id, content);
   }, [parsedCards, message.conversation_id, message.id]);
 
@@ -687,20 +741,34 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             )}
             {displayContent && (
               <div className={styles.markdownBody}>
-                <MarkdownRenderer content={displayContent} codeArtifacts={codeArtifacts} />
+                {/* 按 [CARD:id] 占位符分段渲染：markdown 段走 MarkdownRenderer，卡片段走 renderCards。
+                    没有占位符时 segments 只有一段（全部 content），行为等同改之前。 */}
+                {segments.map((seg, i) => {
+                  if (seg.type === 'markdown') {
+                    if (!seg.content) return null;
+                    return <MarkdownRenderer key={i} content={seg.content} codeArtifacts={codeArtifacts} />;
+                  }
+                  // 卡片段：渲染匹配到的单张卡片
+                  return (
+                    <div key={i} className={styles.cardsContainer}>
+                      {renderCards([seg.card], message.conversation_id, message.id, handleCardAction, message.artifacts, agentMeta.agent_id)}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {cardArtifacts.length > 0 && (
-              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} />
+              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} conversationId={message.conversation_id} />
             )}
             {deployment && (
               <div className={styles.deployCard}>
                 <DeployStatusCard deployment={deployment} />
               </div>
             )}
-            {parsedCards.length > 0 && (
+            {/* 兜底：没有占位符匹配的卡片在末尾渲染（向后兼容 agent 没写占位符的情况） */}
+            {unmatchedCards.length > 0 && (
               <div className={styles.cardsContainer}>
-                {renderCards(parsedCardsLocal, message.conversation_id, message.id, handleCardAction)}
+                {renderCards(unmatchedCards, message.conversation_id, message.id, handleCardAction, message.artifacts, agentMeta.agent_id)}
               </div>
             )}
             {collapsed && <div className={styles.fadeMask} />}
