@@ -148,15 +148,20 @@ class TaskContext {
 
 // name → factory(ctx) => collector。collector 接口：
 //   { reset(), drain() => any[], cleanup(), ... 任意自定义字段 }
+//
+// 当前为空——卡片原由 'cards' collector 通过临时文件 IPC 收集，已改为 agent 直接
+// 在回复正文写 fenced JSON block，daemon 不再参与卡片收集（见 extractCardsFromContent）。
+// 保留 registerOutputCollector + attachCollectors 作为扩展点：未来若新增 daemon 侧
+// 的批量输出类型（progress 流、截图、日志聚合等），可在此注册，无需改 TaskContext。
 const outputCollectors = new Map();
 
 /**
  * 注册一个输出收集器工厂。factory 收到 TaskContext，返回一个 collector 对象。
  * collector 至少应实现 reset() / drain() / cleanup()；可携带任意附加字段。
  *
- * 扩展点：未来新增 daemon 输出类型（progress 流、截图、日志等）时在此注册。
- * 当前没有内置 collector——卡片原由 'cards' collector 通过临时文件 IPC 收集，
- * 已改为 agent 直接在回复正文写 fenced JSON block，daemon 不再参与卡片收集。
+ * 当前未使用——保留为未来扩展点（如 daemon 侧聚合 progress / 截图 / 日志）。
+ * 新增 collector 时在文件底部调用 registerOutputCollector('xxx', factory) 即可，
+ * TaskContext.attachCollectors 会自动实例化并挂到 task.outputs。
  */
 function registerOutputCollector(name, factory) {
   outputCollectors.set(name, factory);

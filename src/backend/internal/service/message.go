@@ -603,8 +603,23 @@ func (s *MessageService) UpdateMessageCards(ctx context.Context, messageID, user
 // 与 UpdateMessageCards 的区别：后者只 UPDATE DB 列不广播，多成员场景下其他人看不到更新。
 // 本方法只走 PushToConversation（message.complete 事件），不触发离线队列/未读计数——
 // 卡片更新不是新消息，不应改变未读数。
+//
+// 校验：cardsJSON 反序列化后过 ValidateCards，过滤掉 type 未知 / 必填缺失的脏卡，
+// 避免前端 PATCH 错误格式破坏 DB 完整性 + 防止其他成员渲染时崩溃。
 func (s *MessageService) UpdateMessageCardsAndBroadcast(ctx context.Context, messageID, cardsJSON string) error {
-	if err := s.msgRepo.UpdateMessageCards(ctx, messageID, cardsJSON); err != nil {
+	// 反序列化 + 校验，再序列化回写——确保落库的 cards_json 始终是 validated 形态。
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(cardsJSON), &parsed); err != nil {
+		return fmt.Errorf("parse cards json: %w", err)
+	}
+	validated := ValidateCards(parsed)
+	validatedJSON, err := json.Marshal(validated)
+	if err != nil {
+		return fmt.Errorf("marshal validated cards: %w", err)
+	}
+	validatedStr := string(validatedJSON)
+
+	if err := s.msgRepo.UpdateMessageCards(ctx, messageID, validatedStr); err != nil {
 		return fmt.Errorf("update cards: %w", err)
 	}
 	msg, err := s.msgRepo.GetByID(ctx, messageID)
@@ -614,10 +629,10 @@ func (s *MessageService) UpdateMessageCardsAndBroadcast(ctx context.Context, mes
 	if msg == nil {
 		return ErrMsgNotFound
 	}
-	if err := json.Unmarshal([]byte(cardsJSON), &msg.Cards); err != nil {
+	if err := json.Unmarshal([]byte(validatedStr), &msg.Cards); err != nil {
 		slog.Warn("unmarshal cards after update", "message_id", messageID, "error", err)
 	}
-	msg.CardsJSON = cardsJSON
+	msg.CardsJSON = validatedStr
 
 	// 直接通过 notifier 广播 message.complete，避免 postPersist 的未读计数/离线入队副作用。
 	if s.notifier != nil {
@@ -1154,13 +1169,15 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	//      成功的 info 卡——子进程通过 POST /api/internal/task-cards 上报）
 	//   3) agentCards —— agent 在回复正文写的 ```json{"cards":[...]}``` block
 	// 顺序：daemon 主进程卡 → subprocess 卡 → agent 文本卡。
-	allCards := append([]map[string]any{}, result.Cards...)
+	// 三处都过 ValidateCards 做兜底校验——拒绝 type 未知 / 必填缺失的脏卡，
+	// 避免 LLM 写错字段后前端组件拿到 undefined 崩溃。
+	allCards := append([]map[string]any{}, ValidateCards(result.Cards)...)
 	if s.taskCardQueue != nil {
 		if subprocessCards := s.taskCardQueue.Drain(task.ID); len(subprocessCards) > 0 {
-			allCards = append(allCards, subprocessCards...)
+			allCards = append(allCards, ValidateCards(subprocessCards)...)
 		}
 	}
-	allCards = append(allCards, agentCards...)
+	allCards = append(allCards, ValidateCards(agentCards)...)
 
 	msg, err := s.msgRepo.Create(ctx, convID, "assistant", strippedContent, string(artifacts), nil, replyTo, nil, nil)
 	if err != nil {

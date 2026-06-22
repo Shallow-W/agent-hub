@@ -44,16 +44,22 @@ export const DiffCard: React.FC<CardProps<DiffCardData>> = ({ card, agentId }) =
 
   // 打开卡片时查 git status（agent 只报了文件路径，status 由平台查），
   // 同时预取每个文件的 fileDiff，点文件时 DiffViewer 直接用缓存秒开。
+  //
+  // Race guard：用 fetchId 标记每次 useEffect 触发的预取批次。当 card.files 快速变化
+  // （比如父组件刷新消息导致 card 引用变化）时，旧的 asyncPool 完成回调 fetchId !== current
+  // 直接丢弃，避免旧请求覆盖新缓存。
+  const fetchIdRef = useRef(0);
   useEffect(() => {
     if (!agentId || !card.workDir || card.files.length === 0) {
       setLoading(false);
       return;
     }
+    const fetchId = ++fetchIdRef.current;
     let cancelled = false;
     setLoading(true);
     fileStatus(agentId, card.workDir, card.files)
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled || fetchId !== fetchIdRef.current) return;
         // agent 报的文件可能 git 查不到 status（非 git 目录/未跟踪），兜底标为 modified
         const statusMap = new Map(result.map((s) => [s.path, s.status]));
         setStatuses(
@@ -61,7 +67,7 @@ export const DiffCard: React.FC<CardProps<DiffCardData>> = ({ card, agentId }) =
         );
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (!cancelled && fetchId === fetchIdRef.current) {
           // 查询失败时仍展示文件列表（兜底全标 modified），不阻塞用户点击查看 diff
           setStatuses(card.files.map((f) => ({ path: f, status: 'modified' as ChangeStatus })));
           if (err instanceof ApiError && err.status !== 503) {
@@ -70,17 +76,18 @@ export const DiffCard: React.FC<CardProps<DiffCardData>> = ({ card, agentId }) =
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && fetchId === fetchIdRef.current) setLoading(false);
       });
 
     // 预取 diff：限制 3 并发，避免大改动（20+ 文件）瞬间打爆 daemon。
     // 失败静默——DiffViewer 打开时若缓存缺失会自行兜底再请求一次。
+    // 同样用 fetchId guard：旧批次完成后若 fetchId 已过期，不写缓存（避免覆盖新批次的最新值）。
     void asyncPool(
       card.files,
       (f) => fileDiff(agentId, card.workDir, f),
       3,
     ).then((results) => {
-      if (cancelled) return;
+      if (cancelled || fetchId !== fetchIdRef.current) return;
       results.forEach((r, i) => {
         if (r.status === 'fulfilled') {
           diffCacheRef.current.set(card.files[i]!, r.value);
