@@ -5,9 +5,9 @@ import type { CardSpec, CardType, InteractiveCard, PlanCard, ApprovalCard, Progr
  *
  * 命名约定（三方完全一致，单一事实源，见 types/card.ts）：
  *   type key = 接口名去 Card 后缀的小写 = 组件名去 Card 后缀
- *   plan / approval / progress / info
+ *   plan / approval / progress / info / diff / project
  *
- * 注册 key 必须与 render_card MCP 工具的 card_type 协议契约一致。
+ * 注册 key 必须与后端系统提示词（context_agent_config.go）+ types/card.ts 的 type union 一致。
  * 不一致会导致 renderCards 静默丢弃卡片。
  *
  * 新增卡片类型只需 3 步：
@@ -88,7 +88,7 @@ const CARD_TYPE_ALIASES: Record<string, CardType> = {
 };
 
 // ---------------------------------------------------------------------------
-// 注册内置卡片类型——key 与 render_card 工具的 card_type 协议一致。
+// 注册内置卡片类型——key 与后端系统提示词（context_agent_config.go）+ types/card.ts 一致。
 // 各组件自描述（component + reduceAction + actionToMessage）。
 // ---------------------------------------------------------------------------
 

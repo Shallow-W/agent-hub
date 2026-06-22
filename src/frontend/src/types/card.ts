@@ -10,21 +10,20 @@
  *   progress      ProgressCard    ProgressCard
  *   info          InfoCard        InfoCard
  *
- * card_type 字符串是 render_card MCP 工具的协议契约——必须与 daemon 的
- * tool inputSchema (card_type 枚举) + 后端系统提示词严格一致。
- * 改这些字符串要同步改三处：daemon 工具定义、后端 context_agent_config.go、本文件。
+ * card_type 字符串是 agent 正文 ```json {"cards":[{"type":"..."}]} ``` fenced block 的协议契约——
+ * 必须与后端系统提示词（context_agent_config.go）+ 前端 CardRegistry 注册的 key 严格一致。
+ * 改这些字符串要同步改三处：后端 context_agent_config.go、本文件、CardRegistry.tsx。
  *
  * 新增卡片类型：
- *   1. daemon 工具 inputSchema 加 card_type 枚举值 + run 分支
- *   2. 后端 context_agent_config.go 加一行使用说明
- *   3. 此处加 type union 成员 + 接口（按上述命名约定）
- *   4. 写一个 XxxCard.tsx 组件（文件名 = 导出名 = 接口名）
- *   5. 在 CardRegistry.tsx 末尾 registerCard('xxx', { component, reduceAction?, actionToMessage? })
+ *   1. 后端 context_agent_config.go 加一行使用说明（教 agent 何时输出）
+ *   2. 此处加 type union 成员 + 接口（按上述命名约定）
+ *   3. 写一个 XxxCard.tsx 组件（文件名 = 导出名 = 接口名）
+ *   4. 在 CardRegistry.tsx 末尾 registerCard('xxx', { component, reduceAction?, actionToMessage? })
  */
 
 import type React from 'react';
 
-/** 卡片类型——与 render_card 工具的 card_type 协议契约一致。 */
+/** 卡片类型——与后端系统提示词 + CardRegistry 注册 key 协议契约一致。 */
 export type CardType = 'plan' | 'approval' | 'progress' | 'info' | 'diff' | 'project' | string;
 
 export interface BaseCard {
@@ -36,7 +35,7 @@ export interface BaseCard {
 }
 
 // ---------------------------------------------------------------------------
-// 具体卡片接口——字段名与 daemon render_card 工具 run() 输出严格对齐
+// 具体卡片接口——字段名与后端系统提示词（context_agent_config.go）严格对齐
 // ---------------------------------------------------------------------------
 
 export interface PlanOption {

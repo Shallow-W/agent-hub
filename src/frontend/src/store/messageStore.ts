@@ -272,12 +272,26 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       const dupIdx = existing.findIndex((m) => m.id === message.id);
       if (dupIdx !== -1) {
         const dup = existing[dupIdx]!;
-        if (message.reply_to_message && !dup.reply_to_message) {
-          const merged = [...existing];
-          merged[dupIdx] = { ...dup, reply_to_message: message.reply_to_message } as Message;
-          return { messages: { ...state.messages, [conversationId]: merged } };
-        }
-        return state;
+        // 合并服务端推送的字段——卡片更新（UpdateMessageCardsAndBroadcast）
+        // 会通过 message.complete 推送新的 cards_json/cards，必须覆盖本地。
+        // reply_to_message 仅在本地缺失时补齐（避免覆盖已有数据）。
+        const merged: Message = {
+          ...dup,
+          ...(message.cards_json !== undefined && message.cards_json !== null
+            ? { cards_json: message.cards_json, cards: message.cards ?? dup.cards }
+            : {}),
+          ...(message.artifacts_json !== undefined && message.artifacts_json !== null
+            ? { artifacts_json: message.artifacts_json }
+            : {}),
+          ...(message.artifacts !== undefined ? { artifacts: message.artifacts } : {}),
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+          ...(message.reply_to_message && !dup.reply_to_message
+            ? { reply_to_message: message.reply_to_message }
+            : {}),
+        };
+        const next = [...existing];
+        next[dupIdx] = merged;
+        return { messages: { ...state.messages, [conversationId]: next } };
       }
       const next = [...existing, message];
       // Trim oldest messages from the beginning if exceeding cap
