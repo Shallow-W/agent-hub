@@ -12,8 +12,8 @@ import (
 func TestStreamingBuffer_PushAndGetState(t *testing.T) {
 	buf := NewStreamingBuffer()
 	events := []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "hello"}),
-		evt(t, model.AgentEventText, map[string]interface{}{"content": " world"}),
+		{Type: model.AgentEventText, Content: "hello"},
+		{Type: model.AgentEventText, Content: " world"},
 	}
 	buf.PushEvents("task-1", events)
 
@@ -36,10 +36,10 @@ func TestStreamingBuffer_MultiplePushesAccumulate(t *testing.T) {
 	// 多次 PushEvents 应该累积到同一状态
 	buf := NewStreamingBuffer()
 	buf.PushEvents("task-2", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "a"}),
+		{Type: model.AgentEventText, Content: "a"},
 	})
 	buf.PushEvents("task-2", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "b"}),
+		{Type: model.AgentEventText, Content: "b"},
 	})
 	state, _ := buf.GetState("task-2")
 	if len(state.Blocks) != 1 {
@@ -53,7 +53,7 @@ func TestStreamingBuffer_MultiplePushesAccumulate(t *testing.T) {
 func TestStreamingBuffer_DeleteReleasesState(t *testing.T) {
 	buf := NewStreamingBuffer()
 	buf.PushEvents("task-3", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "x"}),
+		{Type: model.AgentEventText, Content: "x"},
 	})
 	if _, ok := buf.GetState("task-3"); !ok {
 		t.Fatalf("expected state before delete")
@@ -90,7 +90,7 @@ func TestStreamingBuffer_PushEmptyEventsIsNoop(t *testing.T) {
 	}
 	// 空 taskID: 也不应该创建
 	buf.PushEvents("", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "x"}),
+		{Type: model.AgentEventText, Content: "x"},
 	})
 	if _, ok := buf.GetState(""); ok {
 		t.Fatalf("expected no state for empty taskID")
@@ -101,7 +101,7 @@ func TestStreamingBuffer_GetStateReturnsCopy(t *testing.T) {
 	// GetState 返回副本：修改返回值不影响 buffer 内部
 	buf := NewStreamingBuffer()
 	buf.PushEvents("task-5", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "original"}),
+		{Type: model.AgentEventText, Content: "original"},
 	})
 	state1, _ := buf.GetState("task-5")
 	// 修改副本
@@ -122,12 +122,12 @@ func TestStreamingBuffer_AccumulatesUntilTerminal(t *testing.T) {
 	// 终态事件后继续 PushEvents 应该被 reducer 忽略（终态保护）
 	buf := NewStreamingBuffer()
 	buf.PushEvents("task-6", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "before"}),
-		evt(t, model.AgentEventTurnEnd, nil), // 切到 complete
+		{Type: model.AgentEventText, Content: "before"},
+		evt(model.AgentEventTurnEnd), // 切到 complete
 	})
 	// 后续 push：reducer 应该 no-op（终态保护）
 	buf.PushEvents("task-6", []model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "after"}),
+		{Type: model.AgentEventText, Content: "after"},
 	})
 	state, _ := buf.GetState("task-6")
 	if state.Status != model.MessageStatusComplete {

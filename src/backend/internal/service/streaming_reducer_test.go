@@ -7,32 +7,14 @@
 package service
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/agent-hub/backend/internal/model"
 )
 
-// mustData 把 map[string]interface{} 编码为 json.RawMessage；测试辅助。
-func mustData(t *testing.T, m map[string]interface{}) json.RawMessage {
-	t.Helper()
-	if m == nil {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		t.Fatalf("marshal data: %v", err)
-	}
-	return b
-}
-
-// evt 构造 AgentEvent；测试辅助。
-func evt(t *testing.T, typ string, data map[string]interface{}) model.AgentEvent {
-	t.Helper()
-	return model.AgentEvent{
-		Type: typ,
-		Data: mustData(t, data),
-	}
+// evt 构造 AgentEvent；测试辅助。payload 直接挂在顶层字段。
+func evt(typ string) model.AgentEvent {
+	return model.AgentEvent{Type: typ}
 }
 
 func TestStreamingReducer_EmptyEventsReturnsInitial(t *testing.T) {
@@ -49,7 +31,7 @@ func TestStreamingReducer_EmptyEventsReturnsInitial(t *testing.T) {
 func TestStreamingReducer_SingleTextCreatesBlock(t *testing.T) {
 	// 2. 单 text 事件创建新 text block
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "hello"}),
+		{Type: model.AgentEventText, Content: "hello"},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result.Blocks))
@@ -72,9 +54,9 @@ func TestStreamingReducer_SingleTextCreatesBlock(t *testing.T) {
 func TestStreamingReducer_ConsecutiveTextAccumulates(t *testing.T) {
 	// 3. 连续 text 事件累积到同一 block
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "hello"}),
-		evt(t, model.AgentEventText, map[string]interface{}{"content": " world"}),
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "!"}),
+		{Type: model.AgentEventText, Content: "hello"},
+		{Type: model.AgentEventText, Content: " world"},
+		{Type: model.AgentEventText, Content: "!"},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result.Blocks))
@@ -90,9 +72,9 @@ func TestStreamingReducer_ConsecutiveTextAccumulates(t *testing.T) {
 func TestStreamingReducer_TextThinkingTextThreeBlocks(t *testing.T) {
 	// 4. text→thinking→text 产生 3 个独立 block（单调递增 index）
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "a"}),
-		evt(t, model.AgentEventThinking, map[string]interface{}{"content": "b"}),
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "c"}),
+		{Type: model.AgentEventText, Content: "a"},
+		{Type: model.AgentEventThinking, Content: "b"},
+		{Type: model.AgentEventText, Content: "c"},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 3 {
 		t.Fatalf("expected 3 blocks, got %d", len(result.Blocks))
@@ -114,20 +96,22 @@ func TestStreamingReducer_ToolUseAndResultTwoBlocks(t *testing.T) {
 	// reducer 把这部分追加到最近一个 tool_use block 的 Text（同一 block），
 	// 而不是产生新 block。所以最终 block 数：1 个 tool_use + 1 个 tool_result = 2。
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolUse, map[string]interface{}{
-			"tool":        "Bash",
-			"tool_use_id": "tu_1",
-		}),
+		{
+			Type:      model.AgentEventToolUse,
+			Tool:      "Bash",
+			ToolUseID: "tu_1",
+		},
 		// 模拟线上字段（input）——reducer 兼容路径（优先 content，其次 input）
-		evt(t, model.AgentEventToolUse, map[string]interface{}{
-			"tool":   "",
-			"input":  `{"cmd":"ls"}`,
-			"content": "",
-		}),
-		evt(t, model.AgentEventToolResultOld, map[string]interface{}{
-			"output":      "done",
-			"tool_use_id": "tu_1",
-		}),
+		{
+			Type:  model.AgentEventToolUse,
+			Tool:  "",
+			Input: `{"cmd":"ls"}`,
+		},
+		{
+			Type:      model.AgentEventToolResultOld,
+			Output:    "done",
+			ToolUseID: "tu_1",
+		},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d: %+v", len(result.Blocks), result.Blocks)
@@ -165,25 +149,30 @@ func TestStreamingReducer_ToolUseAndResultTwoBlocks(t *testing.T) {
 func TestStreamingReducer_NewProtocolToolCallInput(t *testing.T) {
 	// 5b. 新协议 tool.call.start + tool.call.input + tool.call.end 累积
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolCallStart, map[string]interface{}{
-			"tool":        "Read",
-			"tool_use_id": "tu_2",
-		}),
-		evt(t, model.AgentEventToolCallInput, map[string]interface{}{
-			"tool_use_id": "tu_2",
-			"delta":       `{"file_path":"/a`,
-		}),
-		evt(t, model.AgentEventToolCallInput, map[string]interface{}{
-			"tool_use_id": "tu_2",
-			"delta":       `.txt"}`,
-		}),
-		evt(t, model.AgentEventToolCallEnd, map[string]interface{}{
-			"tool_use_id": "tu_2",
-		}),
-		evt(t, model.AgentEventToolResultNew, map[string]interface{}{
-			"tool_use_id": "tu_2",
-			"content":     "file body",
-		}),
+		{
+			Type:      model.AgentEventToolCallStart,
+			Tool:      "Read",
+			ToolUseID: "tu_2",
+		},
+		{
+			Type:      model.AgentEventToolCallInput,
+			ToolUseID: "tu_2",
+			Delta:     `{"file_path":"/a`,
+		},
+		{
+			Type:      model.AgentEventToolCallInput,
+			ToolUseID: "tu_2",
+			Delta:     `.txt"}`,
+		},
+		{
+			Type:      model.AgentEventToolCallEnd,
+			ToolUseID: "tu_2",
+		},
+		{
+			Type:      model.AgentEventToolResultNew,
+			ToolUseID: "tu_2",
+			Content:   "file body",
+		},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d: %+v", len(result.Blocks), result.Blocks)
@@ -214,7 +203,7 @@ func TestStreamingReducer_NewProtocolToolCallInput(t *testing.T) {
 func TestStreamingReducer_TurnEndSetsComplete(t *testing.T) {
 	// 6. turn_end 切 status 到 complete（不产生 block）
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventTurnEnd, nil),
+		evt(model.AgentEventTurnEnd),
 	}, InitialStreamingState())
 	if result.Status != model.MessageStatusComplete {
 		t.Fatalf("expected complete status, got %q", result.Status)
@@ -228,7 +217,7 @@ func TestStreamingReducer_SessionEndVariantsSetComplete(t *testing.T) {
 	// 6b. session.end / session_end 同样切 complete（双兼容）
 	for _, typ := range []string{model.AgentEventSessionEndNew, model.AgentEventSessionEndOld} {
 		result := ReduceEvents([]model.AgentEvent{
-			evt(t, typ, nil),
+			evt(typ),
 		}, InitialStreamingState())
 		if result.Status != model.MessageStatusComplete {
 			t.Fatalf("expected complete for type %q, got %q", typ, result.Status)
@@ -239,8 +228,8 @@ func TestStreamingReducer_SessionEndVariantsSetComplete(t *testing.T) {
 func TestStreamingReducer_ErrorAppendsBlockAndSetsError(t *testing.T) {
 	// 7. error 事件追加 error block + status=error
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": "partial"}),
-		evt(t, model.AgentEventError, map[string]interface{}{"message": "boom"}),
+		{Type: model.AgentEventText, Content: "partial"},
+		{Type: model.AgentEventError, Message: "boom"},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(result.Blocks))
@@ -263,7 +252,7 @@ func TestStreamingReducer_ErrorAppendsBlockAndSetsError(t *testing.T) {
 func TestStreamingReducer_CancelSetsCanceled(t *testing.T) {
 	// 8. cancel 事件切 status 到 canceled
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventCancel, map[string]interface{}{"reason": "用户取消"}),
+		{Type: model.AgentEventCancel, Reason: "用户取消"},
 	}, InitialStreamingState())
 	if result.Status != model.MessageStatusCanceled {
 		t.Fatalf("expected canceled status, got %q", result.Status)
@@ -288,8 +277,10 @@ func TestStreamingReducer_PureFunctionDoesNotMutateInput(t *testing.T) {
 		},
 		Status: model.MessageStatusStreaming,
 	}
-	result := StreamingReducer(initial, evt(t, model.AgentEventText,
-		map[string]interface{}{"content": "-post"}))
+	result := StreamingReducer(initial, model.AgentEvent{
+		Type:    model.AgentEventText,
+		Content: "-post",
+	})
 
 	// 入参 state 不变
 	if len(initial.Blocks) != 1 || initial.Blocks[0].Text != "pre" {
@@ -318,8 +309,10 @@ func TestStreamingReducer_TerminalStateProtection(t *testing.T) {
 		Blocks: []model.MessageBlock{},
 		Status: model.MessageStatusComplete,
 	}
-	result := StreamingReducer(ended, evt(t, model.AgentEventText,
-		map[string]interface{}{"content": "x"}))
+	result := StreamingReducer(ended, model.AgentEvent{
+		Type:    model.AgentEventText,
+		Content: "x",
+	})
 	// 终态后 reduce 直接返回原 state
 	if result.Status != model.MessageStatusComplete {
 		t.Fatalf("expected still complete, got %q", result.Status)
@@ -332,10 +325,10 @@ func TestStreamingReducer_TerminalStateProtection(t *testing.T) {
 func TestStreamingReducer_ToolResultDualFieldCompat(t *testing.T) {
 	// 11. tool_result 双字段兼容：output 或 content 都能读到
 	r1 := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolResultOld, map[string]interface{}{"output": "via-output"}),
+		{Type: model.AgentEventToolResultOld, Output: "via-output"},
 	}, InitialStreamingState())
 	r2 := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolResultNew, map[string]interface{}{"content": "via-content"}),
+		{Type: model.AgentEventToolResultNew, Content: "via-content"},
 	}, InitialStreamingState())
 	if r1.Blocks[0].Text != "via-output" {
 		t.Fatalf("expected output via-output, got %q", r1.Blocks[0].Text)
@@ -348,16 +341,10 @@ func TestStreamingReducer_ToolResultDualFieldCompat(t *testing.T) {
 func TestStreamingReducer_IsErrorDualFieldCompat(t *testing.T) {
 	// 12. is_error / isError 双字段兼容
 	r1 := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolResultOld, map[string]interface{}{
-			"output":   "x",
-			"is_error": true,
-		}),
+		{Type: model.AgentEventToolResultOld, Output: "x", IsError: true},
 	}, InitialStreamingState())
 	r2 := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolResultOld, map[string]interface{}{
-			"output":  "x",
-			"isError": true,
-		}),
+		{Type: model.AgentEventToolResultOld, Output: "x", IsErrorAlt: true},
 	}, InitialStreamingState())
 	if !r1.Blocks[0].IsError {
 		t.Fatalf("expected is_error=true for snake_case")
@@ -370,7 +357,7 @@ func TestStreamingReducer_IsErrorDualFieldCompat(t *testing.T) {
 func TestStreamingReducer_ErrorDefaultMessage(t *testing.T) {
 	// error 事件无 message 字段时 fallback 到 '生成失败'
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventError, map[string]interface{}{}),
+		evt(model.AgentEventError),
 	}, InitialStreamingState())
 	if len(result.Blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result.Blocks))
@@ -383,7 +370,7 @@ func TestStreamingReducer_ErrorDefaultMessage(t *testing.T) {
 func TestStreamingReducer_EmptyContentTextIsNoop(t *testing.T) {
 	// text 事件 content 为空时不产生新 block（防御性）
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventText, map[string]interface{}{"content": ""}),
+		{Type: model.AgentEventText, Content: ""},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 0 {
 		t.Fatalf("expected 0 blocks for empty content, got %d", len(result.Blocks))
@@ -393,10 +380,7 @@ func TestStreamingReducer_EmptyContentTextIsNoop(t *testing.T) {
 func TestStreamingReducer_PartialInputWithoutToolUseIsDropped(t *testing.T) {
 	// tool_use 空 tool 名 + 无前置 tool_use block → 丢弃（与 appendDeltas 一致）
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolUse, map[string]interface{}{
-			"tool":   "",
-			"content": `{"partial":"json"}`,
-		}),
+		{Type: model.AgentEventToolUse, Tool: "", Content: `{"partial":"json"}`},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 0 {
 		t.Fatalf("expected 0 blocks for orphan partial input, got %d", len(result.Blocks))
@@ -406,15 +390,17 @@ func TestStreamingReducer_PartialInputWithoutToolUseIsDropped(t *testing.T) {
 func TestStreamingReducer_ToolCallInputWithoutMatchingFallback(t *testing.T) {
 	// tool.call.input 找不到匹配 tool_use_id 时回退到最后一个 tool_use block
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolUse, map[string]interface{}{
-			"tool":        "Read",
-			"tool_use_id": "tu_a",
-		}),
+		{
+			Type:      model.AgentEventToolUse,
+			Tool:      "Read",
+			ToolUseID: "tu_a",
+		},
 		// 找不到 tu_b → 回退到最后一个 tool_use block（tu_a）
-		evt(t, model.AgentEventToolCallInput, map[string]interface{}{
-			"tool_use_id": "tu_b",
-			"delta":       `{"x":1}`,
-		}),
+		{
+			Type:      model.AgentEventToolCallInput,
+			ToolUseID: "tu_b",
+			Delta:     `{"x":1}`,
+		},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(result.Blocks))
@@ -427,12 +413,37 @@ func TestStreamingReducer_ToolCallInputWithoutMatchingFallback(t *testing.T) {
 func TestStreamingReducer_ToolCallInputNoToolUseBlockDrops(t *testing.T) {
 	// tool.call.input 找不到任何 tool_use block → no-op
 	result := ReduceEvents([]model.AgentEvent{
-		evt(t, model.AgentEventToolCallInput, map[string]interface{}{
-			"tool_use_id": "tu_x",
-			"delta":       `{"x":1}`,
-		}),
+		{
+			Type:      model.AgentEventToolCallInput,
+			ToolUseID: "tu_x",
+			Delta:     `{"x":1}`,
+		},
 	}, InitialStreamingState())
 	if len(result.Blocks) != 0 {
 		t.Fatalf("expected 0 blocks for orphan input, got %d", len(result.Blocks))
+	}
+}
+
+func TestStreamingReducer_TextContentFromAltField(t *testing.T) {
+	// 老格式兼容：text 事件用 text 字段（而非 content）也能被读到
+	result := ReduceEvents([]model.AgentEvent{
+		{Type: model.AgentEventText, Text: "from-alt"},
+	}, InitialStreamingState())
+	if len(result.Blocks) != 1 || result.Blocks[0].Text != "from-alt" {
+		t.Fatalf("expected alt text field, got blocks=%+v", result.Blocks)
+	}
+}
+
+func TestStreamingReducer_ToolUseIDAltCamelCase(t *testing.T) {
+	// toolUseID camelCase 兼容路径
+	result := ReduceEvents([]model.AgentEvent{
+		{
+			Type:         model.AgentEventToolCallStart,
+			Tool:         "Read",
+			ToolUseIDAlt: "tu_camel",
+		},
+	}, InitialStreamingState())
+	if len(result.Blocks) != 1 || result.Blocks[0].ToolUseID != "tu_camel" {
+		t.Fatalf("expected toolUseID alt fallback, got blocks=%+v", result.Blocks)
 	}
 }

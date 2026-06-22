@@ -14,12 +14,10 @@
 //   state = ReduceEvents(events, state)
 //   // state.Blocks / state.Status
 //
-// 注意：与 PR1 实现的 TS 版本是双端权威镜像——修改任一方必须同步另一方 + 同步测试。
+// 注意：与 frontend TS 版本是双端权威镜像——修改任一方必须同步另一方 + 同步测试。
 package service
 
 import (
-	"encoding/json"
-
 	"github.com/agent-hub/backend/internal/model"
 )
 
@@ -144,10 +142,13 @@ func ReduceEvents(events []model.AgentEvent, initialState StreamingState) Stream
 
 // applyTextDelta 处理 text / text.delta 事件。
 //
-// 解析 event.Data 为 { content: string }；content 为空时 no-op。
+// payload 字段：Content（兼容老格式 Text）；content 为空时 no-op。
 // 累积到最后一个 text block（若末尾不是 text 则新建）。
 func applyTextDelta(state StreamingState, event model.AgentEvent) StreamingState {
-	content := extractStringField(event.Data, "content")
+	content := event.Content
+	if content == "" {
+		content = event.Text
+	}
 	if content == "" {
 		return state
 	}
@@ -169,7 +170,10 @@ func applyTextDelta(state StreamingState, event model.AgentEvent) StreamingState
 //
 // 行为同 applyTextDelta，但累积到 kind='thinking' 的 block。
 func applyThinkingDelta(state StreamingState, event model.AgentEvent) StreamingState {
-	content := extractStringField(event.Data, "content")
+	content := event.Content
+	if content == "" {
+		content = event.Text
+	}
 	if content == "" {
 		return state
 	}
@@ -196,24 +200,22 @@ func applyThinkingDelta(state StreamingState, event model.AgentEvent) StreamingS
 //     追加到最后一个 tool_use block 的 Text。找不到 tool_use block 容错：忽略。
 func applyToolUseStart(state StreamingState, event model.AgentEvent) StreamingState {
 	blocks := cloneBlocks(state.Blocks)
-	toolName := extractStringField(event.Data, "tool")
-	if toolName != "" {
+	if event.Tool != "" {
 		// 工具名非空 → 开启新 tool_use block
-		toolUseID := extractStringField(event.Data, "tool_use_id")
 		blocks = append(blocks, model.MessageBlock{
 			Index:     nextIndex(blocks),
 			Kind:      model.BlockKindToolUse,
 			Text:      "",
-			ToolName:  toolName,
-			ToolUseID: toolUseID,
+			ToolName:  event.Tool,
+			ToolUseID: event.ToolUseIDOrAlt(),
 		})
 		state.Blocks = blocks
 		return state
 	}
 	// 空工具名 → input_json_delta（老协议）
-	inputDelta := extractStringField(event.Data, "content")
+	inputDelta := event.Content
 	if inputDelta == "" {
-		inputDelta = extractStringField(event.Data, "input")
+		inputDelta = event.Input
 	}
 	if inputDelta == "" {
 		return state
@@ -232,17 +234,15 @@ func applyToolUseStart(state StreamingState, event model.AgentEvent) StreamingSt
 // 找到匹配 tool_use_id 的 tool_use block；找不到则回退到最后一个 tool_use block。
 // 找不到任何 tool_use block 时 no-op。
 func applyToolCallInput(state StreamingState, event model.AgentEvent) StreamingState {
-	delta := extractStringField(event.Data, "delta")
-	if delta == "" {
+	if event.Delta == "" {
 		return state
 	}
 	blocks := cloneBlocks(state.Blocks)
-	toolUseID := extractStringField(event.Data, "tool_use_id")
-	idx := findToolUseBlock(blocks, toolUseID)
+	idx := findToolUseBlock(blocks, event.ToolUseIDOrAlt())
 	if idx == -1 {
 		return state
 	}
-	blocks[idx].Text += delta
+	blocks[idx].Text += event.Delta
 	state.Blocks = blocks
 	return state
 }
@@ -252,21 +252,17 @@ func applyToolCallInput(state StreamingState, event model.AgentEvent) StreamingS
 // 总是新 block。output / content 双兼容；is_error / isError 双兼容。
 // is_error=true 时同时切 Status='error'（与 TS 版一致）。
 func applyToolResult(state StreamingState, event model.AgentEvent) StreamingState {
-	output := extractStringField(event.Data, "output")
+	output := event.Output
 	if output == "" {
-		output = extractStringField(event.Data, "content")
+		output = event.Content
 	}
-	isError := extractBoolField(event.Data, "is_error")
-	if !isError {
-		isError = extractBoolField(event.Data, "isError")
-	}
-	toolUseID := extractStringField(event.Data, "tool_use_id")
+	isError := event.IsErrorOrAlt()
 	blocks := cloneBlocks(state.Blocks)
 	blocks = append(blocks, model.MessageBlock{
 		Index:     nextIndex(blocks),
 		Kind:      model.BlockKindToolResult,
 		Text:      output,
-		ToolUseID: toolUseID,
+		ToolUseID: event.ToolUseIDOrAlt(),
 		IsError:   isError,
 	})
 	state.Blocks = blocks
@@ -281,7 +277,7 @@ func applyToolResult(state StreamingState, event model.AgentEvent) StreamingStat
 // 总是新 block（kind='error'）+ Status='error'。
 // message 字段为空时使用固定文案（与 TS 版一致：'生成失败'）。
 func applyError(state StreamingState, event model.AgentEvent) StreamingState {
-	message := extractStringField(event.Data, "message")
+	message := event.Message
 	if message == "" {
 		message = "生成失败"
 	}
@@ -336,50 +332,4 @@ func cloneBlocks(blocks []model.MessageBlock) []model.MessageBlock {
 	out := make([]model.MessageBlock, len(blocks))
 	copy(out, blocks)
 	return out
-}
-
-// extractStringField 从 json.RawMessage 提取 string 字段。
-//
-// 容错策略：
-//   - data 为 nil / 空 → 返回 ""
-//   - JSON 解析失败 → 返回 ""
-//   - 字段不存在 / 类型不是 string → 返回 ""
-func extractStringField(data json.RawMessage, field string) string {
-	if len(data) == 0 {
-		return ""
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return ""
-	}
-	v, ok := m[field]
-	if !ok {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
-	}
-	return s
-}
-
-// extractBoolField 从 json.RawMessage 提取 bool 字段。
-// 容错策略同 extractStringField，缺省返回 false。
-func extractBoolField(data json.RawMessage, field string) bool {
-	if len(data) == 0 {
-		return false
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return false
-	}
-	v, ok := m[field]
-	if !ok {
-		return false
-	}
-	b, ok := v.(bool)
-	if !ok {
-		return false
-	}
-	return b
 }
