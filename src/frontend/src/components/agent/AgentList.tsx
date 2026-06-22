@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Badge, Button, Popconfirm, Spin, Tag } from 'antd';
+import { Avatar, Button, Popconfirm, Spin, Tag } from 'antd';
 import {
   DownOutlined,
   DeleteOutlined,
@@ -13,6 +13,7 @@ import type { Agent, AgentStatus, DaemonMachine } from '@/types/agent';
 import { ConnectComputerModal } from './ConnectComputerModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import { formatDateTime, resolveAgentAvatar } from './agentPresentation';
+import { StatusBadge, type StatusBadgeStatus } from '@/components/common/StatusBadge';
 import styles from './AgentList.module.css';
 
 interface AgentListProps {
@@ -22,25 +23,62 @@ interface AgentListProps {
   onSelectMachine: (machineId: string) => void;
 }
 
-const statusColor: Record<AgentStatus, string> = {
-  online: 'green',
-  offline: 'default',
-  busy: 'processing',
-  error: 'red',
-  stopped: 'default',
-};
+function machineStatusBadge(status: DaemonMachine['status']): StatusBadgeStatus {
+  switch (status) {
+    case 'connected':
+      return 'connected';
+    case 'pending':
+      return 'warning';
+    case 'offline':
+      return 'disconnected';
+    default:
+      return 'inactive';
+  }
+}
 
-const machineStatusLabel: Record<DaemonMachine['status'], string> = {
-  connected: '已连接',
-  pending: '等待连接',
-  offline: '离线',
-};
+function machineStatusLabel(status: DaemonMachine['status']): string {
+  switch (status) {
+    case 'connected':
+      return '已连接';
+    case 'pending':
+      return '等待连接';
+    case 'offline':
+      return '离线';
+    default:
+      return status;
+  }
+}
 
-const machineStatusColor: Record<DaemonMachine['status'], string> = {
-  connected: 'green',
-  pending: 'gold',
-  offline: 'default',
-};
+function agentStatusBadge(status: AgentStatus): StatusBadgeStatus {
+  switch (status) {
+    case 'online':
+      return 'running';
+    case 'busy':
+      return 'running';
+    case 'error':
+      return 'error';
+    case 'stopped':
+      return 'idle';
+    case 'offline':
+    default:
+      return 'inactive';
+  }
+}
+
+function formatRelativeMin(iso?: string): string {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const diffMs = Date.now() - then;
+  if (diffMs < 0) return '刚刚';
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  return `${day} 天前`;
+}
 
 export const AgentList: React.FC<AgentListProps> = ({
   selectedAgentId,
@@ -191,20 +229,27 @@ export const AgentList: React.FC<AgentListProps> = ({
                 aria-expanded={isExpanded}
               >
                 <div className={styles.machineLeft}>
-                  <Avatar size={36} className={styles.machineAvatar} icon={<DesktopOutlined />} />
+                  <Avatar size={44} className={styles.machineAvatar} icon={<DesktopOutlined />} />
                   <div className={styles.machineMeta}>
                     <div className={styles.machineTitleRow}>
                       <span className={styles.machineTitle}>{group.name}</span>
                       {!group.isGlobal && (
-                        <Tag color={machineStatusColor[group.status]}>
-                          {machineStatusLabel[group.status]}
-                        </Tag>
+                        <StatusBadge
+                          status={machineStatusBadge(group.status)}
+                          label={machineStatusLabel(group.status)}
+                        />
                       )}
                     </div>
                     <span className={styles.machineSub}>
                       {group.isGlobal
                         ? '未绑定到具体电脑的 Agent'
                         : `${group.machineID || '未上报主机 ID'} · ${formatDateTime(group.lastSeenAt)}`}
+                    </span>
+                    <span className={styles.machineHint}>
+                      {group.agents.length} 个 Agent
+                      {!group.isGlobal && group.lastSeenAt
+                        ? ` · 最近心跳 ${formatRelativeMin(group.lastSeenAt)}`
+                        : ''}
                     </span>
                   </div>
                 </div>
@@ -240,39 +285,52 @@ export const AgentList: React.FC<AgentListProps> = ({
                             onClick={() => onSelect(agent)}
                           >
                             <div className={styles.agentHeader}>
-                              <Badge color={statusColor[agent.status]} dot>
-                                <Avatar
-                                  size={28}
-                                  src={resolveAgentAvatar(agent)}
-                                  icon={<RobotOutlined />}
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={(event) => {
-                                    event?.stopPropagation();
-                                    setAvatarPickerAgent(agent);
-                                  }}
-                                />
-                              </Badge>
+                              <Avatar
+                                size={36}
+                                src={resolveAgentAvatar(agent)}
+                                icon={<RobotOutlined />}
+                                className={styles.agentAvatar}
+                                style={{ cursor: 'pointer' }}
+                                onClick={(event) => {
+                                  event?.stopPropagation();
+                                  setAvatarPickerAgent(agent);
+                                }}
+                              />
                               <div className={styles.agentMeta}>
                                 <span className={styles.agentName}>{agent.name}</span>
                                 <span className={styles.agentTool}>
-                                  {agent.cli_tool}
-                                  {agent.version ? ` · ${agent.version}` : ''}
+                                  @{agent.cli_tool}
+                                  {agent.version ? ` · v${agent.version}` : ''}
                                 </span>
+                                {agent.system_prompt ? (
+                                  <span className={styles.agentDesc}>
+                                    {agent.system_prompt.slice(0, 80)}
+                                    {agent.system_prompt.length > 80 ? '…' : ''}
+                                  </span>
+                                ) : null}
                               </div>
-                              <Tag>{agent.type === 'custom' ? '自建' : '系统'}</Tag>
-                              {agent.user_id && (
-                                <Popconfirm
-                                  cancelText="取消"
-                                  okText="删除"
-                                  title="删除这个 Agent？"
-                                  onConfirm={(event) => {
-                                    event?.stopPropagation();
-                                    remove(agent.id);
-                                  }}
-                                >
-                                  <Button danger icon={<DeleteOutlined />} size="small" type="text" onClick={(event) => event.stopPropagation()} />
-                                </Popconfirm>
-                              )}
+                              <div className={styles.agentStatus}>
+                                <StatusBadge
+                                  status={agentStatusBadge(agent.status)}
+                                  withDot
+                                />
+                              </div>
+                              <div className={styles.agentRightActions}>
+                                <Tag>{agent.type === 'custom' ? '自建' : '系统'}</Tag>
+                                {agent.user_id && (
+                                  <Popconfirm
+                                    cancelText="取消"
+                                    okText="删除"
+                                    title="删除这个 Agent？"
+                                    onConfirm={(event) => {
+                                      event?.stopPropagation();
+                                      remove(agent.id);
+                                    }}
+                                  >
+                                    <Button danger icon={<DeleteOutlined />} size="small" type="text" onClick={(event) => event.stopPropagation()} />
+                                  </Popconfirm>
+                                )}
+                              </div>
                             </div>
                               {(() => {
                             const isBuiltinSystem = agent.type === 'system' && !agent.user_id;

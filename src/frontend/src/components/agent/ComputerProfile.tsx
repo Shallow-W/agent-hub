@@ -1,22 +1,26 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Tag, Tooltip, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Typography } from 'antd';
 import { message } from '@/utils/message';
 import {
-  CaretRightOutlined,
+  AppstoreOutlined,
   DeleteOutlined,
   DesktopOutlined,
+  DashboardOutlined,
   LinkOutlined,
   PlusOutlined,
-  PoweroffOutlined,
   ReloadOutlined,
-  RobotOutlined,
 } from '@ant-design/icons';
 import { useAgentStore } from '@/store/agentStore';
 import { getManagementTools, hasManagementToolsInConfig } from './toolAssignments';
 import type { Agent, AgentCandidate, DaemonMachine } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
 import { AvatarPickerModal } from './AvatarPickerModal';
-import { formatDateTime, resolveAgentAvatar } from './agentPresentation';
+import { formatDateTime } from './agentPresentation';
+import { SectionHeader } from '@/components/common/SectionHeader';
+import { StatusBadge, type StatusBadgeStatus } from '@/components/common/StatusBadge';
+import { ResourceChart } from './ResourceChart';
+import { AgentBaseCard } from './AgentBaseCard';
+import { AddedAgentCard } from './AddedAgentCard';
 import styles from './ComputerProfile.module.css';
 
 interface ComputerProfileProps {
@@ -26,33 +30,31 @@ interface ComputerProfileProps {
   onClearSelection?: () => void;
 }
 
-const machineStatusLabel: Record<DaemonMachine['status'], string> = {
-  connected: '已连接',
-  pending: '等待连接',
-  offline: '离线',
-};
+function machineStatusBadge(status: DaemonMachine['status']): StatusBadgeStatus {
+  switch (status) {
+    case 'connected':
+      return 'connected';
+    case 'pending':
+      return 'warning';
+    case 'offline':
+      return 'disconnected';
+    default:
+      return 'inactive';
+  }
+}
 
-const machineStatusColor: Record<DaemonMachine['status'], string> = {
-  connected: 'green',
-  pending: 'gold',
-  offline: 'default',
-};
-
-const agentStatusLabel: Record<Agent['status'], string> = {
-  online: '运行中',
-  offline: '离线',
-  busy: '忙碌',
-  error: '异常',
-  stopped: '已停止',
-};
-
-const agentStatusColor: Record<Agent['status'], string> = {
-  online: 'green',
-  offline: 'default',
-  busy: 'processing',
-  error: 'red',
-  stopped: 'default',
-};
+function machineStatusLabel(status: DaemonMachine['status']): string {
+  switch (status) {
+    case 'connected':
+      return '已连接';
+    case 'pending':
+      return '等待连接';
+    case 'offline':
+      return '离线';
+    default:
+      return status;
+  }
+}
 
 function inferOS(machine: DaemonMachine): string {
   const text = `${machine.name} ${machine.machine_id}`.toLowerCase();
@@ -181,6 +183,12 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     }
   };
 
+  const handleToggleAgent = (agentId: string, action: 'start' | 'stop' | 'restart') => {
+    if (action === 'start') return handleStartAgent(agentId);
+    if (action === 'stop') return handleStopAgent(agentId);
+    return handleRestartAgent(agentId);
+  };
+
   if (!machine) {
     return (
       <div className={styles.empty}>
@@ -197,9 +205,11 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           <div>
             <div className={styles.titleRow}>
               <span className={styles.title}>{machine.name}</span>
-              <Tag color={machineStatusColor[machine.status]}>
-                {machineStatusLabel[machine.status]}
-              </Tag>
+              <StatusBadge
+                status={machineStatusBadge(machine.status)}
+                label={machineStatusLabel(machine.status)}
+                size="md"
+              />
             </div>
             <div className={styles.subtitle}>
               {inferOS(machine)} · {machine.machine_id || '未上报主机名'}
@@ -238,8 +248,8 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
         </div>
       </div>
       {reconnectCmd && (
-        <div className={styles.reconnectBox} style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+        <div className={styles.reconnectBox} style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-tertiary)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
             在目标电脑上执行以下命令重新连接：
           </div>
           <Typography.Text
@@ -253,14 +263,20 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       )}
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>电脑信息</span>
-          <span className={styles.sectionHint}>运行环境与连接状态</span>
-        </div>
+        <SectionHeader
+          icon={<DesktopOutlined />}
+          title="电脑信息"
+          description="运行环境与连接状态"
+        />
         <div className={styles.infoGrid}>
           <div className={styles.infoItem}>
             <span className={styles.infoLabel}>电脑状态</span>
-            <span className={styles.infoValue}>{machineStatusLabel[machine.status]}</span>
+            <span className={styles.infoValue}>
+              <StatusBadge
+                status={machineStatusBadge(machine.status)}
+                label={machineStatusLabel(machine.status)}
+              />
+            </span>
           </div>
           <div className={styles.infoItem}>
             <span className={styles.infoLabel}>主机名</span>
@@ -290,33 +306,65 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Agent 底座</span>
-          <span className={styles.sectionHint}>{machineCandidates.length} 个</span>
+        <SectionHeader
+          icon={<DashboardOutlined />}
+          title="系统资源"
+          description="CPU / 内存 / 磁盘 / 网络 实时占用"
+        />
+        <div className={styles.resourceGrid}>
+          <ResourceChart metric="cpu" title="CPU" machineId={machine.id} />
+          <ResourceChart metric="memory" title="内存" machineId={machine.id} />
+          <ResourceChart metric="disk" title="磁盘" machineId={machine.id} />
+          <ResourceChart metric="network" title="网络" machineId={machine.id} />
         </div>
+      </section>
+
+      <section className={styles.section}>
+        <SectionHeader
+          icon={<AppstoreOutlined />}
+          title="Agent 底座"
+          description={`${machineCandidates.length} 个可用 CLI 工具`}
+        />
         {machineCandidates.length === 0 ? (
           <div className={styles.emptyRow}>暂无底座</div>
         ) : (
-          <div className={styles.baseList}>
+          <div className={styles.baseGrid}>
             {machineCandidates.map((candidate: AgentCandidate) => {
-                return (
-                <div className={styles.baseCard} key={candidate.id}>
-                  <div className={styles.baseName}>{candidate.name}</div>
-                  <div className={styles.baseMeta}>
-                    {candidate.cli_tool}
-                    {candidate.version ? ` · ${candidate.version}` : ''}
-                  </div>
-                </div>
-            );
+              const caps = (() => {
+                if (!candidate.capabilities_json) return [];
+                try {
+                  const parsed = JSON.parse(candidate.capabilities_json);
+                  if (Array.isArray(parsed)) {
+                    return parsed.filter((c): c is string => typeof c === 'string').slice(0, 4);
+                  }
+                  if (parsed && typeof parsed === 'object') {
+                    return Object.keys(parsed).slice(0, 4);
+                  }
+                  return [];
+                } catch {
+                  return [];
+                }
+              })();
+              return (
+                <AgentBaseCard
+                  key={candidate.id}
+                  cliTool={candidate.cli_tool}
+                  name={candidate.name}
+                  version={candidate.version}
+                  capabilities={caps}
+                />
+              );
             })}
           </div>
         )}
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>已添加 Agent</span>
-          <div className={styles.sectionActions}>
+        <SectionHeader
+          icon={<AppstoreOutlined />}
+          title="已添加 Agent"
+          description={`${machineAgents.length} 个 Agent 员工`}
+          extra={
             <Button
               size="small"
               icon={<PlusOutlined />}
@@ -325,125 +373,22 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
             >
               添加 Agent 员工
             </Button>
-          </div>
-        </div>
+          }
+        />
         {machineAgents.length === 0 ? (
           <div className={styles.emptyRow}>暂无 Agent 员工</div>
         ) : (
-          <div className={styles.agentList}>
-            {machineAgents.map((agent) => {
-              const isActive = agent.id === selectedAgentId;
-              return (
-                <div
-                  key={agent.id}
-                  className={`${styles.agentRow} ${isActive ? styles.agentRowActive : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onSelectAgent?.(agent)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onSelectAgent?.(agent);
-                    }
-                  }}
-                >
-                  <div className={styles.agentMain}>
-                    <Avatar
-                      size={32}
-                      src={resolveAgentAvatar(agent)}
-                      icon={<RobotOutlined />}
-                      style={{ cursor: 'pointer' }}
-                      onClick={(event) => {
-                        event?.stopPropagation();
-                        setAvatarPickerAgent(agent);
-                      }}
-                    />
-                    <div className={styles.agentInfo}>
-                      <div className={styles.agentName}>
-                        {agent.name}
-                        <Tag color={agentStatusColor[agent.status]} style={{ marginLeft: 6, fontSize: 10 }}>
-                          {agentStatusLabel[agent.status]}
-                        </Tag>
-                      </div>
-                      <div className={styles.agentMeta}>
-                        {agent.cli_tool}
-                        {agent.version ? ` · ${agent.version}` : ''}
-                      </div>
-                      {agent.system_prompt && (
-                        <div className={styles.agentPrompt}>{agent.system_prompt}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className={styles.agentActions}>
-                    {(agent.status === 'stopped' || agent.status === 'offline' || agent.status === 'error') && (
-                      <Tooltip title="启动">
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<CaretRightOutlined />}
-                          loading={lifecycleLoading[agent.id]}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleStartAgent(agent.id);
-                          }}
-                        />
-                      </Tooltip>
-                    )}
-                    {(agent.status === 'online' || agent.status === 'busy') && (
-                      <>
-                        <Tooltip title="重启">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            loading={lifecycleLoading[agent.id]}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRestartAgent(agent.id);
-                            }}
-                          />
-                        </Tooltip>
-                        <Tooltip title="停止">
-                          <Button
-                            type="text"
-                            size="small"
-                            danger
-                            icon={<PoweroffOutlined />}
-                            loading={lifecycleLoading[agent.id]}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleStopAgent(agent.id);
-                            }}
-                          />
-                        </Tooltip>
-                      </>
-                    )}
-                  </div>
-                  {(() => {
-                    const isBuiltinSystem = agent.type === 'system' && !agent.user_id;
-                    if (isBuiltinSystem) return null;
-                    const tags = (() => {
-                      if (!agent.tags || agent.tags === '[]') return [];
-                      try {
-                        const arr = JSON.parse(agent.tags);
-                        return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : [];
-                      } catch {
-                        return [];
-                      }
-                    })();
-                    if (tags.length === 0) return null;
-                    return (
-                      <div className={styles.agentTags}>
-                        {tags.slice(0, 3).map((item) => (
-                          <Tag key={item}>{item.length > 16 ? item.slice(0, 16) + '...' : item}</Tag>
-                        ))}
-                        {tags.length > 3 && <Tag>+{tags.length - 3}</Tag>}
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })}
+          <div className={styles.agentGrid}>
+            {machineAgents.map((agent) => (
+              <AddedAgentCard
+                key={agent.id}
+                agent={agent}
+                isActive={agent.id === selectedAgentId}
+                lifecycleLoading={lifecycleLoading[agent.id]}
+                onSelect={onSelectAgent}
+                onToggle={handleToggleAgent}
+              />
+            ))}
           </div>
         )}
       </section>

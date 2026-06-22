@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Tag } from 'antd';
 import { message } from '@/utils/message';
 import {
+  DesktopOutlined,
   MessageOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -10,6 +11,7 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SolutionOutlined,
 } from '@ant-design/icons';
 import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -39,6 +41,8 @@ import {
   getToolsetOptions,
   fetchToolCatalog,
 } from './toolAssignments';
+import { SectionHeader } from '@/components/common/SectionHeader';
+import { StatusBadge, type StatusBadgeStatus } from '@/components/common/StatusBadge';
 import styles from './AgentProfile.module.css';
 
 interface AgentProfileProps {
@@ -56,6 +60,39 @@ const tabItems = [
 
 function getStatusText(agent: Agent): string {
   return agent.status === 'online' ? 'Online' : agent.status;
+}
+
+function agentStatusBadge(status: Agent['status']): StatusBadgeStatus {
+  switch (status) {
+    case 'online':
+      return 'running';
+    case 'busy':
+      return 'running';
+    case 'error':
+      return 'error';
+    case 'stopped':
+      return 'idle';
+    case 'offline':
+    default:
+      return 'inactive';
+  }
+}
+
+function agentStatusBadgeLabel(status: Agent['status']): string {
+  switch (status) {
+    case 'online':
+      return '运行中';
+    case 'busy':
+      return '忙碌';
+    case 'error':
+      return '异常';
+    case 'stopped':
+      return '已停止';
+    case 'offline':
+      return '未运行';
+    default:
+      return status;
+  }
 }
 
 export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile', onMessage }) => {
@@ -377,10 +414,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               <div className={styles.profileHeroMain}>
                 <div className={styles.profileTitleRow}>
                   <span className={styles.profileNameText}>{agent.name}</span>
-                  <span className={`${styles.statusChip} ${isOnline ? '' : styles.statusChipOffline}`}>
-                    <span className={styles.statusChipDot} />
-                    {statusLabel}
-                  </span>
+                  <StatusBadge
+                    status={agentStatusBadge(agent.status)}
+                    label={agentStatusBadgeLabel(agent.status)}
+                    size="md"
+                  />
                 </div>
                 <div className={styles.profileMetaLine}>@{agent.cli_tool} · {computerName}</div>
                 <div className={styles.profileDescriptionPreview}>{descriptionSummary}</div>
@@ -412,12 +450,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </div>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>基本资料</div>
-                  <div className={styles.sectionHint}>名称、标签和对外展示信息</div>
-                </div>
-              </div>
+              <SectionHeader
+                icon={<RobotOutlined />}
+                title="基本资料"
+                description="名称、标签和对外展示信息"
+              />
               <div className={styles.formGrid}>
                 <div className={styles.field}>
                   <span className={styles.label}>显示名称</span>
@@ -436,12 +473,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>能力说明</div>
-                  <div className={styles.sectionHint}>从系统提示词中提炼出的角色和可执行操作</div>
-                </div>
-              </div>
+              <SectionHeader
+                icon={<SolutionOutlined />}
+                title="能力说明"
+                description="从系统提示词中提炼出的角色和可执行操作"
+              />
               <div className={styles.descriptionCard}>
                 <div className={styles.descriptionHeadline}>{descriptionSummary}</div>
                 {operationLines.length > 0 && (
@@ -461,12 +497,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>运行信息</div>
-                  <div className={styles.sectionHint}>设备、来源、版本和创建时间</div>
-                </div>
-              </div>
+              <SectionHeader
+                icon={<DesktopOutlined />}
+                title="运行信息"
+                description="设备、来源、版本和创建时间"
+              />
               <div className={styles.infoGrid}>
                 <div>
                   <span className={styles.label}>电脑</span>
@@ -490,12 +525,11 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>操作</div>
-                  <div className={styles.sectionHint}>控制当前 Agent 的运行状态</div>
-                </div>
-              </div>
+              <SectionHeader
+                icon={<PlayCircleOutlined />}
+                title="操作"
+                description="控制当前 Agent 的运行状态"
+              />
               <div className={styles.actionPanel}>
                 {isOnline ? (
                   <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>

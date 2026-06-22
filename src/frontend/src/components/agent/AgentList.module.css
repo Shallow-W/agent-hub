@@ -1,7 +1,7 @@
 .container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   padding: 12px;
   overflow: auto;
   flex: 1;
@@ -29,10 +29,11 @@
   background: var(--color-bg-white);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .machineCardActive {
-  border-color: rgba(47, 143, 107, 0.35);
+  border-color: rgba(47, 143, 107, 0.45);
   box-shadow: 0 10px 18px rgba(47, 143, 107, 0.16);
 }
 
@@ -40,13 +41,14 @@
   width: 100%;
   border: none;
   background: transparent;
-  padding: 10px 12px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   cursor: pointer;
   text-align: left;
+  transition: background var(--transition-fast);
 }
 
 .machineHeader:hover {
@@ -56,44 +58,57 @@
 .machineLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+  flex: 1;
 }
 
 .machineAvatar {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px;
-  min-height: 36px;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 50% !important;
   background: var(--color-primary-light) !important;
   color: var(--color-primary);
+  font-size: 20px !important;
 }
 
 .machineMeta {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .machineTitleRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
 .machineTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .machineSub {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machineHint {
   font-size: 11px;
   color: var(--color-text-tertiary);
   overflow: hidden;
@@ -109,10 +124,10 @@
 }
 
 .machineCount {
-  min-width: 22px;
+  min-width: 24px;
   height: 22px;
   border-radius: 999px;
-  padding: 0 6px;
+  padding: 0 8px;
   background: rgba(47, 143, 107, 0.12);
   color: var(--color-primary);
   font-size: 11px;
@@ -129,13 +144,16 @@
 
 .machineBody {
   border-top: 1px solid var(--color-border-light);
-  padding: 8px 12px 12px;
+  padding: 10px 12px 12px;
   background: var(--color-bg-white);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 
 .sectionLabel {
-  margin: 8px 0 6px;
+  margin: 4px 0 2px;
   font-size: 11px;
   font-weight: 600;
   color: var(--color-text-secondary);
@@ -151,9 +169,9 @@
 }
 
 .agentRow {
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 10px;
-  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 12px;
+  padding: 12px 14px;
   background: var(--color-bg-white);
   cursor: pointer;
   display: flex;
@@ -163,29 +181,42 @@
 }
 
 .agentRow:hover {
-  border-color: rgba(31, 35, 40, 0.2);
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+  border-color: rgba(47, 143, 107, 0.28);
+  box-shadow: 0 8px 14px rgba(15, 23, 42, 0.08);
 }
 
 .agentRowActive {
-  border-color: rgba(47, 143, 107, 0.4);
+  border-color: rgba(47, 143, 107, 0.45);
   box-shadow: 0 8px 16px rgba(47, 143, 107, 0.16);
 }
 
 .agentHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agentAvatar {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  border-radius: 50% !important;
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary);
 }
 
 .agentMeta {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .agentName {
   display: block;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
@@ -195,42 +226,52 @@
 
 .agentTool {
   display: block;
-  margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
+  font-family: 'SF Mono', Menlo, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentSummary {
+.agentDesc {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.agentTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: 46px;
+}
+
+.agentTags :global(.ant-tag) {
+  margin: 0;
+  font-size: 10.5px;
+  padding: 0 6px;
+  line-height: 18px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  border: none;
+  color: var(--color-text-secondary);
+}
+
+.agentStatus {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.agentRightActions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-  padding-left: 36px;
-  color: var(--color-text-tertiary);
-  font-size: 11px;
-}
-
-.agentSummary span:first-child {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  max-width: 84px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.agentSummary span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .candidateRow {
@@ -238,9 +279,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px dashed var(--color-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.7);
 }
 
@@ -284,11 +325,11 @@
 }
 
 :global(html.dark) .agentRow {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-border);
 }
 
 :global(html.dark) .agentRow:hover {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(52, 211, 153, 0.35);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
 }
 

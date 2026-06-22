@@ -1,0 +1,92 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.md {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tone: success (green) */
+.success {
+  background: rgba(82, 196, 26, 0.12);
+  color: #389e0d;
+  border-color: rgba(82, 196, 26, 0.24);
+}
+.success .dot {
+  background: var(--color-success);
+  box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.18);
+}
+
+/* Tone: neutral (grey) */
+.neutral {
+  background: rgba(139, 150, 160, 0.12);
+  color: var(--color-text-secondary);
+  border-color: rgba(139, 150, 160, 0.24);
+}
+.neutral .dot {
+  background: var(--color-text-tertiary);
+}
+
+/* Tone: danger (red) */
+.danger {
+  background: rgba(255, 92, 92, 0.12);
+  color: var(--color-danger);
+  border-color: rgba(255, 92, 92, 0.24);
+}
+.danger .dot {
+  background: var(--color-danger);
+  box-shadow: 0 0 0 2px rgba(255, 92, 92, 0.18);
+}
+
+/* Tone: warning (orange) */
+.warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border-color: rgba(245, 158, 11, 0.24);
+}
+.warning .dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+
+/* ── Dark mode ── */
+:global(html.dark) .success {
+  color: #86efac;
+}
+:global(html.dark) .neutral {
+  color: var(--color-text-secondary);
+}
+:global(html.dark) .danger {
+  color: #fca5a5;
+}
+:global(html.dark) .warning {
+  color: #fcd34d;
+}
