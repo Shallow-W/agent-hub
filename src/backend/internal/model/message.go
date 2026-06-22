@@ -30,7 +30,17 @@ type Message struct {
 	Mentions       []string            `json:"mentions,omitempty" db:"-"`  // JSON array of user IDs, stored in mentions TEXT column
 	CardsJSON      string              `json:"cards_json,omitempty" db:"cards_json"`
 	Cards          []map[string]any    `json:"cards,omitempty" db:"-"` // 交互式卡片（plan/progress/confirm/result），从 cards_json 反序列化
+	BlocksJSON     string              `json:"blocks_json,omitempty" db:"blocks_json"` // 流式 block 结构（text/thinking/tool_use/tool_result），空则 fallback 到 content
+	Status         string              `json:"status" db:"status"`                     // streaming / complete / error / canceled；旧消息默认 complete
 }
+
+// 消息状态常量。空值视为 complete（向后兼容旧消息）。
+const (
+	MessageStatusStreaming = "streaming"
+	MessageStatusComplete  = "complete"
+	MessageStatusError     = "error"
+	MessageStatusCanceled  = "canceled"
+)
 
 // MessagePin represents a message pinned into the shared conversation context.
 type MessagePin struct {

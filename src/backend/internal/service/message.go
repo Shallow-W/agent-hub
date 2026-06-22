@@ -64,6 +64,10 @@ type MsgRepo interface {
 	HideMessage(ctx context.Context, userID, messageID string) error
 	UnhideMessage(ctx context.Context, userID, messageID string) error
 	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
+	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error)
+	FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error
+	ListStreaming(ctx context.Context) ([]model.Message, error)
+	MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -1107,12 +1111,28 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
+	// D5 ADR：预创建 streaming 状态的 assistant message，让前端在流式期间就能看到
+	// message_id 并实时 append delta。task.complete 时 FinalizeStreaming 切到 complete。
+	// 失败路径：daemon 崩溃 / 超时 / 用户取消 → watchdog 或显式 UPDATE 切到 error/canceled。
+	//
+	// senderID 传 nil——messages.sender_id 外键指向 users 表（不是 agents），
+	// assistant message 的 agent 身份存在 artifacts_json（agent_id/agent_name/cli_tool）。
+	// 这与原 Create 路径行为一致（见下行 msgRepo.Create(... nil, nil, nil)）。
+	streamingMsg, err := s.msgRepo.CreateStreaming(ctx, convID, "assistant", nil, replyTo)
+	if err != nil {
+		return nil, fmt.Errorf("create streaming message: %w", err)
+	}
+
 	// Push via WS and wait for channel-based result
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		// daemon 未连接：直接把预创建 message 标 error，避免悬挂。
+		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
+			slog.Warn("finalize streaming on daemon-disconnect failed", "message_id", streamingMsg.ID, "error", ferr)
+		}
 		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
 	s.daemonHub.RegisterTaskPromise(task.ID)
-	slog.Info("createAgentReply: BEFORE SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "reply_to", stringValue(replyTo))
+	slog.Info("createAgentReply: BEFORE SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "message_id", streamingMsg.ID, "reply_to", stringValue(replyTo))
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
 		Data: map[string]interface{}{
@@ -1123,14 +1143,22 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 			"agent_id":         agent.ID,
 			"conversation_id":  convID,
 			"user_id":          userID,
+			"message_id":       streamingMsg.ID,
 		},
 	}); err != nil {
+		// dispatch 失败也标 error
+		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
+			slog.Warn("finalize streaming on dispatch-failure failed", "message_id", streamingMsg.ID, "error", ferr)
+		}
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
-	slog.Info("createAgentReply: AFTER SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID)
+	slog.Info("createAgentReply: AFTER SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "message_id", streamingMsg.ID)
 
 	ch := s.daemonHub.AwaitTaskResult(task.ID)
 	if ch == nil {
+		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
+			slog.Warn("finalize streaming on no-channel failed", "message_id", streamingMsg.ID, "error", ferr)
+		}
 		return nil, fmt.Errorf("daemon not connected for task %s", task.ID)
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
@@ -1142,10 +1170,18 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	select {
 	case result = <-ch:
 	case <-ctx.Done():
+		// 超时：标记 error（保留已输出的流式 block）
+		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
+			slog.Warn("finalize streaming on timeout failed", "message_id", streamingMsg.ID, "error", ferr)
+		}
 		return nil, ErrMsgAgentTimeout
 	}
 
 	if result.Error != "" {
+		// daemon task 失败：标记 error，content 留空（前端可显示 error block + 错误原因）
+		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
+			slog.Warn("finalize streaming on task-error failed", "message_id", streamingMsg.ID, "error", ferr)
+		}
 		return nil, fmt.Errorf("daemon task failed: %s", result.Error)
 	}
 
@@ -1179,10 +1215,19 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	}
 	allCards = append(allCards, ValidateCards(agentCards)...)
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", strippedContent, string(artifacts), nil, replyTo, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create agent reply: %w", err)
+	// D5 ADR：预创建模式下用 FinalizeStreaming UPDATE 而非 Create INSERT。
+	// content = strippedContent（剥离 cards 后的可见文本）
+	// blocks_json = 空（前端已通过流式 delta 累积出 block 结构，不需要后端再写；
+	//   未来可在 watchdog / message.complete 时用累积的 delta 落库作为权威副本）
+	// status = complete
+	if err := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusComplete, strippedContent, "", string(artifacts)); err != nil {
+		return nil, fmt.Errorf("finalize streaming message: %w", err)
 	}
+	// 用最终字段补全内存中的 streamingMsg（供后续 postPersist 广播和返回值使用）
+	streamingMsg.Content = strippedContent
+	streamingMsg.ArtifactsJSON = string(artifacts)
+	streamingMsg.Status = model.MessageStatusComplete
+	msg := streamingMsg
 
 	// 持久化合并后的卡片状态（如果任意一方产出卡片）。
 	// 同时填充 msg.Cards 结构化字段，使 WS 广播（postPersist）和返回值携带一致形状。

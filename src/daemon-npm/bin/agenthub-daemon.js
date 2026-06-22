@@ -12,6 +12,7 @@ const path = require('node:path');
 // skillRoots / scanAgents 四处分支点的 CLI 行为（claude/codex/opencode/openclaw）
 // 收敛为 spec 对象。新增 CLI 只需在 cli/index.js 加一个工厂，零修改分发函数。
 const cliTools = require('../cli');
+const { StreamBuffer } = require('../cli/stream_adapter');
 
 // ===========================================================================
 // CONFIG —— daemon 所有运行时配置集中在此，便于一处查看与调整。
@@ -114,6 +115,9 @@ class TaskContext {
     this.agentId = task && task.agent_id;
     this.conversationId = task && task.conversation_id;
     this.userId = task && task.user_id;
+    // D5 ADR: backend 预创建的 streaming message ID。task.dispatch 时由 backend 传入，
+    // daemon 在 task.progress 原样回传，让前端按 message_id 路由流式 delta。
+    this.messageId = task && task.message_id;
     // name → collector。collector 由 OutputCollector 工厂创建。
     this.outputs = new Map();
   }
@@ -907,6 +911,29 @@ function sendTaskComplete(data) {
     has_error: Boolean(data.error),
     pending_count: pendingTaskCompletions.size,
   });
+}
+
+/**
+ * sendTaskProgress —— 把流式增量（AgentEvent 批量）发给后端。
+ *
+ * 与 sendTaskComplete 不同：
+ * - 流式期间 WS 断开时丢弃（不 buffer），因为增量是"短暂信息"，重连后可继续。
+ * - 日志只打 event 数和字节数，不打具体内容（避免日志爆炸）。
+ */
+function sendTaskProgress(data) {
+  const taskId = data && data.task_id;
+  if (!taskId) return;
+  const events = Array.isArray(data.events) ? data.events : [];
+  if (events.length === 0) return;
+  const envelope = JSON.stringify({ type: 'task.progress', data: { ...data, events } });
+  const sent = safeSend(currentDaemonWs, envelope);
+  if (sent) {
+    logFlow('info', 'task.progress_sent', {
+      task_id: taskId,
+      event_count: events.length,
+      bytes: envelope.length,
+    });
+  }
 }
 
 function flushPendingTaskCompletions() {
@@ -2448,13 +2475,13 @@ function stopAgentProcess(agent_id) {
  * 未来 dispatcher 翻译成 WS 消息（本次不切换 WS 消息路径）。函数名暂保留，因 callsite
  * 仍在用（改名是 Switch 5 的事）。
  */
-function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx) {
+function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx, eventRef) {
   const spec = cliTools.getCliTool('claude');
   if (!spec || typeof spec.spawnPersistent !== 'function') {
     throw new Error('Claude spec does not support spawnPersistent');
   }
   return spec.spawnPersistent(
-    { agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx },
+    { agentId, sessionId, systemPrompt, resume, conversationId, userId, taskCtx, eventRef },
     initCliToolsCtx,
   );
 }
@@ -2478,7 +2505,7 @@ function spawnStreamJsonProcess(agentId, sessionId, systemPrompt, resume, conver
  * 注：WS event name（agent.*）是前端约定的对外协议，保持原样不动；只改函数名和内部
  * 通用性。前端不会感知到这个函数改名。
  */
-async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx, cliTool = 'claude') {
+async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, prompt, systemPrompt, taskCtx, cliTool = 'claude', onEvent = null) {
   const sessionKey = `${agentId}:${conversationId}`;
   const savedSessionId = conversationSessions.get(sessionKey) || null;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2503,9 +2530,15 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
         session_id: slot.sessionId,
       });
     }
-    const response = await slot.sendPrompt(prompt);
-    if (response.error) throw new Error(response.error);
-    return response.result;
+    // 注入本次 task 的 onEvent 到 slot.eventRef（persistent agent 跨 task 复用）
+    if (slot.eventRef && typeof onEvent === 'function') slot.eventRef.current = onEvent;
+    try {
+      const response = await slot.sendPrompt(prompt);
+      if (response.error) throw new Error(response.error);
+      return response.result;
+    } finally {
+      if (slot.eventRef) slot.eventRef.current = null;
+    }
   }
 
   // 如果已有持久进程在运行且属于同一会话，直接复用（fast path）。
@@ -2531,17 +2564,24 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
       });
       // 更新当前对话 ID（用于日志追踪）
       slot.currentConversationId = conversationId;
-      const response = await slot.sendPrompt(prompt);
-      if (response.error) throw new Error(response.error);
-      return response.result;
+      if (slot.eventRef && typeof onEvent === 'function') slot.eventRef.current = onEvent;
+      try {
+        const response = await slot.sendPrompt(prompt);
+        if (response.error) throw new Error(response.error);
+        return response.result;
+      } finally {
+        if (slot.eventRef) slot.eventRef.current = null;
+      }
     }
   }
 
   // 没有已有进程——spawn 新的
+  // 为新 slot 创建 eventRef，让 stdout.on('data') 闭包捕获，后续 dispatch 动态切换 current。
+  const eventRef = { current: typeof onEvent === 'function' ? onEvent : null };
   let result;
   if (validSessionId) {
     try {
-      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId, taskCtx);
+      result = spawnStreamJsonProcess(agentId, validSessionId, systemPrompt, true, conversationId, userId, taskCtx, eventRef);
       // Wait briefly to detect immediate resume failure
       await sleep(2000);
       if (result.child.exitCode !== null) {
@@ -2554,10 +2594,10 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
         conversation_id: conversationId,
         session_id: validSessionId,
       });
-      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx);
+      result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef);
     }
   } else {
-    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx);
+    result = spawnStreamJsonProcess(agentId, null, systemPrompt, false, conversationId, userId, taskCtx, eventRef);
   }
 
   const { child, sessionId, sendPrompt } = result;
@@ -2586,6 +2626,7 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
     currentConversationId: conversationId,
     cliTool,
     sendPrompt,
+    eventRef,
   });
   idleAgentConfigs.set(agentId, { cliTool, sessionId, systemPrompt: systemPrompt || '' });
   agentTurnStates.set(agentId, 'idle');
@@ -2602,9 +2643,13 @@ async function dispatchToPersistentSlot(ws, agentId, conversationId, userId, pro
     resumed: Boolean(validSessionId),
   });
 
-  const response = await sendPrompt(prompt);
-  if (response.error) throw new Error(response.error);
-  return response.result;
+  try {
+    const response = await sendPrompt(prompt);
+    if (response.error) throw new Error(response.error);
+    return response.result;
+  } finally {
+    eventRef.current = null;
+  }
 }
 
 function enqueueAgentStart(ws, payload) {
@@ -2733,6 +2778,7 @@ async function handleTaskDispatch(ws, data) {
     agent_id: data.agent_id,
     conversation_id: data.conversation_id,
     user_id: data.user_id,
+    message_id: data.message_id,
   };
   if (!task.id) {
     // task_id 缺失——几乎一定是后端发的字段名和 daemon 期望的不一致
@@ -2779,6 +2825,24 @@ async function handleTaskDispatch(ws, data) {
   // taskCtx 随执行链路传递，承载 per-task 的临时资源；任务结束统一清理。
   const taskCtx = new TaskContext(task);
   taskCtx.attachCollectors();
+
+  // 流式输出：创建 StreamBuffer（50ms 节流），onFlush 时把批量 AgentEvent 通过
+  // bus.emit('task.progress') 转发到后端。仅 persistent slot 路径（Claude stream-json）
+  // 会往 buffer 推事件；legacy spawn（codex/opencode/openclaw）走批处理，buffer 始终空。
+  const streamBuffer = new StreamBuffer({
+    onFlush: (events) => {
+      if (!events || events.length === 0) return;
+      bus.emit('task.progress', {
+        task_id: task.id,
+        message_id: taskCtx.messageId,
+        agent_id: taskCtx.agentId,
+        conversation_id: taskCtx.conversationId,
+        events,
+      });
+    },
+  });
+  const onEvent = (ev) => streamBuffer.push(ev);
+
   try {
     let result;
     if (
@@ -2794,7 +2858,7 @@ async function handleTaskDispatch(ws, data) {
         conversation_id: task.conversation_id,
         mode: 'persistent_slot',
       });
-      result = await dispatchToPersistentSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt, taskCtx, task.cli_tool);
+      result = await dispatchToPersistentSlot(ws, task.agent_id, task.conversation_id, task.user_id, userPrompt, systemPrompt, taskCtx, task.cli_tool, onEvent);
     } else {
       logFlow('info', 'task.execution_start', {
         task_id: task.id,
@@ -2830,6 +2894,9 @@ async function handleTaskDispatch(ws, data) {
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
+    // 关闭流式 buffer：正常路径已无残留（turn_end 立即 flush），失败路径会 flush
+    // 已累积的增量事件，让前端看到错误前的部分输出。
+    streamBuffer.close();
     // 清理本任务所有 collector 的临时资源（卡片临时文件等）
     taskCtx.cleanup();
   }
@@ -2856,6 +2923,10 @@ registerWsHandler('agent.restart', (ws, data) => {
 });
 registerWsHandler('task.dispatch', (ws, data) => {
   bus.emit('task.dispatch', { ws, data });
+  return true;
+});
+registerWsHandler('task.cancel', (ws, data) => {
+  bus.emit('task.cancel', { ws, data });
   return true;
 });
 
@@ -2899,6 +2970,36 @@ bus.on('task.failed', (info) => {
     task_id: info.task_id,
     error: info.error,
   });
+});
+
+// task 流式增量：StreamBuffer flush 时 emit，转发到后端 WS 为 task.progress。
+// 后端收到后转为 message.streaming 广播给前端。
+bus.on('task.progress', (info) => {
+  sendTaskProgress(info);
+});
+
+// task 取消：前端"停止生成"按钮 → 后端发 task.cancel → daemon SIGINT agent 进程。
+// 取消是"尽力而为"——进程已被杀时无副作用。
+bus.on('task.cancel', ({ data } = {}) => {
+  const { task_id, agent_id } = data || {};
+  logFlow('info', 'task.cancel_received', { task_id, agent_id });
+  if (!agent_id) return;
+  const slot = runningAgents.get(agent_id);
+  if (!slot || !slot.process) {
+    logFlow('warn', 'task.cancel_no_slot', { task_id, agent_id });
+    return;
+  }
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(slot.process.pid), '/T', '/SIGINT'], { windowsHide: true });
+    } else {
+      // SIGINT 让 Claude CLI 优雅中断（发 result 事件 + 退出），而不是 SIGKILL 的强杀。
+      process.kill(slot.process.pid, 'SIGINT');
+    }
+    logFlow('info', 'task.cancel_signal_sent', { task_id, agent_id, pid: slot.process.pid });
+  } catch (err) {
+    logFlow('warn', 'task.cancel_failed', { task_id, agent_id, error: errorMessage(err) });
+  }
 });
 
 async function connectWS(serverURL, apiKey) {

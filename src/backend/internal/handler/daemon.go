@@ -119,8 +119,9 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 // RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
 func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachine) {
 	var req struct {
-		MachineID string                    `json:"machine_id"`
-		Agents    []service.DiscoveredAgent `json:"agents"`
+		MachineID    string                    `json:"machine_id"`
+		Agents       []service.DiscoveredAgent `json:"agents"`
+		Capabilities []string                  `json:"capabilities"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 40040, "message": "daemon 注册参数错误: " + err.Error(), "data": nil})
@@ -130,6 +131,9 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachin
 	registerCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 	if machine != nil {
+		if len(req.Capabilities) > 0 {
+			h.agentSvc.UpdateMachineCapabilities(machine.ID, req.Capabilities)
+		}
 		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
@@ -271,6 +275,8 @@ func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, m
 			h.handleRegister(ctx, client, envelope.Data, machine)
 		case "task.complete":
 			h.handleTaskComplete(envelope.Data, machine)
+		case "task.progress":
+			h.handleTaskProgress(envelope.Data, machine)
 		case "agent.started":
 			h.handleAgentStarted(envelope.Data)
 		case "agent.stopped":
@@ -297,18 +303,20 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 		Result    string              `json:"result"`
 		Error     string              `json:"error"`
 		Artifacts []ws.ArtifactResult `json:"artifacts"`
+		Cards     []map[string]any    `json:"cards"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid task.complete data", "error", err)
 		return
 	}
-	h.logger.Info("handleTaskComplete ENTER", "task_id", req.TaskID, "result_len", len(req.Result), "has_error", req.Error != "")
+	h.logger.Info("handleTaskComplete ENTER", "task_id", req.TaskID, "result_len", len(req.Result), "has_error", req.Error != "", "cards_count", len(req.Cards))
 	// Resolve WS promise first (for orchestrator channel-based wait)
 	h.daemonHub.ResolveTask(req.TaskID, &ws.TaskResult{
 		TaskID:    req.TaskID,
 		Result:    req.Result,
 		Error:     req.Error,
 		Artifacts: req.Artifacts,
+		Cards:     req.Cards,
 	})
 	// Also persist to DB (for HTTP fallback and audit)
 	if machine != nil {
@@ -322,10 +330,55 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 	// Orch worker results are now handled by goroutines using dispatchAndWait.
 }
 
+// handleTaskProgress 处理 daemon 的流式增量上报。
+//
+// daemon 侧 StreamBuffer 50ms 批量 flush AgentEvent[]，这里把批量事件透传给前端：
+//   - WS 事件类型：TypeMessageStreaming ("message.streaming")
+//   - payload: { message_id, conversation_id, deltas: AgentEvent[] }
+//
+// 前端按 message_id 路由到对应 streamingBlocks[messageId]，appendDelta 累积渲染。
+//
+// 注意：不写 DB（D3 ADR）——流式期间 backend 不 persist 增量，task.complete 时
+// FinalizeStreaming 一次性落库最终 content/blocks_json。
+func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.DaemonMachine) {
+	var req struct {
+		TaskID        string          `json:"task_id"`
+		MessageID     string          `json:"message_id"`
+		ConversationID string         `json:"conversation_id"`
+		AgentID       string          `json:"agent_id"`
+		Events        json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid task.progress data", "error", err)
+		return
+	}
+	if req.MessageID == "" || len(req.Events) == 0 {
+		// 没有 message_id 说明 backend dispatch 时未预创建 streaming message
+		// （例如旧路径 / orchestrator / 非 agent reply）。事件无法路由，丢弃。
+		h.logger.Debug("task.progress missing message_id or events, dropping",
+			"task_id", req.TaskID, "event_bytes", len(req.Events))
+		return
+	}
+	if h.userHub == nil {
+		return
+	}
+	h.userHub.Broadcast(ws.WSMessage{
+		Type: ws.TypeMessageStreaming,
+		Data: map[string]interface{}{
+			"message_id":      req.MessageID,
+			"conversation_id": req.ConversationID,
+			"task_id":         req.TaskID,
+			"agent_id":        req.AgentID,
+			"deltas":          json.RawMessage(req.Events), // 透传 AgentEvent[]，前端按 kind 渲染
+		},
+	})
+}
+
 func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
-		MachineID string                    `json:"machine_id"`
-		Agents    []service.DiscoveredAgent `json:"agents"`
+		MachineID    string                    `json:"machine_id"`
+		Agents       []service.DiscoveredAgent `json:"agents"`
+		Capabilities []string                  `json:"capabilities"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid daemon register data", "error", err)
@@ -341,6 +394,10 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonCli
 	registerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if machine != nil {
+		// 更新机器能力清单（docker 等），供部署策略选 machine 用
+		if len(req.Capabilities) > 0 {
+			h.agentSvc.UpdateMachineCapabilities(machine.ID, req.Capabilities)
+		}
 		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			return

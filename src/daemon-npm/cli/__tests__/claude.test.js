@@ -60,12 +60,13 @@ function buildMockCtx(overrides = {}) {
   return { ctx, calls };
 }
 
-test('claude.resolveCommand delegates to ctx.resolveCommand("claude")', () => {
+test('claude.resolveCommand returns literal "claude" (no delegation to avoid recursion)', () => {
   const { ctx, calls } = buildMockCtx();
   const spec = createClaudeCliSpec(ctx);
   const result = spec.resolveCommand();
-  assert.strictEqual(result, '/bin/claude');
-  assert.deepStrictEqual(calls.resolveCommand, ['claude']);
+  assert.strictEqual(result, 'claude');
+  // 不能回调 ctx.resolveCommand('claude')——会触发 ctx.resolveCommand ↔ spec.resolveCommand 循环递归。
+  assert.deepStrictEqual(calls.resolveCommand, []);
 });
 
 test('claude.parseResult combines stdout and stderr (fallback behavior)', () => {

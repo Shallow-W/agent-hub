@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/agent-hub/backend/internal/model"
 )
@@ -26,7 +27,6 @@ type MessageStore interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
-	SetMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
@@ -37,6 +37,10 @@ type MessageStore interface {
 	HideMessage(ctx context.Context, userID, messageID string) error
 	UnhideMessage(ctx context.Context, userID, messageID string) error
 	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
+	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error)
+	FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error
+	ListStreaming(ctx context.Context) ([]model.Message, error)
+	MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error)
 }
 
 // ConvStore is the canonical interface for conversation persistence.
@@ -86,6 +90,8 @@ type AgentStore interface {
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
 	GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
+	UpdateMachineCapabilities(ctx context.Context, id string, capabilities []string) error
+	FindMachineWithCapability(ctx context.Context, userID, capability string) (*model.DaemonMachine, error)
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)

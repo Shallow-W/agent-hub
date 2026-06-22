@@ -146,6 +146,57 @@ func (r *fakeMsgRepo) GetHiddenMessageIDs(ctx context.Context, userID, conversat
 	return map[string]bool{}, nil
 }
 
+// streaming 相关桩：维护 messages slice 与真实 repo 行为一致，
+// 让 ListByConversation 能查到预创建的 streaming message（和 FinalizeStreaming 后的 complete message）。
+func (r *fakeMsgRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error) {
+	msg := model.Message{
+		ID:             "msg-streaming",
+		ConversationID: conversationID,
+		Role:           role,
+		SenderID:       senderID,
+		ReplyTo:        replyTo,
+		Status:         model.MessageStatusStreaming,
+		CreatedAt:      time.Now(),
+	}
+	r.messages = append(r.messages, msg)
+	return &msg, nil
+}
+func (r *fakeMsgRepo) FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error {
+	for i := range r.messages {
+		if r.messages[i].ID == messageID {
+			r.messages[i].Status = status
+			if content != "" {
+				r.messages[i].Content = content
+			}
+			if artifactsJSON != "" {
+				r.messages[i].ArtifactsJSON = artifactsJSON
+			}
+			r.messages[i].BlocksJSON = blocksJSON
+			return nil
+		}
+	}
+	return nil
+}
+func (r *fakeMsgRepo) ListStreaming(ctx context.Context) ([]model.Message, error) {
+	var out []model.Message
+	for _, m := range r.messages {
+		if m.Status == model.MessageStatusStreaming {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+func (r *fakeMsgRepo) MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error) {
+	n := 0
+	for i := range r.messages {
+		if r.messages[i].Status == model.MessageStatusStreaming && time.Since(r.messages[i].CreatedAt) > maxAge {
+			r.messages[i].Status = model.MessageStatusError
+			n++
+		}
+	}
+	return n, nil
+}
+
 type fakeConvRepoForMsg struct {
 	conv      *model.Conversation
 	agents    []model.ConversationAgent

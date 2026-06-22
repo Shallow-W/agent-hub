@@ -29,6 +29,8 @@ func NewMessageRepo(db *sqlx.DB, attachmentRepo *AttachmentRepo, artifactRepo *A
 const messageCols = `m.id, m.conversation_id, m.role, m.content, COALESCE(m.artifacts_json, '') AS artifacts_json, m.reply_to, m.deleted_at, m.created_at, m.sender_id,
 COALESCE(a.name, u.username, '') AS username,
 COALESCE(m.cards_json, '') AS cards_json,
+COALESCE(m.blocks_json, '') AS blocks_json,
+COALESCE(NULLIF(m.status, ''), 'complete') AS status,
 EXISTS (
 	SELECT 1 FROM message_pins mp
 	WHERE mp.message_id = m.id AND mp.conversation_id = m.conversation_id AND mp.enabled = TRUE
@@ -104,13 +106,7 @@ func (r *MessageRepo) Create(ctx context.Context, conversationID, role, content,
 	// 填充 mentions（直接从内存设置，无需再查 DB）
 	m.Mentions = mentions
 
-	// 反序列化 cards_json
-	if m.CardsJSON != "" {
-		var cards []map[string]any
-		if err := json.Unmarshal([]byte(m.CardsJSON), &cards); err == nil {
-			m.Cards = cards
-		}
-	}
+	// cards_json → Cards 已由 fillAttachmentsAndReply → fillCards 统一反序列化
 
 	return &m, nil
 }
@@ -124,8 +120,13 @@ func (r *MessageRepo) SaveArtifacts(ctx context.Context, messageID string, artif
 	return r.artifactRepo.CreateArtifacts(ctx, messageID, artifacts)
 }
 
-// UpdateMessageCards 更新消息的 cards_json 字段（用户选择方案/确认操作后调用）。
+// UpdateMessageCards 更新消息的 cards_json 字段。
+// 既用于 agent 回复后落库（cards 首次写入），也用于用户交互后更新卡片状态（resolved/selected）。
+// 两条路径语义一致：覆盖写该消息的 cards_json。空串短路——无卡片时不做无谓写。
 func (r *MessageRepo) UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error {
+	if cardsJSON == "" {
+		return nil
+	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE messages SET cards_json = $2 WHERE id = $1`,
 		messageID, cardsJSON,
@@ -136,19 +137,86 @@ func (r *MessageRepo) UpdateMessageCards(ctx context.Context, messageID, cardsJS
 	return nil
 }
 
-// SetMessageCards 在消息创建后设置 cards_json（agent 回复携带卡片时调用）。
-func (r *MessageRepo) SetMessageCards(ctx context.Context, messageID, cardsJSON string) error {
-	if cardsJSON == "" {
-		return nil
+// CreateStreaming 预创建一条 streaming 状态的 assistant 消息（D5 ADR）。
+// task.dispatch 前调用，message_id 透传给 daemon，daemon 在 task.progress 原样回传。
+// task.complete 时 FinalizeStreaming 把 content/blocks_json 写入并切到 complete/error。
+func (r *MessageRepo) CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string) (*model.Message, error) {
+	var m model.Message
+	err := r.db.QueryRowxContext(ctx,
+		`INSERT INTO messages (conversation_id, role, content, sender_id, reply_to, status)
+		 VALUES ($1, $2, '', $3, $4, 'streaming')
+		 RETURNING id, conversation_id, role, content,
+		 COALESCE(blocks_json, '') AS blocks_json,
+		 COALESCE(NULLIF(status, ''), 'complete') AS status, created_at`,
+		conversationID, role, senderID, replyTo,
+	).StructScan(&m)
+	if err != nil {
+		return nil, fmt.Errorf("create streaming message: %w", err)
+	}
+	// 同步更新对话 updated_at，与 Create 行为一致
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE conversations SET updated_at = NOW() WHERE id = $1`, conversationID,
+	); err != nil {
+		return nil, fmt.Errorf("update conversation timestamp: %w", err)
+	}
+	return &m, nil
+}
+
+// FinalizeStreaming 把 streaming 状态的 message 切到 complete/error/canceled，
+// 并写入最终的 content / blocks_json / artifacts_json。
+// status 传空字符串时默认 complete。
+func (r *MessageRepo) FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error {
+	if status == "" {
+		status = model.MessageStatusComplete
 	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE messages SET cards_json = $2 WHERE id = $1`,
-		messageID, cardsJSON,
+		`UPDATE messages
+		 SET status = $2, content = $3, blocks_json = $4, artifacts_json = COALESCE(NULLIF($5, ''), artifacts_json)
+		 WHERE id = $1`,
+		messageID, status, content, blocksJSON, artifactsJSON,
 	)
 	if err != nil {
-		return fmt.Errorf("set message cards: %w", err)
+		return fmt.Errorf("finalize streaming message: %w", err)
 	}
 	return nil
+}
+
+// ListStreaming 返回当前所有 streaming 状态的 message（watchdog 用）。
+// 限制 conversation + sender_id 字段，watchdog 用它们找对应的 agent / daemon 路由。
+func (r *MessageRepo) ListStreaming(ctx context.Context) ([]model.Message, error) {
+	var list []model.Message
+	err := r.db.SelectContext(ctx, &list,
+		`SELECT `+messageCols+` FROM `+messageFrom+
+			` WHERE m.deleted_at IS NULL AND COALESCE(NULLIF(m.status, ''), 'complete') = 'streaming'`)
+	if err != nil {
+		return nil, fmt.Errorf("list streaming messages: %w", err)
+	}
+	return list, nil
+}
+
+// MarkStaleStreaming 把超过 maxAge 的 streaming message 标记为 error（watchdog 触发）。
+// 只改 status 和追加 error block 到 blocks_json，不动 content（保留已输出部分）。
+// 返回受影响行数，0 表示没有 stale message。
+func (r *MessageRepo) MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error) {
+	// 在 SQL 里判断 created_at + maxAge < NOW()，避免把所有 streaming 拉到应用层。
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE messages
+		 SET status = 'error',
+		     blocks_json = CASE
+		       WHEN blocks_json IS NULL OR blocks_json = '' THEN $1
+		       ELSE blocks_json || ',' || $2
+		     END
+		 WHERE COALESCE(NULLIF(status, ''), 'complete') = 'streaming'
+		   AND created_at + $3::interval < NOW()`,
+		`[{"kind":"error","text":"streaming watchdog timeout"}]`,
+		`{"kind":"error","text":"streaming watchdog timeout"}`,
+		fmt.Sprintf("%.0f seconds", maxAge.Seconds()),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("mark stale streaming: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // MarkConversationRead 更新会话成员的已读时间戳
@@ -255,6 +323,8 @@ func (r *MessageRepo) GetByID(ctx context.Context, id string) (*model.Message, e
 	if err != nil {
 		return nil, fmt.Errorf("get message by id: %w", err)
 	}
+	// 补齐 cards_json → Cards 结构化（与列表读路径保持一致）
+	fillCards([]model.Message{m})
 	return &m, nil
 }
 
@@ -509,7 +579,27 @@ func (r *MessageRepo) fillAttachmentsAndReply(ctx context.Context, messages []mo
 		return nil, err
 	}
 
+	// 填充交互式卡片（cards_json → Cards 结构化），无需 DB 查询，纯内存反序列化
+	fillCards(messages)
+
 	return messages, nil
+}
+
+// fillCards 将每条消息的 cards_json 反序列化到 Cards 字段。
+// Message.Cards 标记为 db:"-"，StructScan 只会填充 CardsJSON；
+// 此函数补齐结构化字段，使历史消息与新建消息返回一致形状，前端无需重复 parse。
+// 解析失败静默跳过——cards_json 为空或损坏时不影响消息本身。
+func fillCards(messages []model.Message) {
+	for i := range messages {
+		m := &messages[i]
+		if m.CardsJSON == "" {
+			continue
+		}
+		var cards []map[string]any
+		if err := json.Unmarshal([]byte(m.CardsJSON), &cards); err == nil {
+			m.Cards = cards
+		}
+	}
 }
 
 // fillAttachments 批量填充消息的附件字段

@@ -10,6 +10,7 @@ const {
   textEvent,
   thinkingEvent,
   toolUseEvent,
+  toolResultEvent,
   turnEndEvent,
   errorEvent,
 } = require('./events');
@@ -92,10 +93,10 @@ function createClaudeCliSpec(ctx) {
     // 以下方法目前 dormant —— spec 上有定义但 daemon.js 还没切过去调用。
     // Step 4 会把 daemon.js 的对应分支替换为下面的 spec.方法 调用。
 
-    // resolveCommand：Claude 走 default 分支（命令名 === cliTool）。
-    // 等价于原 daemon.js resolveCommand('claude') 中最后的 `return cliTool`。
+    // resolveCommand：Claude 命令名即执行名，直接返回字面量。
+    // 不回调 ctx.resolveCommand（会触发循环递归：ctx.resolveCommand → spec.resolveCommand → ctx.resolveCommand ...）。
     resolveCommand(_taskOrCtx) {
-      return ctx.resolveCommand('claude');
+      return 'claude';
     },
 
     // parseResult：one-shot 模式的 stdout/stderr fallback。
@@ -108,10 +109,17 @@ function createClaudeCliSpec(ctx) {
     // parseStreamEvent：解析 Claude stream-json 一行 stdout 为 AgentEvent。
     // 非可识别事件返回 null（调用方忽略）。
     //
-    // Claude stream-json 事件类型（v1 观察）：
-    //   { type: 'assistant', message: { content: [{ type: 'text', text }, { type: 'tool_use', name, input }, { type: 'thinking', thinking }] } }
-    //   { type: 'result', result, is_error, subtype }
-    //   { type: 'tool_result', ... } (stream-json 里较少见，通常嵌入 assistant 事件)
+    // Claude stream-json 事件类型（见 research/claude-stream-json-protocol.md）：
+    //   整体骨架：{ type: 'assistant', message: { content: [...] } }
+    //   增量（核心流式来源）：
+    //     { type: 'content_block_start', index, content_block: { type: 'text'|'thinking'|'tool_use', ... } }
+    //     { type: 'content_block_delta', index, delta: { type: 'text_delta'|'thinking_delta'|'input_json_delta', text|thinking|partial_json } }
+    //     { type: 'content_block_stop', index }
+    //     { type: 'user', message: { content: [{ type: 'tool_result', ... }] } }
+    //   回合结束：{ type: 'result', result, is_error, subtype }
+    //
+    // 历史兼容：保留旧版 `assistant` 事件解析（整条 message.content），用于流式增量
+    // 丢失或 CLI 版本不输出 content_block_delta 的场景。
     parseStreamEvent(line, _ctx) {
       if (!line || !line.trim()) return null;
       let event;
@@ -122,6 +130,55 @@ function createClaudeCliSpec(ctx) {
       }
       if (!event || typeof event !== 'object') return null;
 
+      // 增量路径：content_block_start/delta/stop
+      if (event.type === 'content_block_start') {
+        const block = event.content_block || {};
+        // tool_use 在 start 时把 tool name 作为空字符串事件先推，让前端立即显示工具气泡。
+        // 真正的入参通过后续 input_json_delta 累积。
+        if (block.type === 'tool_use') {
+          return [toolUseEvent(block.name || '', {})];
+        }
+        return null;
+      }
+      if (event.type === 'content_block_delta') {
+        const delta = event.delta || {};
+        if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+          return [textEvent(delta.text)];
+        }
+        if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          return [thinkingEvent(delta.thinking)];
+        }
+        if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          // partial_json 是工具入参的 JSON 片段，作为 tool_use 的增量入参发出。
+          // 前端按 tool_use 事件累积展示，最终在 content_block_stop 拼成完整 JSON。
+          return [toolUseEvent('', delta.partial_json)];
+        }
+        return null;
+      }
+      if (event.type === 'content_block_stop') {
+        // block 边界标记——不产生 AgentEvent（保持事件流纯净），由 StreamBuffer 的
+        // turn_end / session_end 触发立即 flush。这里显式返回 null。
+        return null;
+      }
+      if (event.type === 'user') {
+        // tool_result 事件：user 消息里的 tool_result content
+        const msg = event.message || {};
+        const content = Array.isArray(msg.content) ? msg.content : [];
+        const out = [];
+        for (const c of content) {
+          if (c && c.type === 'tool_result') {
+            const output = typeof c.content === 'string'
+              ? c.content
+              : (Array.isArray(c.content)
+                ? c.content.map((x) => x?.text || '').join('')
+                : '');
+            out.push(toolResultEvent('', output, Boolean(c.is_error)));
+          }
+        }
+        return out.length > 0 ? out : null;
+      }
+
+      // 兼容路径：assistant 整条消息（非增量）
       if (event.type === 'assistant') {
         const message = event.message && typeof event.message === 'object' ? event.message : null;
         const content = Array.isArray(message?.content) ? message.content : [];
@@ -158,7 +215,7 @@ function createClaudeCliSpec(ctx) {
         return turnEndEvent({ result: text || '', subtype: event.subtype });
       }
 
-      // tool_result / system 等其它事件类型当前 stream-json 不发送，忽略。
+      // system 等其它事件类型当前不处理，忽略。
       return null;
     },
 
@@ -199,6 +256,7 @@ function createClaudeCliSpec(ctx) {
       conversationId,
       userId,
       taskCtx,
+      eventRef,
     } = {}, daemonCtx = ctx) {
       const command = daemonCtx.resolveCommand('claude');
       // Bug 1 fix: taskId 必须从 taskCtx.taskId 提取并传给 buildPlatformMcpArgs，
@@ -212,6 +270,9 @@ function createClaudeCliSpec(ctx) {
         '--output-format', 'stream-json',
         '--input-format', 'stream-json',
         '--verbose',
+        // thinking 默认开（D2 ADR）：让思考流通过 thinking_delta / thinking 事件传到前端，
+        // 用户在 UI 上折叠查看。token 成本上升约 20-40%，首 token 略延迟。
+        '--thinking', 'enabled',
         ...mcpArgs,
         resume ? '--resume' : '--session-id',
         effectiveSessionId,
@@ -258,6 +319,20 @@ function createClaudeCliSpec(ctx) {
           if (!line.trim()) continue;
           const events = this.parseStreamEventAll(line, daemonCtx);
           if (events.length === 0) continue;
+          // 新增：把每个事件同步推给 eventRef.current 回调，让 dispatcher 层（StreamBuffer）
+          // 节流后转发为 task.progress WS 消息。queue.push 仍然保留作为
+          // sendPrompt 内部观察通道。
+          //
+          // eventRef 是 { current: fn | null } mutable 引用——persistent agent 跨 task
+          // 复用，每次 dispatch 时 dispatcher 把自己的 onEvent 装进 eventRef.current，
+          // turn 结束后置 null。这样 stdout.on('data') 的闭包只捕获 eventRef 引用本身，
+          // current 的替换对闭包透明。
+          const onEvent = eventRef && eventRef.current;
+          if (typeof onEvent === 'function') {
+            for (const ev of events) {
+              try { onEvent(ev); } catch { /* onEvent 错误不阻断事件流 */ }
+            }
+          }
           for (const ev of events) {
             if (ev.type === EVENT_TYPES.TURN_END) {
               // Bug 2 fix: 镜像原 spawnStreamJsonProcess（:2682-2689）的 agent.turn_result

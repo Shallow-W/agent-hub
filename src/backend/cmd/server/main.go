@@ -334,6 +334,10 @@ func main() {
 	go hub.Run(ctx)
 	go daemonHub.Run(ctx)
 	go machineTracker.Run(ctx)
+	// 启动 streaming watchdog：60s 超时阈值，10s 扫描间隔。
+	// 兜底处理 daemon 崩溃 / WS 断开导致 streaming message 卡住的情况（R8 / D6）。
+	streamingWatchdog := service.NewStreamingWatchdog(msgRepo, logger, 60*time.Second, 10*time.Second)
+	go streamingWatchdog.Run(ctx)
 	// 启动 TaskCardQueue 的 TTL 清理 goroutine（每小时扫一次过期 entry，防泄漏）。
 	taskCardQueue.StartCleanup(ctx)
 
