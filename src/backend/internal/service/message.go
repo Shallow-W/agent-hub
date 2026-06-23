@@ -1285,18 +1285,24 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	select {
 	case result = <-ch:
 	case <-ctx.Done():
-		// 超时：标记 error（保留已输出的流式 block）
+		// 超时：标记 error（保留已输出的流式 block）。
+		// 同步广播终态，让前端停止显示 streaming cursor / StopButton。
 		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
 			slog.Warn("finalize streaming on timeout failed", "message_id", streamingMsg.ID, "error", ferr)
 		}
+		s.broadcastStreamingTerminal(streamingMsg, model.MessageStatusError)
 		return nil, ErrMsgAgentTimeout
 	}
 
 	if result.Error != "" {
-		// daemon task 失败：标记 error，content 留空（前端可显示 error block + 错误原因）
+		// daemon task 失败：标记 error，content 留空（前端可显示 error block + 错误原因）。
+		// PR5 fix：原实现只 UPDATE DB，不广播 message.complete，导致前端 streaming message
+		// 永远停在 'streaming' 状态（StopButton 不卸载、cursor 不消失）。这里同步广播终态，
+		// 让前端 addMessage 把 status 切到 error 并清理 streamingTaskIds。
 		if ferr := s.msgRepo.FinalizeStreaming(ctx, streamingMsg.ID, model.MessageStatusError, "", "", ""); ferr != nil {
 			slog.Warn("finalize streaming on task-error failed", "message_id", streamingMsg.ID, "error", ferr)
 		}
+		s.broadcastStreamingTerminal(streamingMsg, model.MessageStatusError)
 		return nil, fmt.Errorf("daemon task failed: %s", result.Error)
 	}
 
@@ -1476,6 +1482,55 @@ func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, c
 		return
 	}
 	s.postPersist(convID, userID, msg)
+}
+
+// broadcastStreamingTerminal 广播 streaming message 的终态（error/canceled）给
+// conversation 成员，让前端把 streaming 占位符切到终态 status、清理 streamingTaskIds、
+// 卸载 StopButton / streaming cursor。
+//
+// 设计：与 streaming_watchdog.broadcastStaleError 同构——构造最小 message.complete
+// payload（status=error/canceled，content/blocks_json 为空），best-effort 广播。
+//
+// 场景：createAgentReply 的 task-error / timeout 路径——原实现只 UPDATE DB，
+// 不广播，导致前端永远显示"生成中"。注意：success 路径走 postPersist 自然广播，
+// 此 helper 只覆盖 failure 路径。
+func (s *MessageService) broadcastStreamingTerminal(streamingMsg *model.Message, status string) {
+	if s.notifier == nil || streamingMsg == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	memberIDs, err := s.convRepo.ListMemberIDs(ctx, streamingMsg.ConversationID)
+	if err != nil {
+		slog.Warn("broadcastStreamingTerminal: list members failed",
+			"message_id", streamingMsg.ID, "error", err)
+		return
+	}
+	if len(memberIDs) == 0 {
+		return
+	}
+	payload := map[string]interface{}{
+		"id":              streamingMsg.ID,
+		"conversation_id": streamingMsg.ConversationID,
+		"role":            streamingMsg.Role,
+		"status":          status,
+		"content":         "",
+		"blocks_json":     streamingMsg.BlocksJSON,
+		"artifacts_json":  streamingMsg.ArtifactsJSON,
+		"cards_json":      "[]",
+		"created_at":      streamingMsg.CreatedAt,
+		"sender_id":       nil,
+	}
+	if streamingMsg.SenderID != nil {
+		payload["sender_id"] = *streamingMsg.SenderID
+	}
+	if streamingMsg.Username != "" {
+		payload["username"] = streamingMsg.Username
+	}
+	// 广播 message.complete 终态事件——复用 notifier 接口（与 postPersist 路径不同：
+	// postPersist 推送的是完整 model.Message（默认 status=complete），这里需要自定义
+	// payload 携带 status=error/canceled，让前端 addMessage 切换占位符状态）。
+	s.notifier.PushCustomEvent(streamingMsg.ConversationID, memberIDs, ws.TypeMessageComplete, payload)
 }
 
 func shortAgentError(err error) string {

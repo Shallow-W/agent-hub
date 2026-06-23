@@ -110,7 +110,15 @@ export function useWebSocket() {
         case 'message.complete': {
           const msgId = msg.data.id ?? messageId;
           const msgContent = msg.data.content;
-          if (!msgId || !msgContent) break;
+          // PR5 fix：status=error/canceled 的终态广播 content 可能为空（task 失败/取消
+          // 时没有正文），不能因为 content 为空就 drop。只要 id + conversation_id 存在
+          // 且 status 是终态，就应当透传给 addMessage 切换占位符状态、清理 streamingTaskIds。
+          const status = (msg.data.status ?? 'complete') as import('@/types/message').MessageStatus;
+          const isTerminalWithoutContent = msg.data.id
+            && msg.data.conversation_id
+            && (status === 'error' || status === 'canceled')
+            && !msgContent;
+          if (!msgId || (!msgContent && !isTerminalWithoutContent)) break;
 
           // Full message push from Hub (has id + conversation_id)
           if (msg.data.id && msg.data.conversation_id) {
@@ -121,7 +129,7 @@ export function useWebSocket() {
               id: msg.data.id,
               conversation_id: msg.data.conversation_id,
               role: msg.data.role ?? 'assistant',
-              content: msgContent,
+              content: msgContent ?? '',
               artifacts_json: msg.data.artifacts_json ?? null,
               created_at: msg.data.created_at ?? new Date().toISOString(),
               attachments: msg.data.attachments,
@@ -139,7 +147,7 @@ export function useWebSocket() {
               blocks: msg.data.blocks,
               // 终态：服务端推送的 status 是真源（complete / error / canceled）。
               // 缺省时按 'complete' 处理（message.complete 事件本身就是终态信号）。
-              status: (msg.data.status ?? 'complete') as import('@/types/message').MessageStatus,
+              status,
             });
           } else if (messageId && content) {
             // Streaming completion
