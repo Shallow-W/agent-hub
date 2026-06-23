@@ -574,11 +574,15 @@ test('claude.spawnPersistent: includes stream-json flags and --dangerously-skip-
   }, ctx);
 
   const args = calls.spawn[0].args;
-  // Mirror daemon.js spawnStreamJsonProcess arg order.
+  // 第 0 位永远是 --dangerously-skip-permissions。
   assert.strictEqual(args[0], '--dangerously-skip-permissions');
-  assert.deepStrictEqual(args.slice(1, 5), [
-    '--output-format', 'stream-json',
-    '--input-format', 'stream-json',
-  ]);
+  // stream-json 输入输出模式 + 多 turn 复用必需的三个 partial flag。
+  // 这些一起存在才能在多 turn stdin 模式下拿到 content_block_delta 增量。
+  assert.ok(args.includes('-p'), 'must include -p (--include-partial-messages 校验依赖)');
+  assert.ok(args.includes('--output-format'), 'must include --output-format');
+  assert.ok(args.includes('stream-json'), 'must include stream-json value');
+  assert.ok(args.includes('--input-format'), 'must include --input-format');
+  assert.ok(args.includes('--include-partial-messages'), 'must include --include-partial-messages (token streaming)');
+  assert.ok(args.includes('--replay-user-messages'), 'must include --replay-user-messages (multi-turn stdin driving)');
   assert.ok(args.includes('--verbose'));
 });

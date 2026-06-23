@@ -130,6 +130,14 @@ function createClaudeCliSpec(ctx) {
       }
       if (!event || typeof event !== 'object') return null;
 
+      // --include-partial-messages 模式下，content_block_* / message_* 等 SSE 增量
+      // 被包在 { type: 'stream_event', event: {...} } 里；assistant/user/result/system
+      // 仍是顶层事件。这里解包后让下面的分支统一处理 event.event 内嵌结构，
+      // 保持对"关闭 partial 时的旧格式"兼容（那时 content_block_* 直接是顶层）。
+      if (event.type === 'stream_event' && event.event && typeof event.event === 'object') {
+        event = event.event;
+      }
+
       // 增量路径：content_block_start/delta/stop
       if (event.type === 'content_block_start') {
         const block = event.content_block || {};
@@ -269,8 +277,18 @@ function createClaudeCliSpec(ctx) {
 
       const args = [
         '--dangerously-skip-permissions',
+        // Claude CLI 在多 turn stream-json 模式下默认只在 message 边界吐整块
+        // content_block_*。--include-partial-messages 强制把 SSE 的 token-level
+        // delta 原样转成 NDJSON 行；它要求 --print 和 --output-format=stream-json，
+        // 而在 stream-json stdin（多 turn）模式下还需要 --replay-user-messages
+        // 才能正确驱动子进程（裸 -p + input-format stream-json 会启动后无响应）。
+        // 三者同时存在已在命令行测试中验证可多 turn 复用（见 research/claude-streaming.md
+        // 及本任务的命令行验证记录）。
+        '-p',
         '--output-format', 'stream-json',
         '--input-format', 'stream-json',
+        '--replay-user-messages',
+        '--include-partial-messages',
         '--verbose',
         // thinking 默认开（D2 ADR）：让思考流通过 thinking_delta / thinking 事件传到前端，
         // 用户在 UI 上折叠查看。token 成本上升约 20-40%，首 token 略延迟。

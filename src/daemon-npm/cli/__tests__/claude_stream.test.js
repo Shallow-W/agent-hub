@@ -228,3 +228,69 @@ test('parseStreamEventAll: 把单个事件展开为数组', () => {
   assert.ok(Array.isArray(arr));
   assert.equal(arr.length, 1);
 });
+
+// === stream_event 解包（--include-partial-messages 模式）===
+// 当 daemon 启用 -p + --include-partial-messages + --replay-user-messages 后，
+// Claude CLI 把 content_block_* / message_* SSE 增量包在
+// { type: 'stream_event', event: { ... } } 里。parseStreamEvent 必须能解包
+// 后把内嵌 event 当作普通 content_block_* 处理，否则 delta 流会全部丢失。
+test('stream_event 包装的 content_block_delta(text_delta) 被正确解包为 text 事件', () => {
+  const line = JSON.stringify({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'text_delta', text: 'Hello' },
+    },
+    session_id: 's-1',
+  });
+  const arr = spec.parseStreamEventAll(line, mockCtx);
+  assert.equal(arr.length, 1);
+  assert.equal(arr[0].type, EVENT_TYPES.TEXT);
+  assert.equal(arr[0].content, 'Hello');
+});
+
+test('stream_event 包装的 content_block_delta(thinking_delta) 被正确解包为 thinking 事件', () => {
+  const line = JSON.stringify({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'thinking_delta', thinking: 'think' },
+    },
+  });
+  const arr = spec.parseStreamEventAll(line, mockCtx);
+  assert.equal(arr.length, 1);
+  assert.equal(arr[0].type, EVENT_TYPES.THINKING);
+  assert.equal(arr[0].content, 'think');
+});
+
+test('stream_event 包装的 content_block_start(tool_use) 立即产生工具气泡事件', () => {
+  const line = JSON.stringify({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_start',
+      index: 2,
+      content_block: { type: 'tool_use', id: 'toolu_x', name: 'Read', input: {} },
+    },
+  });
+  const arr = spec.parseStreamEventAll(line, mockCtx);
+  assert.equal(arr.length, 1);
+  assert.equal(arr[0].type, EVENT_TYPES.TOOL_USE);
+  assert.equal(arr[0].tool, 'Read');
+});
+
+test('stream_event 包装的 content_block_stop 返回空数组（保持事件流纯净）', () => {
+  const line = JSON.stringify({
+    type: 'stream_event',
+    event: { type: 'content_block_stop', index: 0 },
+  });
+  const arr = spec.parseStreamEventAll(line, mockCtx);
+  assert.equal(arr.length, 0);
+});
+
+test('stream_event.event 缺失时返回空数组（容错）', () => {
+  const line = JSON.stringify({ type: 'stream_event' });
+  const arr = spec.parseStreamEventAll(line, mockCtx);
+  assert.equal(arr.length, 0);
+});
