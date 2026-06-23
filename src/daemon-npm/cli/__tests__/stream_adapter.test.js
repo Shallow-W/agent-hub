@@ -1,12 +1,21 @@
 'use strict';
 
-// StreamBuffer 单测：验证 50ms 时间窗口节流、边界事件立即 flush、close 行为。
+// StreamBuffer 单测：验证 16ms 时间窗口节流、kind 切换立即 flush、边界事件立即 flush、close 行为。
 
 const { test } = require('node:test');
 const assert = require('node:assert');
 
 const { StreamBuffer } = require('../stream_adapter');
-const { textEvent, turnEndEvent, errorEvent, sessionEndEvent } = require('../events');
+const {
+  textEvent,
+  thinkingEvent,
+  toolUseEvent,
+  toolResultEvent,
+  cancelEvent,
+  turnEndEvent,
+  errorEvent,
+  sessionEndEvent,
+} = require('../events');
 
 test('StreamBuffer: 空事件不触发 flush', () => {
   let flushCount = 0;
@@ -118,4 +127,87 @@ test('StreamBuffer: ignore null/undefined events', () => {
   buf.close();
   assert.equal(flushed.length, 1);
   assert.equal(flushed[0].content, 'valid');
+});
+
+// ====== 新增：kind 切换立即 flush（修复"短文本回复一次性显示"的核心 bug） ======
+
+test('StreamBuffer: kind 切换立即 flush（thinking → text 边界清晰）', () => {
+  const batches = [];
+  const buf = new StreamBuffer({
+    onFlush: (evs) => batches.push(evs),
+    flushMs: 1000,
+  });
+  buf.push(thinkingEvent('想1'));
+  buf.push(thinkingEvent('想2'));
+  // kind 切换：thinking → text，pending thinking 批次立即 flush
+  buf.push(textEvent('答1'));
+  buf.push(textEvent('答2'));
+  // 主动 flush 收尾，拿到最后一个批次（不依赖 timer）
+  buf.flush();
+  // 应当有 2 个批次：[thinking, thinking], [text, text]
+  assert.equal(batches.length, 2, 'kind 切换应触发立即 flush，产生 2 个独立批次');
+  assert.deepEqual(
+    batches[0].map((e) => e.type),
+    ['thinking', 'thinking'],
+  );
+  assert.deepEqual(
+    batches[1].map((e) => e.type),
+    ['text', 'text'],
+  );
+  buf.close();
+});
+
+test('StreamBuffer: text → tool_use → tool_result 三类切换各成一批', () => {
+  const batches = [];
+  const buf = new StreamBuffer({
+    onFlush: (evs) => batches.push(evs),
+    flushMs: 1000,
+  });
+  buf.push(textEvent('准备调用工具'));
+  buf.push(toolUseEvent('Read', { path: '/a' }));
+  buf.push(toolResultEvent('Read', 'content'));
+  buf.flush();
+  assert.equal(batches.length, 3, '三种 kind 各自独立成批');
+  assert.equal(batches[0][0].type, 'text');
+  assert.equal(batches[1][0].type, 'tool_use');
+  assert.equal(batches[2][0].type, 'tool_result');
+  buf.close();
+});
+
+test('StreamBuffer: flushOnKindSwitch=false 时退回到纯时间窗批处理', () => {
+  const batches = [];
+  const buf = new StreamBuffer({
+    onFlush: (evs) => batches.push(evs),
+    flushMs: 1000,
+    flushOnKindSwitch: false,
+  });
+  buf.push(thinkingEvent('想'));
+  buf.push(textEvent('答'));
+  // 关闭 kind 切换 flush 后，两类事件应合并到同一 buffer（直到 timer 或 close）
+  assert.equal(batches.length, 0);
+  buf.close();
+  assert.equal(batches.length, 1);
+  assert.deepEqual(
+    batches[0].map((e) => e.type),
+    ['thinking', 'text'],
+  );
+});
+
+test('StreamBuffer: cancel 事件立即 flush（与 turn_end 同级）', () => {
+  const batches = [];
+  const buf = new StreamBuffer({
+    onFlush: (evs) => batches.push(evs),
+    flushMs: 1000,
+  });
+  buf.push(textEvent('未完'));
+  buf.push(cancelEvent('用户取消'));
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0][0].type, 'text');
+  assert.equal(batches[1][0].type, 'cancel');
+});
+
+test('StreamBuffer: 默认 flushMs=16（短文本回复也能流式呈现）', () => {
+  // 不传 flushMs 时应使用 16ms 默认值，而不是旧的 50ms
+  const buf = new StreamBuffer({ onFlush: () => {} });
+  assert.equal(buf.flushMs, 16);
 });
