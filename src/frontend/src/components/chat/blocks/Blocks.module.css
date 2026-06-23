@@ -7,6 +7,9 @@
 
 .textBlock {
   max-width: 100%;
+  /* word-break: break-word 防止流式期间长字符串（URL / code）溢出导致 layout shift，
+     layout shift 会放大"停顿"的视觉感受。 */
+  word-break: break-word;
 }
 
 .thinkingBlock {
@@ -231,11 +234,11 @@
   vertical-align: text-bottom;
   margin-left: 2px;
   background: currentColor;
-  animation: blink 1s steps(2) infinite;
+  /* 与 MessageBubble.module.css 的 cursorPulse 对齐——smooth pulse 而非 steps(2) 硬闪。
+     硬闪会给人"卡顿/跳"的感觉，smooth pulse 视觉上更像"正在输入"。 */
+  animation: cursorPulse 0.8s ease-in-out infinite;
 }
 
-@keyframes blink {
-  to {
-    opacity: 0;
-  }
+@keyframes cursorPulse {
+  50% { opacity: 0.2; }
 }
