@@ -73,7 +73,7 @@ function formatDividerTime(dateStr: string): string {
   return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
+export const MessageList: React.FC<MessageListProps> = React.memo(({
   conversationId,
   onReply,
   onForward,
@@ -281,4 +281,4 @@ export const MessageList: React.FC<MessageListProps> = ({
       <div ref={bottomRef} />
     </div>
   );
-};
+});

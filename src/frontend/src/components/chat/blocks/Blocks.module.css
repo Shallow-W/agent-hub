@@ -10,33 +10,126 @@
 }
 
 .thinkingBlock {
+  position: relative;
   border-left: 3px solid var(--color-primary, #1677ff);
   background: var(--color-thinking-bg, rgba(22, 119, 255, 0.06));
-  border-radius: 4px;
-  padding: 6px 10px;
-  margin: 4px 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 6px 0;
   font-size: 13px;
   color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+/* streaming 时背景微微变深 + 强调色边框 */
+.thinkingStreaming {
+  background: var(--color-thinking-bg-active, rgba(22, 119, 255, 0.1));
+  border-left-color: var(--color-primary, #1677ff);
 }
 
 .thinkingHeader {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
   user-select: none;
   font-weight: 500;
   color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12.5px;
+  line-height: 20px;
+  transition: color 150ms ease;
 }
 
 .thinkingHeader:hover {
   color: var(--color-primary, #1677ff);
 }
 
-.thinkingBody {
+.thinkingIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary, #1677ff);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.thinkingLabel {
+  font-style: italic;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.thinkingPreview {
+  flex: 1;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+  font-style: italic;
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+.thinkingChevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+
+/* 折叠态 body——max-height: 0 + opacity 0 实现平滑收起 */
+.thinkingBodyWrap {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 240ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 180ms ease,
+              margin-top 240ms ease;
+  margin-top: 0;
+}
+
+.thinkingBodyExpanded {
+  max-height: 1200px;  /* 给足够空间，超出后由 .thinkingBody 自然扩展 */
+  opacity: 1;
   margin-top: 6px;
+}
+
+.thinkingBody {
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.6));
+}
+
+/* streaming 时底部不确定进度条 */
+.thinkingProgress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: rgba(22, 119, 255, 0.08);
+  overflow: hidden;
+}
+
+.thinkingProgressBar {
+  width: 30%;
+  height: 100%;
+  background: var(--color-primary, #1677ff);
+  animation: thinkingProgressLoop 1.4s ease-in-out infinite;
+}
+
+@keyframes thinkingProgressLoop {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(250%); }
+  100% { transform: translateX(-100%); }
 }
 
 .toolCallBlock {
