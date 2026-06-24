@@ -25,10 +25,11 @@ type DaemonHandler struct {
 	daemonHub       *ws.DaemonHub
 	userHub         *ws.Hub
 	streamingBuffer *service.StreamingBuffer
+	convRepo        service.ConvRepoForDaemon
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
-func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub, streamingBuffer *service.StreamingBuffer) *DaemonHandler {
+func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub, streamingBuffer *service.StreamingBuffer, convRepo service.ConvRepoForDaemon) *DaemonHandler {
 	return &DaemonHandler{
 		agentSvc:        agentSvc,
 		orchSvc:         orchSvc,
@@ -38,6 +39,7 @@ func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.Orchestra
 		daemonHub:       daemonHub,
 		userHub:         userHub,
 		streamingBuffer: streamingBuffer,
+		convRepo:        convRepo,
 	}
 }
 
@@ -399,10 +401,25 @@ func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.
 	if agentName != "" {
 		payload["agent_name"] = agentName
 	}
-	h.userHub.Broadcast(ws.WSMessage{
-		Type: ws.TypeMessageStreaming,
-		Data: payload,
-	})
+	// 流式增量按会话成员推送（本任务修复）：
+	//   原实现 Broadcast 推给所有在线用户，造成跨会话数据泄漏 + 多余广播流量。
+	//   改用 PushStreamingToConversation 按 conv 成员列表精准推送，前端无需再过滤。
+	// memberIDs 查询失败 / 为空时降级为不推送（避免泄漏）。
+	if h.convRepo == nil {
+		h.logger.Warn("task.progress convRepo missing, skip streaming push", "task_id", req.TaskID)
+		return
+	}
+	listCtx, listCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer listCancel()
+	memberIDs, err := h.convRepo.ListMemberIDs(listCtx, req.ConversationID)
+	if err != nil {
+		h.logger.Warn("task.progress list members failed", "conversation_id", req.ConversationID, "error", err)
+		return
+	}
+	if len(memberIDs) == 0 {
+		return
+	}
+	h.userHub.PushStreamingToConversation(req.ConversationID, memberIDs, payload)
 }
 
 func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {

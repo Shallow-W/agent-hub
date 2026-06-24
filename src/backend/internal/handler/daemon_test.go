@@ -171,7 +171,7 @@ func newTestDaemonHandler(t *testing.T) (*DaemonHandler, *ws.DaemonHub, *fakeDae
 
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 	return handler, daemonHub, fakeRepo
 }
 
@@ -381,7 +381,7 @@ func TestDaemonWS_AgentStarted_UpdatesStatus(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 
 	machineID := "machine-status-1"
 
@@ -493,7 +493,7 @@ func TestDaemonWS_MachineDisconnect_MarksAgentsStopped(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	_ = NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	_ = NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 
 	// Simulate a machine disconnect by calling MarkMachineOffline directly
 	// (this is what the handler does in its defer after readLoop returns)
@@ -527,7 +527,7 @@ func TestDaemonWS_AgentStartedWithError_SetsErrorStatus(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 
 	machineID := "machine-err-1"
 
@@ -608,7 +608,7 @@ func TestDaemonWS_AgentStarted_EmptyAgentID_Ignored(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 
 	machineID := "machine-empty-1"
 
@@ -680,7 +680,7 @@ func TestDaemonWS_Ping_RespondsPong(t *testing.T) {
 	go daemonHub.Run(hubCtx)
 	agentSvc.SetDaemonHub(daemonHub)
 
-	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil)
+	handler := NewDaemonHandler(agentSvc, nil, "test-daemon-token", slog.Default(), []string{"*"}, daemonHub, nil, nil, nil)
 
 	machineID := "machine-ping-1"
 

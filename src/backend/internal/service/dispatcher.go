@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -35,6 +37,10 @@ type DaemonTaskCreator interface {
 // P8a 后 OrchestratorService 持有 canonical repository.MessageStore；Dispatcher
 // 仍保留此窄接口（Create + SaveArtifacts 两方法），隔离 Dispatcher 的最小依赖面。
 // repository.MessageStore 自动满足 MessagePersister。
+//
+// 群聊流式接入（本任务）后 Dispatcher 同时使用 StreamingMsgRepo（来自 streaming_pipeline.go）
+// 落 streaming placeholder；MessagePersister 保留给 legacy defaultMessageHandler
+// 的 fallback 路径，避免破坏 runDaemonEdit 这种不落 message 的 ResultHandler。
 type MessagePersister interface {
 	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error)
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
@@ -45,11 +51,22 @@ type MessagePersister interface {
 // P7 之前 Dispatcher 通过 d.svc 反向依赖 OrchestratorService 来访问这些字段；
 // P7 把它们显式提到 DispatcherDeps 中，解掉反向依赖，使得 Dispatcher 可独立测试与构造。
 // P8b 把 DaemonHub 从 concrete *ws.DaemonHub 改为 port.DaemonDispatcher 端口接口。
+//
+// 群聊流式接入（本任务）新增字段：
+//   - StreamingPipeline：包含 StreamingMsgRepo / StreamingBuffer / Notifier / ConvRepo。
+//     当 StreamingPipeline.MsgRepo 为 nil 时，Dispatcher 回退到非流式行为
+//     （Create 而非 CreateStreaming+FinalizeStreaming），保持向后兼容。
+//   - TaskAgentIndex：让 *ws.DaemonHub 通过 TaskAgentIndex 接口注入 task→agentName
+//     映射；nil 时不注册（仅影响 message.streaming payload 的 agent_name 字段）。
+//   - TaskCardQueue：drain MCP subprocess 卡片，与 createAgentReply 一致。可空。
 type DispatcherDeps struct {
 	AgentRepo    DaemonTaskCreator
 	DaemonHub    port.DaemonDispatcher
 	MsgRepo      MessagePersister
 	UploadDir    string // 用于 artifactsFromMarkdown fallback（目前未直接使用，预留）
+	Streaming    *StreamingPipelineDeps
+	TaskAgent    TaskAgentIndex
+	TaskCardQueue *TaskCardQueue
 }
 
 // Dispatcher 封装「为单个 agent 创建 daemon task + WS dispatch + 等待结果 + 落库消息」
@@ -78,7 +95,8 @@ type DispatcherDeps struct {
 // 它只做「拿到 prompt + contextMessages 后把任务送到 daemon 并等待结果」这一件事。
 // 并发护栏由调用方在调用 Dispatcher.Dispatch / DispatchPlan 前/后用 AgentQueue.Run 包裹。
 type Dispatcher struct {
-	deps DispatcherDeps
+	deps   DispatcherDeps
+	handles sync.Map // taskID -> *StreamingHandle（in-flight streaming placeholder bookkeeping）
 }
 
 // NewDispatcher 构造一个独立 Dispatcher，依赖通过 deps 显式注入。
@@ -88,6 +106,19 @@ type Dispatcher struct {
 // 装入 DispatcherDeps 后传给 NewDispatcher。
 func NewDispatcher(deps DispatcherDeps) *Dispatcher {
 	return &Dispatcher{deps: deps}
+}
+
+// SetStreamingDeps 在 OrchestratorService 默认装配完 Dispatcher 后由 main 调用，
+// 注入流式管线共享依赖（与 MessageService 共用同一组 msgRepo / daemonHub / buffer /
+// notifier / convRepo / taskCardQueue）。让群聊 worker dispatch 走与单聊 createAgentReply
+// 一致的流式管线。
+//
+// taskAgentIndex 一般传 *ws.DaemonHub（满足 TaskAgentIndex 接口）；nil 时跳过
+// task→agentName 映射注册（仅影响 message.streaming payload 的 agent_name 字段）。
+func (d *Dispatcher) SetStreamingDeps(streaming StreamingPipelineDeps, taskAgentIndex TaskAgentIndex, taskCardQueue *TaskCardQueue) {
+	d.deps.Streaming = &streaming
+	d.deps.TaskAgent = taskAgentIndex
+	d.deps.TaskCardQueue = taskCardQueue
 }
 
 // DispatchInput 是 Dispatcher.Dispatch 的输入。
@@ -178,6 +209,20 @@ type DispatchPlan struct {
 	// nil 时使用 defaultMessageHandler：CreateMessage(agentMetadata(input.Agent)) +
 	// persistArtifacts(task.Artifacts)，与 P9 之前 dispatchCore 行为完全等价。
 	ResultHandler func(ctx context.Context, task *model.DaemonTask) (*model.Message, error)
+
+	// StreamingRequested 控制 dispatchPlanCore 是否预创建 streaming placeholder
+	// 并把 message_id 注入 dispatch payload。
+	//
+	// 群聊流式接入（本任务）引入。语义：
+	//   - true：调用方走 streaming 管线（预创建 placeholder + FinalizeStreaming 切终态）。
+	//     Dispatch() 薄壳默认置 true（worker / 群聊 @mention 走这条，与单聊 createAgentReply
+	//     行为对齐）。
+	//   - false（零值）：跳过 streaming。runDaemonEdit（不落 message）/ handleOrchestratedDispatch
+	//     （自己落 dispatch message）走这条——这些调用方明确处理产物，创建 placeholder 反而会孤立。
+	//
+	// 仍要求 DispatcherDeps.Streaming.MsgRepo 非 nil（main.go SetStreamingDeps 注入）。
+	// 若 StreamingDeps 未注入，本字段被忽略（兼容旧测试装配）。
+	StreamingRequested bool
 }
 
 // DispatchPlanResult 是 DispatchPlan 的输出。
@@ -199,12 +244,19 @@ func defaultPromptBuilder(_ context.Context, in DispatchInput) (string, error) {
 	return in.Prompt, nil
 }
 
-// defaultMessageHandler 是 DispatchPlan.ResultHandler 的默认实现：落 assistant
-// message（artifacts = agentMetadata(input.Agent)）+ persistArtifacts。
+// defaultMessageHandler 是 DispatchPlan.ResultHandler 的默认实现。
 //
-// P9 引入：与 P9 之前 dispatchCore 内联的 CreateMessage + persistArtifacts 行为
-// 完全等价。
+// 群聊流式接入（本任务）：
+//   - 若 dispatcher 装配了 StreamingPipeline（d.deps.Streaming 非 nil 且 MsgRepo 满足
+//     StreamingMsgRepo），用 FinalizeStreamingPipeline 切 streaming placeholder 到 complete，
+//     写 blocks_json / cards / artifacts。与 createAgentReply 1322-1387 行为一致。
+//   - 否则回退到 P9 之前行为：Create + persistArtifacts。保留以兼容 streaming 未注入的
+//     构造（如 runDaemonEdit / 单元测试）。
 func (d *Dispatcher) defaultMessageHandler(ctx context.Context, in DispatchInput, task *model.DaemonTask) (*model.Message, error) {
+	if handle, ok := d.streamingHandleForTask(task.ID); ok {
+		return d.finalizeStreamingSuccess(ctx, *handle, in, task)
+	}
+	// fallback：legacy Create + persistArtifacts
 	artifacts := agentMetadata(in.Agent)
 	msg, err := d.deps.MsgRepo.Create(ctx, in.ConvID, "assistant", task.Result, artifacts, nil, in.ReplyTo, nil, nil)
 	if err != nil {
@@ -213,6 +265,102 @@ func (d *Dispatcher) defaultMessageHandler(ctx context.Context, in DispatchInput
 	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", in.ConvID, "agent_id", in.Agent.ID, "agent_name", in.Agent.Name, "message_id", msg.ID, "reply_to", stringValue(in.ReplyTo), "content_len", len(msg.Content))
 	d.persistArtifacts(ctx, msg, task.Artifacts)
 	return msg, nil
+}
+
+// streamingHandleForTask 从 dispatcher 内部 in-flight handle 表查询 taskID 对应的
+// StreamingHandle。handle 由 dispatchPlanCore 在 setup 时存入，finalize 后清除。
+// 第二返回值 false 表示该 task 走 legacy Create 路径（无 streaming）。
+func (d *Dispatcher) streamingHandleForTask(taskID string) (*StreamingHandle, bool) {
+	if taskID == "" {
+		return nil, false
+	}
+	v, ok := d.handles.Load(taskID)
+	if !ok {
+		return nil, false
+	}
+	return v.(*StreamingHandle), true
+}
+
+// finalizeStreamingSuccess 在 task 成功完成时调用：
+//  - 抽取 agent 写在正文里的 cards
+//  - drain MCP subprocess 卡片队列
+//  - snapshot streamingBuffer 累积的 blocks_json
+//  - FinalizeStreamingPipeline 写 status=complete + content + blocks_json + cards + artifacts
+//  - 清理 in-flight handle
+func (d *Dispatcher) finalizeStreamingSuccess(ctx context.Context, handle StreamingHandle, in DispatchInput, task *model.DaemonTask) (*model.Message, error) {
+	pipelineDeps := d.streamingDeps()
+	defer d.handles.Delete(handle.TaskID)
+
+	agentCards, strippedContent, _ := extractCardsFromContent(task.Result)
+	allCards := append([]map[string]any{}, ValidateCards(nil)...)
+	if d.deps.TaskCardQueue != nil {
+		if subprocessCards := d.deps.TaskCardQueue.Drain(handle.TaskID); len(subprocessCards) > 0 {
+			allCards = append(allCards, ValidateCards(subprocessCards)...)
+		}
+	}
+	allCards = append(allCards, ValidateCards(agentCards)...)
+
+	var blocksJSON string
+	if pipelineDeps.StreamingBuffer != nil {
+		// pipelineDeps.StreamingBuffer 是 *StreamingBuffer；通过类型断言拿 snapshotBlocksJSON
+		if buf, ok := pipelineDeps.StreamingBuffer.(*StreamingBuffer); ok {
+			blocksJSON = snapshotBlocksJSONFromBuffer(buf, handle.TaskID)
+		}
+	}
+
+	msg, err := FinalizeStreamingPipeline(ctx, pipelineDeps, &handle, FinalizeStreamingPipelineOptions{
+		Status:        model.MessageStatusComplete,
+		Content:       strippedContent,
+		BlocksJSON:    blocksJSON,
+		ArtifactsJSON: handle.ArtifactsJSON,
+		Cards:         allCards,
+		Artifacts:     mergeArtifactsForStreaming(task.Artifacts, strippedContent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finalize streaming message: %w", err)
+	}
+	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", in.ConvID, "agent_id", in.Agent.ID, "agent_name", in.Agent.Name, "message_id", msg.ID, "reply_to", stringValue(in.ReplyTo), "content_len", len(msg.Content))
+	return msg, nil
+}
+
+// streamingDeps 返回当前 dispatcher 装配的 StreamingPipelineDeps（零值时所有字段为 nil，
+// 调用方需各自做 nil 防护）。
+func (d *Dispatcher) streamingDeps() StreamingPipelineDeps {
+	if d.deps.Streaming == nil {
+		return StreamingPipelineDeps{}
+	}
+	return *d.deps.Streaming
+}
+
+// snapshotBlocksJSONFromBuffer 从 *StreamingBuffer 取 taskID 累积的 blocks JSON。
+// 单聊（createAgentReply）与群聊（Dispatcher）共用此包级函数。
+func snapshotBlocksJSONFromBuffer(buf *StreamingBuffer, taskID string) string {
+	if buf == nil || taskID == "" {
+		return ""
+	}
+	state, ok := buf.GetState(taskID)
+	if !ok || len(state.Blocks) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(state.Blocks)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// mergeArtifactsForStreaming 是 dispatcher 流式成功路径的 artifact 合并函数。
+// 与 createAgentReply 的 artifactsFromTaskResultOrMarkdown 对齐，但 task.Artifacts
+// 已是 []model.Artifact（dispatcher 的 DaemonTask 在 waitDaemonTask 中由
+// artifactsFromTaskResult 转换过），所以只做 markdown fallback——空时从正文抽取。
+func mergeArtifactsForStreaming(arts []model.Artifact, content string) []model.Artifact {
+	if len(arts) > 0 {
+		if !hasCodeArtifact(arts) {
+			arts = append(arts, codeArtifactsFromMarkdown(content)...)
+		}
+		return arts
+	}
+	return artifactsFromMarkdown(content)
 }
 
 // Dispatch 把一个任务送到 daemon 并等待结果，落库为 assistant 消息后返回。
@@ -236,8 +384,9 @@ func (d *Dispatcher) defaultMessageHandler(ctx context.Context, in DispatchInput
 // 任一错误路径上 OnFailed 都会被调用一次（若非 nil），便于调用方统一处理失败。
 func (d *Dispatcher) Dispatch(ctx context.Context, in DispatchInput, hooks DispatchHooks) (*DispatchResult, error) {
 	plan := DispatchPlan{
-		Input:         in,
-		PromptBuilder: defaultPromptBuilder,
+		Input:               in,
+		PromptBuilder:       defaultPromptBuilder,
+		StreamingRequested:  true, // worker / 群聊 @mention 路径：走 streaming 管线（与 createAgentReply 对齐）
 		ResultHandler: func(ctx context.Context, task *model.DaemonTask) (*model.Message, error) {
 			return d.defaultMessageHandler(ctx, in, task)
 		},
@@ -289,7 +438,7 @@ func (d *Dispatcher) DispatchPlan(ctx context.Context, plan DispatchPlan, hooks 
 	}
 	resultHandler := plan.ResultHandler
 
-	task, msg, err := d.dispatchPlanCore(ctx, in, promptBuilder, resultHandler, hooks.OnTaskCreated)
+	task, msg, err := d.dispatchPlanCore(ctx, in, promptBuilder, resultHandler, hooks.OnTaskCreated, plan.StreamingRequested)
 	if err != nil {
 		if hooks.OnFailed != nil {
 			hooks.OnFailed(ctx, in, err)
@@ -327,6 +476,7 @@ func (d *Dispatcher) dispatchPlanCore(
 	promptBuilder func(context.Context, DispatchInput) (string, error),
 	resultHandler func(context.Context, *model.DaemonTask) (*model.Message, error),
 	onTaskCreated func(context.Context, *model.DaemonTask),
+	streamingRequested bool,
 ) (*model.DaemonTask, *model.Message, error) {
 	convID, userID := in.ConvID, in.UserID
 	agent, contextMessages, replyTo := in.Agent, in.ContextMessages, in.ReplyTo
@@ -351,34 +501,94 @@ func (d *Dispatcher) dispatchPlanCore(
 		onTaskCreated(ctx, task)
 	}
 
+	// 群聊流式接入（本任务）：预创建 streaming placeholder + 注册 task 映射。
+	// 流式仅在「调用方显式声明走 streaming 路径」时启用：
+	//   - Dispatch() 薄壳把 StreamingRequested 置 true → 启用流式（worker / 群聊 @mention 走这条）
+	//   - DispatchPlan() 注入自定义 ResultHandler 的调用方（runDaemonEdit /
+	//     handleOrchestratedDispatch）默认 StreamingRequested=false → 不启用流式，
+	//     避免创建孤立的 streaming placeholder（无人 FinalizeStreaming → 仅 watchdog 兜底），
+	//     且与调用方自己的产物落库形成双消息。
+	//
+	// 同时要求 StreamingDeps.MsgRepo 非 nil（main.go 通过 SetStreamingDeps 注入）。
+	// 测试若直接构造 DispatcherDeps{} 不注入 Streaming，也保持向后兼容（无流式）。
+	pipelineDeps := d.streamingDeps()
+	streamingEnabled := pipelineDeps.MsgRepo != nil && streamingRequested
+	var handle *StreamingHandle
+	if streamingEnabled {
+		handle, err = SetupStreamingPipeline(ctx, pipelineDeps, convID, agent.ID, agent.Name, agent.CLITool, task.ID, replyTo, d.deps.TaskAgent)
+		if err != nil {
+			return task, nil, err
+		}
+		d.handles.Store(task.ID, handle)
+		// defer 清理（对齐 createAgentReply:1269-1279）
+		defer d.handles.Delete(task.ID)
+		if d.deps.DaemonHub != nil {
+			defer d.deps.DaemonHub.RemoveTaskPromise(task.ID)
+			defer d.deps.DaemonHub.DeleteTaskMessage(task.ID)
+		}
+		if d.deps.TaskAgent != nil {
+			defer d.deps.TaskAgent.DeleteTaskAgent(task.ID)
+		}
+		if pipelineDeps.StreamingBuffer != nil {
+			if buf, ok := pipelineDeps.StreamingBuffer.(*StreamingBuffer); ok {
+				defer buf.Delete(task.ID)
+			}
+		}
+	}
+
+	finalizeErr := func(status string) {
+		if !streamingEnabled || handle == nil {
+			return
+		}
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{Status: status}); ferr != nil {
+			slog.Warn("dispatcher: finalize streaming on error failed", "message_id", handle.MessageID, "error", ferr)
+		}
+		BroadcastStreamingTerminal(pipelineDeps, handle, status)
+	}
+
 	if d.deps.DaemonHub == nil || !d.deps.DaemonHub.IsConnected(*agent.MachineID) {
 		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
+		finalizeErr(model.MessageStatusError)
 		return task, nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接: %w", agent.Name, ErrDaemonNotConnected)
 	}
 	d.deps.DaemonHub.RegisterTaskPromise(task.ID)
+	dispatchData := map[string]interface{}{
+		"task_id":          task.ID,
+		"cli_tool":         agent.CLITool,
+		"prompt":           prompt,
+		"context_messages": contextMessages,
+		"agent_id":         agent.ID,
+		"conversation_id":  convID,
+		"user_id":          userID,
+	}
+	if handle != nil {
+		dispatchData["message_id"] = handle.MessageID
+	}
 	if err := d.deps.DaemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          task.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           prompt,
-			"context_messages": contextMessages,
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
+		Data: dispatchData,
 	}); err != nil {
+		finalizeErr(model.MessageStatusError)
 		return task, nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
 
+	preWaitTask := task
 	task, err = d.waitDaemonTask(ctx, task.ID)
 	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
+		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", preWaitTask.ID, "error", err)
+		finalizeErr(model.MessageStatusError)
+		// 注意：waitDaemonTask 出错时返回的 task 可能为 nil（IsConnected 返回 false
+		// / channel nil 等场景）。这里取原 task（preWaitTask，预 CreateDaemonTask 的实例）
+		// 避免 nil 解引用；调用方读 task 时容忍无 Result/Artifacts 字段（与重构前行为一致）。
+		if task == nil {
+			task = preWaitTask
+		}
 		return task, nil, err
 	}
 	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
 	if task.Status == "failed" {
+		finalizeErr(model.MessageStatusError)
 		return task, nil, fmt.Errorf("daemon task failed: %s", task.Error)
 	}
 

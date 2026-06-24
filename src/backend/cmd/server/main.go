@@ -230,6 +230,21 @@ func main() {
 	streamingBuffer := service.NewStreamingBuffer()
 	msgSvc.SetStreamingBuffer(streamingBuffer)
 
+	// 群聊流式接入（本任务）：Dispatcher 共享 MessageService 的流式管线依赖，
+	// 让群聊 worker dispatch 也走 SetupStreamingPipeline / FinalizeStreamingPipeline。
+	// 必须在 orchSvc 构造后、orchSvc.Dispatcher 默认装配后再注入——这里在 orchSvc
+	// 创建后回填 DispatcherDeps.Streaming / TaskAgent / TaskCardQueue。
+	msgSvcStreamingDeps := service.StreamingPipelineDeps{
+		MsgRepo:         msgRepo,
+		DaemonHub:       daemonHub,
+		StreamingBuffer: streamingBuffer,
+		Notifier:        hub,
+		ConvRepo:        convRepo,
+	}
+	if d := orchSvc.Dispatcher(); d != nil {
+		d.SetStreamingDeps(msgSvcStreamingDeps, daemonHub, taskCardQueue)
+	}
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	convHandler := handler.NewConversationHandler(convSvc, roleSvc)
@@ -248,7 +263,7 @@ func main() {
 	toolDefHandler.SetToolRegistry(toolRegistry)
 	toolCategoryHandler := handler.NewToolCategoryHandler(toolCategoryRepo)
 	catalogHandler := catalog.NewHandler(catalogSvc)
-	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub, streamingBuffer)
+	daemonHandler := handler.NewDaemonHandler(agentSvc, orchSvc, cfg.Daemon.Token, logger, cfg.CORS.AllowedOrigins, daemonHub, hub, streamingBuffer, convRepo)
 	// 不再注册 SetDaemonTaskDispatcher：CreateDaemonTask 的每个合法 caller
 	// (createAgentReply / Dispatcher.dispatchCore / agent_browse / agent_skill_open)
 	// 都会自己调 SendToMachine(task.dispatch) 并按需携带 message_id。

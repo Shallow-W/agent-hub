@@ -621,18 +621,35 @@ func (h *Hub) SendToRoomExcept(conversationID string, exclude *Client, msg WSMes
 
 // PushToConversation 推送持久化消息给会话所有成员（在线房间推送 + 按用户推送）
 func (h *Hub) PushToConversation(conversationID string, memberIDs []string, message interface{}) {
+	h.pushPersisted(conversationID, memberIDs, message, TypeMessageComplete)
+}
+
+// PushStreamingToConversation 推送流式增量（task.progress → message.streaming）给
+// 会话所有成员。与 PushToConversation 区别：使用 TypeMessageStreaming 事件类型，
+// 不走 TypeMessageComplete 路径——前端按 type 区分终态广播与流式增量。
+//
+// 引入原因（本任务）：handleTaskProgress 原实现 Broadcast 推给所有在线用户，
+// 造成跨用户数据泄漏 + 多余广播流量。改用本方法按 conversation 成员推送。
+func (h *Hub) PushStreamingToConversation(conversationID string, memberIDs []string, payload interface{}) {
+	h.pushPersisted(conversationID, memberIDs, payload, TypeMessageStreaming)
+}
+
+// pushPersisted 是 PushToConversation / PushStreamingToConversation 的共享实现。
+// eventType 决定 WS message.type 字段（TypeMessageComplete 终态 / TypeMessageStreaming 增量）。
+func (h *Hub) pushPersisted(conversationID string, memberIDs []string, payload interface{}, eventType string) {
 	select {
 	case h.bus <- BusMessage{
-		Type:   BusPersistedMsg,
+		Type:   BusCustomEvent,
 		Target: conversationID,
-		Payload: &persistedMsgPayload{
+		Payload: &customEventPayload{
 			ConversationID: conversationID,
 			MemberIDs:      memberIDs,
-			Message:        message,
+			EventType:      eventType,
+			Data:           payload,
 		},
 	}:
 	default:
-		h.logger.Warn("hub bus full, dropping push-to-conversation", "conversation_id", conversationID)
+		h.logger.Warn("hub bus full, dropping push-to-conversation", "conversation_id", conversationID, "event_type", eventType)
 	}
 }
 
