@@ -82,6 +82,7 @@ func Setup(r *gin.Engine, deps Deps) {
 			kbRoutes.GET("/:id/search", deps.KnowledgeHandler.SearchFiles)
 			kbRoutes.GET("/:id/files/:fileId/text", deps.KnowledgeHandler.GetFileText)
 			kbRoutes.GET("/:id/files/:fileId/content", deps.KnowledgeHandler.GetFileContent)
+			kbRoutes.POST("/:id/files/:fileId/smart-rename", deps.KnowledgeHandler.SmartRenameFile)
 			kbRoutes.DELETE("/:id/files/:fileId", deps.KnowledgeHandler.DeleteFile)
 			kbRoutes.GET("/group/:groupId", deps.KnowledgeHandler.ListGroup)
 			kbRoutes.GET("/resolve", deps.KnowledgeHandler.ResolveKnowledgeRef)

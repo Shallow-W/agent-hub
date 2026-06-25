@@ -19,20 +19,22 @@ import (
 )
 
 var (
-	ErrKBNotFound     = errors.New("知识库不存在")
-	ErrKBNoPermission = errors.New("无权访问该知识库")
-	ErrKBNameEmpty    = errors.New("知识库名称不能为空")
-	ErrKBNotPublic    = errors.New("该知识库不是公开的")
-	ErrKBFileEmpty    = errors.New("上传文件不能为空")
-	ErrKBFileNotFound = errors.New("文件不存在")
+	ErrKBNotFound      = errors.New("知识库不存在")
+	ErrKBNoPermission  = errors.New("无权访问该知识库")
+	ErrKBNameEmpty     = errors.New("知识库名称不能为空")
+	ErrKBNotPublic     = errors.New("该知识库不是公开的")
+	ErrKBFileEmpty     = errors.New("上传文件不能为空")
+	ErrKBFileNotFound  = errors.New("文件不存在")
+	ErrKBRenameNoAgent = errors.New("没有可用在线智能体")
 )
 
 // KnowledgeService 知识库业务逻辑
 type KnowledgeService struct {
-	kbRepo    *repository.KnowledgeRepo
-	userRepo  *repository.UserRepo
-	uploadDir string
-	fileURLs  *FileURLBuilder
+	kbRepo            *repository.KnowledgeRepo
+	userRepo          *repository.UserRepo
+	uploadDir         string
+	fileURLs          *FileURLBuilder
+	filenameSuggester KnowledgeFilenameSuggester
 }
 
 // NewKnowledgeService 创建知识库服务

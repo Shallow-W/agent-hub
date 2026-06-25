@@ -215,6 +215,7 @@ func main() {
 		msgSvc.SetDeliveryState(nil)
 	}
 	agentSvc.SetDaemonHub(daemonHub)
+	knowledgeSvc.SetFilenameSuggester(agentSvc)
 	msgSvc.SetDaemonHub(daemonHub)
 
 	// TaskCardQueue: 收集 MCP subprocess 工具 emit 的卡片（如 deploy_project info 卡），

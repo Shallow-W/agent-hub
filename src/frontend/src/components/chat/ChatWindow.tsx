@@ -48,6 +48,7 @@ const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
+const EMPTY_MESSAGES: Message[] = [];
 const BLACKBOARD_MAX_LEN = 8000;
 const { Text } = Typography;
 
@@ -97,10 +98,9 @@ export const ChatWindow: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
-  const streamingContent = useMessageStore(
-    (s) => (activeId ? s.streamingContent[activeId] : undefined),
+  const isStreaming = useMessageStore(
+    (s) => (activeId ? (s.messages[activeId] ?? EMPTY_MESSAGES).some((msg) => msg.status === 'streaming') : false),
   );
-  const isStreaming = (streamingContent ?? '').length > 0;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
 
@@ -291,11 +291,10 @@ export const ChatWindow: React.FC = () => {
       type: 'user.stop_stream',
       data: { conversation_id: activeId },
     }));
-    useMessageStore.setState((s) => {
-      const next = { ...s.streamingContent };
-      delete next[activeId];
-      return { streamingContent: next };
-    });
+    const store = useMessageStore.getState();
+    for (const msg of store.messages[activeId] ?? []) {
+      if (msg.status === 'streaming') store.cancelStreaming(activeId, msg.id);
+    }
     antMessage.info('已停止生成');
   }, [wsClient, activeId]);
 

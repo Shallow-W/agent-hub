@@ -32,7 +32,11 @@ const KnowledgeView: React.FC = () => {
       {/* 右侧面板 */}
       <div className={styles.rightPanel}>
         {selectedKnowledgeFile && selectedKbId ? (
-          <KnowledgeFilePreview file={selectedKnowledgeFile} kbId={selectedKbId} />
+          <KnowledgeFilePreview
+            file={selectedKnowledgeFile}
+            kbId={selectedKbId}
+            onFileRenamed={(file) => setSelectedKnowledgeFile(file, selectedKbId)}
+          />
         ) : (
           <div className={styles.emptyRightPanel}>
             <div className={styles.emptyRightIcon}>📚</div>
