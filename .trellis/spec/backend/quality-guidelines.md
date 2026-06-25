@@ -213,10 +213,14 @@ detail.Description = truncateString(ca.Description, 300)
 **Signatures**:
 - API: `PUT /api/agents/:id/tools-config`
 - Request: `{"tools_config": string, "enable_management_tools": boolean}`
+- Tool catalog API: `GET /api/tools/definitions`
+- Builtin template API: `GET /api/tools/builtin-templates`
 - Storage: `agents.tools_config` stores the normalized JSON string; `agents.enable_management_tools` stores whether management tools are enabled.
 - Runtime read: daemon MCP resolves the current Agent through `/mcp/agents/:id` or `/mcp/agents` and must receive `tools_config`.
 
 **Contracts**:
+- `/api/tools/definitions` must expose the runtime `ToolRegistry` entries, not stale DB/catalog rows. `tool_definitions` is a sync/cache table; it is not the frontend authorization source of truth.
+- `/api/tools/builtin-templates` must normalize `tool_names` against the runtime `ToolRegistry` before returning them to the frontend. Filter unknown names and map supported legacy aliases such as `list_group_agents` -> `list_conversation_agents`.
 - `agents.tools_config` is the per-Agent MCP tool authorization config. The supported JSON shape is `{"toolset": string, "allowed_tools": string[]}`.
 - Frontend Agent tool assignment UI must persist through `PUT /api/agents/:id/tools-config`, not only local component/store state and not the full `PUT /api/agents/:id` custom-Agent update path.
 - The tools-config update endpoint only mutates `tools_config` and `enable_management_tools`; it must not change name, prompt, avatar, capabilities, Skills, status, or machine fields.
@@ -234,6 +238,8 @@ detail.Description = truncateString(ca.Description, 300)
 **Validation & Error Matrix**:
 - Empty `tools_config` -> persist normalized no-tools config `{"toolset":"none","allowed_tools":[]}`.
 - Unknown tool names -> filter before persistence.
+- Stale DB/catalog tool definition not registered in `ToolRegistry` -> omit from `/api/tools/definitions`.
+- Builtin template contains stale/unknown tool names -> return only canonical registered names in `tool_names`.
 - Invalid JSON object shape that cannot be normalized -> `ErrAgentInvalidInput`.
 - Missing `agent_id` or `user_id` -> `ErrAgentInvalidInput`.
 - Agent not visible to the current user -> `ErrAgentNotFound`.
@@ -241,16 +247,28 @@ detail.Description = truncateString(ca.Description, 300)
 
 **Good/Base/Bad Cases**:
 - Good: User selects `list_tasks` for a daemon-added Codex Agent, saves, reloads, and the Agent still has `allowed_tools:["list_tasks"]`.
+- Good: Frontend can only select tool names returned by `ToolRegistry`; saving `list_conversation_agents` persists and reloads as the same canonical name.
 - Base: User selects no tools; backend persists explicit empty allowlist and daemon exposes no platform tools.
 - Bad: Frontend checkbox state updates but no backend API writes `agents.tools_config`.
 - Bad: Saving tools through the full `PUT /api/agents/:id` path fails for non-custom/system Agents.
+- Bad: `/api/tools/definitions` exposes stale `list_group_agents`; backend filters it during persistence, so the UI shows "saved" and then clears the selection.
 
 **Tests Required**:
 - Backend service test for `tools_config` normalization, unknown tool filtering, and tools-config persistence for visible daemon/system/custom Agents.
+- Backend handler test that `/api/tools/definitions` is sourced from `ToolRegistry` and that builtin templates filter/alias stale names.
+- Frontend E2E for selecting an Agent tool, saving, switching tabs, refreshing, and seeing the same canonical tool still selected.
 - Daemon MCP test for filtered `tools/list` and unauthorized `tools/call`.
 - End-to-end daemon MCP test where one Agent's config allows tool A and denies tool B.
 
 **Wrong vs Correct**:
+```go
+// Wrong: UI tool catalog comes from persisted seed rows that may be stale.
+definitions, _ := repo.List(ctx)
+
+// Correct: UI tool catalog comes from the same runtime registry used for validation.
+definitions := handler.definitionsFromRegistry()
+```
+
 ```go
 // Wrong: all MCP tools are always exposed.
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)

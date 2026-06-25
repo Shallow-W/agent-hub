@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 
 	"github.com/agent-hub/backend/internal/middleware"
+	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -34,6 +36,10 @@ func (h *ToolDefinitionHandler) SetToolRegistry(tr *service.ToolRegistry) {
 }
 
 func (h *ToolDefinitionHandler) ListDefinitions(c *gin.Context) {
+	if h.toolRegistry != nil {
+		middleware.SuccessResponse(c, h.definitionsFromRegistry())
+		return
+	}
 	list, err := h.svc.ListDefinitions(c.Request.Context())
 	if err != nil {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50090, "查询工具定义失败")
@@ -48,6 +54,9 @@ func (h *ToolDefinitionHandler) ListBuiltinTemplates(c *gin.Context) {
 		middleware.ErrorResponse(c, http.StatusInternalServerError, 50091, "查询内置模板失败")
 		return
 	}
+	if h.toolRegistry != nil {
+		list = h.normalizeBuiltinTemplates(list)
+	}
 	middleware.SuccessResponse(c, list)
 }
 
@@ -58,6 +67,78 @@ func (h *ToolDefinitionHandler) BuiltinSkillTemplates(c *gin.Context) {
 		return
 	}
 	middleware.SuccessResponse(c, list)
+}
+
+var managementToolNames = map[string]bool{
+	"create_agent": true,
+	"update_agent": true,
+	"delete_agent": true,
+}
+
+var legacyToolAliases = map[string]string{
+	"list_group_agents": "list_conversation_agents",
+}
+
+func (h *ToolDefinitionHandler) definitionsFromRegistry() []model.ToolDefinition {
+	specs := h.toolRegistry.List()
+	out := make([]model.ToolDefinition, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, model.ToolDefinition{
+			Name:         spec.Name(),
+			Label:        spec.Label(),
+			Category:     spec.Category(),
+			Description:  spec.Description(),
+			IsManagement: managementToolNames[spec.Name()],
+		})
+	}
+	return out
+}
+
+func (h *ToolDefinitionHandler) normalizeBuiltinTemplates(list []model.BuiltinToolsetTemplate) []model.BuiltinToolsetTemplate {
+	allowed := h.registryToolNames()
+	out := make([]model.BuiltinToolsetTemplate, len(list))
+	for i, tpl := range list {
+		out[i] = tpl
+		var names []string
+		if err := json.Unmarshal(tpl.ToolNames, &names); err != nil {
+			out[i].ToolNames = json.RawMessage("[]")
+			continue
+		}
+		out[i].ToolNames = marshalToolNames(normalizeToolNamesForRegistry(names, allowed))
+	}
+	return out
+}
+
+func (h *ToolDefinitionHandler) registryToolNames() map[string]bool {
+	allowed := map[string]bool{}
+	for _, spec := range h.toolRegistry.List() {
+		allowed[spec.Name()] = true
+	}
+	return allowed
+}
+
+func normalizeToolNamesForRegistry(names []string, allowed map[string]bool) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if alias, ok := legacyToolAliases[name]; ok {
+			name = alias
+		}
+		if name == "" || !allowed[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func marshalToolNames(names []string) json.RawMessage {
+	data, err := json.Marshal(names)
+	if err != nil {
+		return json.RawMessage("[]")
+	}
+	return data
 }
 
 // ToolRegistryItem is the DTO for an individual tool in the tool-registry response.
