@@ -118,5 +118,9 @@ for the full contract.
   deep links, browser history, and future deployment routing harder. Prefer
   paths such as `/chat`, `/agents`, `/contacts`, `/knowledge`, `/tasks`, and
   `/settings` for major workspaces.
+- Reusing `activeConversationId` directly in workspace pages whose domain is
+  group-only can fetch the wrong server data after switching from a single chat.
+  Resolve it through the current group conversation list first, and use the
+  resolved group id for task APIs, WS refresh checks, and create payloads.
 - Polling the server via `setInterval` to detect changes that already arrive as
   WS events. Adds load and hides the WS source-of-truth.
