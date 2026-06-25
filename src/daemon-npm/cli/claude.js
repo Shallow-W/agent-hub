@@ -16,8 +16,24 @@ const {
 } = require('./events');
 
 function createClaudeCliSpec(ctx) {
+  // Bug 1 fix (per-type dedup): partial 模式（--include-partial-messages）下，
+  // daemon 同时通过两条通道发射同一份 content：
+  //   1. content_block_start / content_block_delta（增量通道）
+  //   2. turn 结束的 assistant 事件（整条 message.content，回退通道）
+  // 旧版用单一 sawContentBlockInTurn flag 抑制整个 assistant fallback——太激进，
+  // 如果某些 content type 没走 partial（比如某些 CLI 版本 thinking 不发 delta），
+  // assistant fallback 也被抑制 → 内容丢失。
+  //
+  // 新策略：per-type flag（text / thinking / tool_use 各自跟踪）。
+  // assistant fallback 只跳过已经通过 partial 发过的 type，其它 type 正常发。
+  // result 事件 reset 全部 3 个 flag（每个 turn 边界都重置）。
+  const adapter = {
+    sawTextInTurn: false,
+    sawThinkingInTurn: false,
+    sawToolUseInTurn: false,
+  };
+
   return {
-    // 标识符，用于 Registry 键 + 分发匹配。
     cliTool: 'claude',
     // UI 名（CANDIDATES 派生时使用）。
     name: 'Claude Code',
@@ -141,6 +157,14 @@ function createClaudeCliSpec(ctx) {
       // 增量路径：content_block_start/delta/stop
       if (event.type === 'content_block_start') {
         const block = event.content_block || {};
+        // Bug 1 fix (per-type dedup): 记录该 type 已通过 partial 通道发射过。
+        if (block.type === 'text') {
+          adapter.sawTextInTurn = true;
+        } else if (block.type === 'thinking') {
+          adapter.sawThinkingInTurn = true;
+        } else if (block.type === 'tool_use') {
+          adapter.sawToolUseInTurn = true;
+        }
         // tool_use 在 start 时把 tool name 作为空字符串事件先推，让前端立即显示工具气泡。
         // 真正的入参通过后续 input_json_delta 累积。
         // PR5：同步把 block.id（Claude 的 tool_use 稳定 ID）透传给 toolUseEvent，
@@ -153,14 +177,18 @@ function createClaudeCliSpec(ctx) {
       if (event.type === 'content_block_delta') {
         const delta = event.delta || {};
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+          // Bug 1 fix: text 增量通道已激活，后续 assistant fallback 中的 text 部分跳过。
+          adapter.sawTextInTurn = true;
           return [textEvent(delta.text)];
         }
         if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          adapter.sawThinkingInTurn = true;
           return [thinkingEvent(delta.thinking)];
         }
         if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           // partial_json 是工具入参的 JSON 片段，作为 tool_use 的增量入参发出。
           // 前端按 tool_use 事件累积展示，最终在 content_block_stop 拼成完整 JSON。
+          adapter.sawToolUseInTurn = true;
           return [toolUseEvent('', delta.partial_json)];
         }
         return null;
@@ -196,10 +224,14 @@ function createClaudeCliSpec(ctx) {
         for (const part of content) {
           if (!part || typeof part !== 'object') continue;
           if (part.type === 'text' && typeof part.text === 'string') {
+            // Bug 1 fix (per-type dedup): 该 type 已通过 partial 通道发射，跳过 fallback
+            if (adapter.sawTextInTurn) continue;
             out.push(textEvent(part.text));
           } else if (part.type === 'thinking' && typeof part.thinking === 'string') {
+            if (adapter.sawThinkingInTurn) continue;
             out.push(thinkingEvent(part.thinking));
           } else if (part.type === 'tool_use') {
+            if (adapter.sawToolUseInTurn) continue;
             out.push(toolUseEvent(part.name || '', part.input, part.id || ''));
           }
         }
@@ -213,6 +245,10 @@ function createClaudeCliSpec(ctx) {
       }
 
       if (event.type === 'result') {
+        // Bug 1 fix (per-type dedup): turn 边界 reset 全部 per-type flag。
+        adapter.sawTextInTurn = false;
+        adapter.sawThinkingInTurn = false;
+        adapter.sawToolUseInTurn = false;
         const text = typeof event.result === 'string' ? event.result : JSON.stringify(event.result);
         const isError = Boolean(event.is_error || event.subtype === 'error_during_execution');
         if (isError) {

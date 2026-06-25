@@ -101,6 +101,14 @@ func (r *fakeAgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, mach
 	return nil
 }
 
+func (r *fakeAgentRepo) UpdateMachineCapabilities(ctx context.Context, id string, capabilities []string) error {
+	return nil
+}
+
+func (r *fakeAgentRepo) FindMachineWithCapability(ctx context.Context, userID, capability string) (*model.DaemonMachine, error) {
+	return nil, nil
+}
+
 func (r *fakeAgentRepo) UpsertMachineAgent(ctx context.Context, userID, machineID, machineName, name, cliTool, version, capabilitiesJSON string) error {
 	r.machineAgent = append(r.machineAgent, machineID+":"+cliTool)
 	return nil

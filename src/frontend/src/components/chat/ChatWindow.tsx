@@ -97,10 +97,12 @@ export const ChatWindow: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
-  const streamingContent = useMessageStore(
-    (s) => (activeId ? s.streamingContent[activeId] : undefined),
+  // PR3：检测当前对话是否有 streaming 状态的 message（单一 messages 数组即可判定，
+  // 不再依赖已删除的 streamingContent map）。用于 header 的 Stop 任务按钮 disable 状态。
+  const hasStreamingMessage = useMessageStore(
+    (s) => (activeId ? (s.messages[activeId] ?? []).some((m) => m.status === 'streaming') : false),
   );
-  const isStreaming = (streamingContent ?? '').length > 0;
+  const isStreaming = hasStreamingMessage;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
 
@@ -291,11 +293,6 @@ export const ChatWindow: React.FC = () => {
       type: 'user.stop_stream',
       data: { conversation_id: activeId },
     }));
-    useMessageStore.setState((s) => {
-      const next = { ...s.streamingContent };
-      delete next[activeId];
-      return { streamingContent: next };
-    });
     antMessage.info('已停止生成');
   }, [wsClient, activeId]);
 

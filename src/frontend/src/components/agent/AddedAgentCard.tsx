@@ -69,15 +69,6 @@ export const AddedAgentCard: React.FC<AddedAgentCardProps> = ({
 }) => {
   const isRunning = agent.status === 'online' || agent.status === 'busy';
   const canStart = agent.status === 'stopped' || agent.status === 'offline' || agent.status === 'error';
-  const tags = (() => {
-    if (!agent.tags || agent.tags === '[]') return [];
-    try {
-      const arr = JSON.parse(agent.tags);
-      return Array.isArray(arr) ? arr.filter((t): t is string => typeof t === 'string') : [];
-    } catch {
-      return [];
-    }
-  })();
   const isBuiltinSystem = agent.type === 'system' && !agent.user_id;
 
   const handleCardClick = () => {
@@ -119,16 +110,11 @@ export const AddedAgentCard: React.FC<AddedAgentCardProps> = ({
             @{agent.cli_tool}
             {agent.version ? ` · v${agent.version}` : ''}
           </div>
-          {tags.length > 0 ? (
-            <div className={styles.tags}>
-              {tags.slice(0, 3).map((item) => (
-                <span className={styles.tag} key={item}>
-                  {item.length > 14 ? item.slice(0, 14) + '…' : item}
-                </span>
-              ))}
-              {tags.length > 3 && <span className={styles.tagMore}>+{tags.length - 3}</span>}
-            </div>
-          ) : null}
+          {agent.system_prompt ? (
+            <div className={styles.desc}>{agent.system_prompt}</div>
+          ) : (
+            <div className={styles.descPlaceholder} />
+          )}
         </div>
       </div>
 

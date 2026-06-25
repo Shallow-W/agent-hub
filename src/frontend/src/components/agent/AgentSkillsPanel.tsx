@@ -10,6 +10,9 @@ import {
   CloseOutlined,
   SaveOutlined,
   SettingOutlined,
+  CheckCircleFilled,
+  AppstoreFilled,
+  LockFilled,
 } from '@ant-design/icons';
 import type { Agent, PlatformSkill } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
@@ -431,53 +434,68 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
 
   return (
     <div className={styles.container}>
-      <div className={styles.overviewStrip}>
-        <div className={styles.overviewItem}>
-          <span className={styles.overviewLabel}>已分配</span>
-          <strong className={styles.overviewValue}>{skills.length}</strong>
+      <div className={styles.panelActions}>
+        <div className={styles.miniMetrics}>
+          <div className={styles.miniMetric}>
+            <span className={styles.miniMetricIcon} style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#22c55e' }}>
+              <CheckCircleFilled />
+            </span>
+            <span className={styles.miniMetricMeta}>
+              <span className={styles.miniMetricLabel}>已分配</span>
+              <span className={styles.miniMetricValue}>{skills.length}</span>
+            </span>
+          </div>
+          <div className={styles.miniMetric}>
+            <span className={styles.miniMetricIcon} style={{ background: 'rgba(139, 92, 246, 0.12)', color: '#8b5cf6' }}>
+              <AppstoreFilled />
+            </span>
+            <span className={styles.miniMetricMeta}>
+              <span className={styles.miniMetricLabel}>平台库</span>
+              <span className={styles.miniMetricValue}>{librarySkills.length}</span>
+            </span>
+          </div>
+          <div className={styles.miniMetric}>
+            <span className={styles.miniMetricIcon} style={{ background: 'rgba(249, 115, 22, 0.12)', color: '#f97316' }}>
+              <LockFilled />
+            </span>
+            <span className={styles.miniMetricMeta}>
+              <span className={styles.miniMetricLabel}>底座只读</span>
+              <span className={styles.miniMetricValue}>{baseSkills.length}</span>
+            </span>
+          </div>
         </div>
-        <div className={styles.overviewItem}>
-          <span className={styles.overviewLabel}>平台库</span>
-          <strong className={styles.overviewValue}>{librarySkills.length}</strong>
-        </div>
-        <div className={styles.overviewItem}>
-          <span className={styles.overviewLabel}>底座只读</span>
-          <strong className={styles.overviewValue}>{baseSkills.length}</strong>
-        </div>
-      </div>
-
-      <div className={styles.templateToolbar}>
-        <span className={styles.templateLabel}>技能模板</span>
-        <Select
-          className={styles.templateSelect}
-          value={skillTemplate}
-          options={skillTemplateOptions}
-          onChange={handleSkillTemplateChange}
-          placeholder="按分类快速导入"
-          getPopupContainer={(trigger) => trigger.parentElement || document.body}
-        />
-        <Button icon={<SettingOutlined />} onClick={() => setSkillManageOpen(true)}>
-          管理
-        </Button>
-        <Button icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
-          保存
-        </Button>
-        <Button icon={<PlusOutlined />} onClick={() => { setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' }); setCreateModalOpen(true); }}>
-          新建技能
-        </Button>
-        <span className={styles.templateCount}>
-          已选 {skills.length}/{librarySkills.length}
-        </span>
-      </div>
-
-      <div className={styles.subTabsRow}>
-        <div className={styles.subTabs}>
-          <button
-            className={`${styles.subTab} ${activeTab === 'assigned' ? styles.subTabActive : ''}`}
-            type="button"
-            onClick={() => setActiveTab('assigned')}
+        <div className={styles.panelActionsRow}>
+          <Select
+            className={styles.templateSelect}
+            value={skillTemplate}
+            options={skillTemplateOptions}
+            onChange={handleSkillTemplateChange}
+            placeholder="技能模板"
+            getPopupContainer={(trigger) => trigger.parentElement || document.body}
+          />
+          <Button icon={<SettingOutlined />} onClick={() => setSkillManageOpen(true)}>
+            管理
+          </Button>
+          <Button icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
+            保存
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => { setCreateForm({ name: '', category: '', description: '', trigger: '', detail: '' }); setCreateModalOpen(true); }}
           >
-            已分配 Skills <span className={styles.subTabCount}>{skills.length}</span>
+            新建技能
+          </Button>
+        </div>
+      </div>
+
+      <div className={styles.subTabs}>
+        <button
+          className={`${styles.subTab} ${activeTab === 'assigned' ? styles.subTabActive : ''}`}
+          type="button"
+          onClick={() => setActiveTab('assigned')}
+        >
+          已分配 Skills <span className={styles.subTabCount}>{skills.length}</span>
         </button>
         <button
           className={`${styles.subTab} ${activeTab === 'library' ? styles.subTabActive : ''}`}
@@ -486,7 +504,6 @@ export const AgentSkillsPanel: React.FC<AgentSkillsPanelProps> = ({ agent }) => 
         >
           平台库 <span className={styles.subTabCount}>{librarySkills.length}</span>
         </button>
-        </div>
       </div>
 
       {activeTab === 'assigned' && (

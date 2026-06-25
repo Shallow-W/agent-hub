@@ -32,12 +32,13 @@ import {
 const UNKNOWN_KIND = 'nonexistent_kind_xyz' as BlockKind;
 
 describe('BlockRegistry', () => {
-  it('1. 内置 5 个 block 已自注册（import ./index 副作用）', () => {
+  it('1. 内置 6 个 block 已自注册（import ./index 副作用）', () => {
     expect(hasBlockRenderer('text')).toBe(true);
     expect(hasBlockRenderer('thinking')).toBe(true);
     expect(hasBlockRenderer('tool_use')).toBe(true);
     expect(hasBlockRenderer('tool_result')).toBe(true);
     expect(hasBlockRenderer('error')).toBe(true);
+    expect(hasBlockRenderer('card')).toBe(true);
   });
 
   it('2. getBlockSpec 已注册返回 spec，未注册返回 undefined', () => {

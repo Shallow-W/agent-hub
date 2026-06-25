@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Avatar, Button, Popconfirm, Typography } from 'antd';
+import { Avatar, Button, Popconfirm, Tag, Typography } from 'antd';
 import { message } from '@/utils/message';
 import {
   AppstoreOutlined,
@@ -21,6 +21,7 @@ import { StatusBadge, type StatusBadgeStatus } from '@/components/common/StatusB
 import { ResourceChart } from './ResourceChart';
 import { AgentBaseCard } from './AgentBaseCard';
 import { AddedAgentCard } from './AddedAgentCard';
+import { buildCommands, DAEMON_VERSION } from '@/utils/connectCommand';
 import styles from './ComputerProfile.module.css';
 
 interface ComputerProfileProps {
@@ -84,7 +85,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
   const restartAgent = useAgentStore((s) => s.restartAgent);
   const [createOpen, setCreateOpen] = useState(false);
   const [avatarPickerAgent, setAvatarPickerAgent] = useState<Agent | null>(null);
-  const [reconnectCmd, setReconnectCmd] = useState<string | null>(null);
+  const [reconnectCommands, setReconnectCommands] = useState<{ npx: string; node: string } | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [lifecycleLoading, setLifecycleLoading] = useState<Record<string, boolean>>({});
 
@@ -123,7 +124,7 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
     try {
       const { getMachineConnectCommand } = await import('@/api/agent');
       const result = await getMachineConnectCommand(machine.id);
-      setReconnectCmd(result.command);
+      setReconnectCommands(buildCommands(result.command, result.daemon_npm_path, machine.name));
     } catch {
       message.error('获取连接命令失败');
     } finally {
@@ -247,18 +248,32 @@ export const ComputerProfile: React.FC<ComputerProfileProps> = ({
           </Popconfirm>
         </div>
       </div>
-      {reconnectCmd && (
-        <div className={styles.reconnectBox} style={{ margin: '0 0 8px', padding: 12, background: 'var(--color-bg-tertiary)', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+      {reconnectCommands && (
+        <div className={styles.reconnectBox}>
+          <div className={styles.reconnectHint}>
             在目标电脑上执行以下命令重新连接：
+            <Tag color="blue" className={styles.versionTag}>Daemon v{DAEMON_VERSION}</Tag>
           </div>
-          <Typography.Text
-            copyable
-            code
-            style={{ fontSize: 12, wordBreak: 'break-all' }}
-          >
-            {reconnectCmd}
-          </Typography.Text>
+          <div className={styles.reconnectCommandsList}>
+            <div className={styles.reconnectRow}>
+              <div className={styles.reconnectLabel}>
+                <Tag>NPX</Tag>
+                <span className={styles.reconnectHintInline}>在线（npm 安装）</span>
+              </div>
+              <Typography.Text copyable code className={styles.reconnectCode}>
+                {reconnectCommands.npx}
+              </Typography.Text>
+            </div>
+            <div className={styles.reconnectRow}>
+              <div className={styles.reconnectLabel}>
+                <Tag>Node</Tag>
+                <span className={styles.reconnectHintInline}>本地（开发用，跳过 npm）</span>
+              </div>
+              <Typography.Text copyable code className={styles.reconnectCode}>
+                {reconnectCommands.node}
+              </Typography.Text>
+            </div>
+          </div>
         </div>
       )}
 

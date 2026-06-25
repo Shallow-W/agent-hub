@@ -24,6 +24,9 @@ const (
 	BlockKindToolUse    BlockKind = "tool_use"
 	BlockKindToolResult BlockKind = "tool_result"
 	BlockKindError      BlockKind = "error"
+	// BlockKindCard 把交互式卡片提升为 first-class block kind，与 text/thinking 等平级。
+	// 仅 Card 字段有值。Card 字段是 InteractiveCard 反序列化后的 map 表示。
+	BlockKindCard BlockKind = "card"
 )
 
 // MessageBlock 单个累积 block。
@@ -35,6 +38,7 @@ const (
 //   - ToolName    kind=tool_use 的工具名（如 "Read"）
 //   - ToolUseID   kind=tool_use 的 tool_use_id（与 tool_result 对齐用）
 //   - IsError     kind=tool_result / error 时为 true
+//   - Card        kind=card 时持有交互式卡片（InteractiveCard 的 map 表示）
 //
 // 注意：tool_use 的 partial JSON 输入累积到 Text 字段（不是独立 InputJSON 字段），
 // 这与 frontend streamingReducer 行为一致（PR1 已锁死）。
@@ -45,4 +49,5 @@ type MessageBlock struct {
 	ToolName  string    `json:"tool_name,omitempty" db:"tool_name"`
 	ToolUseID string    `json:"tool_use_id,omitempty" db:"tool_use_id"`
 	IsError   bool      `json:"is_error,omitempty" db:"is_error"`
+	Card      map[string]any `json:"card,omitempty" db:"-"`
 }

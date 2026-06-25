@@ -75,6 +75,7 @@ function createOpenCodeCliSpec(ctx) {
     // 字段：{ command, args, resultFormat, persistSessionKey, env }
     buildCommand(task, deps) {
       const { command, systemPrompt, userPrompt } = deps;
+      const taskId = deps.taskId || task.id || null;
       const sessionKey = ctx.sessionKeyForTask(task);
       const savedSessionId = sessionKey ? ctx.conversationSessions.get(sessionKey) : '';
       const effectivePrompt = systemPrompt
@@ -100,7 +101,7 @@ function createOpenCodeCliSpec(ctx) {
         args,
         resultFormat: 'opencode-json',
         persistSessionKey: sessionKey,
-        env: ctx.buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
+        env: ctx.buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id, taskId),
       };
     },
 

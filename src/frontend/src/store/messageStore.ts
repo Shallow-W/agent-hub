@@ -70,6 +70,27 @@ function generateTempId(): string {
   return `__temp_${Date.now()}_${++tempIdCounter}`;
 }
 
+/**
+ * 解析服务端推送的 blocks_json 字符串。
+ *
+ * 服务端 model.Message 只有 BlocksJSON 字符串字段（没有 Blocks 数组），
+ * task.complete 时 backend SplitTextBlocksByCardFences 已把 text block 里的
+ * fenced JSON 切分为 card kind block，写入了 blocks_json。
+ *
+ * 容错：JSON.parse 失败、非数组、空数组都返回 null，调用方 fallback 到本地 blocks。
+ * 返回 null 时调用方应继续 fallback 到 message.blocks 或 dup.blocks。
+ */
+function parseServerBlocksJSON(blocksJSON: string | undefined | null): MessageBlock[] | null {
+  if (!blocksJSON || typeof blocksJSON !== 'string') return null;
+  try {
+    const parsed = JSON.parse(blocksJSON);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed as MessageBlock[];
+  } catch {
+    return null;
+  }
+}
+
 const recentlyRecalled = new Map<string, number>();
 
 function isRecentlyRecalled(messageId: string): boolean {
@@ -283,8 +304,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         // 合并服务端推送的字段——卡片更新（UpdateMessageCardsAndBroadcast）
         // 会通过 message.complete 推送新的 cards_json/cards，必须覆盖本地。
         // reply_to_message 仅在本地缺失时补齐（避免覆盖已有数据）。
-        // blocks：本地 placeholder 累积的 blocks 优先（保留流式期间已渲染的内容），
-        // 除非服务端推送了权威 blocks/blocks_json（PR4 后落库）。
+        // blocks 优先级（PR 修复）：服务端 blocks_json（权威，已切分为 card kind block）
+        // > 服务端 blocks 数组 > 本地 placeholder 累积的 blocks（流式原文）。
+        // 之前 bug：后端 model.Message 只有 BlocksJSON 字符串，WS 推送时 blocks 字段
+        // 永远为 undefined，导致本地 placeholder 的原始 text block 胜出，渲染为 fenced JSON 原文。
+        const serverBlocksFromJSON = parseServerBlocksJSON(message.blocks_json);
+        const mergedBlocks = serverBlocksFromJSON && serverBlocksFromJSON.length > 0
+          ? serverBlocksFromJSON
+          : (message.blocks ?? dup.blocks);
         const merged: Message = {
           ...dup,
           ...message,
@@ -299,12 +326,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           ...(message.reply_to_message && !dup.reply_to_message
             ? { reply_to_message: message.reply_to_message }
             : {}),
-          // blocks：本地已有 blocks 时优先保留本地（前端权威），除非服务端明确推送。
-          // PR3：placeholder 在流式期间已累积 blocks，task.complete 广播的 message
-          // 会把 status 切到 complete，此时保留本地 blocks（已渲染过的 token）。
-          blocks: dup.blocks && dup.blocks.length > 0 && !(message.blocks && message.blocks.length > 0)
-            ? dup.blocks
-            : (message.blocks ?? dup.blocks),
+          blocks: mergedBlocks,
         };
         const next = [...existing];
         next[dupIdx] = merged;
@@ -422,12 +444,16 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       const placeholderBlocks = placeholder?.blocks;
       const placeholderUsername = placeholder?.username;
 
+      // blocks 优先级（PR 修复）：服务端 blocks_json（权威，已切分为 card kind block）
+      // > 服务端 blocks 数组 > 本地 placeholder 累积的 blocks。
+      const serverBlocksFromJSON = parseServerBlocksJSON(fullMessage.blocks_json);
+      const mergedBlocks = serverBlocksFromJSON && serverBlocksFromJSON.length > 0
+        ? serverBlocksFromJSON
+        : (fullMessage.blocks ?? placeholderBlocks);
+
       const mergedMessage: Message = {
         ...fullMessage,
-        // 本地 blocks 优先（流式期间累积），除非服务端明确推送权威副本。
-        blocks: (placeholderBlocks && placeholderBlocks.length > 0 && !fullMessage.blocks && !fullMessage.blocks_json)
-          ? placeholderBlocks
-          : (fullMessage.blocks ?? placeholderBlocks),
+        blocks: mergedBlocks,
         status: (fullMessage.status ?? 'complete') as MessageStatus,
         // username 保留 placeholder 中的（完整名字），防止服务端广播未带 username 时 fallback。
         ...(placeholderUsername && !fullMessage.username ? { username: placeholderUsername } : {}),

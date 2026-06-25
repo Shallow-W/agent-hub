@@ -1,6 +1,6 @@
 import React, { useState, type ReactNode } from 'react';
-import { Modal, Tabs } from 'antd';
-import { CodeOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import { Modal, Tabs, Button } from 'antd';
+import { CodeOutlined, EditOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +8,7 @@ import type { Artifact } from '@/types/message';
 import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
 import { DeployButton } from './DeployButton';
+import { ArtifactEditor } from './ArtifactEditor';
 import styles from './ArtifactWorkspace.module.css';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
   onClose: () => void;
   /** 来源 Agent 名称，用于群聊多 Agent 时标识产物归属。 */
   agentName?: string | null;
+  /** 对话 ID，传给 DeployButton 供 docker 部署走统一 API。 */
+  conversationId?: string;
 }
 
 function artifactTitle(artifact: Artifact): string {
@@ -234,11 +237,13 @@ const MetaView: React.FC<{ artifact: Artifact; agentName?: string | null }> = ({
   );
 };
 
-export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName }) => {
+export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName, conversationId }) => {
   const defaultTab = artifact?.type === 'webpage' || isPreviewableDocument(artifact)
     ? 'preview'
     : 'code';
   const [activeKey, setActiveKey] = useState(defaultTab);
+  // webpage/document 的编辑器浮层：从只读预览进入全功能编辑（版本/编辑/Diff/AI）
+  const [editorArtifact, setEditorArtifact] = useState<Artifact | null>(null);
 
   React.useEffect(() => {
     setActiveKey(
@@ -250,44 +255,98 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
 
   if (!artifact) return null;
 
+  // webpage：预览 + 编辑入口（编辑入口打开 ArtifactEditor，享版本/Diff/AI 编辑）
   if (artifact.type === 'webpage') {
     return (
-      <Modal
-        open={open}
-        onCancel={onClose}
-        footer={null}
-        width="94vw"
-        style={{ top: 16, maxWidth: 'none' }}
-        className={`${styles.workspaceModal} ${styles.webpageModal}`}
-        destroyOnHidden
-      >
-        <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
-          <PreviewView artifact={artifact} />
-        </div>
-      </Modal>
+      <>
+        <Modal
+          open={open}
+          onCancel={onClose}
+          footer={null}
+          width="94vw"
+          style={{ top: 16, maxWidth: 'none' }}
+          className={`${styles.workspaceModal} ${styles.webpageModal}`}
+          destroyOnHidden
+        >
+          <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
+            <div className={styles.toolbar}>
+              <span className={styles.source}>
+                {agentName && (
+                  <>
+                    <RobotOutlined />
+                    <span className={styles.sourceAgent}>{agentName}</span>
+                  </>
+                )}
+              </span>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setEditorArtifact(artifact)}
+              >
+                编辑 / 版本
+              </Button>
+            </div>
+            <PreviewView artifact={artifact} />
+          </div>
+        </Modal>
+        {editorArtifact && (
+          <ArtifactEditor
+            artifact={editorArtifact}
+            open={Boolean(editorArtifact)}
+            onClose={() => setEditorArtifact(null)}
+          />
+        )}
+      </>
     );
   }
 
   const isDocument = isPreviewableDocument(artifact);
 
+  // document/file：预览 + 编辑入口
   if (isDocument) {
     return (
-      <Modal
-        open={open}
-        onCancel={onClose}
-        footer={null}
-        width="94vw"
-        style={{ top: 16, maxWidth: 'none' }}
-        title={artifactTitle(artifact)}
-        className={`${styles.workspaceModal} ${styles.documentModal}`}
-        destroyOnHidden
-      >
-        <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
-          <div className={styles.documentViewArea}>
-            <PreviewView artifact={artifact} />
+      <>
+        <Modal
+          open={open}
+          onCancel={onClose}
+          footer={null}
+          width="94vw"
+          style={{ top: 16, maxWidth: 'none' }}
+          title={artifactTitle(artifact)}
+          className={`${styles.workspaceModal} ${styles.documentModal}`}
+          destroyOnHidden
+        >
+          <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
+            <div className={styles.toolbar}>
+              <span className={styles.source}>
+                {agentName && (
+                  <>
+                    <RobotOutlined />
+                    <span className={styles.sourceAgent}>{agentName}</span>
+                  </>
+                )}
+              </span>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setEditorArtifact(artifact)}
+              >
+                编辑 / 版本
+              </Button>
+            </div>
+            <div className={styles.documentViewArea}>
+              <PreviewView artifact={artifact} />
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+        {editorArtifact && (
+          <ArtifactEditor
+            artifact={editorArtifact}
+            open={Boolean(editorArtifact)}
+            onClose={() => setEditorArtifact(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -312,7 +371,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
               </>
             )}
           </span>
-          <DeployButton artifact={artifact} />
+          <DeployButton artifact={artifact} conversationId={conversationId} />
         </div>
         <Tabs
           activeKey={activeKey}

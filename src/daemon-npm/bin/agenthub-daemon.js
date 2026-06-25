@@ -520,6 +520,41 @@ function gitRepoRoot(cwd) {
   } catch { return null; }
 }
 
+// 在 task dispatch 前，若 workdir 不是 git 仓库则自动 git init + baseline commit。
+// 这样 agent 后续跑 git diff 才能拿到 HEAD 对比，不会因为非 git 仓库直接 fatal。
+//
+// 行为：
+// - 已是 git 仓库：no-op
+// - 非 git 仓库：git init + 配置 user.email/user.name + add -A + commit baseline
+// - 任何环节失败：logFlow warn，不阻塞 task 执行（agent 可能不需要 git）
+//
+// taskMeta 用于日志关联（task_id / cli_tool 等），可省略。
+function ensureGitRepoForTask(workDir, taskMeta = {}) {
+  if (!workDir) return;
+  const root = gitRepoRoot(workDir);
+  if (root) return; // 已是 git 仓库，跳过
+  const logFields = { ...taskMeta, work_dir: workDir };
+  try {
+    runGitSync(workDir, ['init']);
+    // 配置本仓库 user.email/user.name，避免后续 commit 因缺少 identity 报错。
+    try { runGitSync(workDir, ['config', 'user.email', 'agenthub@local']); } catch { /* 已有 global identity 也行 */ }
+    try { runGitSync(workDir, ['config', 'user.name', 'AgentHub']); } catch { /* 同上 */ }
+    // 只在有内容时才 commit，避免空目录 commit 报 "nothing to commit"。
+    let hasContent = false;
+    try {
+      const status = runGitSync(workDir, ['status', '--porcelain', '--untracked-files=all']);
+      hasContent = Boolean(status && status.trim());
+    } catch { /* status 失败也无所谓，下面 commit 失败会被外层吞掉 */ }
+    if (hasContent) {
+      runGitSync(workDir, ['add', '-A']);
+      runGitSync(workDir, ['commit', '-m', 'baseline (auto)']);
+    }
+    logFlow('info', 'task.git_init_baseline', logFields);
+  } catch (err) {
+    logFlow('warn', 'task.git_init_failed', { ...logFields, error: errorMessage(err) });
+  }
+}
+
 // 解析 git status 字母为前端统一的状态枚举。
 // 接受 porcelain 的两列状态码 "XY"（X=staged，Y=工作区），也可接受单字符（diff --name-status）。
 // 优先级：删除 > 新增 > 修改；未跟踪 "??" 归 added。两列任一非空格即取该状态。
@@ -782,8 +817,9 @@ function browseFiles(prompt) {
   }
 
   // 读某 commit 下某文件的内容（git show <rev>:<path>）。同样用 repoRoot 作 cwd。
+  // 非 git 目录没有 commit 历史，无法解析 rev，给出明确错误而非含糊的 "Not a git repo"。
   if (action === 'show') {
-    if (!repoRoot) throw new Error('Not a git repo');
+    if (!repoRoot) throw new Error('File history requires git repo');
     if (!payload.rev) throw new Error('rev is required for show');
     const target = safePathWithin(repoRoot, payload.path);
     if (!target) throw new Error('Invalid or out-of-root path');
@@ -801,13 +837,29 @@ function browseFiles(prompt) {
 
   // 拿某文件的前后内容（默认工作区 vs HEAD）——供 diff 卡片点击文件后做对比。
   // 一次调用拿全 oldContent/newContent，前端不必分别 fileShow 两次。
+  // 非 git 目录优雅降级：oldContent 留空（无历史），newContent 读工作区文件内容（若存在），
+  // 这样 diff 卡片仍可展示为"新增文件"。
   if (action === 'diff') {
-    if (!repoRoot) throw new Error('Not a git repo');
+    const oldRev = payload.old_rev || 'HEAD';
+    const newRev = payload.new_rev || '';  // 空 = 工作区当前版本
+    if (!repoRoot) {
+      // 非 git 仓库：用 workDir 兜底解析 path，oldContent 留空，newContent 读工作区文件。
+      const nonGitTarget = safePathWithin(baseRoot, payload.path);
+      if (!nonGitTarget) throw new Error('Invalid or out-of-root path');
+      let newContent = '';
+      if (!newRev) {
+        try {
+          const buf = fs.readFileSync(nonGitTarget);
+          if (buf.length <= BROWSE_FILE_READ_MAX_SIZE && !looksBinary(buf)) {
+            newContent = buf.toString('utf8');
+          }
+        } catch { /* 工作区无此文件，newContent 留空 */ }
+      }
+      return JSON.stringify({ path: payload.path, oldContent: '', newContent });
+    }
     const target = safePathWithin(repoRoot, payload.path);
     if (!target) throw new Error('Invalid or out-of-root path');
     const rel = path.relative(repoRoot, target);
-    const oldRev = payload.old_rev || 'HEAD';
-    const newRev = payload.new_rev || '';  // 空 = 工作区当前版本
     // 旧版本：git show <rev>:<path>
     let oldContent = '';
     try { oldContent = runGitSync(repoRoot, ['show', `${oldRev}:${rel}`]); }
@@ -1108,11 +1160,12 @@ function buildPlatformMcpArgs(conversationId, userId, agentId, taskId) {
   return ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__agenthub-platform'];
 }
 
-function buildAgentHubContextEnv(conversationId, userId, agentId) {
+function buildAgentHubContextEnv(conversationId, userId, agentId, taskId) {
   const env = {};
   if (conversationId) env.AGENTHUB_CONVERSATION_ID = conversationId;
   if (userId) env.AGENTHUB_USER_ID = userId;
   if (agentId) env.AGENTHUB_AGENT_ID = agentId;
+  if (taskId) env.AGENTHUB_TASK_ID = taskId;
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
@@ -1741,31 +1794,11 @@ function ensureTaskWorkdir(task) {
 }
 
 function ensureAgentHubCodexHome() {
-  const configured = process.env.AGENTHUB_CODEX_HOME;
-  const dir = configured || path.join(os.homedir(), '.agenthub', 'codex');
+  // Codex 登录态默认保存在 ~/.codex。这里默认复用用户已登录的 CODEX_HOME，
+  // 避免 scanAgents 用默认 home 判定已登录、实际执行却切到空 ~/.agenthub/codex。
+  const configured = process.env.AGENTHUB_CODEX_HOME || process.env.CODEX_HOME;
+  const dir = configured || path.join(os.homedir(), '.codex');
   fs.mkdirSync(dir, { recursive: true });
-  const configFile = path.join(dir, 'config.toml');
-  if (!fs.existsSync(configFile)) {
-    fs.writeFileSync(configFile, [
-      'model_provider = "OpenAI"',
-      'model = "gpt-5.5"',
-      'review_model = "gpt-5.5"',
-      'model_reasoning_effort = "xhigh"',
-      'disable_response_storage = true',
-      'network_access = "enabled"',
-      'windows_wsl_setup_acknowledged = true',
-      '',
-      '[model_providers.OpenAI]',
-      'name = "OpenAI"',
-      'base_url = "https://www.aitoken-api.com"',
-      'wire_api = "responses"',
-      'requires_openai_auth = true',
-      '',
-      '[features]',
-      'goals = true',
-      '',
-    ].join('\n'), 'utf8');
-  }
   return dir;
 }
 
@@ -1777,18 +1810,20 @@ function tomlArray(values) {
   return `[${values.map(tomlString).join(', ')}]`;
 }
 
-function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId) {
+function ensureAgentHubCodexMcpConfig(codexHome, conversationId, userId, agentId, taskId) {
   const configFile = path.join(codexHome, 'config.toml');
   let content = fs.existsSync(configFile) ? fs.readFileSync(configFile, 'utf8') : '';
   const sectionPattern = /\n?\[mcp_servers\.agenthub-platform\]\n[\s\S]*?(?=\n\[[^\]]+\]|\s*$)/;
   content = content.replace(sectionPattern, '').trimEnd();
-  const args = buildPlatformMcpServerArgs(conversationId, userId, agentId);
+  const args = buildPlatformMcpServerArgs(conversationId, userId, agentId, taskId);
   if (args.length === 0) return configFile;
   const section = [
     '',
     '[mcp_servers.agenthub-platform]',
     'command = "node"',
     `args = ${tomlArray(args)}`,
+    'enabled = true',
+    'default_tools_approval_mode = "approve"',
     '',
   ].join('\n');
   fs.writeFileSync(configFile, `${content}${section}`, 'utf8');
@@ -1896,6 +1931,10 @@ async function executeTask(task, taskCtx) {
     agent_id: task.agent_id,
     conversation_id: task.conversation_id,
   };
+  // 在 spawn 之前确保 workdir 是 git 仓库——agent 跑 git diff 生成 diff 卡片时
+  // 非 git 仓库会 fatal（exit 128），导致前面的文件修改全部丢失。daemon 自动 init +
+  // baseline commit 作为兜底，失败不阻塞 task。
+  ensureGitRepoForTask(spec.cwd || process.cwd(), taskMeta);
   logFlow('info', 'task.command_prepared', {
     ...taskMeta,
     command: spec.command,
@@ -2702,7 +2741,11 @@ async function handleAgentStart(ws, payload) {
   }
 
   try {
-    const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false);
+    // agent.start 创建的 slot 必须带 eventRef，否则后续 task.dispatch 走 fast path 时
+    // slot.eventRef.current = onEvent 注入失败 → Claude CLI 的 thinking/text/tool_use
+    // delta 全部丢弃，用户看到"一次性出结果"而非流式。
+    const eventRef = { current: null };
+    const result = spawnStreamJsonProcess(agent_id, null, system_prompt, false, null, null, null, eventRef, cli_tool);
     const { child, sessionId, sendPrompt } = result;
 
     // Wait briefly to detect immediate startup failure (same pattern as dispatchToPersistentSlot)
@@ -2737,6 +2780,7 @@ async function handleAgentStart(ws, payload) {
       cliTool: cli_tool,
       sendPrompt,
       currentConversationId: null,
+      eventRef,
     });
     idleAgentConfigs.set(agent_id, { cliTool: cli_tool, sessionId, systemPrompt: system_prompt || '' });
     agentTurnStates.set(agent_id, 'idle');
@@ -4163,7 +4207,10 @@ if (require.main === module) {
 module.exports = {
   commandForTask,
   conversationSessions,
+  ensureGitRepoForTask,
+  ensureAgentHubCodexMcpConfig,
   executeTaskOnce,
   ensureOpenCodeMcpConfig,
+  daemonConn,
   onWebSocket,
 };

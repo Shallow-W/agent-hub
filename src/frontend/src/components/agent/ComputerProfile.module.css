@@ -170,6 +170,58 @@
   }
 }
 
+/* 重连命令 */
+.reconnectBox {
+  margin: 0 0 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+}
+
+.reconnectHint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.versionTag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.reconnectCommandsList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reconnectRow {
+  display: flex;
+  flex-direction: column;
+}
+
+.reconnectLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.reconnectHintInline {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.reconnectCode {
+  font-size: 12px;
+  word-break: break-all;
+}
+
 /* 重连命令：去除 antd Typography 自动链接的蓝色 */
 .reconnectBox :global(a) {
   color: inherit;

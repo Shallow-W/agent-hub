@@ -39,7 +39,7 @@ export interface Artifact {
 }
 
 /** 流式消息 block 类型——与后端 daemon AgentEvent kind 对齐。 */
-export type BlockKind = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error';
+export type BlockKind = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error' | 'card';
 
 /** 单个累积 block（同 kind 连续 delta 聚合成一个 block）。 */
 export interface MessageBlock {
@@ -54,6 +54,8 @@ export interface MessageBlock {
   tool_use_id?: string;
   /** kind=tool_result / error 时为 true */
   is_error?: boolean;
+  /** kind=card 时的交互式卡片实例（fenced JSON block 切分而来） */
+  card?: import('./card').InteractiveCard;
 }
 
 /** 消息生命周期状态——空值视为 complete（向后兼容旧消息）。 */

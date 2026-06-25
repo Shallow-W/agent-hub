@@ -56,7 +56,9 @@ func artifactsFromMarkdown(text string) []model.Artifact {
 		}
 
 		switch {
-		case language == "html" && looksLikeHTML(content):
+		// language=html 即归类为 webpage（平台协议约定，见系统提示词产物协议段）。
+		// 不强制 looksLikeHTML——片段 HTML 也可预览，agent 只要标 ```html 即生效。
+		case language == "html":
 			artifacts = append(artifacts, model.Artifact{
 				Version: 1,
 				Type:    "webpage",
@@ -124,10 +126,6 @@ func extractFenceBlocks(text string) []fencedBlock {
 	}
 
 	return blocks
-}
-
-func looksLikeHTML(content string) bool {
-	return regexp.MustCompile(`(?i)<\s*(?:html|!doctype|body|head|div)\b`).MatchString(content)
 }
 
 func firstNonEmptyString(values ...string) string {

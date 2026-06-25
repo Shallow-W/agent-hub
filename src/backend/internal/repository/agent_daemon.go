@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -16,7 +17,7 @@ func (r *AgentRepo) CreateDaemonMachine(ctx context.Context, userID, name, apiKe
 		`INSERT INTO daemon_machines (user_id, name, api_key_hash)
 		 VALUES ($1, $2, $3)
 		 RETURNING id, user_id, name, api_key_hash, machine_id, status,
-		           last_seen_at, created_at, updated_at`,
+		           last_seen_at, created_at, updated_at, capabilities`,
 		userID, name, apiKeyHash,
 	).StructScan(&m)
 	if err != nil {
@@ -30,7 +31,7 @@ func (r *AgentRepo) ListDaemonMachines(ctx context.Context, userID string) ([]mo
 	list := make([]model.DaemonMachine, 0)
 	err := r.db.SelectContext(ctx, &list,
 		`SELECT id, user_id, name, api_key_hash, machine_id, status,
-		        last_seen_at, created_at, updated_at
+		        last_seen_at, created_at, updated_at, capabilities
 		 FROM daemon_machines
 		 WHERE user_id = $1
 		 ORDER BY updated_at DESC`,
@@ -83,7 +84,7 @@ func (r *AgentRepo) GetDaemonMachineByAPIKeyHash(ctx context.Context, apiKeyHash
 	var m model.DaemonMachine
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT id, user_id, name, api_key_hash, machine_id, status,
-		        last_seen_at, created_at, updated_at
+		        last_seen_at, created_at, updated_at, capabilities
 		 FROM daemon_machines WHERE api_key_hash = $1`,
 		apiKeyHash,
 	).StructScan(&m)
@@ -113,7 +114,7 @@ func (r *AgentRepo) GetDaemonMachineByID(ctx context.Context, id string) (*model
 	var m model.DaemonMachine
 	err := r.db.QueryRowxContext(ctx,
 		`SELECT id, user_id, name, api_key_hash, machine_id, status,
-		        last_seen_at, created_at, updated_at
+		        last_seen_at, created_at, updated_at, capabilities
 		 FROM daemon_machines WHERE id = $1`,
 		id,
 	).StructScan(&m)
@@ -138,6 +139,42 @@ func (r *AgentRepo) MarkDaemonMachineConnected(ctx context.Context, id, machineI
 		return fmt.Errorf("mark daemon machine connected: %w", err)
 	}
 	return nil
+}
+
+// UpdateMachineCapabilities 更新机器能力清单（docker 等）。capsJSON 是 JSON 数组字符串。
+func (r *AgentRepo) UpdateMachineCapabilities(ctx context.Context, id string, capabilities []string) error {
+	capsJSON, _ := json.Marshal(capabilities)
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE daemon_machines SET capabilities = $2, updated_at = NOW() WHERE id = $1`,
+		id, string(capsJSON),
+	)
+	if err != nil {
+		return fmt.Errorf("update machine capabilities: %w", err)
+	}
+	return nil
+}
+
+// FindMachineWithCapability 找一台指定能力的在线机器（用于 docker 部署选 machine）。
+// 按 last_seen_at 降序取第一台。
+func (r *AgentRepo) FindMachineWithCapability(ctx context.Context, userID, capability string) (*model.DaemonMachine, error) {
+	var m model.DaemonMachine
+	err := r.db.QueryRowxContext(ctx,
+		`SELECT id, user_id, name, api_key_hash, machine_id, status,
+		        last_seen_at, created_at, updated_at, capabilities
+		 FROM daemon_machines
+		 WHERE user_id = $1 AND status = 'connected'
+		   AND capabilities::jsonb @> $2::jsonb
+		 ORDER BY last_seen_at DESC NULLS LAST
+		 LIMIT 1`,
+		userID, `["`+capability+`"]`,
+	).StructScan(&m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find machine with capability: %w", err)
+	}
+	return &m, nil
 }
 
 // SetMachineAndAgentsOnline 标记机器及其 Agent 为在线（仅状态变更时调用）。

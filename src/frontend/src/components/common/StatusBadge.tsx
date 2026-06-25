@@ -15,6 +15,7 @@ interface StatusBadgeProps {
   label?: string;
   size?: 'sm' | 'md';
   withDot?: boolean;
+  dotOnly?: boolean;
 }
 
 const DEFAULT_LABELS: Record<StatusBadgeStatus, string> = {
@@ -42,11 +43,18 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   label,
   size = 'sm',
   withDot = true,
+  dotOnly = false,
 }) => {
   const tone = COLOR_TONE[status];
   const text = label ?? DEFAULT_LABELS[status];
   const sizeClass = size === 'md' ? styles.md : styles.sm;
   const toneClass = styles[tone] ?? styles.neutral;
+
+  if (dotOnly) {
+    return (
+      <span className={`${styles.dotOnly} ${toneClass}`} title={text} />
+    );
+  }
 
   return (
     <span className={`${styles.badge} ${sizeClass} ${toneClass}`}>

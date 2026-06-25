@@ -35,7 +35,7 @@ import { DeployStatusCard } from './DeployStatusCard';
 import { StopButton } from './StopButton';
 // blocks/index.ts 触发各 block 组件的 registerBlock 自注册副作用，
 // MessageBubble 只依赖 renderBlock 抽象，不直接 import 具体组件。
-import { renderBlock } from './blocks';
+import { renderBlock, type BlockRenderContext } from './blocks';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './MessageBubble.module.css';
@@ -766,9 +766,18 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                   // renderBlock 内部把 streaming prop 传给组件（tool_result / error 忽略之）。
                   const isLast = i === parsedBlocks.length - 1;
                   const showCursor = isStreaming && isLast;
+                  // 构造 blockCtx：CardBlock 需要 conversationId / messageId / agentId /
+                  // artifacts / onAction 调 renderCards。其它 block 组件忽略 ctx。
+                  const blockCtx: BlockRenderContext = {
+                    conversationId: message.conversation_id,
+                    messageId: message.id,
+                    agentId: agentMeta.agent_id,
+                    artifacts: message.artifacts,
+                    onAction: handleCardAction,
+                  };
                   return (
                     <React.Fragment key={block.index ?? i}>
-                      {renderBlock(block, showCursor)}
+                      {renderBlock(block, showCursor, blockCtx)}
                     </React.Fragment>
                   );
                 })}

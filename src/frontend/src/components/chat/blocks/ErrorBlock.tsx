@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Button } from 'antd';
 import { ExclamationCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { MessageBlock } from '@/types/message';
+import type { BlockRenderContext } from './BlockRegistry';
 import styles from './Blocks.module.css';
 import { registerBlock } from './BlockRegistry';
 
@@ -9,6 +10,8 @@ interface ErrorBlockProps {
   block: MessageBlock;
   /** streaming flag（registry 签名要求；error 不增量，忽略该 prop） */
   streaming?: boolean;
+  /** registry 签名要求；ErrorBlock 不依赖上下文，忽略 */
+  ctx?: BlockRenderContext;
   /** 重试按钮回调（可选；registry 渲染路径不传，保留给其他调用方） */
   onRetry?: () => void;
 }

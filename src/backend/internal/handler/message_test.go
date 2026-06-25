@@ -481,7 +481,7 @@ func (r *fakeMsgRepoForHandler) GetHiddenMessageIDs(_ context.Context, _, _ stri
 }
 
 // streaming-related methods (MsgRepo interface extension for PR1/PR2):
-func (r *fakeMsgRepoForHandler) CreateStreaming(_ context.Context, conversationID, role string, _ *string, replyTo *string) (*model.Message, error) {
+func (r *fakeMsgRepoForHandler) CreateStreaming(_ context.Context, conversationID, role string, _ *string, replyTo *string, _ string) (*model.Message, error) {
 	return &model.Message{ID: "streaming-1", ConversationID: conversationID, Role: role, ReplyTo: replyTo, Status: model.MessageStatusStreaming, CreatedAt: time.Now()}, nil
 }
 func (r *fakeMsgRepoForHandler) FinalizeStreaming(_ context.Context, _, _, _, _, _ string) error {

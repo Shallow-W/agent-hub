@@ -29,6 +29,7 @@ src/backend/
 │   ├── handler/                # HTTP / WS entry points (thin)
 │   ├── router/                 # Centralized HTTP route registration (Deps struct)
 │   ├── middleware/              # Auth, logging, response shaping
+│   ├── catalog/                # Unified abstraction over directory vertical slices
 │   ├── infrastructure/
 │   │   └── ws/                 # Adapters: EventBroadcaster over *pkgws.Hub
 │   ├── docextract/             # File content extractors
@@ -74,6 +75,7 @@ handler → service → port ← infrastructure
 | `service/` | Use cases, orchestration, error sentinels | HTTP, SQL strings |
 | `handler/` | Request parsing, error→HTTP mapping | Business decisions |
 | `router/` | HTTP route registration only (single `Setup` entry point) | Handler construction, business logic |
+| `catalog/` | Unified CRUD over `platform_skill` / `tool_definition` / `agent_prompt_template` / `user_template` (DomainSpec + Registry + AdapterStore) | Direct per-domain CRUD code duplication |
 | `infrastructure/` | Adapters for external systems | Business logic |
 
 ---
@@ -95,7 +97,7 @@ handler → service → port ← infrastructure
   repository.XxxStore`. Do not introduce new ones — use the canonical
   interfaces from `repository/types.go`.
 - **Interfaces in `port/`**: named by capability (`EventBroadcaster`,
-  `RoleStore`), not by implementation.
+  `DaemonDispatcher`, `TokenIssuerPort`), not by implementation.
 - **Error sentinels**: `Err<Subject><Problem>` (`ErrConvOrchConflict`,
   `ErrConvInvalidRole`). Defined in `service/` next to the consuming
   service, not in `model/` or `domain/`.
@@ -114,15 +116,55 @@ handler → service → port ← infrastructure
   only `time` and `domain`.
 - `internal/port/events.go` — `EventBroadcaster` interface; the only
   thing service layer sees.
+- `internal/port/daemon.go` — `DaemonDispatcher` interface (5 methods:
+  IsConnected / RegisterTaskPromise / SendToMachine / AwaitTaskResult /
+  RemoveTaskPromise) abstracting `*pkgws.DaemonHub`. Compile-time
+  assertion `var _ DaemonDispatcher = (*ws.DaemonHub)(nil)` guards
+  signature drift.
+- `internal/port/token.go` — `TokenIssuerPort` interface (1 method:
+  IssueAgentToken) abstracting `*service.TokenIssuer`. Same compile-time
+  assertion pattern in `service/token_issuer.go`.
 - `internal/repository/types.go` — canonical repo interfaces
   (`MessageStore`, `ConvStore`, ...) satisfied by the concrete
   `*XxxRepo` structs. New code references these.
 - `internal/router/router.go` — single `Setup(r, Deps{...})` entry
   point; `Deps` struct aggregates every handler so `main.go` stays
   thin.
+- `internal/catalog/` — unified catalog abstraction (B1, pilot):
+  - `types.go` — `Domain`, `Scope`, `Item`, `CreateInput`, `UpdateInput`,
+    `ListQuery`, unified error sentinels (`ErrNotFound` / `ErrInvalid` /
+    `ErrDuplicate` / `ErrUnknownDomain` / `ErrReadOnly`).
+  - `store.go` — `Store` interface (List/GetByID/Create/Update/Delete).
+  - `registry.go` — `DomainSpec` + `Registry`. Adding a new catalog domain
+    means appending a `DomainSpec` in `domains.go`; the catalog core
+    (`service.go`, `handler.go`) never switches on a specific Domain.
+  - `adapter.go` — `AdapterStore` proxies to the four existing repos
+    (no DB changes) and converts `model.*` ↔ `Item`.
+  - `service.go` — `Service` (normalize, error mapping, ImportDefaults).
+  - `handler.go` — unified REST handler mounted at `/api/catalog/:domain`.
+  - `domains.go` — `DefaultRegistry()` registers all 4 known domains.
+  - `seeders_data.go` — catalog-local copy of default-value data (the
+    legacy `service.Default*` functions are kept for the legacy handlers
+    until B2/B3/B4 land).
+  - To add a new catalog domain: append a `DomainSpec` to
+    `DefaultRegistry()` in `domains.go`, and (if the adapter doesn't
+    already cover it) extend `AdapterStore` with the appropriate
+    model↔Item converters. You should NOT need to modify `service.go`,
+    `handler.go`, or `store.go`.
+  - Transition path to a unified physical table: `Store` is the only
+    storage contract `Service` depends on, so a future `SQLCatalogStore`
+    (single table, one row per catalog Item) can replace `AdapterStore`
+    without touching `service.go` / `handler.go` / `domains.go`. The
+    four legacy repos + their handlers stay during the transition (B2 /
+    B3 / B4 migrate them one at a time, then B-later deletes the
+    legacy code and the duplicated `seeders_data.go`).
 - `internal/service/orchestrator.go` — `OrchestratorDeps` struct +
   `NewOrchestratorServiceWithDeps` constructor; legacy setters kept
   but tagged `// Deprecated`.
+- `internal/service/dispatcher_router.go` + `dispatcher.go` + `agent_queue.go`
+  — P5b split of dispatch responsibilities: `Router` (@mention → target),
+  `Dispatcher` (wraps `dispatchAndWait`), `AgentQueue` (same-agent
+  serialization). See `dispatcher.md` for the full contract.
 - `internal/service/role_service.go` — `RoleService` depends on
   `RoleConvRepo` (narrow) + `port.EventBroadcaster`.
 - `internal/infrastructure/ws/event_broadcaster.go` — concrete adapter

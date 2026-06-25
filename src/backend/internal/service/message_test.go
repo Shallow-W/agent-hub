@@ -681,44 +681,44 @@ func TestExtractCardsFromContent(t *testing.T) {
 	}{
 		{
 			name: "single_block_single_card",
-			input: "我先解释一下：\n```json\n" +
+			input: "我先解释一下：\n```agenthub\n" +
 				`{"cards":[{"type":"info","id":"i1","fields":{}}]}` + "\n```\n尾文本",
 			expectedCardsLen:          1,
 			expectedStrippedContains:  []string{"[CARD:i1]", "我先解释一下：", "尾文本"},
-			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedStrippedNotContain: []string{"```agenthub", "\"cards\""},
 			expectedCardsJSONContains: []string{`"type":"info"`, `"id":"i1"`},
 		},
 		{
 			name: "single_block_multi_card",
-			input: "开头\n```json\n" +
+			input: "开头\n```agenthub\n" +
 				`{"cards":[{"type":"info","id":"c1"},{"type":"diff","id":"c2"}]}` + "\n```\n结尾",
 			expectedCardsLen:          2,
 			expectedStrippedContains:  []string{"[CARD:c1]", "[CARD:c2]"},
-			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedStrippedNotContain: []string{"```agenthub", "\"cards\""},
 			expectedCardsJSONContains: []string{`"id":"c1"`, `"id":"c2"`},
 		},
 		{
 			name: "multi_block_multi_card",
-			input: "头部\n```json\n" +
-				`{"cards":[{"type":"info","id":"a1"}]}` + "\n```\n中间文字\n```JSON\n" +
+			input: "头部\n```agenthub\n" +
+				`{"cards":[{"type":"info","id":"a1"}]}` + "\n```\n中间文字\n```agenthub\n" +
 				`{"cards":[{"type":"diff","id":"b1"}]}` + "\n```\n尾部",
 			expectedCardsLen:          2,
 			expectedStrippedContains:  []string{"[CARD:a1]", "[CARD:b1]", "中间文字"},
-			expectedStrippedNotContain: []string{"```json", "```JSON", "\"cards\""},
+			expectedStrippedNotContain: []string{"```agenthub", "\"cards\""},
 			expectedCardsJSONContains: []string{`"id":"a1"`, `"id":"b1"`},
 		},
 		{
 			name: "block_in_middle",
-			input: "前文说明\n```json\n" +
+			input: "前文说明\n```agenthub\n" +
 				`{"cards":[{"type":"info","id":"mid1"}]}` + "\n```\n后文说明",
 			expectedCardsLen:          1,
 			expectedStrippedContains:  []string{"[CARD:mid1]", "前文说明", "后文说明"},
-			expectedStrippedNotContain: []string{"```json", "\"cards\""},
+			expectedStrippedNotContain: []string{"```agenthub", "\"cards\""},
 			expectedCardsJSONContains: []string{`"id":"mid1"`},
 		},
 		{
 			name: "block_without_id",
-			input: "```json\n" +
+			input: "```agenthub\n" +
 				`{"cards":[{"type":"info","fields":{}}]}` + "\n```\n",
 			expectedCardsLen:         1,
 			expectCardIDNonEmpty:     true,
@@ -726,9 +726,9 @@ func TestExtractCardsFromContent(t *testing.T) {
 		},
 		{
 			name: "invalid_json",
-			input: "开头\n```json\nthis is not json{]\n```\n结尾",
+			input: "开头\n```agenthub\nthis is not json{]\n```\n结尾",
 			expectedCardsLen:          0,
-			expectedStrippedContains:  []string{"```json", "this is not json{]", "结尾"},
+			expectedStrippedContains:  []string{"```agenthub", "this is not json{]", "结尾"},
 			expectedStrippedNotContain: []string{"[CARD:"},
 		},
 		{
@@ -791,7 +791,7 @@ func TestExtractCardsFromContent(t *testing.T) {
 }
 
 // TestCreateAgentReplyMergesDaemonAndTextCards 验证 daemon 上行 cards（如 deploy info）
-// 与 agent 正文 ```json{"cards":[...]}``` block 解析出的卡片被合并、剥离后存入 DB。
+// 与 agent 正文 ```agenthub{"cards":[...]}``` block 解析出的卡片被合并、剥离后存入 DB。
 func TestCreateAgentReplyMergesDaemonAndTextCards(t *testing.T) {
 	userID := "user-1"
 	msgRepo := &fakeMsgRepo{}
@@ -811,7 +811,7 @@ func TestCreateAgentReplyMergesDaemonAndTextCards(t *testing.T) {
 	daemonCards := []map[string]any{
 		{"type": "info", "id": "daemon-deploy", "fields": map[string]any{"url": "https://example.com"}},
 	}
-	textResult := "回复开头\n```json\n" + `{"cards":[{"type":"diff","id":"d1","title":"本次修改","workDir":"/repo","files":["App.tsx"]}]}` + "\n```\n尾文本"
+	textResult := "回复开头\n```agenthub\n" + `{"cards":[{"type":"diff","id":"d1","title":"本次修改","workDir":"/repo","files":["App.tsx"]}]}` + "\n```\n尾文本"
 
 	go func() {
 		deadline := time.Now().Add(5 * time.Second)
@@ -858,8 +858,8 @@ func TestCreateAgentReplyMergesDaemonAndTextCards(t *testing.T) {
 	if strings.Contains(agentMsg.Content, `{"cards"`) {
 		t.Errorf("content should not contain raw cards JSON block, got: %s", agentMsg.Content)
 	}
-	if strings.Contains(agentMsg.Content, "```json") {
-		t.Errorf("content should not contain fenced json block, got: %s", agentMsg.Content)
+	if strings.Contains(agentMsg.Content, "```agenthub") {
+		t.Errorf("content should not contain fenced agenthub block, got: %s", agentMsg.Content)
 	}
 
 	// 应含占位符 + 前后文字

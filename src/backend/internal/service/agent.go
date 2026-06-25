@@ -36,6 +36,8 @@ type AgentRepo interface {
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
 	GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
+	UpdateMachineCapabilities(ctx context.Context, id string, capabilities []string) error
+	FindMachineWithCapability(ctx context.Context, userID, capability string) (*model.DaemonMachine, error)
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)
@@ -177,6 +179,18 @@ func (s *AgentService) TouchMachine(machineID string) {
 func (s *AgentService) MarkMachineOnline(machineID string) {
 	if s.tracker != nil {
 		s.tracker.MarkOnline(machineID)
+	}
+}
+
+// UpdateMachineCapabilities 更新机器能力清单（docker 等）。daemon register 时上报。
+func (s *AgentService) UpdateMachineCapabilities(machineID string, capabilities []string) {
+	if machineID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.repo.UpdateMachineCapabilities(ctx, machineID, capabilities); err != nil {
+		slog.Warn("update machine capabilities failed", "machine_id", machineID, "error", err)
 	}
 }
 
@@ -640,15 +654,9 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	if serverURL == "" {
 		serverURL = "http://localhost:8080" // fallback when not configured
 	}
-	// 生成两条连接命令：
-	// 1. 本地测试命令——直接 node 执行，无需 npm，方便开发调试
-	// 2. 通用 npx 命令——发布到 npm 后其他电脑可用
-	npmPath := resolveDaemonNPMPath()
-	localCommand := fmt.Sprintf("node %s/bin/agenthub-daemon.js --server-url %s --api-key %s", npmPath, serverURL, apiKey)
-	npxCommand := fmt.Sprintf("npx @hust-agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
-	// 主命令用本地测试（当前未发布到 npm）
-	command := localCommand
-	_ = npxCommand // 保留，后续前端可展示两条命令
+	// daemon 已发布到 npm（@hust-agenthub/daemon），固定到 0.3.0 以保证行为可重现。
+	npxCommand := fmt.Sprintf("npx @hust-agenthub/daemon@0.3.0 --server-url %s --api-key %s", serverURL, apiKey)
+	command := npxCommand
 	return command, machine, apiKey, nil
 }
 

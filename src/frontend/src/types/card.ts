@@ -10,7 +10,7 @@
  *   progress      ProgressCard    ProgressCard
  *   info          InfoCard        InfoCard
  *
- * card_type 字符串是 agent 正文 ```json {"cards":[{"type":"..."}]} ``` fenced block 的协议契约——
+ * card_type 字符串是 agent 正文 ```agenthub {"cards":[{"type":"..."}]} ``` fenced block 的协议契约——
  * 必须与后端系统提示词（context_agent_config.go）+ 前端 CardRegistry 注册的 key 严格一致。
  * 改这些字符串要同步改三处：后端 context_agent_config.go、本文件、CardRegistry.tsx。
  *

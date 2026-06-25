@@ -1,5 +1,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { MessageBlock, BlockKind } from '@/types/message';
+import type { InteractiveCard } from '@/types/card';
+import type { Artifact } from '@/types/message';
 
 /**
  * Block 渲染器注册表——自描述 BlockSpec 模式。
@@ -12,20 +14,43 @@ import type { MessageBlock, BlockKind } from '@/types/message';
  *
  * 与 CardRegistry 的区别：
  *   - Block 只有视图、无交互 reducer（block 是被动展示）
- *   - Block 组件签名统一为 (props: { block, streaming? })
+ *   - Block 组件签名统一为 (props: { block, streaming?, ctx? })
  *   - streaming prop 仅传给"最后一个 block"（由 renderBlock 调用方决定）
+ *   - ctx 是 BlockRenderContext，让 CardBlock 拿到 conversationId / messageId /
+ *     agentId / artifacts / onAction（其它 block 忽略 ctx）
  *
  * 新增 block 类型只需 3 步：
  *   1. types/message.ts 的 BlockKind union 加成员
- *   2. 写一个 XxxBlock.tsx 组件（签名 `(props: { block, streaming? }) => JSX.Element`）
+ *   2. 写一个 XxxBlock.tsx 组件（签名 `(props: { block, streaming?, ctx? }) => JSX.Element`）
  *   3. 组件文件末尾 `registerBlock('xxx', { component: XxxBlock })`
  *
  * import './index'（或 MessageBubble import './blocks'）触发所有 block 自注册副作用。
  */
 
+/**
+ * BlockRenderContext 把 MessageBubble 顶层持有的、block 组件可能需要的上下文统一打包。
+ *
+ * 当前只有 CardBlock 用到这些字段（用于调 renderCards → InteractiveCard 组件）。
+ * 其它 block（text / thinking / tool_use / tool_result / error）忽略 ctx。
+ *
+ * 未来若有其它 block 需要上下文（如 inline artifact 引用），扩展此接口即可，
+ * 所有 block 组件都能拿到——这是「context prop over prop drilling」的统一收敛点。
+ */
+export interface BlockRenderContext {
+  conversationId: string;
+  messageId: string;
+  agentId?: string;
+  artifacts?: Artifact[];
+  onAction: (cardId: string, action: string, data?: Record<string, unknown>) => void;
+}
+
 export interface BlockSpec<T extends MessageBlock = MessageBlock> {
-  /** 组件签名统一：读 block 数据，可选 streaming flag 控制光标 */
-  component: ComponentType<{ block: T; streaming?: boolean }>;
+  /** 组件签名统一：读 block 数据，可选 streaming flag + ctx */
+  component: ComponentType<{
+    block: T;
+    streaming?: boolean;
+    ctx?: BlockRenderContext;
+  }>;
 }
 
 const registry = new Map<BlockKind, BlockSpec>();
@@ -72,10 +97,23 @@ export function registeredBlockKinds(): BlockKind[] {
  *
  * @param block MessageBlock 实例
  * @param streaming 是否处于流式状态（调用方决定：通常仅最后一个 block 且消息未 complete 时为 true）
+ * @param ctx 可选的渲染上下文（CardBlock 等需要 conversationId / onAction 的 block 使用）
  */
-export function renderBlock(block: MessageBlock, streaming: boolean): ReactNode {
+export function renderBlock(
+  block: MessageBlock,
+  streaming: boolean,
+  ctx?: BlockRenderContext,
+): ReactNode {
   const spec = getBlockSpec(block.kind);
   if (!spec) return null;
   const Renderer = spec.component;
-  return <Renderer block={block} streaming={streaming} />;
+  return <Renderer block={block} streaming={streaming} ctx={ctx} />;
+}
+
+/** 类型守卫：block 是否为 card kind（用于 MessageBubble 顶层分支判断）。 */
+export function isCardBlock(block: MessageBlock): block is MessageBlock & {
+  kind: 'card';
+  card: InteractiveCard;
+} {
+  return block.kind === 'card' && Boolean(block.card);
 }

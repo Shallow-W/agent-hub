@@ -24,10 +24,10 @@ function buildMockCtx(overrides = {}) {
     },
     pathJoin: (...args) => args.join('/'),
     tmpdir: () => '/tmp',
-    ensureAgentHubCodexHome: () => '/tmp/codex-home',
-    ensureAgentHubCodexMcpConfig: () => {},
+    ensureAgentHubCodexHome: overrides.ensureAgentHubCodexHome || (() => '/tmp/codex-home'),
+    ensureAgentHubCodexMcpConfig: overrides.ensureAgentHubCodexMcpConfig || (() => {}),
     ensureTaskWorkdir: () => '/tmp/work',
-    buildAgentHubContextEnv: () => ({}),
+    buildAgentHubContextEnv: overrides.buildAgentHubContextEnv || (() => ({})),
     logFlow: () => {},
     processSpec: (command, args) => ({ command, args }),
     spawnSync: () => ({ status: 0, stdout: '', stderr: '' }),
@@ -66,6 +66,40 @@ test('codex.resolveCommand returns "codex" literal when nothing matches', () => 
   });
   const spec = createCodexCliSpec(ctx);
   assert.strictEqual(spec.resolveCommand(), 'codex');
+});
+
+test('codex.buildCommand passes task id to MCP config and context env', () => {
+  const calls = [];
+  const ctx = buildMockCtx({
+    ensureAgentHubCodexMcpConfig: (...args) => { calls.push(args); },
+    buildAgentHubContextEnv: (conv, user, agent, taskId) => ({
+      AGENTHUB_CONVERSATION_ID: conv,
+      AGENTHUB_USER_ID: user,
+      AGENTHUB_AGENT_ID: agent,
+      AGENTHUB_TASK_ID: taskId,
+    }),
+  });
+  const spec = createCodexCliSpec(ctx);
+  const command = spec.buildCommand({
+    id: 'task-from-payload',
+    conversation_id: 'conv-1',
+    user_id: 'user-1',
+    agent_id: 'agent-1',
+  }, {
+    command: 'codex',
+    systemPrompt: '',
+    userPrompt: 'hello',
+    taskId: 'task-from-context',
+  });
+
+  assert.deepStrictEqual(calls[0], [
+    '/tmp/codex-home',
+    'conv-1',
+    'user-1',
+    'agent-1',
+    'task-from-context',
+  ]);
+  assert.strictEqual(command.env.AGENTHUB_TASK_ID, 'task-from-context');
 });
 
 test('codex.parseResult prefers outputFile when present and non-empty', () => {

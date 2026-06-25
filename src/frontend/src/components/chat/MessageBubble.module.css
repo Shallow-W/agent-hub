@@ -73,6 +73,7 @@
   font-size: 13.5px;
   line-height: 1.7;
   word-break: break-word;
+  overflow-wrap: anywhere;
   box-shadow: var(--shadow-bubble-assistant);
 }
 
@@ -119,6 +120,20 @@
 .markdownBody { max-width: 100%; }
 .markdownBody > :first-child { margin-top: 0; }
 .markdownBody > :last-child { margin-bottom: 0; }
+
+/* 代码块（markdown fenced code 渲染成 <pre>）默认 white-space: pre 不换行，
+   长行会溢出气泡。强制换行让长 JSON / 长代码行在容器边界处 wrap。 */
+.markdownBody :global(pre) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.markdownBody :global(pre) :global(code) {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
 
 .innerAssistant .markdownBody :global(strong),
 .innerUser .markdownBody :global(strong) { font-weight: 700; }

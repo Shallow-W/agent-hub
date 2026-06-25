@@ -39,7 +39,7 @@ func TestAIEditArtifact_EmptyInstruction(t *testing.T) {
 		&fakeArtifactRepo{convIDByRoot: map[string]string{"root-1": "c1"}},
 		"",
 	)
-	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "   ", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "   ", "", 0)
 	if !errors.Is(err, ErrArtifactEditInvalid) {
 		t.Fatalf("expected ErrArtifactEditInvalid, got %v", err)
 	}
@@ -53,7 +53,7 @@ func TestAIEditArtifact_RootNotFound(t *testing.T) {
 		&fakeArtifactRepo{rootNotFound: true},
 		"",
 	)
-	_, err := svc.AIEditArtifact(context.Background(), "root-x", "u1", "改一下", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-x", "u1", "改一下", "", 0)
 	if !errors.Is(err, ErrArtifactEditNotFound) {
 		t.Fatalf("expected ErrArtifactEditNotFound, got %v", err)
 	}
@@ -67,26 +67,48 @@ func TestAIEditArtifact_NotMember(t *testing.T) {
 		&fakeArtifactRepo{convIDByRoot: map[string]string{"root-1": "c1"}},
 		"",
 	)
-	_, err := svc.AIEditArtifact(context.Background(), "root-1", "intruder", "改一下", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "intruder", "改一下", "", 0)
 	if !errors.Is(err, ErrArtifactEditNoPerm) {
 		t.Fatalf("expected ErrArtifactEditNoPerm, got %v", err)
 	}
 }
 
-func TestAIEditArtifact_NonCodeUnsupported(t *testing.T) {
+// TestAIEditArtifact_BinaryTypeUnsupported 验证二进制类型（file）仍不支持 AI 编辑。
+// code/webpage/document 已放开支持（见 isAIEditableType）。
+func TestAIEditArtifact_BinaryTypeUnsupported(t *testing.T) {
 	svc, _ := buildEditService(t,
 		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1", UserID: "u1"}},
 		&fakeOrchAgentRepo{},
 		&fakeMsgRepo{},
 		&fakeArtifactRepo{
 			convIDByRoot: map[string]string{"root-1": "c1"},
-			latest:       &model.Artifact{Type: "webpage", URL: "http://x"},
+			latest:       &model.Artifact{Type: "file", URL: "http://x"},
 		},
 		"",
 	)
-	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改一下", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改一下", "", 0)
 	if !errors.Is(err, ErrArtifactEditUnsupported) {
-		t.Fatalf("expected ErrArtifactEditUnsupported, got %v", err)
+		t.Fatalf("expected ErrArtifactEditUnsupported for file type, got %v", err)
+	}
+}
+
+// TestAIEditArtifact_WebpagePassesTypeCheck 验证 webpage 类型通过类型校验
+// （会因无连接 agent 失败，但不应报 ErrArtifactEditUnsupported）。
+func TestAIEditArtifact_WebpagePassesTypeCheck(t *testing.T) {
+	svc, _ := buildEditService(t,
+		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1", UserID: "u1"}},
+		&fakeOrchAgentRepo{},
+		&fakeMsgRepo{},
+		&fakeArtifactRepo{
+			convIDByRoot: map[string]string{"root-1": "c1"},
+			latest:       &model.Artifact{Type: "webpage", Content: "<html></html>", MessageID: "m1"},
+		},
+		"",
+	)
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改一下", "", 0)
+	// webpage 现在支持编辑，应通过类型校验；无连接 agent 会报 ErrArtifactEditNoAgent
+	if errors.Is(err, ErrArtifactEditUnsupported) {
+		t.Fatalf("webpage should pass type check now, got ErrArtifactEditUnsupported")
 	}
 }
 
@@ -105,7 +127,7 @@ func TestAIEditArtifact_NoConnectedAgent(t *testing.T) {
 		},
 		"machine-1",
 	)
-	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改一下", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改一下", "", 0)
 	if !errors.Is(err, ErrArtifactEditNoAgent) {
 		t.Fatalf("expected ErrArtifactEditNoAgent, got %v", err)
 	}
@@ -137,7 +159,7 @@ func TestAIEditArtifact_Success_ExtractsFencedCode(t *testing.T) {
 		})
 	}()
 
-	created, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "重命名函数", "func old() {}")
+	created, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "重命名函数", "func old() {}", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,7 +204,7 @@ func TestAIEditArtifact_Success_PrefersCodeArtifact(t *testing.T) {
 		})
 	}()
 
-	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改值", "")
+	_, err := svc.AIEditArtifact(context.Background(), "root-1", "u1", "改值", "", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

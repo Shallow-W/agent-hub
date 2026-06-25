@@ -33,7 +33,8 @@ function createCodexCliSpec(ctx) {
     buildCommand(task, deps) {
       const { command, systemPrompt, userPrompt } = deps;
       const codexHome = ctx.ensureAgentHubCodexHome();
-      ctx.ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id);
+      const taskId = deps.taskId || task.id || null;
+      ctx.ensureAgentHubCodexMcpConfig(codexHome, task.conversation_id, task.user_id, task.agent_id, taskId);
       const outputFile = ctx.pathJoin(ctx.tmpdir(), `agenthub-task-${task.id}.txt`);
       const effectivePrompt = systemPrompt
         ? `${CODEX_MCP_FALLBACK}[系统指令]\n${systemPrompt}\n\n${userPrompt}`
@@ -54,7 +55,7 @@ function createCodexCliSpec(ctx) {
         cwd: ctx.ensureTaskWorkdir(task),
         env: {
           CODEX_HOME: codexHome,
-          ...ctx.buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id),
+          ...ctx.buildAgentHubContextEnv(task.conversation_id, task.user_id, task.agent_id, taskId),
         },
       };
     },

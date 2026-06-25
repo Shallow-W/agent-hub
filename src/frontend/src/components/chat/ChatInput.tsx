@@ -10,6 +10,7 @@ import {
   DownOutlined,
 } from '@ant-design/icons';
 import { useMessages } from '@/hooks/useMessages';
+import { useMessageStore } from '@/store/messageStore';
 import { useWsStore } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAgentStore } from '@/store/agentStore';
@@ -74,8 +75,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
-  const { send, streamingContent } = useMessages(conversationId);
-  const isStreaming = (streamingContent ?? '').length > 0;
+  const { send } = useMessages(conversationId);
+  // PR3：流式状态来自 messages 数组里是否存在 status='streaming' 的 message。
+  // 不再使用已删除的 streamingContent map。
+  const isStreaming = useMessageStore(
+    (s) => (s.messages[conversationId] ?? []).some((m) => m.status === 'streaming'),
+  );
   const wsClient = useWsStore((s) => s.wsClient);
   const agentTyping = useWsStore((s) => conversationId ? (s.agentTyping[conversationId] ?? false) : false);
   const fileInputRef = useRef<HTMLInputElement>(null);

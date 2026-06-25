@@ -6,33 +6,33 @@
   background: var(--color-bg-chat);
 }
 
+/* ── Header ── */
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 78px;
-  padding: 12px 0 14px;
+  gap: 12px;
+  padding: 8px 0 12px;
   border-bottom: 1px solid var(--color-border-light);
-  background: transparent;
 }
 
 .identity {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
+  flex: 1;
 }
 
 .identity :global(.ant-avatar) {
-  width: 40px !important;
-  height: 40px !important;
+  width: 48px !important;
+  height: 48px !important;
   border-radius: 50% !important;
   flex-shrink: 0;
   aspect-ratio: 1 / 1;
   background: var(--gradient-agent) !important;
   color: #fff;
-  box-shadow: 0 10px 18px rgba(47, 143, 107, 0.22);
+  box-shadow: 0 8px 16px rgba(47, 143, 107, 0.2);
 }
 
 .clickableAvatar {
@@ -41,49 +41,74 @@
 
 .titleBlock {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .title {
-  display: block;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
-  font-family: var(--font-family-display);
   color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
 }
 
 .subtitle {
-  display: block;
-  margin-top: 2px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--color-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roleTag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: 18px;
+  padding: 0 7px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: rgba(31, 35, 40, 0.06);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: lowercase;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .actions :global(.ant-btn) {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
   border: 1px solid rgba(31, 35, 40, 0.08);
   background: var(--color-bg-white);
   color: var(--color-text);
-  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
 }
 
 .actions :global(.ant-btn:hover) {
   border-color: rgba(47, 143, 107, 0.35);
   color: var(--color-primary);
-  box-shadow: 0 8px 16px rgba(47, 143, 107, 0.16);
 }
 
 .actions :global(.ant-btn-primary) {
@@ -97,12 +122,25 @@
   color: #fff;
 }
 
+.actions :global(.ant-btn-text) {
+  width: 30px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.actions :global(.ant-btn-text:hover) {
+  background: rgba(31, 35, 40, 0.05);
+  color: var(--color-text);
+}
+
+/* ── Tabs (underline style) ── */
 .tabs {
   display: flex;
   gap: 4px;
-  padding: 6px 0 12px;
+  padding: 0;
   border-bottom: 1px solid var(--color-border-light);
-  background: transparent;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -112,292 +150,362 @@
 }
 
 .tab {
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  position: relative;
+  height: 38px;
+  padding: 0 12px;
+  border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.4px;
   white-space: nowrap;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: color var(--transition-fast);
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.7);
   color: var(--color-text);
-  border-color: rgba(31, 35, 40, 0.08);
 }
 
 .tabActive {
-  background: var(--color-bg-white);
-  color: var(--color-text);
-  border-color: rgba(31, 35, 40, 0.08);
-  box-shadow: var(--shadow-sm);
+  color: var(--color-primary);
+}
+
+.tabActive::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--color-primary);
+  border-radius: 2px;
 }
 
 .body {
   flex: 1;
   overflow: auto;
-  margin-top: 8px;
+  margin-top: 4px;
   background: transparent;
   border: none;
   border-radius: 0;
   box-shadow: none;
 }
 
-.profileHero {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  padding: 22px 24px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
+/* ── Overview cards ── */
+.overviewCard {
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(47, 143, 107, 0.1), rgba(79, 70, 229, 0.05)),
-    var(--color-bg-white);
+  background: var(--color-bg-white);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.profileAvatar {
-  flex-shrink: 0;
-  box-shadow: 0 14px 28px rgba(47, 143, 107, 0.22);
-}
-
-.profileHeroMain {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.profileTitleRow {
+.overviewCardHeader {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
-.profileNameText {
-  color: var(--color-text);
-  font-family: var(--font-family-display);
-  font-size: 22px;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.statusChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  background: rgba(47, 143, 107, 0.12);
-  color: var(--color-primary);
-  font-size: 12px;
+.overviewCardTitle {
+  font-size: 14px;
   font-weight: 700;
-}
-
-.statusChipOffline {
-  background: rgba(148, 163, 184, 0.16);
-  color: var(--color-text-secondary);
-}
-
-.statusChipDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.profileMetaLine {
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-
-.profileDescriptionPreview {
-  max-width: 760px;
   color: var(--color-text);
+}
+
+.overviewCardHint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.overviewDescriptionText {
   font-size: 13px;
   line-height: 1.6;
+  color: var(--color-text);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.heroBadges {
-  display: flex;
-  flex-wrap: wrap;
+.overviewDescriptionText.expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+
+.overviewDescriptionText p {
+  margin: 0 0 6px;
+}
+
+.overviewDescriptionText p:last-child {
+  margin-bottom: 0;
+}
+
+.expandToggle {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.expandToggle:hover {
+  text-decoration: underline;
+}
+
+/* ── Metrics ── */
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
-.metricStrip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  margin: 12px 0 0;
-  overflow: hidden;
-  border: 1px solid rgba(31, 35, 40, 0.08);
+.metricCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: rgba(31, 35, 40, 0.08);
-}
-
-.metricItem {
-  min-width: 0;
-  padding: 12px 14px;
   background: var(--color-bg-white);
 }
 
-.metricLabel {
-  display: block;
-  color: var(--color-text-secondary);
+.metricCardLabel {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
 }
 
-.metricValue {
-  display: block;
-  margin-top: 4px;
-  color: var(--color-text);
-  font-size: 14px;
+.metricCardValue {
+  font-size: 20px;
   font-weight: 800;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.metricCardTrend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #16a34a;
+}
+
+/* ── Skills row ── */
+.skillRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skillMiniCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  min-width: 0;
+}
+
+.skillMiniIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(245, 158, 11, 0.15));
+  color: #8b5cf6;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.skillMiniMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skillMiniName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.profileTop {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 24px;
-  border-bottom: 1px solid var(--color-border-light);
+.skillMiniTag {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: lowercase;
 }
 
-.profileName {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 20px;
-  font-weight: 700;
-  font-family: var(--font-family-display);
-}
-
-.statusDot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #52c41a;
-}
-
-.offlineDot {
-  background: #bfbfbf;
-}
-
-.handle {
-  margin-top: 4px;
+.viewAllLink {
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.section {
-  padding: 20px 24px;
-  border-top: 1px solid var(--color-border-light);
+.viewAllLink:hover {
+  color: var(--color-primary);
 }
 
-.sectionHeader {
+.skillsEmpty {
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+/* ── Conversation list ── */
+.conversationList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conversationItem {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(31, 35, 40, 0.02);
+  transition: background var(--transition-fast);
+}
+
+.conversationItem:hover {
+  background: rgba(47, 143, 107, 0.04);
+}
+
+.conversationIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.conversationMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.conversationContent {
+  font-size: 13px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.conversationSub {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.conversationStatus {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.conversationStatus_completed {
+  background: rgba(47, 143, 107, 0.12);
+  color: var(--color-primary);
+}
+
+.conversationStatus_running {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+.conversationStatus_failed {
+  background: rgba(255, 92, 92, 0.12);
+  color: var(--color-danger);
+}
+
+/* ── Overview actions ── */
+.overviewActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overviewActions :global(.ant-btn) {
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* ── Sections (edit mode + other tabs) ── */
+.section {
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: var(--color-bg-white);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .sectionTitle {
   margin-bottom: 12px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-}
-
-.sectionHeader .sectionTitle {
-  margin-bottom: 4px;
-}
-
-.sectionHint {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.sectionToggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-  padding: 4px 0;
-  width: 100%;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  transition: color 0.15s;
-}
-
-.sectionToggle:hover {
   color: var(--color-text);
-}
-
-.sectionToggle .sectionTitle {
-  margin-bottom: 0;
-}
-
-.sectionCount {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  margin-left: 4px;
-  border-radius: 999px;
-  background: rgba(31, 35, 40, 0.08);
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-:global(html.dark) .sectionCount {
-  background: rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .field {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .formGrid {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr);
+  gap: 14px;
 }
+
+.formGrid .field {
+  margin-bottom: 0;
+}
+
 .label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .value {
   color: var(--color-text);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .descriptionText {
@@ -416,31 +524,30 @@
 }
 
 .descriptionCard {
-  max-width: 820px;
-  padding: 14px 16px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  background: var(--color-bg-white);
+  background: rgba(31, 35, 40, 0.02);
 }
 
 .descriptionHeadline {
   color: var(--color-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 .descriptionBlock {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--color-border-light);
 }
 
 .descriptionBlockTitle {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -448,45 +555,39 @@
   margin: 0;
   padding-left: 18px;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
 .infoGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 18px 36px;
-  max-width: 720px;
-}
-
-.runtimeRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 14px 24px;
 }
 
 .toolControlRow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .toolsetSelect {
-  min-width: 180px;
+  min-width: 160px;
 }
 
 .toolGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .toolCountLabel {
   margin-left: auto;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -494,20 +595,20 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .filterPill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
-  padding: 0 12px;
+  height: 26px;
+  padding: 0 10px;
   border: 1px solid rgba(31, 35, 40, 0.1);
   border-radius: 999px;
   background: var(--color-bg-white);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -533,8 +634,8 @@
 .toolCard {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border: 1px solid rgba(31, 35, 40, 0.06);
   border-radius: 8px;
   background: var(--color-bg-white);
@@ -559,38 +660,142 @@
   flex: 1;
 }
 
+.toolName {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
 .toolDesc {
   display: block;
   margin-top: 2px;
   color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .toolFooter {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 6px;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid rgba(31, 35, 40, 0.06);
 }
 
 .toolFooterName {
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 10px;
   font-family: Consolas, monospace;
 }
 
 .toolFooterBadge {
   display: inline-flex;
   align-items: center;
-  padding: 0 6px;
-  height: 16px;
+  padding: 0 5px;
+  height: 14px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   line-height: 1;
+}
+
+.tagPreview,
+.actionPanel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.actionPanel :global(.ant-btn) {
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* ── Activity placeholder ── */
+.activityPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.activityPlaceholderIcon {
+  font-size: 36px;
+  color: var(--color-text-tertiary);
+  margin-bottom: 10px;
+}
+
+.activityPlaceholderTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+
+.activityPlaceholderDesc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  max-width: 280px;
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border-radius: 0;
+  border: none;
+}
+
+@media (max-width: 900px) {
+  .infoGrid,
+  .formGrid,
+  .metricGrid,
+  .skillRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .toolGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 暗色模式 ── */
+:global(html.dark) .actions :global(.ant-btn) {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .actions :global(.ant-btn-text:hover) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:global(html.dark) .overviewCard,
+:global(html.dark) .section {
+  background: var(--color-surface-strong);
+  border-color: var(--color-border);
+}
+
+:global(html.dark) .conversationItem {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:global(html.dark) .conversationItem:hover {
+  background: rgba(52, 211, 153, 0.06);
+}
+
+:global(html.dark) .descriptionCard {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:global(html.dark) .roleTag {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 :global(html.dark) .filterPill {
@@ -618,292 +823,4 @@
 
 :global(html.dark) .toolFooter {
   border-top-color: rgba(255, 255, 255, 0.06);
-}
-
-.monospaceTextarea {
-  font-family: Consolas, monospace;
-}
-
-.toolHelpText {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.tagPreview,
-.actionPanel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.actionPanel :global(.ant-btn) {
-  border-radius: 8px;
-  font-weight: 600;
-}
-
-.runtimeBadge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 12px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  background: var(--color-bg-white);
-  color: var(--color-text);
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 999px;
-}
-
-.modelBadge {
-  background: rgba(47, 143, 107, 0.12);
-  color: var(--color-primary);
-  border-color: rgba(47, 143, 107, 0.24);
-}
-.reasoningBadge {
-  background: rgba(245, 158, 11, 0.12);
-  color: #8a5200;
-  border-color: rgba(245, 158, 11, 0.28);
-}
-
-.envValue {
-  display: inline-block;
-  max-width: 100%;
-  padding: 8px 12px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  background: var(--color-bg-white);
-  font-family: Consolas, monospace;
-  font-size: 13px;
-  border-radius: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.capabilityList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.capabilityItem {
-  padding: 14px 16px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  background: var(--color-bg-white);
-  border-radius: 12px;
-}
-
-.emptyState {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border-radius: 0;
-  border: none;
-}
-
-.skillsHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.skillActions {
-  display: flex;
-  gap: 8px;
-}
-
-.skillsHeader .sectionTitle {
-  margin-bottom: 0;
-}
-
-.skillsEmpty {
-  padding: 16px 0;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-
-.skillGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.customSkillList {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.skillCard {
-  position: relative;
-  padding: 12px 14px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  background: var(--color-bg-white);
-  border-radius: 12px;
-  cursor: default;
-}
-
-.skillDelete {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  border-radius: 50%;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-}
-
-.skillCard:hover .skillDelete {
-  opacity: 1;
-}
-
-.skillDelete:hover {
-  background: rgba(255, 77, 79, 0.12);
-  color: #ff4d4f;
-}
-
-.skillBadge {
-  display: inline-block;
-  margin-bottom: 6px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(47, 143, 107, 0.12);
-  color: var(--color-primary);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-
-.skillName {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-  cursor: pointer;
-  border-radius: 4px;
-  padding: 1px 2px;
-}
-
-.skillName:hover {
-  background: rgba(47, 143, 107, 0.08);
-  color: var(--color-primary);
-}
-
-.skillNameInput {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.skillDesc {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-}
-
-.skillTrigger {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--color-primary);
-  line-height: 1.5;
-}
-
-.skillEditor {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.skillField {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.skillAddRow {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.inputFlex {
-  flex: 1;
-}
-
-@media (max-width: 900px) {
-  .infoGrid,
-  .formGrid {
-    grid-template-columns: 1fr;
-  }
-  .actions {
-    display: none;
-  }
-}
-
-/* ── 暗色模式 ── */
-:global(html.dark) .actions :global(.ant-btn) {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .tab:hover {
-  background: var(--color-surface-muted);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .tabActive {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .runtimeBadge {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .reasoningBadge {
-  color: #fbbf24;
-}
-
-:global(html.dark) .envValue {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .capabilityItem {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:global(html.dark) .skillCard {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-/* 重连命令：去除 antd Typography 自动链接的蓝色 */
-.reconnectBox :global(a) {
-  color: inherit;
-  text-decoration: underline;
-}
-
-/* 暗色模式：重连命令代码块 */
-:global(html.dark) .reconnectBox :global(code) {
-  color: #e2e8f0 !important;
-  background: #1e293b !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-:global(html.dark) .reconnectBox :global(a) {
-  color: #94a3b8 !important;
 }

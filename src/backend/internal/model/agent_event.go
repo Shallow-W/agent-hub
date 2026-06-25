@@ -14,7 +14,10 @@
 //   - payload 字段（按 Type 使用不同字段，见下方注释）
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // AgentEvent 是三端共享的流式事件契约。
 //
@@ -28,7 +31,13 @@ import "time"
 //   - Tool            tool_use（工具名）
 //   - ToolUseID       tool_use / tool_result 关联 ID
 //   - ToolUseIDAlt    兼容 daemon camelCase 'toolUseID'
-//   - Input           tool_use partial_json（老协议）
+//   - Input           tool_use partial_json（老协议）。
+//                     JS daemon 在 content_block_start 时发 `input: {}`（空对象占位），
+//                     在 content_block_delta 时发 `input: "<partial_json>"`（string）。
+//                     用 json.RawMessage 兼容两种 shape，避免 unmarshal object into string
+//                     报错导致整批 events 被 daemon handler 丢弃。reducer 读取时按需转
+//                     string：`string(event.Input)`。
+//                     omitempty：nil/empty slice 省略；非空（含 `{}`）正常序列化为 JSON value。
 //   - Delta           tool.call.input.delta（新协议）
 //   - Output          tool_result.output
 //   - Message         error.message
@@ -38,24 +47,24 @@ import "time"
 //   - Result          turn_end.result（reducer 当前不消费，保留透传）
 //   - Code            session_end.code（reducer 当前不消费，保留透传）
 type AgentEvent struct {
-	Type        string      `json:"type"`
-	Seq         int64       `json:"seq,omitempty"`
-	Adapter     string      `json:"adapter,omitempty"`
-	Ts          time.Time   `json:"ts,omitempty"`
-	Content     string      `json:"content,omitempty"`
-	Text        string      `json:"text,omitempty"`
-	Tool        string      `json:"tool,omitempty"`
-	ToolUseID   string      `json:"tool_use_id,omitempty"`
-	ToolUseIDAlt string     `json:"toolUseID,omitempty"`
-	Input       string      `json:"input,omitempty"`
-	Delta       string      `json:"delta,omitempty"`
-	Output      string      `json:"output,omitempty"`
-	Message     string      `json:"message,omitempty"`
-	Reason      string      `json:"reason,omitempty"`
-	IsError     bool        `json:"is_error,omitempty"`
-	IsErrorAlt  bool        `json:"isError,omitempty"`
-	Result      interface{} `json:"result,omitempty"`
-	Code        int         `json:"code,omitempty"`
+	Type         string          `json:"type"`
+	Seq          int64           `json:"seq,omitempty"`
+	Adapter      string          `json:"adapter,omitempty"`
+	Ts           time.Time       `json:"ts,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	Text         string          `json:"text,omitempty"`
+	Tool         string          `json:"tool,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	ToolUseIDAlt string          `json:"toolUseID,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	Delta        string          `json:"delta,omitempty"`
+	Output       string          `json:"output,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+	IsError      bool            `json:"is_error,omitempty"`
+	IsErrorAlt   bool            `json:"isError,omitempty"`
+	Result       interface{}     `json:"result,omitempty"`
+	Code         int             `json:"code,omitempty"`
 }
 
 // Type 常量（与 frontend agentEvent.ts AgentEventType 对齐）。

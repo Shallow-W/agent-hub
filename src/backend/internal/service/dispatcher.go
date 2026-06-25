@@ -334,6 +334,11 @@ func (d *Dispatcher) streamingDeps() StreamingPipelineDeps {
 
 // snapshotBlocksJSONFromBuffer 从 *StreamingBuffer 取 taskID 累积的 blocks JSON。
 // 单聊（createAgentReply）与群聊（Dispatcher）共用此包级函数。
+//
+// 切分：取出 blocks 后调用 SplitTextBlocksByCardFences，把 text block 里的
+// ```agenthub {"cards":[...]}``` fenced block 提升为独立 card kind block。这样
+// 卡片成为 first-class block（与 text/thinking 平级），前端 BlockRegistry 直接渲染，
+// 无需依赖 content placeholder + cards_json 的双表示路径。
 func snapshotBlocksJSONFromBuffer(buf *StreamingBuffer, taskID string) string {
 	if buf == nil || taskID == "" {
 		return ""
@@ -342,7 +347,9 @@ func snapshotBlocksJSONFromBuffer(buf *StreamingBuffer, taskID string) string {
 	if !ok || len(state.Blocks) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(state.Blocks)
+	// 切分 text block 里的 fenced card blocks，让卡片成为 first-class block。
+	splitBlocks := SplitTextBlocksByCardFences(state.Blocks)
+	b, err := json.Marshal(splitBlocks)
 	if err != nil {
 		return ""
 	}

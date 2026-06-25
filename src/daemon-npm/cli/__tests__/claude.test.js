@@ -586,3 +586,211 @@ test('claude.spawnPersistent: includes stream-json flags and --dangerously-skip-
   assert.ok(args.includes('--replay-user-messages'), 'must include --replay-user-messages (multi-turn stdin driving)');
   assert.ok(args.includes('--verbose'));
 });
+
+// === Bug 1 fix tests (per-type dedup redo) ===
+// Bug 1: partial 模式（--include-partial-messages）下，daemon 同时通过两条通道
+// 发射同一份 content：
+//   1. content_block_start / content_block_delta（增量通道）
+//   2. turn 结束的 assistant 事件（整条 message.content，回退通道）
+// 旧版 Bug 1 fix 用单一 sawContentBlockInTurn flag 抑制整个 assistant fallback——
+// 太激进（某些 type 没走 partial 也被吞掉）。redo 改成 per-type dedup：
+//   - text_delta / content_block_start(text) → sawTextInTurn
+//   - thinking_delta / content_block_start(thinking) → sawThinkingInTurn
+//   - input_json_delta / content_block_start(tool_use) → sawToolUseInTurn
+//   - assistant fallback 按对应 flag 跳过每个 part
+//   - result 事件 reset 全部 3 个 flag
+
+test('claude.parseStreamEvent: assistant fallback emits content when no content_block_* seen (non-partial compat)', () => {
+  // non-partial 模式下没有任何 content_block_*，所有 flag 保持 false，
+  // assistant fallback 应正常工作（向后兼容）。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+  const line = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [{ type: 'text', text: 'hello-non-partial' }],
+    },
+  });
+  const events = spec.parseStreamEvent(line, ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(events[0].content, 'hello-non-partial');
+});
+
+test('claude.parseStreamEvent: assistant fallback SKIPS text when text_delta seen in same turn (Bug 1 per-type)', () => {
+  // partial 模式下：先发 content_block_delta(text_delta)（增量已发射），再发
+  // assistant 事件 → assistant 的 text 部分应该 dedup，只返回 [textEvent('')]
+  // 维持 active state。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  // 1) content_block_delta(text_delta) 触发 sawTextInTurn
+  const deltaLine = JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'text_delta', text: 'hello-partial' },
+  });
+  const deltaEvents = spec.parseStreamEvent(deltaLine, ctx);
+  assert.ok(Array.isArray(deltaEvents));
+  assert.strictEqual(deltaEvents.length, 1);
+  assert.strictEqual(deltaEvents[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(deltaEvents[0].content, 'hello-partial');
+
+  // 2) 同 turn 内 assistant 事件（含 text 部分）—— text 必须跳过，只返回 [textEvent('')]
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [{ type: 'text', text: 'hello-partial' }],
+    },
+  });
+  const events = spec.parseStreamEvent(assistantLine, ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1, 'assistant text part must be deduped to single empty textEvent');
+  assert.strictEqual(events[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(events[0].content, '', 'assistant text must NOT re-emit content');
+});
+
+test('claude.parseStreamEvent: tool_use content_block_start only dedups tool_use parts (Bug 1 per-type)', () => {
+  // 关键差异点（vs 旧单一 flag）：content_block_start(tool_use) 只点亮
+  // sawToolUseInTurn。assistant 里的 text/thinking 部分仍然正常发，不被影响。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  const startLine = JSON.stringify({
+    type: 'content_block_start',
+    content_block: { type: 'tool_use', name: 'Bash', id: 'tu_1' },
+  });
+  spec.parseStreamEvent(startLine, ctx);
+
+  // assistant 含 text + tool_use：text 应保留，tool_use 被跳过，最后只保留 text
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'text', text: 'should-be-kept' },
+        { type: 'tool_use', name: 'Bash', input: { cmd: 'ls' }, id: 'tu_1' },
+      ],
+    },
+  });
+  const events = spec.parseStreamEvent(assistantLine, ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1, 'text kept, tool_use deduped');
+  assert.strictEqual(events[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(events[0].content, 'should-be-kept');
+});
+
+test('claude.parseStreamEvent: tool_use dedup via input_json_delta (Bug 1 per-type)', () => {
+  // input_json_delta 点亮 sawToolUseInTurn；assistant 里 tool_use 部分跳过。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'input_json_delta', partial_json: '{"cmd":"ls"}' },
+  }), ctx);
+
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', name: 'Bash', input: { cmd: 'ls' }, id: 'tu_1' },
+      ],
+    },
+  });
+  const events = spec.parseStreamEvent(assistantLine, ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(events[0].content, '', 'tool_use deduped to empty textEvent active marker');
+});
+
+test('claude.parseStreamEvent: thinking_delta only dedups thinking parts (Bug 1 per-type)', () => {
+  // thinking_delta 点亮 sawThinkingInTurn；assistant 里 text 部分正常发。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'thinking_delta', thinking: 'pondering' },
+  }), ctx);
+
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'thinking', thinking: 'pondering' },
+        { type: 'text', text: 'reply-after-thinking' },
+      ],
+    },
+  });
+  const events = spec.parseStreamEvent(assistantLine, ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1, 'thinking deduped, text kept');
+  assert.strictEqual(events[0].type, EVENT_TYPES.TEXT);
+  assert.strictEqual(events[0].content, 'reply-after-thinking');
+});
+
+test('claude.parseStreamEvent: result event resets all per-type flags for next turn (Bug 1)', () => {
+  // 验证 turn 边界 reset：turn1 有 content_block_delta(text)，turn2 没有 →
+  // turn2 的 assistant 应正常发 content。
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  // Turn 1: text_delta + result
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'text_delta', text: 'turn1' },
+  }), ctx);
+  const turnEnd = spec.parseStreamEvent(JSON.stringify({
+    type: 'result',
+    result: 'turn1 done',
+  }), ctx);
+  assert.strictEqual(turnEnd.type, EVENT_TYPES.TURN_END);
+
+  // Turn 2: 没有 content_block_*，直接发 assistant → 应正常 emit content
+  const events = spec.parseStreamEvent(JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'turn2-fresh' }] },
+  }), ctx);
+  assert.ok(Array.isArray(events));
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].content, 'turn2-fresh', 'flag must reset on result; next turn assistant works');
+});
+
+test('claude.parseStreamEvent: per-type flag only counts content_block_* within same turn', () => {
+  // 跨 turn 验证：turn1 的 content_block_delta(text) 不能让 turn2 的 assistant
+  // text 被跳过（已经被 result reset 测试覆盖，这里再补一个完整 happy-path sequence）
+  const { ctx } = buildMockCtx();
+  const spec = createClaudeCliSpec(ctx);
+
+  // Turn 1 partial sequence
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'text_delta', text: 'A' },
+  }), ctx);
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'text_delta', text: 'B' },
+  }), ctx);
+  // assistant in turn 1 → dedup text
+  const t1Assistant = spec.parseStreamEvent(JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'AB' }] },
+  }), ctx);
+  assert.strictEqual(t1Assistant[0].content, '', 'turn1 assistant text should be deduped');
+
+  // result ends turn 1
+  spec.parseStreamEvent(JSON.stringify({ type: 'result', result: 'ok' }), ctx);
+
+  // Turn 2 partial sequence again
+  spec.parseStreamEvent(JSON.stringify({
+    type: 'content_block_delta',
+    delta: { type: 'text_delta', text: 'C' },
+  }), ctx);
+  // assistant in turn 2 → still dedup text (because turn 2 also had text_delta)
+  const t2Assistant = spec.parseStreamEvent(JSON.stringify({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'C' }] },
+  }), ctx);
+  assert.strictEqual(t2Assistant[0].content, '', 'turn2 assistant text should be deduped (per-turn flag)');
+});

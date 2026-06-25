@@ -189,6 +189,11 @@
 }
 
 .toolResultHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));

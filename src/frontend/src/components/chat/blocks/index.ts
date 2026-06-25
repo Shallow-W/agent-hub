@@ -16,6 +16,7 @@ import './ThinkingBlock';
 import './ToolCallBlock';
 import './ToolResultBlock';
 import './ErrorBlock';
+import './CardBlock';
 
 // re-export registry 公共 API
 export {
@@ -24,5 +25,6 @@ export {
   hasBlockRenderer,
   registeredBlockKinds,
   renderBlock,
+  isCardBlock,
 } from './BlockRegistry';
-export type { BlockSpec } from './BlockRegistry';
+export type { BlockSpec, BlockRenderContext } from './BlockRegistry';

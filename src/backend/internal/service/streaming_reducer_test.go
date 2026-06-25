@@ -7,6 +7,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/agent-hub/backend/internal/model"
@@ -102,10 +103,12 @@ func TestStreamingReducer_ToolUseAndResultTwoBlocks(t *testing.T) {
 			ToolUseID: "tu_1",
 		},
 		// 模拟线上字段（input）——reducer 兼容路径（优先 content，其次 input）
+		// Note: Input 是 json.RawMessage（[]byte），Bug 3 修复后兼容 daemon 的
+		// `input: {}` 对象 / `input: "<partial>"` 字符串两种 shape。
 		{
 			Type:  model.AgentEventToolUse,
 			Tool:  "",
-			Input: `{"cmd":"ls"}`,
+			Input: json.RawMessage(`{"cmd":"ls"}`),
 		},
 		{
 			Type:      model.AgentEventToolResultOld,
@@ -352,6 +355,43 @@ func TestStreamingReducer_IsErrorDualFieldCompat(t *testing.T) {
 	if !r2.Blocks[0].IsError {
 		t.Fatalf("expected is_error=true for camelCase")
 	}
+	// is_error=true 不再切 Status='error'——agent 在工具失败后通常继续输出总结文本
+	// 和卡片，提前切 error 会触发终态保护丢弃后续事件（regression：streaming 截断 bug）。
+	if r1.Status != model.MessageStatusStreaming {
+		t.Fatalf("tool_result(is_error) must not flip status; got %q", r1.Status)
+	}
+	if r2.Status != model.MessageStatusStreaming {
+		t.Fatalf("tool_result(isError) must not flip status; got %q", r2.Status)
+	}
+}
+
+func TestStreamingReducer_TextAfterToolResultErrorStillAccumulates(t *testing.T) {
+	// 12b. 回归测试：agent 在 tool_result(is_error=true) 之后仍会输出总结文本，
+	// reducer 必须继续累积，且最终 status 跟随 turn_end 切到 complete。
+	// 这是 streaming 截断 bug 的核心契约：tool_result error 不等价于流级 error。
+	result := ReduceEvents([]model.AgentEvent{
+		{Type: model.AgentEventText, Content: "before-tool"},
+		{Type: model.AgentEventToolUse, Tool: "Bash", ToolUseID: "tu_a"},
+		{Type: model.AgentEventToolResultOld, ToolUseID: "tu_a", Output: "boom", IsError: true},
+		{Type: model.AgentEventText, Content: "after-tool-summary"},
+		{Type: model.AgentEventTurnEnd},
+	}, InitialStreamingState())
+
+	if result.Status != model.MessageStatusComplete {
+		t.Fatalf("expected status=complete (turn_end after tool error), got %q", result.Status)
+	}
+	// 期望 4 个 block: text / tool_use / tool_result(error) / text(summary)
+	if len(result.Blocks) != 4 {
+		t.Fatalf("expected 4 blocks (text/tool_use/tool_result/text), got %d: %+v", len(result.Blocks), result.Blocks)
+	}
+	last := result.Blocks[3]
+	if last.Kind != model.BlockKindText || last.Text != "after-tool-summary" {
+		t.Fatalf("expected final block to be summary text, got kind=%q text=%q", last.Kind, last.Text)
+	}
+	tr := result.Blocks[2]
+	if tr.Kind != model.BlockKindToolResult || !tr.IsError {
+		t.Fatalf("expected tool_result(is_error) at index 2, got kind=%q is_error=%v", tr.Kind, tr.IsError)
+	}
 }
 
 func TestStreamingReducer_ErrorDefaultMessage(t *testing.T) {
@@ -445,5 +485,132 @@ func TestStreamingReducer_ToolUseIDAltCamelCase(t *testing.T) {
 	}, InitialStreamingState())
 	if len(result.Blocks) != 1 || result.Blocks[0].ToolUseID != "tu_camel" {
 		t.Fatalf("expected toolUseID alt fallback, got blocks=%+v", result.Blocks)
+	}
+}
+
+// === Bug 3 fix tests ===
+// Bug 3: JS daemon 的 toolUseEvent 在 content_block_start 路径发 `input: {}`（空对象），
+// 旧 `Input string` 字段 unmarshal object 报错 → daemon.go:377 丢整批 events。
+// 改为 json.RawMessage 后兼容 object / string 两种 shape。
+
+func TestStreamingReducer_ToolUseStartWithObjectInputNoPanic(t *testing.T) {
+	// content_block_start 路径：tool 非空 + Input 是 `{}` 对象占位
+	// 预期：不 panic，创建空 tool_use block，Input 字段被忽略（不作为 delta 追加）。
+	result := ReduceEvents([]model.AgentEvent{
+		{
+			Type:      model.AgentEventToolUse,
+			Tool:      "Bash",
+			ToolUseID: "tu_obj_1",
+			Input:     json.RawMessage(`{}`),
+		},
+	}, InitialStreamingState())
+	if len(result.Blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d: %+v", len(result.Blocks), result.Blocks)
+	}
+	b := result.Blocks[0]
+	if b.Kind != model.BlockKindToolUse {
+		t.Fatalf("expected kind=tool_use, got %q", b.Kind)
+	}
+	if b.ToolName != "Bash" {
+		t.Fatalf("expected tool_name=Bash, got %q", b.ToolName)
+	}
+	if b.ToolUseID != "tu_obj_1" {
+		t.Fatalf("expected tool_use_id=tu_obj_1, got %q", b.ToolUseID)
+	}
+	if b.Text != "" {
+		t.Fatalf("expected empty Text (Input object placeholder should NOT be appended), got %q", b.Text)
+	}
+}
+
+func TestStreamingReducer_ToolUseDeltaWithStringInputRawMessage(t *testing.T) {
+	// content_block_delta 路径：tool 空 + Input 是 JSON string（被 RawMessage 保留为原文）
+	// 预期：Input RawMessage 转 string 后追加到上一个 tool_use block 的 Text。
+	result := ReduceEvents([]model.AgentEvent{
+		{
+			Type:      model.AgentEventToolUse,
+			Tool:      "Bash",
+			ToolUseID: "tu_str_1",
+		},
+		{
+			Type:  model.AgentEventToolUse,
+			Tool:  "",
+			Input: json.RawMessage(`{"cmd":"ls"}`),
+		},
+	}, InitialStreamingState())
+	if len(result.Blocks) != 1 {
+		t.Fatalf("expected 1 block (delta accumulates), got %d: %+v", len(result.Blocks), result.Blocks)
+	}
+	if result.Blocks[0].Text != `{"cmd":"ls"}` {
+		t.Fatalf("expected Text=%q, got %q", `{"cmd":"ls"}`, result.Blocks[0].Text)
+	}
+}
+
+func TestStreamingReducer_ObjectInputBatchUnmarshalSucceeds(t *testing.T) {
+	// 回归 Bug 3：模拟 daemon.go:377 反序列化场景——
+	// 整批 events 含 object shape Input 时不能因为 unmarshal 失败被丢弃。
+	raw := []byte(`[
+		{"type":"tool_use","tool":"Bash","tool_use_id":"tu_a","input":{}},
+		{"type":"tool_use","tool":"","input":"{\"cmd\":\"ls\"}"},
+		{"type":"tool_result","tool_use_id":"tu_a","output":"done"}
+	]`)
+	var events []model.AgentEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		t.Fatalf("Unmarshal must succeed for object-shape input (Bug 3): %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+	// reduce 后应得到 1 个 tool_use block（input delta 累积）+ 1 个 tool_result block
+	result := ReduceEvents(events, InitialStreamingState())
+	if len(result.Blocks) != 2 {
+		t.Fatalf("expected 2 blocks after reduce, got %d: %+v", len(result.Blocks), result.Blocks)
+	}
+}
+
+// TestStreamingReducer_StringShapeInputUnwrappedCorrectly 验证 daemon content_block_delta
+// 路径下 string-shape input 被正确解码（不带外层引号/转义）。
+//
+// daemon events.js toolUseEvent('', partial_json) 让 input 字段成为 JS string，
+// JSON.stringify 后变成带引号的 JSON string。reducer 必须把 RawMessage 解包成
+// 原始 partial_json，而不是直接 string() 转换保留字面引号和反斜杠。
+// 否则 tool_use.Text 会累积成 `"{\"cmd\":\"ls\"}"`（双转义）而非 `{"cmd":"ls"}`。
+func TestStreamingReducer_StringShapeInputUnwrappedCorrectly(t *testing.T) {
+	raw := []byte(`[
+		{"type":"tool_use","tool":"Bash","tool_use_id":"tu_s","input":{}},
+		{"type":"tool_use","tool":"","input":"{\"cmd\":\"ls\"}"}
+	]`)
+	var events []model.AgentEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	result := ReduceEvents(events, InitialStreamingState())
+	if len(result.Blocks) != 1 {
+		t.Fatalf("expected 1 tool_use block, got %d: %+v", len(result.Blocks), result.Blocks)
+	}
+	want := `{"cmd":"ls"}`
+	if result.Blocks[0].Text != want {
+		t.Fatalf("expected Text=%q, got %q (double-escape bug if mismatched)", want, result.Blocks[0].Text)
+	}
+}
+
+// TestStreamingReducer_PartialStringInputAccumulatesCorrectly 多个 partial_json 片段
+// 累积后必须拼成原始完整 JSON（不带额外转义）。
+func TestStreamingReducer_PartialStringInputAccumulatesCorrectly(t *testing.T) {
+	raw := []byte(`[
+		{"type":"tool_use","tool":"Read","tool_use_id":"tu_p","input":{}},
+		{"type":"tool_use","tool":"","input":"{\"file\":"},
+		{"type":"tool_use","tool":"","input":"\"/a.txt\"}"}
+	]`)
+	var events []model.AgentEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	result := ReduceEvents(events, InitialStreamingState())
+	if len(result.Blocks) != 1 {
+		t.Fatalf("expected 1 tool_use block, got %d", len(result.Blocks))
+	}
+	want := `{"file":"/a.txt"}`
+	if result.Blocks[0].Text != want {
+		t.Fatalf("expected accumulated Text=%q, got %q", want, result.Blocks[0].Text)
 	}
 }

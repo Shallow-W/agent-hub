@@ -87,9 +87,11 @@ func (h *ArtifactHandler) CreateVersion(c *gin.Context) {
 type AIEditRequest struct {
 	Instruction string `json:"instruction"`
 	Selection   string `json:"selection"`
+	// Version 指定编辑基准版本（>0 时用该版本内容作为 base；0 或缺省用最新版本）。
+	Version int `json:"version"`
 }
 
-// AIEdit 用 AI 改写一个 code 产物，结果存为新版本并返回。
+// AIEdit 用 AI 改写一个产物（code/webpage/document），结果存为新版本并返回。
 func (h *ArtifactHandler) AIEdit(c *gin.Context) {
 	rootID := c.Param("rootId")
 	if rootID == "" {
@@ -108,7 +110,7 @@ func (h *ArtifactHandler) AIEdit(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	created, err := h.orchSvc.AIEditArtifact(c.Request.Context(), rootID, userID, req.Instruction, req.Selection)
+	created, err := h.orchSvc.AIEditArtifact(c.Request.Context(), rootID, userID, req.Instruction, req.Selection, req.Version)
 	if err != nil {
 		h.handleEditErr(c, err)
 		return

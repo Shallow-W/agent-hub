@@ -88,6 +88,7 @@ func NewDeploymentService(repo DeployRepo, artRepo DeployArtifactRepo, convRepo 
 		strategies:    map[string]port.DeploymentStrategy{},
 	}
 	// 注册内置策略：preview 永远可用，github 仅在 publisher 注入后 Enabled()。
+	// docker 部署走 MCP 工具（deploy_project），不经后端编排，故不在此注册。
 	s.RegisterStrategy(&previewDeploymentStrategy{svc: s})
 	s.RegisterStrategy(&gitHubDeploymentStrategy{svc: s})
 	return s
@@ -510,6 +511,7 @@ func (s *gitHubDeploymentStrategy) Deploy(ctx context.Context, art *model.Artifa
 
 // 编译期断言：两个内置策略实现 port.DeploymentStrategy 接口。
 // 方法签名漂移时构建在此处直接报错，而非落到调用点。
+// 注意：docker 部署走 MCP 工具（deploy_project），不经 DeploymentStrategy 注册表。
 var (
 	_ port.DeploymentStrategy = (*previewDeploymentStrategy)(nil)
 	_ port.DeploymentStrategy = (*gitHubDeploymentStrategy)(nil)

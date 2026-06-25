@@ -7,6 +7,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
@@ -14,6 +15,22 @@ const {
   conversationSessions,
 } = require('./agenthub-daemon.js');
 const cliTools = require('../cli');
+
+function withTempCodexHome(fn) {
+  const tempCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agenthub-codex-home-'));
+  const originalCodexHome = process.env.AGENTHUB_CODEX_HOME;
+  process.env.AGENTHUB_CODEX_HOME = tempCodexHome;
+  try {
+    return fn(tempCodexHome);
+  } finally {
+    if (originalCodexHome === undefined) {
+      delete process.env.AGENTHUB_CODEX_HOME;
+    } else {
+      process.env.AGENTHUB_CODEX_HOME = originalCodexHome;
+    }
+    fs.rmSync(tempCodexHome, { recursive: true, force: true });
+  }
+}
 
 // ─── Registry 基础验证 ───────────────────────────────────────────────────
 
@@ -97,60 +114,65 @@ test('claude persistent: uses --dangerously-skip-permissions + registered sessio
 // ─── Codex: exec 命令 + CODEX_HOME + outputFile + cwd ───────────────────
 
 test('codex: exec args order + CODEX_HOME env + outputFile + cwd', () => {
-  const task = {
-    id: 'codex-eq-1',
-    cli_tool: 'codex',
-    agent_id: 'a1',
-    conversation_id: 'c1',
-    user_id: 'u1',
-    prompt: 'do something',
-  };
-  const spec = commandForTask(task);
+  withTempCodexHome((codexHome) => {
+    const task = {
+      id: 'codex-eq-1',
+      cli_tool: 'codex',
+      agent_id: 'a1',
+      conversation_id: 'c1',
+      user_id: 'u1',
+      prompt: 'do something',
+    };
+    const spec = commandForTask(task);
 
-  // args[0] 是 'exec'
-  assert.equal(spec.args[0], 'exec');
-  // execArgs 顺序
-  const expectedExecFlags = [
-    '--skip-git-repo-check',
-    '--dangerously-bypass-approvals-and-sandbox',
-    '--ephemeral',
-    '--color',
-    'never',
-    '--output-last-message',
-  ];
-  for (let i = 0; i < expectedExecFlags.length; i += 1) {
-    assert.equal(spec.args[1 + i], expectedExecFlags[i], `codex args[${1 + i}] mismatch`);
-  }
-  // outputFile 字段
-  assert.ok(spec.outputFile);
-  assert.equal(spec.outputFile, path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`));
-  // cwd 字段（任务工作目录）
-  assert.ok(spec.cwd);
-  assert.ok(spec.cwd.includes('agenthub-cli-tasks'));
-  // env: CODEX_HOME + AgentHub context
-  assert.ok(spec.env.CODEX_HOME);
-  assert.equal(spec.env.AGENTHUB_CONVERSATION_ID, 'c1');
-  assert.equal(spec.env.AGENTHUB_USER_ID, 'u1');
-  assert.equal(spec.env.AGENTHUB_AGENT_ID, 'a1');
-  // codexMcpFallback 文本必须出现在末尾 prompt 中（fallback 末尾有 \n，故 [Codex MCP 适配]\n...）
-  // 此 task 无 context_messages，故无 [系统指令]，userPrompt 含默认群聊前缀
-  const lastArg = spec.args[spec.args.length - 1];
-  assert.match(lastArg, /\[Codex MCP 适配\]\n/);
-  assert.match(lastArg, /do something$/);
+    // args[0] 是 'exec'
+    assert.equal(spec.args[0], 'exec');
+    // execArgs 顺序
+    const expectedExecFlags = [
+      '--skip-git-repo-check',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--ephemeral',
+      '--color',
+      'never',
+      '--output-last-message',
+    ];
+    for (let i = 0; i < expectedExecFlags.length; i += 1) {
+      assert.equal(spec.args[1 + i], expectedExecFlags[i], `codex args[${1 + i}] mismatch`);
+    }
+    // outputFile 字段
+    assert.ok(spec.outputFile);
+    assert.equal(spec.outputFile, path.join(os.tmpdir(), `agenthub-task-${task.id}.txt`));
+    // cwd 字段（任务工作目录）
+    assert.ok(spec.cwd);
+    assert.ok(spec.cwd.includes('agenthub-cli-tasks'));
+    // env: CODEX_HOME + AgentHub context
+    assert.equal(spec.env.CODEX_HOME, codexHome);
+    assert.equal(spec.env.AGENTHUB_CONVERSATION_ID, 'c1');
+    assert.equal(spec.env.AGENTHUB_USER_ID, 'u1');
+    assert.equal(spec.env.AGENTHUB_AGENT_ID, 'a1');
+    assert.equal(spec.env.AGENTHUB_TASK_ID, 'codex-eq-1');
+    // codexMcpFallback 文本必须出现在末尾 prompt 中（fallback 末尾有 \n，故 [Codex MCP 适配]\n...）
+    // 此 task 无 context_messages，故无 [系统指令]，userPrompt 含默认群聊前缀
+    const lastArg = spec.args[spec.args.length - 1];
+    assert.match(lastArg, /\[Codex MCP 适配\]\n/);
+    assert.match(lastArg, /do something$/);
+  });
 });
 
 test('codex: with systemPrompt wraps as [系统指令]', () => {
-  const spec = commandForTask({
-    id: 'codex-eq-2',
-    cli_tool: 'codex',
-    prompt: 'user-msg',
-    context_messages: '[系统指令]\nBe concise.',
+  withTempCodexHome(() => {
+    const spec = commandForTask({
+      id: 'codex-eq-2',
+      cli_tool: 'codex',
+      prompt: 'user-msg',
+      context_messages: '[系统指令]\nBe concise.',
+    });
+    const lastArg = spec.args[spec.args.length - 1];
+    // 结构：[Codex MCP 适配]\n<fallback 文本>\n[系统指令]\n<sp>...<userPrompt>
+    assert.match(lastArg, /\[Codex MCP 适配\]\n/);
+    assert.match(lastArg, /\[系统指令\]\nBe concise\./);
+    assert.match(lastArg, /user-msg$/);
   });
-  const lastArg = spec.args[spec.args.length - 1];
-  // 结构：[Codex MCP 适配]\n<fallback 文本>\n[系统指令]\n<sp>...<userPrompt>
-  assert.match(lastArg, /\[Codex MCP 适配\]\n/);
-  assert.match(lastArg, /\[系统指令\]\nBe concise\./);
-  assert.match(lastArg, /user-msg$/);
 });
 
 // ─── OpenCode: session 复用 + --fork + persistSessionKey ────────────────

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { MessageBlock } from '@/types/message';
+import type { BlockRenderContext } from './BlockRegistry';
 import styles from './Blocks.module.css';
 import { registerBlock } from './BlockRegistry';
 
@@ -11,6 +12,8 @@ interface TextBlockProps {
   block: MessageBlock;
   /** streaming 状态时显示末尾闪烁光标 */
   streaming?: boolean;
+  /** registry 签名要求；TextBlock 不依赖上下文，忽略 */
+  ctx?: BlockRenderContext;
 }
 
 /**

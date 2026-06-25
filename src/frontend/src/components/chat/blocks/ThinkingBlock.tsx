@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { LoadingOutlined } from '@ant-design/icons';
 import type { MessageBlock } from '@/types/message';
+import type { BlockRenderContext } from './BlockRegistry';
 import styles from './Blocks.module.css';
 import { registerBlock } from './BlockRegistry';
 
@@ -10,6 +11,8 @@ interface ThinkingBlockProps {
   defaultExpanded?: boolean;
   /** streaming 状态时显示末尾闪烁光标 + 自动展开 */
   streaming?: boolean;
+  /** registry 签名要求；ThinkingBlock 不依赖上下文，忽略 */
+  ctx?: BlockRenderContext;
 }
 
 /**

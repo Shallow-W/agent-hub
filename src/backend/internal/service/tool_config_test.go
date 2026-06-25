@@ -64,8 +64,6 @@ func testRegistry() ToolRegistryReader {
 		"delete_agent":             true,
 		"list_toolsets":            true,
 		"list_platform_skills":     true,
-		"deploy_artifact":          true,
-		"deploy_artifact_github":   true,
 	}}
 }
 

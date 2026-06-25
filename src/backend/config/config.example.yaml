@@ -1,5 +1,8 @@
 ﻿server:
   port: 8080
+  # Optional. Set to a LAN/public reachable URL (e.g. "http://10.0.0.1:8080")
+  # for daemon connect commands. Auto-detects LAN IP when empty.
+  external_url: ""
 database:
   host: localhost
   port: 5432
