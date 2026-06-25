@@ -1,7 +1,8 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Drawer, Button, Tooltip, Spin, Empty, Tree, Select } from 'antd';
+import { Drawer, Button, Tooltip, Spin, Empty, Tree, Select, Segmented } from 'antd';
 import type { TreeDataNode } from 'antd';
 import {
+  CodeOutlined,
   FolderOpenOutlined,
   FolderOutlined,
   FileOutlined,
@@ -9,6 +10,7 @@ import {
   FileExcelOutlined,
   FileExclamationOutlined,
   DownloadOutlined,
+  EyeOutlined,
   ReloadOutlined,
   DownOutlined,
   HistoryOutlined,
@@ -31,6 +33,8 @@ import {
   type ChangeStatus,
   type Commit,
 } from '@/api/files';
+import { WebpageFrame } from './WebpageFrame';
+import { defaultFileViewMode, isHtmlPreviewFile, type FileViewMode } from './filePreview';
 import styles from './FilesDrawer.module.css';
 
 // CodeMirror 较重，懒加载（与 ArtifactEditor 同款策略）
@@ -99,6 +103,7 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
   const [diffOld, setDiffOld] = useState<ReadResult | null>(null);
   const [diffNew, setDiffNew] = useState<ReadResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [fileViewMode, setFileViewMode] = useState<FileViewMode>('source');
 
   // 文件树虚拟化的可见高度（用 ref 测量，避免固定值在小屏上滚动条计算不准）
   const treeContainerRef = useRef<HTMLDivElement>(null);
@@ -124,6 +129,7 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
     setSelectedAbsPath('');
     setFileContent(null);
     setPanelMode('view');
+    setFileViewMode('source');
     setCommits([]);
     browseTree(agentId, workDir)
       .then((data) => {
@@ -206,6 +212,7 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
       if (!absPath) return;
       setSelectedAbsPath(absPath);
       setPanelMode('view');
+      setFileViewMode(defaultFileViewMode(absPath));
       setFileContent(null);
       setFileLoading(true);
       readFile(agentId, workDir, absPath)
@@ -329,6 +336,7 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
 
   const fileLanguage = useMemo(() => inferLanguageFromPath(selectedRelPath), [selectedRelPath]);
   const isMarkdown = selectedRelPath.toLowerCase().endsWith('.md');
+  const isHtml = isHtmlPreviewFile(selectedRelPath);
 
   // 文件内容渲染分支（view 模式）
   const renderFileContent = () => {
@@ -348,6 +356,13 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
       return (
         <div className={styles.markdownPreview}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{fileContent.content}</ReactMarkdown>
+        </div>
+      );
+    }
+    if (isHtml && fileViewMode === 'preview') {
+      return (
+        <div className={styles.htmlPreview}>
+          <WebpageFrame srcDoc={fileContent.content} />
         </div>
       );
     }
@@ -514,6 +529,17 @@ export const FilesDrawer: React.FC<FilesDrawerProps> = ({ agentId, workDir, open
           <div className={styles.filePanel}>
             <div className={styles.filePanelHeader}>
               <span className={styles.filePanelPath}>{selectedRelPath || '（未选择）'}</span>
+              {selectedAbsPath && panelMode === 'view' && isHtml && (
+                <Segmented<FileViewMode>
+                  size="small"
+                  value={fileViewMode}
+                  onChange={setFileViewMode}
+                  options={[
+                    { label: '预览', value: 'preview', icon: <EyeOutlined /> },
+                    { label: '源码', value: 'source', icon: <CodeOutlined /> },
+                  ]}
+                />
+              )}
               {selectedAbsPath && (
                 <Tooltip title={panelMode === 'history' ? '返回查看' : '查看 git 历史'}>
                   <Button

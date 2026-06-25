@@ -159,6 +159,12 @@
   height: 100%;
 }
 
+.htmlPreview {
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+}
+
 .treeNode {
   display: flex;
   align-items: center;
