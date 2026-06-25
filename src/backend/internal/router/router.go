@@ -127,6 +127,7 @@ func Setup(r *gin.Engine, deps Deps) {
 		apiGroup.GET("/agents", deps.AgentHandler.List)
 		apiGroup.POST("/agents", deps.AgentHandler.Create)
 		apiGroup.PUT("/agents/:id", deps.AgentHandler.Update)
+		apiGroup.PUT("/agents/:id/tools-config", deps.AgentHandler.UpdateToolsConfig)
 		apiGroup.PUT("/agents/:id/avatar", deps.AgentHandler.UpdateAvatar)
 		apiGroup.PUT("/agents/:id/tags", deps.AgentHandler.UpdateTags)
 		apiGroup.PUT("/agents/:id/custom-skills", deps.AgentHandler.UpdateCustomSkills)

@@ -95,6 +95,9 @@ func (r *fakeDaemonAgentRepo) CreateCustom(_ context.Context, _, _, _, _, _, _, 
 func (r *fakeDaemonAgentRepo) UpdateCustom(_ context.Context, _, _, _, _, _, _, _, _, _ string, _ bool) (*model.Agent, error) {
 	return nil, nil
 }
+func (r *fakeDaemonAgentRepo) UpdateToolsConfig(_ context.Context, _, _, _ string, _ bool) (*model.Agent, error) {
+	return nil, nil
+}
 func (r *fakeDaemonAgentRepo) UpdateAvatar(_ context.Context, _, _, _ string) (*model.Agent, error) {
 	return nil, nil
 }

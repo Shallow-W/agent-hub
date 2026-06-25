@@ -43,6 +43,7 @@ type AgentRepo interface {
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
+	UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
 	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)
@@ -436,6 +437,26 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateToolsConfig 更新 Agent 的工具授权配置。它只触碰 tools_config，允许用户为
+// 自己可见的 daemon/system/custom Agent 分配 MCP 工具，不放开完整资料编辑。
+func (s *AgentService) UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error) {
+	if id == "" || userID == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateToolsConfig(ctx, id, userID, toolsConfig, enableManagementTools)
+	if err != nil {
+		return nil, fmt.Errorf("update agent tools_config: %w", err)
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound

@@ -98,6 +98,7 @@ type AgentStore interface {
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
+	UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
 	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)

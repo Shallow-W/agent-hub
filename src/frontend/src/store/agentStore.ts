@@ -29,6 +29,7 @@ interface AgentState {
   addAgentCandidate: (id: string, body: AddCandidateAgentRequest) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
+  updateAgentToolsConfig: (id: string, toolsConfig: string, enableManagementTools: boolean) => Promise<Agent>;
   updateAgentAvatar: (id: string, avatar: string) => Promise<Agent>;
   openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
@@ -148,6 +149,19 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   updateAgent: async (id, body) => {
     const agent = await agentApi.updateAgent(id, body);
+    set((state) => ({
+      agents: sortAgents(state.agents.map((item) => (
+        item.id === id ? agent : item
+      ))),
+    }));
+    return agent;
+  },
+
+  updateAgentToolsConfig: async (id, toolsConfig, enableManagementTools) => {
+    const agent = await agentApi.updateAgentToolsConfig(id, {
+      tools_config: toolsConfig,
+      enable_management_tools: enableManagementTools,
+    });
     set((state) => ({
       agents: sortAgents(state.agents.map((item) => (
         item.id === id ? agent : item

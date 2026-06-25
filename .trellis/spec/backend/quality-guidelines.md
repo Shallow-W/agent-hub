@@ -210,18 +210,43 @@ detail.Description = truncateString(ca.Description, 300)
 
 **Scope / Trigger**: Applies when changing `agents.tools_config`, daemon MCP tool registration, or platform MCP endpoints.
 
+**Signatures**:
+- API: `PUT /api/agents/:id/tools-config`
+- Request: `{"tools_config": string, "enable_management_tools": boolean}`
+- Storage: `agents.tools_config` stores the normalized JSON string; `agents.enable_management_tools` stores whether management tools are enabled.
+- Runtime read: daemon MCP resolves the current Agent through `/mcp/agents/:id` or `/mcp/agents` and must receive `tools_config`.
+
 **Contracts**:
 - `agents.tools_config` is the per-Agent MCP tool authorization config. The supported JSON shape is `{"toolset": string, "allowed_tools": string[]}`.
+- Frontend Agent tool assignment UI must persist through `PUT /api/agents/:id/tools-config`, not only local component/store state and not the full `PUT /api/agents/:id` custom-Agent update path.
+- The tools-config update endpoint only mutates `tools_config` and `enable_management_tools`; it must not change name, prompt, avatar, capabilities, Skills, status, or machine fields.
+- The tools-config update endpoint applies to the current user's visible Agents, including daemon/system/custom Agents. Full Agent profile updates may remain custom-Agent-only.
 - `allowed_tools` must only contain known platform tool names. Unknown names are filtered before persistence.
 - Legacy non-JSON `tools_config` text may be preserved for display, but it must not grant extra MCP tools.
+- Saving `enable_management_tools` must reflect the current selected tools. Removing management tools should be able to set it back to `false`.
+- `/mcp/agents` and `/mcp/agents/:id` responses used by daemons must include `tools_config`; otherwise persisted assignments will not affect runtime `tools/list`.
 - MCP `tools/list` must only return tools allowed for the current `agent_id`.
 - MCP `tools/call` must reject unauthorized tool names before executing the tool handler.
 - MCP sessions without a resolved `agent_id`, or with an unknown Agent, must fail closed and expose no tools.
 - Explicit JSON `allowed_tools: []` means no tools; it must not fall back to default tools.
 - Hiding tools in prompts or UI is not sufficient; runtime tool calls must enforce the same allowlist.
 
+**Validation & Error Matrix**:
+- Empty `tools_config` -> persist normalized no-tools config `{"toolset":"none","allowed_tools":[]}`.
+- Unknown tool names -> filter before persistence.
+- Invalid JSON object shape that cannot be normalized -> `ErrAgentInvalidInput`.
+- Missing `agent_id` or `user_id` -> `ErrAgentInvalidInput`.
+- Agent not visible to the current user -> `ErrAgentNotFound`.
+- Repository failure -> wrap with `%w` and return handler 500.
+
+**Good/Base/Bad Cases**:
+- Good: User selects `list_tasks` for a daemon-added Codex Agent, saves, reloads, and the Agent still has `allowed_tools:["list_tasks"]`.
+- Base: User selects no tools; backend persists explicit empty allowlist and daemon exposes no platform tools.
+- Bad: Frontend checkbox state updates but no backend API writes `agents.tools_config`.
+- Bad: Saving tools through the full `PUT /api/agents/:id` path fails for non-custom/system Agents.
+
 **Tests Required**:
-- Backend service test for `tools_config` normalization and unknown tool filtering.
+- Backend service test for `tools_config` normalization, unknown tool filtering, and tools-config persistence for visible daemon/system/custom Agents.
 - Daemon MCP test for filtered `tools/list` and unauthorized `tools/call`.
 - End-to-end daemon MCP test where one Agent's config allows tool A and denies tool B.
 
@@ -232,6 +257,14 @@ server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 
 // Correct: server list/call is constrained by the current Agent's tool config.
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
+```
+
+```typescript
+// Wrong: frontend appears saved, but non-custom Agents never persist in backend.
+await updateAgent(agent.id, fullAgentPayload)
+
+// Correct: tool assignment uses the dedicated persistence endpoint.
+await updateAgentToolsConfig(agent.id, toolsConfig, hasManagementTools)
 ```
 
 ### Agent Platform Skills

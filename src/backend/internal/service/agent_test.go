@@ -23,6 +23,7 @@ type fakeAgentRepo struct {
 	addedTools    string
 	addedSkills   string
 	updatedUser   string
+	updatedTools  string
 	updatedSkills string
 }
 
@@ -137,6 +138,17 @@ func (r *fakeAgentRepo) CreateCustom(ctx context.Context, userID, name, cliTool,
 
 func (r *fakeAgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error) {
 	return r.updateResult, nil
+}
+
+func (r *fakeAgentRepo) UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error) {
+	r.updatedUser = userID
+	r.updatedTools = toolsConfig
+	if r.updateResult != nil {
+		r.updateResult.ToolsConfig = toolsConfig
+		r.updateResult.EnableManagementTools = enableManagementTools
+		return r.updateResult, nil
+	}
+	return nil, nil
 }
 
 func (r *fakeAgentRepo) DeleteOwned(ctx context.Context, id, userID string) (bool, error) {
@@ -364,6 +376,62 @@ func TestAddCandidateAgentRejectsInvalidCustomSkills(t *testing.T) {
 		`not json`,
 		false,
 	)
+	if !errors.Is(err, ErrAgentInvalidInput) {
+		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
+	}
+}
+
+func TestUpdateToolsConfigPersistsForOwnedDaemonAgent(t *testing.T) {
+	userID := "user-1"
+	repo := &fakeAgentRepo{
+		updateResult: &model.Agent{
+			ID:      "agent-1",
+			UserID:  &userID,
+			Name:    "Daemon Agent",
+			Type:    "custom",
+			Source:  "daemon",
+			CLITool: "codex",
+		},
+	}
+	svc := NewAgentService(repo, nil)
+	svc.SetToolRegistry(testRegistry())
+	svc.SetToolsetStore(testToolsetStore())
+
+	agent, err := svc.UpdateToolsConfig(
+		context.Background(),
+		"agent-1",
+		userID,
+		`{"toolset":"custom","allowed_tools":["list_tasks","unknown","create_agent"]}`,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("update tools config failed: %v", err)
+	}
+	if agent == nil {
+		t.Fatal("expected updated agent")
+	}
+	if repo.updatedUser != userID {
+		t.Fatalf("expected scoped user id, got %q", repo.updatedUser)
+	}
+	if repo.updatedTools != `{"allowed_tools":["list_tasks","create_agent"]}` {
+		t.Fatalf("unexpected normalized tools config: %s", repo.updatedTools)
+	}
+	if !agent.EnableManagementTools {
+		t.Fatal("expected management flag persisted")
+	}
+}
+
+func TestUpdateToolsConfigReturnsNotFound(t *testing.T) {
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.UpdateToolsConfig(context.Background(), "agent-1", "user-1", `{"toolset":"none"}`, false)
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestUpdateToolsConfigRejectsInvalidIDs(t *testing.T) {
+	svc := NewAgentService(&fakeAgentRepo{}, nil)
+	_, err := svc.UpdateToolsConfig(context.Background(), "agent-1", "", `{"toolset":"none"}`, false)
 	if !errors.Is(err, ErrAgentInvalidInput) {
 		t.Fatalf("expected ErrAgentInvalidInput, got %v", err)
 	}

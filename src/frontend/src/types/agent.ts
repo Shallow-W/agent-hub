@@ -73,6 +73,11 @@ export interface AgentRequest {
   enable_management_tools?: boolean;
 }
 
+export interface AgentToolsConfigRequest {
+  tools_config: string;
+  enable_management_tools?: boolean;
+}
+
 export interface DaemonMachine {
   id: string;
   user_id: string;

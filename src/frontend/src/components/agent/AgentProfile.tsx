@@ -144,6 +144,7 @@ function conversationStatusMeta(status: ConversationItem['status']): { label: st
 
 export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'overview', onMessage }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
+  const updateAgentToolsConfig = useAgentStore((s) => s.updateAgentToolsConfig);
   const updateAgentTags = useAgentStore((s) => s.updateAgentTags);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const [activeTab, setActiveTab] = useState(defaultTab);
@@ -434,16 +435,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
       const mgmt = getManagementTools();
       const hasMgmt = selectedTools.some((t) => mgmt.has(t));
-      await updateAgent(agent.id, {
-        name: agent.name,
-        cli_tool: agent.cli_tool,
-        avatar: agent.avatar || undefined,
-        system_prompt: agent.system_prompt ?? '',
-        tools_config: nextToolsConfig,
-        capabilities_json: agent.capabilities_json ?? '',
-        custom_skills: agent.custom_skills ?? '',
-        enable_management_tools: (agent.enable_management_tools ?? false) || hasMgmt,
-      });
+      await updateAgentToolsConfig(agent.id, nextToolsConfig, hasMgmt);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
