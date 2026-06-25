@@ -6,10 +6,15 @@ import {
   FilePdfOutlined,
   FileTextOutlined,
   DownloadOutlined,
+  LoadingOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import type { KnowledgeFile } from '@/types/knowledge';
 import { getKnowledgeFileText, getKnowledgeFileUrl } from '@/api/knowledge';
 import { getAuthHeaders } from '@/api/client';
+import { useAgentStore } from '@/store/agentStore';
+import { useKnowledgeStore } from '@/store/knowledgeStore';
+import { message } from '@/utils/message';
 import {
   buildKnowledgePreviewModel,
   isImageMime,
@@ -23,6 +28,7 @@ import styles from './KnowledgeFilePreview.module.css';
 interface KnowledgeFilePreviewProps {
   file: KnowledgeFile;
   kbId: string;
+  onFileRenamed?: (file: KnowledgeFile) => void;
 }
 
 type PreviewState = 'loading' | 'loaded' | 'error';
@@ -41,12 +47,23 @@ async function fetchFileBlob(kbId: string, file: KnowledgeFile): Promise<{ url: 
   return { url: blobUrl, blob };
 }
 
-const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId }) => {
+const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId, onFileRenamed }) => {
   const [state, setState] = useState<PreviewState>('loading');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [renameLoading, setRenameLoading] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
+  const agentsLoaded = useAgentStore((s) => s.agentsLoaded);
+  const fetchAgents = useAgentStore((s) => s.fetchAgents);
+  const hasOnlineAgent = useAgentStore((s) => s.agents.some((agent) => agent.status === 'online'));
+  const smartRenameFile = useKnowledgeStore((s) => s.smartRenameFile);
+
+  useEffect(() => {
+    if (!agentsLoaded) {
+      void fetchAgents().catch(() => undefined);
+    }
+  }, [agentsLoaded, fetchAgents]);
 
   // 清理 blob URL
   useEffect(() => {
@@ -122,6 +139,23 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
       URL.revokeObjectURL(blobUrl);
     } catch {
       // 静默失败，用户可通过右键保存
+    }
+  };
+
+  const handleSmartRename = async () => {
+    if (!hasOnlineAgent) {
+      message.warning('需要至少一个在线智能体');
+      return;
+    }
+    setRenameLoading(true);
+    try {
+      const updatedFile = await smartRenameFile(kbId, file.id);
+      onFileRenamed?.(updatedFile);
+      message.success(`已重命名为 ${updatedFile.filename}`);
+    } catch (err) {
+      message.error((err as Error).message || '智能重命名失败');
+    } finally {
+      setRenameLoading(false);
     }
   };
 
@@ -206,14 +240,27 @@ const KnowledgeFilePreview: React.FC<KnowledgeFilePreviewProps> = ({ file, kbId 
           <span className={styles.fileIcon}>{fileTypeIcon}</span>
           <span className={styles.fileName}>{file.filename}</span>
         </div>
-        <button
-          className={styles.downloadBtn}
-          type="button"
-          aria-label="下载文件"
-          onClick={handleDownload}
-        >
-          <DownloadOutlined />
-        </button>
+        <div className={styles.fileActions}>
+          <button
+            className={styles.smartRenameBtn}
+            type="button"
+            aria-label="智能重命名"
+            title={hasOnlineAgent ? '智能重命名' : '需要至少一个在线智能体'}
+            disabled={renameLoading || !hasOnlineAgent}
+            onClick={handleSmartRename}
+          >
+            {renameLoading ? <LoadingOutlined /> : <RobotOutlined />}
+            <span>智能重命名</span>
+          </button>
+          <button
+            className={styles.downloadBtn}
+            type="button"
+            aria-label="下载文件"
+            onClick={handleDownload}
+          >
+            <DownloadOutlined />
+          </button>
+        </div>
       </div>
 
       {/* 预览区域 */}

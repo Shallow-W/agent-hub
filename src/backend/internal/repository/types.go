@@ -158,6 +158,7 @@ type KnowledgeStore interface {
 	FindByUserAndName(ctx context.Context, userID, kbName string) (*model.KnowledgeBase, error)
 	GetFileByID(ctx context.Context, kbID, fileID string) (*model.KnowledgeFile, error)
 	UpdateFilePreview(ctx context.Context, kbID, fileID, previewText, previewType string) error
+	UpdateFileName(ctx context.Context, kbID, fileID, filename string) (*model.KnowledgeFile, error)
 	SearchFiles(ctx context.Context, kbID, keyword string, limit int) ([]model.KnowledgeFile, error)
 	ListPublicByUsers(ctx context.Context, userIDs []string, excludeUserID string) ([]model.KnowledgeBase, error)
 }

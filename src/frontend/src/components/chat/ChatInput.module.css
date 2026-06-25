@@ -174,6 +174,74 @@
   background: rgba(47, 143, 107, 0.12) !important;
 }
 
+.kbReferenceBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 8px;
+  margin-bottom: 7px;
+  border: 1px solid rgba(47, 143, 107, 0.16);
+  border-radius: 10px;
+  background: rgba(47, 143, 107, 0.06);
+  color: var(--color-text-secondary);
+}
+
+.kbReferenceBarIcon {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-size: 14px;
+}
+
+.kbReferenceBarLabel {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kbReferencePills {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kbReferencePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(260px, 100%);
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid rgba(47, 143, 107, 0.18);
+  border-radius: 999px;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.kbReferencePill:hover {
+  border-color: rgba(47, 143, 107, 0.32);
+  color: var(--color-primary);
+}
+
+.kbReferenceName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbReferenceRemove {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+}
+
 .replyBar {
   display: flex;
   align-items: center;
@@ -243,4 +311,94 @@
 .mentionItem:hover,
 .mentionItemActive {
   background: rgba(47, 143, 107, 0.08);
+}
+
+.kbDropdown {
+  max-height: 280px;
+  padding: 6px;
+}
+
+.kbClearItem {
+  margin-bottom: 4px;
+  border-radius: 6px;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+
+.kbMentionItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 9px;
+  border-radius: 8px;
+}
+
+.kbMentionIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.1);
+  font-size: 14px;
+}
+
+.kbMentionMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.kbMentionName {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbMentionMeta {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.kbMentionVisibility {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.08);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.kbEmptyItem {
+  padding: 14px 12px;
+  color: var(--color-text-tertiary);
+  cursor: default;
+  font-size: 13px;
+}
+
+:global(html.dark) .kbReferenceBar {
+  border-color: rgba(47, 143, 107, 0.28);
+  background: rgba(47, 143, 107, 0.12);
+}
+
+:global(html.dark) .kbReferencePill {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .kbMentionIcon,
+:global(html.dark) .kbMentionVisibility {
+  background: rgba(47, 143, 107, 0.16);
 }

@@ -3,7 +3,10 @@ import { Input, Button, Tooltip, Spin } from 'antd';
 import { message } from '@/utils/message';
 import {
   CloseOutlined,
+  DatabaseOutlined,
+  GlobalOutlined,
   LinkOutlined,
+  LockOutlined,
   RobotOutlined,
   SendOutlined,
   UpOutlined,
@@ -26,6 +29,7 @@ import type { TextAreaRef } from 'antd/es/input/TextArea';
 import type { AttachmentPayload } from '@/types/attachment';
 import type { Message, ReplyToPreview } from '@/types/message';
 import { AttachmentPreview, type PendingAttachment } from './AttachmentPreview';
+import { extractKnowledgeRefs, removeKnowledgeRef } from '@/components/knowledge/knowledgeReferenceState';
 import styles from './ChatInput.module.css';
 import replyStyles from './ChatInput.module.css';
 
@@ -35,6 +39,7 @@ const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const REPLY_PREVIEW_LIMIT = 50;
+const EMPTY_MESSAGES: Message[] = [];
 
 type MentionTarget =
   | { id: string; label: string; mentionLabel: string; kind: 'user'; user: GroupMember }
@@ -76,10 +81,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [value, setValue] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const { send } = useMessages(conversationId);
-  // PR3：流式状态来自 messages 数组里是否存在 status='streaming' 的 message。
-  // 不再使用已删除的 streamingContent map。
   const isStreaming = useMessageStore(
-    (s) => (s.messages[conversationId] ?? []).some((m) => m.status === 'streaming'),
+    (s) => (s.messages[conversationId] ?? EMPTY_MESSAGES).some((msg) => msg.status === 'streaming'),
   );
   const wsClient = useWsStore((s) => s.wsClient);
   const agentTyping = useWsStore((s) => conversationId ? (s.agentTyping[conversationId] ?? false) : false);
@@ -377,6 +380,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     );
   }, [kbTargets, kbQuery]);
 
+  const selectedKnowledgeRefs = useMemo(() => extractKnowledgeRefs(value), [value]);
+
+  const handleRemoveKnowledgeRef = useCallback((key: string) => {
+    setValue((current) => removeKnowledgeRef(current, key));
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
+
   const insertKB = useCallback((target: KBTarget | null) => {
     const before = value.slice(0, kbStart);
     const after = value.slice(kbStart + kbQuery.length + 1); // +1 for #
@@ -577,6 +587,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           />
         </div>
       )}
+      {selectedKnowledgeRefs.length > 0 && (
+        <div className={styles.kbReferenceBar}>
+          <DatabaseOutlined className={styles.kbReferenceBarIcon} />
+          <span className={styles.kbReferenceBarLabel}>已引用知识库</span>
+          <div className={styles.kbReferencePills}>
+            {selectedKnowledgeRefs.map((ref) => (
+              <button
+                key={ref.key}
+                type="button"
+                className={styles.kbReferencePill}
+                title={`移除 ${ref.key}`}
+                onClick={() => handleRemoveKnowledgeRef(ref.key)}
+              >
+                <span className={styles.kbReferenceName}>{ref.key}</span>
+                <CloseOutlined className={styles.kbReferenceRemove} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <AttachmentPreview items={pendingFiles} onRemove={handleRemoveFile} />
       <div className={styles.inputRow}>
         <Tooltip title="添加附件">
@@ -641,11 +671,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </div>
       )}
       {kbVisible && (
-        <div className={styles.mentionDropdown}>
-          {/* "不使用知识库" option at index 0 */}
+        <div className={`${styles.mentionDropdown} ${styles.kbDropdown}`}>
           <button
-            className={`${styles.mentionItem} ${0 === kbIndex ? styles.mentionItemActive : ''}`}
-            style={{ color: 'var(--color-text-tertiary)' }}
+            className={`${styles.mentionItem} ${styles.kbClearItem} ${0 === kbIndex ? styles.mentionItemActive : ''}`}
             type="button"
             onMouseDown={(e) => {
               e.preventDefault();
@@ -656,28 +684,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           </button>
           {filteredKBTargets.length > 0 ? (
             filteredKBTargets.map((kb, i) => {
-              const idx = i + 1; // offset by 1 for "不使用" option
+              const idx = i + 1;
               return (
                 <button
                   key={`${kb.username}/${kb.name}`}
-                  className={`${styles.mentionItem} ${idx === kbIndex ? styles.mentionItemActive : ''}`}
+                  className={`${styles.mentionItem} ${styles.kbMentionItem} ${idx === kbIndex ? styles.mentionItemActive : ''}`}
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
                     insertKB({ username: kb.username, kbName: kb.name, kbId: kb.id, visibility: kb.visibility });
                   }}
                 >
-                  <span style={{ fontWeight: 500 }}>{kb.username}/{kb.name}</span>
-                  {kb.visibility === 'public' ? ' · 公开' : ' · 私有'}
-                  <span style={{ color: 'var(--color-text-tertiary)', fontSize: 12, marginLeft: 6 }}>
-                    ({kb.file_count} 个文件)
+                  <DatabaseOutlined className={styles.kbMentionIcon} />
+                  <span className={styles.kbMentionMain}>
+                    <span className={styles.kbMentionName}>{kb.username}/{kb.name}</span>
+                    <span className={styles.kbMentionMeta}>{kb.file_count} 个文件</span>
+                  </span>
+                  <span className={styles.kbMentionVisibility}>
+                    {kb.visibility === 'public' ? <GlobalOutlined /> : <LockOutlined />}
+                    {kb.visibility === 'public' ? '公开' : '私有'}
                   </span>
                 </button>
               );
             })
           ) : (
-            <div className={styles.mentionItem} style={{ color: 'var(--color-text-tertiary)', cursor: 'default' }}>
-              {kbLoaded ? '没有可用的知识库' : '加载中...'}
+            <div className={styles.kbEmptyItem}>
+              {kbLoaded ? '没有可用的知识库' : '加载知识库中...'}
             </div>
           )}
         </div>

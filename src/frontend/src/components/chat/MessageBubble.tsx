@@ -9,6 +9,7 @@ import { useMessageStore } from '@/store/messageStore';
 import {
   CloseOutlined,
   CopyOutlined,
+  DatabaseOutlined,
   DeleteOutlined,
   DownOutlined,
   ForwardOutlined,
@@ -38,6 +39,12 @@ import { StopButton } from './StopButton';
 import { renderBlock, type BlockRenderContext } from './blocks';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import {
+  simplifyKnowledgeContextText,
+  splitKnowledgeRefText,
+  type KnowledgeContextSummary,
+  type KnowledgeReference,
+} from '@/components/knowledge/knowledgeReferenceState';
 import styles from './MessageBubble.module.css';
 
 const { Text } = Typography;
@@ -104,8 +111,30 @@ export function splitByCardPlaceholder(
 
 const MENTION_RE = /(^|\s)@([\p{L}\p{N}_\-.]{2,20})(?=\s|$)/gu;
 
+function renderKnowledgeReference(ref: KnowledgeReference, key: string): ReactNode {
+  return (
+    <span key={key} className={styles.knowledgeRef} title={`知识库：${ref.key}`}>
+      <DatabaseOutlined className={styles.knowledgeRefIcon} />
+      <span className={styles.knowledgeRefName}>{ref.key}</span>
+    </span>
+  );
+}
+
+function KnowledgeContextCompact({ summary }: { summary: KnowledgeContextSummary }): ReactNode {
+  return (
+    <div className={styles.knowledgeContextCompact} title="完整知识库内容已提供给智能体">
+      <DatabaseOutlined className={styles.knowledgeContextIcon} />
+      <span className={styles.knowledgeContextTitle}>知识库上下文</span>
+      <span className={styles.knowledgeContextMeta}>
+        {summary.knowledgeBaseCount} 个知识库 · {summary.fileCount} 个文件
+        {summary.collapsedChars > 0 ? ` · 已折叠 ${summary.collapsedChars} 字` : ''}
+      </span>
+    </div>
+  );
+}
+
 /** Split text nodes so @mentions get highlighted spans. */
-function renderTextWithMentions(text: string): ReactNode[] {
+function renderTextWithMentions(text: string, keyPrefix = 'm'): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIndex = 0;
   MENTION_RE.lastIndex = 0;
@@ -117,7 +146,7 @@ function renderTextWithMentions(text: string): ReactNode[] {
     }
     if (match[1]) parts.push(match[1]);
     parts.push(
-      <span key={`m${key++}`} className={styles.mention}>
+      <span key={`${keyPrefix}${key++}`} className={styles.mention}>
         @{match[2]}
       </span>,
     );
@@ -127,16 +156,32 @@ function renderTextWithMentions(text: string): ReactNode[] {
   return parts;
 }
 
-/** Process top-level string leaves for @mention highlighting — does NOT recurse into React elements. */
+/** Split text nodes so knowledge references and @mentions render as first-class inline tokens. */
+function renderTextWithInlineReferences(text: string): ReactNode[] {
+  const tokens = splitKnowledgeRefText(text);
+  if (tokens.length === 0) return [text];
+
+  const parts: ReactNode[] = [];
+  tokens.forEach((token, index) => {
+    if (token.type === 'knowledge_ref') {
+      parts.push(renderKnowledgeReference(token.ref, `kb${index}`));
+      return;
+    }
+    parts.push(...renderTextWithMentions(token.text, `t${index}-m`));
+  });
+  return parts;
+}
+
+/** Process top-level string leaves for inline token highlighting — does NOT recurse into React elements. */
 function renderChildrenWithMentions(children: ReactNode): ReactNode {
   if (typeof children === 'string') {
-    const parts = renderTextWithMentions(children);
+    const parts = renderTextWithInlineReferences(children);
     return parts.length === 1 ? parts[0] : <>{parts}</>;
   }
   if (Array.isArray(children)) {
     return <>{children.map((c, i) => {
       if (typeof c === 'string') {
-        const parts = renderTextWithMentions(c);
+        const parts = renderTextWithInlineReferences(c);
         return <React.Fragment key={i}>{parts.length === 1 ? parts[0] : <>{parts}</>}</React.Fragment>;
       }
       return <React.Fragment key={i}>{c}</React.Fragment>;
@@ -321,10 +366,17 @@ const MarkdownRenderer = React.memo<{ content: string; codeArtifacts: Artifact[]
       () => buildMarkdownComponents(codeArtifacts),
       [codeArtifacts],
     );
+    const knowledgeContext = React.useMemo(
+      () => simplifyKnowledgeContextText(content),
+      [content],
+    );
     return (
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
-        {content}
-      </ReactMarkdown>
+      <>
+        {knowledgeContext.summary && <KnowledgeContextCompact summary={knowledgeContext.summary} />}
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+          {knowledgeContext.text}
+        </ReactMarkdown>
+      </>
     );
   },
 );
@@ -801,7 +853,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
               </div>
             ) : null}
             {cardArtifacts.length > 0 && (
-              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} conversationId={message.conversation_id} />
+              <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} />
             )}
             {deployment && (
               <div className={styles.deployCard}>
