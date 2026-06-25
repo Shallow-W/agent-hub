@@ -435,7 +435,10 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
       const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
       const mgmt = getManagementTools();
       const hasMgmt = selectedTools.some((t) => mgmt.has(t));
-      await updateAgentToolsConfig(agent.id, nextToolsConfig, hasMgmt);
+      const savedAgent = await updateAgentToolsConfig(agent.id, nextToolsConfig, hasMgmt);
+      const parsedTools = parseToolsConfig(savedAgent.tools_config);
+      setSelectedToolset(parsedTools.toolset);
+      setSelectedTools(parsedTools.allowedTools);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
