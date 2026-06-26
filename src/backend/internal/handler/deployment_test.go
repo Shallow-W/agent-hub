@@ -48,6 +48,9 @@ func (fakeDeployArtRepo) GetConversationIDByRoot(_ context.Context, _ string) (s
 func (fakeDeployArtRepo) GetLatestRootByConversation(_ context.Context, _ string) (string, error) {
 	return "", repository.ErrArtifactRootNotFound
 }
+func (fakeDeployArtRepo) GetLatestByConversationAndName(_ context.Context, _, _ string) (*model.Artifact, error) {
+	return nil, nil
+}
 
 type fakeDeployConvRepo struct{}
 

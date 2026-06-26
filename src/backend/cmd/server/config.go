@@ -14,7 +14,8 @@ import (
 // Config 应用配置结构
 type Config struct {
 	Server struct {
-		Port int `koanf:"port"`
+		Port        int    `koanf:"port"`
+		ExternalURL string `koanf:"external_url"` // 局域网/公网可达地址，如 http://10.0.0.1:8080；为空则自动检测
 	} `koanf:"server"`
 	Database struct {
 		Host     string `koanf:"host"`

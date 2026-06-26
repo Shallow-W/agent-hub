@@ -47,3 +47,47 @@
 <PptxPreview fileUrl={fileUrl} fileName={fileName} previewUrl={previewUrl} />
 ```
 
+## Scenario: Project HTML File Preview
+
+### 1. Scope / Trigger
+- Trigger: `project` cards open `FilesDrawer`, and users need to preview `.html` / `.htm` files instead of only reading source code.
+- Do not add a separate `html_preview` card type for single-file previews. `project` remains the directory-level entry point; HTML rendering is a file viewer mode.
+
+### 2. Signatures
+- Frontend component: `FilesDrawer({ agentId, workDir, open, onClose })`
+- File read API: `readFile(agentId, workDir, targetPath) -> ReadResult`
+- Preview helper: `isHtmlPreviewFile(filepath)`, `defaultFileViewMode(filepath)`
+
+### 3. Contracts
+- `.html` and `.htm` files open in `preview` mode by default.
+- The file panel header shows a segmented control only for HTML files in normal view mode: `preview` and `source`.
+- Preview mode renders the file content through `WebpageFrame` with `srcDoc`, reusing its sandbox behavior.
+- Source mode keeps the existing code viewer path and language inference (`html` -> CodeMirror HTML mode).
+- Markdown, code, text, binary, large-file, and git-history views must keep their existing behavior.
+
+### 4. Validation & Error Matrix
+- Binary file -> existing binary unsupported hint, no HTML preview.
+- Too-large file -> existing too-large hint, no HTML preview.
+- Empty or missing file content -> existing empty/read hint.
+- HTML file with external relative assets -> preview may render the HTML shell only; full project-relative asset preview requires a separate static preview/session URL.
+
+### 5. Good/Base/Bad Cases
+- Good: selecting `index.html` in a project card immediately shows iframe preview and lets the user switch to source.
+- Base: selecting `README.md` still renders markdown preview and does not show the HTML segmented control.
+- Bad: adding a new card type for HTML files duplicates `project` directory semantics and forces agents to choose card protocol variants for a file-viewer concern.
+
+### 6. Tests Required
+- Unit test for `.html` / `.htm` detection and default view mode.
+- Frontend build/type check must pass because `FilesDrawer` owns the Ant Design segmented control and `WebpageFrame` integration.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```json
+{"type":"html_preview","workDir":"/repo","path":"index.html"}
+```
+
+#### Correct
+```tsx
+<WebpageFrame srcDoc={fileContent.content} />
+```

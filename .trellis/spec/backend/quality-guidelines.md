@@ -210,28 +210,79 @@ detail.Description = truncateString(ca.Description, 300)
 
 **Scope / Trigger**: Applies when changing `agents.tools_config`, daemon MCP tool registration, or platform MCP endpoints.
 
+**Signatures**:
+- API: `PUT /api/agents/:id/tools-config`
+- Request: `{"tools_config": string, "enable_management_tools": boolean}`
+- Tool catalog API: `GET /api/tools/definitions`
+- Builtin template API: `GET /api/tools/builtin-templates`
+- Storage: `agents.tools_config` stores the normalized JSON string; `agents.enable_management_tools` stores whether management tools are enabled.
+- Runtime read: daemon MCP resolves the current Agent through `/mcp/agents/:id` or `/mcp/agents` and must receive `tools_config`.
+
 **Contracts**:
+- `/api/tools/definitions` must expose the runtime `ToolRegistry` entries, not stale DB/catalog rows. `tool_definitions` is a sync/cache table; it is not the frontend authorization source of truth.
+- `/api/tools/builtin-templates` must normalize `tool_names` against the runtime `ToolRegistry` before returning them to the frontend. Filter unknown names and map supported legacy aliases such as `list_group_agents` -> `list_conversation_agents`.
 - `agents.tools_config` is the per-Agent MCP tool authorization config. The supported JSON shape is `{"toolset": string, "allowed_tools": string[]}`.
+- Frontend Agent tool assignment UI must persist through `PUT /api/agents/:id/tools-config`, not only local component/store state and not the full `PUT /api/agents/:id` custom-Agent update path.
+- The tools-config update endpoint only mutates `tools_config` and `enable_management_tools`; it must not change name, prompt, avatar, capabilities, Skills, status, or machine fields.
+- The tools-config update endpoint applies to the current user's visible Agents, including daemon/system/custom Agents. Full Agent profile updates may remain custom-Agent-only.
 - `allowed_tools` must only contain known platform tool names. Unknown names are filtered before persistence.
 - Legacy non-JSON `tools_config` text may be preserved for display, but it must not grant extra MCP tools.
+- Saving `enable_management_tools` must reflect the current selected tools. Removing management tools should be able to set it back to `false`.
+- `/mcp/agents` and `/mcp/agents/:id` responses used by daemons must include `tools_config`; otherwise persisted assignments will not affect runtime `tools/list`.
 - MCP `tools/list` must only return tools allowed for the current `agent_id`.
 - MCP `tools/call` must reject unauthorized tool names before executing the tool handler.
 - MCP sessions without a resolved `agent_id`, or with an unknown Agent, must fail closed and expose no tools.
 - Explicit JSON `allowed_tools: []` means no tools; it must not fall back to default tools.
 - Hiding tools in prompts or UI is not sufficient; runtime tool calls must enforce the same allowlist.
 
+**Validation & Error Matrix**:
+- Empty `tools_config` -> persist normalized no-tools config `{"toolset":"none","allowed_tools":[]}`.
+- Unknown tool names -> filter before persistence.
+- Stale DB/catalog tool definition not registered in `ToolRegistry` -> omit from `/api/tools/definitions`.
+- Builtin template contains stale/unknown tool names -> return only canonical registered names in `tool_names`.
+- Invalid JSON object shape that cannot be normalized -> `ErrAgentInvalidInput`.
+- Missing `agent_id` or `user_id` -> `ErrAgentInvalidInput`.
+- Agent not visible to the current user -> `ErrAgentNotFound`.
+- Repository failure -> wrap with `%w` and return handler 500.
+
+**Good/Base/Bad Cases**:
+- Good: User selects `list_tasks` for a daemon-added Codex Agent, saves, reloads, and the Agent still has `allowed_tools:["list_tasks"]`.
+- Good: Frontend can only select tool names returned by `ToolRegistry`; saving `list_conversation_agents` persists and reloads as the same canonical name.
+- Base: User selects no tools; backend persists explicit empty allowlist and daemon exposes no platform tools.
+- Bad: Frontend checkbox state updates but no backend API writes `agents.tools_config`.
+- Bad: Saving tools through the full `PUT /api/agents/:id` path fails for non-custom/system Agents.
+- Bad: `/api/tools/definitions` exposes stale `list_group_agents`; backend filters it during persistence, so the UI shows "saved" and then clears the selection.
+
 **Tests Required**:
-- Backend service test for `tools_config` normalization and unknown tool filtering.
+- Backend service test for `tools_config` normalization, unknown tool filtering, and tools-config persistence for visible daemon/system/custom Agents.
+- Backend handler test that `/api/tools/definitions` is sourced from `ToolRegistry` and that builtin templates filter/alias stale names.
+- Frontend E2E for selecting an Agent tool, saving, switching tabs, refreshing, and seeing the same canonical tool still selected.
 - Daemon MCP test for filtered `tools/list` and unauthorized `tools/call`.
 - End-to-end daemon MCP test where one Agent's config allows tool A and denies tool B.
 
 **Wrong vs Correct**:
+```go
+// Wrong: UI tool catalog comes from persisted seed rows that may be stale.
+definitions, _ := repo.List(ctx)
+
+// Correct: UI tool catalog comes from the same runtime registry used for validation.
+definitions := handler.definitionsFromRegistry()
+```
+
 ```go
 // Wrong: all MCP tools are always exposed.
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger)
 
 // Correct: server list/call is constrained by the current Agent's tool config.
 server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
+```
+
+```typescript
+// Wrong: frontend appears saved, but non-custom Agents never persist in backend.
+await updateAgent(agent.id, fullAgentPayload)
+
+// Correct: tool assignment uses the dedicated persistence endpoint.
+await updateAgentToolsConfig(agent.id, toolsConfig, hasManagementTools)
 ```
 
 ### Agent Platform Skills
@@ -447,6 +498,52 @@ attachment.FilePath = "http://111.228.35.61:8080/api/uploads/originals/a.png"
 // Correct: persist a relative path and compute the URL at the service boundary.
 attachment.FilePath = "uploads/originals/a.png"
 attachment.URL = fileURLs.UploadURL(attachment.FilePath)
+```
+
+### Daemon CLI One-Shot Context
+
+**Scope / Trigger**: Applies when changing daemon one-shot adapters for Codex, OpenCode, OpenClaw, or any CLI that uses global/config-file MCP registration instead of Claude Code's per-command `--mcp-config`.
+
+**Signatures**:
+- Codex command: `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --ephemeral --color never --output-last-message <file> <prompt>`.
+- Codex config: `$CODEX_HOME/config.toml` section `[mcp_servers.agenthub-platform]`.
+- One-shot env: `AGENTHUB_CONVERSATION_ID`, `AGENTHUB_USER_ID`, `AGENTHUB_AGENT_ID`, and `AGENTHUB_TASK_ID`.
+- Daemon MCP command args: `node <agenthub-daemon.js> --server-url <url> --api-key <key> --mcp --conversation-id <id> --user-id <id> --agent-id <id> --task-id <id>`.
+
+**Contracts**:
+- Codex must default to the user's normal `CODEX_HOME` (`$CODEX_HOME` if set, otherwise `~/.codex`) so daemon scan-time login detection and task execution use the same auth store.
+- `AGENTHUB_CODEX_HOME` is an explicit override for isolated Codex homes; do not silently switch to `~/.agenthub/codex`.
+- Codex/OpenCode one-shot env must include `AGENTHUB_TASK_ID` when a task ID is available so MCP subprocesses can emit task-scoped cards.
+- Codex per-task MCP config must pass `--task-id` to the daemon MCP subprocess, matching Claude Code's `buildPlatformMcpArgs(..., taskId)` behavior.
+- Codex `agenthub-platform` MCP config must set `default_tools_approval_mode = "approve"` because one-shot automation cannot surface interactive tool approval prompts reliably.
+- Codex and OpenCode remain one-shot unless their spec explicitly implements and tests `spawnPersistent`; do not route them into the Claude persistent slot by changing only dispatcher conditions.
+- Tests that call Codex `commandForTask` must set `AGENTHUB_CODEX_HOME` to a temp directory to avoid mutating the developer's real `~/.codex/config.toml`.
+
+**Validation & Error Matrix**:
+- Missing daemon server URL/API key while building MCP config -> skip writing the MCP server section; command construction still succeeds.
+- Missing Codex login in the effective `CODEX_HOME` -> Codex CLI fails at execution; daemon should report the CLI error instead of claiming the Agent is usable from a different home.
+- Missing `task_id` -> MCP tool card emission logs `card.emit_no_task` and the tool result still returns.
+- MCP tool approval prompt during one-shot -> treated as adapter misconfiguration; set `default_tools_approval_mode = "approve"`.
+
+**Good/Base/Bad Cases**:
+- Good: `codex login status` is true for `~/.codex`, daemon Codex task executes with `CODEX_HOME=~/.codex`, and platform MCP receives conversation/user/agent/task IDs.
+- Base: Operator sets `AGENTHUB_CODEX_HOME=/secure/codex-home`; scan and execution must be checked against that same home.
+- Bad: scan uses default `~/.codex` and execution uses empty `~/.agenthub/codex`, so the UI shows Codex online but tasks fail as not logged in.
+- Bad: Codex one-shot MCP config omits `--task-id`, so deployment/card-producing tools complete without attaching cards to the task.
+
+**Tests Required**:
+- Codex spec unit test asserts `buildCommand` passes task ID to `ensureAgentHubCodexMcpConfig` and `buildAgentHubContextEnv`.
+- Daemon command test asserts Codex one-shot env contains `CODEX_HOME` and all `AGENTHUB_*` context keys, including `AGENTHUB_TASK_ID`.
+- Daemon MCP config test asserts `[mcp_servers.agenthub-platform]` includes `--task-id` and `default_tools_approval_mode = "approve"`.
+- OpenCode command test asserts one-shot env includes `AGENTHUB_TASK_ID` when task context exists.
+
+**Wrong vs Correct**:
+```js
+// Wrong: execution uses an empty isolated home even though scan saw ~/.codex login.
+const codexHome = path.join(os.homedir(), '.agenthub', 'codex');
+
+// Correct: reuse the same Codex auth/config home by default; allow explicit override.
+const codexHome = process.env.AGENTHUB_CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 ```
 
 ---

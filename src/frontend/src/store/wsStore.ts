@@ -3,16 +3,77 @@ import { WebSocketClient, type WsStatus } from '@/api/websocket';
 
 const agentTypingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// ---------------------------------------------------------------------------
+// 泛化 WS 事件发布/订阅
+// 替代之前为 task.changed / conversation.role_changed 手写的独立 pubsub。
+// 新增事件类型只需 onWsEvent('type', handler) 订阅。
+// ---------------------------------------------------------------------------
+
+type WsEventHandler = (data: unknown) => void;
+const eventListeners = new Map<string, Set<WsEventHandler>>();
+
+/** 订阅一个 WS 事件类型。返回取消订阅函数。 */
+export function onWsEvent(eventType: string, handler: WsEventHandler): () => void {
+  if (!eventListeners.has(eventType)) {
+    eventListeners.set(eventType, new Set());
+  }
+  eventListeners.get(eventType)!.add(handler);
+  return () => { eventListeners.get(eventType)?.delete(handler); };
+}
+
+/** 向所有订阅者分发一个 WS 事件。由 useWebSocket 调用。 */
+export function dispatchWsEvent(eventType: string, data: unknown): void {
+  const handlers = eventListeners.get(eventType);
+  if (handlers) {
+    handlers.forEach((h) => {
+      try { h(data); } catch (e) { console.warn('WS event handler error', eventType, e); }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 向后兼容的薄包装——已有消费者无需修改。
+// ---------------------------------------------------------------------------
+
 type TaskChangedListener = (conversationId: string) => void;
-const taskChangedListeners = new Set<TaskChangedListener>();
 
 export function onTaskChanged(fn: TaskChangedListener): () => void {
-  taskChangedListeners.add(fn);
-  return () => { taskChangedListeners.delete(fn); };
+  return onWsEvent('task.changed', (data) => {
+    const d = data as Record<string, unknown>;
+    fn(String(d.conversationId ?? d.conversation_id ?? ''));
+  });
 }
 
 export function notifyTaskChanged(conversationId: string): void {
-  taskChangedListeners.forEach((fn) => fn(conversationId));
+  dispatchWsEvent('task.changed', { conversationId });
+}
+
+// conversation.role_changed 事件载荷：服务端在群聊内 Agent 角色变更后广播。
+export interface RoleChangedPayload {
+  conversationId: string;
+  agentId: string;
+  role: string;
+  actorId: string;
+  demotedAgentId?: string;
+}
+
+type RoleChangedListener = (payload: RoleChangedPayload) => void;
+
+export function onConversationRoleChanged(fn: RoleChangedListener): () => void {
+  return onWsEvent('conversation.role_changed', (data) => {
+    const d = data as Record<string, unknown>;
+    fn({
+      conversationId: String(d.conversationId ?? d.conversation_id ?? ''),
+      agentId: String(d.agentId ?? d.agent_id ?? ''),
+      role: String(d.role ?? ''),
+      actorId: String(d.actorId ?? d.actor_id ?? ''),
+      demotedAgentId: d.demotedAgentId != null ? String(d.demotedAgentId) : (d.demoted_agent_id != null ? String(d.demoted_agent_id) : undefined),
+    });
+  });
+}
+
+export function notifyConversationRoleChanged(payload: RoleChangedPayload): void {
+  dispatchWsEvent('conversation.role_changed', payload);
 }
 
 export interface TypingUser {

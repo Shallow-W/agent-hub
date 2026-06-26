@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { message } from '@/utils/message';
 import type { Conversation, ConversationType } from '@/types/conversation';
 import * as convApi from '@/api/conversation';
+import { STORAGE_KEYS } from '@/config/constants';
 
-const DIRECT_AGENT_CHATS_KEY = 'agenthub_direct_agent_chats';
+
 
 interface ConversationState {
   conversations: Conversation[];
@@ -26,7 +27,7 @@ interface ConversationState {
 
 function loadDirectAgentChats(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(DIRECT_AGENT_CHATS_KEY);
+    const raw = localStorage.getItem(STORAGE_KEYS.DIRECT_AGENT_CHATS);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -47,7 +48,7 @@ function sortConversations(list: Conversation[]): Conversation[] {
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
-  activeConversationId: localStorage.getItem('agenthub_active_conv'),
+  activeConversationId: localStorage.getItem(STORAGE_KEYS.ACTIVE_CONV),
   directAgentChats: loadDirectAgentChats(),
   memberPanelOpen: false,
   loading: false,
@@ -148,15 +149,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   setActive: (id) => {
-    if (id) localStorage.setItem('agenthub_active_conv', id);
-    else localStorage.removeItem('agenthub_active_conv');
+    if (id) localStorage.setItem(STORAGE_KEYS.ACTIVE_CONV, id);
+    else localStorage.removeItem(STORAGE_KEYS.ACTIVE_CONV);
     set({ activeConversationId: id, memberPanelOpen: false });
   },
 
   bindDirectAgentChat: (conversationId, agentId) => {
     set((state) => {
       const next = { ...state.directAgentChats, [conversationId]: agentId };
-      localStorage.setItem(DIRECT_AGENT_CHATS_KEY, JSON.stringify(next));
+      localStorage.setItem(STORAGE_KEYS.DIRECT_AGENT_CHATS, JSON.stringify(next));
       return { directAgentChats: next };
     });
   },
@@ -165,7 +166,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set((state) => {
       const next = { ...state.directAgentChats };
       delete next[conversationId];
-      localStorage.setItem(DIRECT_AGENT_CHATS_KEY, JSON.stringify(next));
+      localStorage.setItem(STORAGE_KEYS.DIRECT_AGENT_CHATS, JSON.stringify(next));
       return { directAgentChats: next };
     });
   },
@@ -184,6 +185,6 @@ export function resetConversationStore() {
     loading: false,
     _fetching: false,
   });
-  localStorage.removeItem('agenthub_active_conv');
-  localStorage.removeItem(DIRECT_AGENT_CHATS_KEY);
+  localStorage.removeItem(STORAGE_KEYS.ACTIVE_CONV);
+  localStorage.removeItem(STORAGE_KEYS.DIRECT_AGENT_CHATS);
 }

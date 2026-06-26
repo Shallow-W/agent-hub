@@ -235,6 +235,28 @@ func (r *KnowledgeRepo) UpdateFilePreview(ctx context.Context, kbID, fileID, pre
 	return nil
 }
 
+func (r *KnowledgeRepo) UpdateFileName(ctx context.Context, kbID, fileID, filename string) (*model.KnowledgeFile, error) {
+	var f model.KnowledgeFile
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE knowledge_files
+		    SET filename = $1
+		  WHERE id = $2 AND knowledge_base_id = $3
+		  RETURNING id, knowledge_base_id, filename, file_path, file_size, mime_type, preview_text, preview_type, created_at`,
+		filename, fileID, kbID,
+	).StructScan(&f)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update knowledge file filename: %w", err)
+	}
+	_, _ = r.db.ExecContext(ctx,
+		`UPDATE knowledge_bases SET updated_at = now() WHERE id = $1`,
+		kbID,
+	)
+	return &f, nil
+}
+
 func (r *KnowledgeRepo) SearchFiles(ctx context.Context, kbID, keyword string, limit int) ([]model.KnowledgeFile, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {

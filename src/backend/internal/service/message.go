@@ -8,14 +8,21 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
+	"github.com/google/uuid"
 )
 
 const maxMessageLen = 10000 // 10KB
 const maxBlackboardManualContextLen = 8000
+
+// agentReplyInFlight 防止同一源消息触发重复 agent dispatch。
+// key = replyTo (source message ID)。
+var agentReplyInFlight sync.Map
 
 const recallTimeLimit = 2 * time.Minute // 消息撤回时间限制
 
@@ -35,7 +42,8 @@ type MessageDeliveryState interface {
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
 }
 
-// MsgRepo 消息服务所需的仓库接口
+// MsgRepo 消息服务所需的仓库接口。
+// Deprecated: migrate to repository.MessageStore for canonical interface.
 type MsgRepo interface {
 	Create(ctx context.Context, conversationID, role, content, artifactsJSON string, attachments []model.MessageAttachment, replyTo *string, senderID *string, mentions []string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID string, before interface{}, limit int) ([]model.Message, error)
@@ -46,12 +54,20 @@ type MsgRepo interface {
 	SearchByContent(ctx context.Context, conversationID, keyword string, limit int) ([]model.Message, error)
 	SoftDelete(ctx context.Context, messageID string) error
 	SaveArtifacts(ctx context.Context, messageID string, artifacts []model.Artifact) error
+	UpdateMessageCards(ctx context.Context, messageID, cardsJSON string) error
 	PinMessage(ctx context.Context, conversationID, messageID, userID string) (*model.MessagePin, error)
 	UnpinMessage(ctx context.Context, conversationID, messageID string) error
 	ListPinnedMessages(ctx context.Context, conversationID string, limit int) ([]model.PinnedMessage, error)
 	GetConversationBlackboard(ctx context.Context, conversationID string) (*model.ConversationBlackboard, error)
 	UpsertConversationBlackboard(ctx context.Context, conversationID, manualContext, userID string) (*model.ConversationBlackboard, error)
 	ListReplies(ctx context.Context, messageID string) ([]model.Message, error)
+	HideMessage(ctx context.Context, userID, messageID string) error
+	UnhideMessage(ctx context.Context, userID, messageID string) error
+	GetHiddenMessageIDs(ctx context.Context, userID, conversationID string) (map[string]bool, error)
+	CreateStreaming(ctx context.Context, conversationID, role string, senderID *string, replyTo *string, artifactsJSON string) (*model.Message, error)
+	FinalizeStreaming(ctx context.Context, messageID, status, content, blocksJSON, artifactsJSON string) error
+	ListStreaming(ctx context.Context) ([]model.Message, error)
+	MarkStaleStreaming(ctx context.Context, maxAge time.Duration) (int, error)
 }
 
 // artifactsFromTaskResult 将 daemon 上行的产物转换为 model.Artifact。
@@ -85,12 +101,145 @@ func artifactsFromTaskResultOrMarkdown(results []ws.ArtifactResult, content stri
 }
 
 func hasCodeArtifact(artifacts []model.Artifact) bool {
-	for _, artifact := range artifacts {
-		if artifact.Type == "code" {
+	for _, a := range artifacts {
+		if a.Type == "code" {
 			return true
 		}
 	}
 	return false
+}
+
+// extractCardsFromContent 从 agent 回复文本里提取所有 ```agenthub {"cards":[...]} ```
+// fenced block，合并所有 block 的 cards 为单一数组。同时生成 strippedContent：每个
+// block 替换为 N 个 `[CARD:<id>]` 占位符（N = block 内卡数，按数组顺序），保留卡片
+// 在正文中的位置。找不到 id 字段的卡用自动 UUID。
+//
+// 行为细则：
+//   - 只识别 fenced block（```agenthub 开启，``` 闭合），不识别整段 content 为 JSON
+//     （避免 agent 整段 JSON 回复被误解析）
+//   - 多个 fenced block 全部识别并合并
+//   - block 内 JSON 解析失败：静默丢弃该 block，原文中该 block（含 fence 行）原样保留
+//   - block 无 cards 字段或 cards 不是数组：静默丢弃，原文中该 block 原样保留
+//
+// 协议契约：fence 标记用 ```agenthub 而非 ```json，避免与普通 JSON 代码块歧义。
+// 与 block_card_extractor.go / context_agent_config.go 三方一致。
+func extractCardsFromContent(content string) (cards []map[string]any, strippedContent string, cardsJSON string) {
+	lines := strings.Split(content, "\n")
+
+	// 第一遍：识别所有有效 block 的 (startLine, endLine, cards) 映射，便于第二遍精确替换。
+	type blockMatch struct {
+		startLine int // ```agenthub 所在行号
+		endLine   int // ``` 闭合所在行号
+		cards     []map[string]any
+	}
+	var blocks []blockMatch
+
+	inBlock := false
+	blockStart := -1
+	var jsonBuf strings.Builder
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inBlock {
+			if trimmed == fenceOpenMarker {
+				inBlock = true
+				blockStart = i
+				jsonBuf.Reset()
+			}
+			continue
+		}
+		// inBlock == true
+		if trimmed == "```" {
+			// 闭合 fence——尝试解析这个 block
+			var probe struct {
+				Cards []map[string]any `json:"cards"`
+			}
+			if err := json.Unmarshal([]byte(jsonBuf.String()), &probe); err == nil && probe.Cards != nil {
+				// 只接受 cards 为非空数组的 block；cards 缺失或为 null/非数组则丢弃
+				blocks = append(blocks, blockMatch{
+					startLine: blockStart,
+					endLine:   i,
+					cards:     probe.Cards,
+				})
+			}
+			inBlock = false
+			blockStart = -1
+			continue
+		}
+		jsonBuf.WriteString(line)
+		jsonBuf.WriteString("\n")
+	}
+
+	if len(blocks) == 0 {
+		return nil, content, ""
+	}
+
+	// 合并所有 block 的 cards，为缺失 id 的卡补 UUID。
+	cards = make([]map[string]any, 0, len(blocks))
+	for _, b := range blocks {
+		for _, c := range b.cards {
+			if c == nil {
+				continue
+			}
+			if _, ok := c["id"]; !ok {
+				c["id"] = uuid.NewString()
+			}
+			cards = append(cards, c)
+		}
+	}
+
+	if len(cards) == 0 {
+		return nil, content, ""
+	}
+
+	// 构建 strippedContent：用 [CARD:<id>] 占位符替换每个有效 block（含 fence 行）。
+	// 处理嵌套：在第一遍识别时 block 不会嵌套（一个 block 闭合前不会开启新的），所以
+	// 行区间不会重叠，可以按 startLine 升序逐个替换。
+	var out strings.Builder
+	cursor := 0
+	for _, b := range blocks {
+		// 写入 block 之前的原文行。
+		for i := cursor; i < b.startLine; i++ {
+			out.WriteString(lines[i])
+			out.WriteString("\n")
+		}
+		// 写入占位符——每张卡一行，按数组顺序。
+		for _, c := range b.cards {
+			if c == nil {
+				continue
+			}
+			id, _ := c["id"].(string)
+			out.WriteString("[CARD:")
+			out.WriteString(id)
+			out.WriteString("]\n")
+		}
+		cursor = b.endLine + 1
+	}
+	// 写入剩余行
+	for i := cursor; i < len(lines); i++ {
+		out.WriteString(lines[i])
+		out.WriteString("\n")
+	}
+
+	// strings.Split 在 content 非空时末尾会带一个空串元素，对应的 "\n" 会被上面循环写回；
+	// 为避免多余尾部换行，trim 等于原 content 末尾的内容。
+	stripped := out.String()
+	// 去掉由于循环统一加 "\n" 而多出来的末尾换行（与原 content 的末尾对齐）。
+	if strings.HasSuffix(stripped, "\n") {
+		stripped = strings.TrimSuffix(stripped, "\n")
+		if !strings.HasSuffix(content, "\n") {
+			// 原 content 不以换行结尾时，补一次移除（上面 split 会多一个空元素）
+		} else {
+			stripped += "\n"
+		}
+	}
+
+	b, err := json.Marshal(cards)
+	if err != nil {
+		// 极不可能发生（输入已经是 []map[string]any）
+		return cards, stripped, ""
+	}
+	return cards, stripped, string(b)
 }
 
 func codeArtifactsFromMarkdown(content string) []model.Artifact {
@@ -107,7 +256,8 @@ func codeArtifactsFromMarkdown(content string) []model.Artifact {
 	return codeArtifacts
 }
 
-// ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）
+// ConvRepoForMsg 消息服务需要的对话仓库接口（用于权限校验和成员查询）。
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type ConvRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	UpdateTimestamp(ctx context.Context, id string) error
@@ -116,7 +266,20 @@ type ConvRepoForMsg interface {
 	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
 }
 
+// ConvRepoForDaemon 是 DaemonHandler 需要的 conv 仓库子集（仅 ListMemberIDs）。
+//
+// 引入原因（本任务）：handleTaskProgress 原实现 Broadcast 推流式事件给所有在线用户，
+// 改用 PushStreamingToConversation 按会话成员推送需要查成员列表。抽独立接口而非
+// 直接用 ConvRepoForMsg 让 handler 包依赖面最小（不引入 GetMember / ListAgents 等
+// handler 用不到的方法）。
+//
+// repository.ConvStore 自动满足此接口。
+type ConvRepoForDaemon interface {
+	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
+}
+
 // AgentRepoForMsg 消息服务查询 Agent 用于对话接入。
+// Deprecated: migrate to repository.AgentStore for canonical interface.
 type AgentRepoForMsg interface {
 	GetByID(ctx context.Context, id string) (*model.Agent, error)
 	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
@@ -143,15 +306,16 @@ var (
 
 // MessageService 消息业务逻辑
 type MessageService struct {
-	msgRepo   MsgRepo
-	convRepo  ConvRepoForMsg
-	agentRepo AgentRepoForMsg
-	notifier  MessageNotifier
-	delivery  MessageDeliveryState
-	orchSvc   *OrchestratorService
-	daemonHub *ws.DaemonHub
-	deploySvc *DeploymentService
-	fileURLs  *FileURLBuilder
+	msgRepo         MsgRepo
+	convRepo        ConvRepoForMsg
+	agentRepo       AgentRepoForMsg
+	notifier        MessageNotifier
+	delivery        MessageDeliveryState
+	orchSvc         *OrchestratorService
+	daemonHub       port.DaemonDispatcher
+	fileURLs        *FileURLBuilder
+	taskCardQueue   *TaskCardQueue // 收集 MCP subprocess 工具 emit 的卡片，按 task_id 索引
+	streamingBuffer *StreamingBuffer // PR4: 累积 task_id 对应的 StreamingState，task.complete 时落权威 blocks_json
 }
 
 // SendMessageResult 发送消息后的用户消息和可选 Agent 回复。
@@ -185,14 +349,13 @@ func (s *MessageService) SetOrchestratorService(orchSvc *OrchestratorService) {
 	s.orchSvc = orchSvc
 }
 
-// SetDaemonHub 注入 DaemonHub（避免循环依赖，由 main.go 调用）
-func (s *MessageService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
-}
-
-// SetDeploymentService 注入部署服务，用于聊天「部署」指令拦截（避免循环依赖，由 main.go 调用）。
-func (s *MessageService) SetDeploymentService(d *DeploymentService) {
-	s.deploySvc = d
+// SetDaemonHub 注入 DaemonDispatcher（避免循环依赖，由 main.go 调用）。
+//
+// P8b: 字段类型由 *ws.DaemonHub 改为 port.DaemonDispatcher，service 层不再
+// 直接依赖 pkg/ws 具体实现。*ws.DaemonHub 通过 Go 结构化类型自动满足该接口，
+// 调用方（main.go）依然传 *ws.DaemonHub 指针，无需改动。
+func (s *MessageService) SetDaemonHub(dh port.DaemonDispatcher) {
+	s.daemonHub = dh
 }
 
 // SetFileURLBuilder injects the public URL policy for message attachments.
@@ -201,6 +364,21 @@ func (s *MessageService) SetFileURLBuilder(builder *FileURLBuilder) {
 		builder = NewFileURLBuilder("")
 	}
 	s.fileURLs = builder
+}
+
+// SetTaskCardQueue 注入 MCP subprocess 卡片队列。daemon 主进程在 createAgentReply
+// 时会 Drain task_id 对应的卡片，合并到 message.cards_json。
+func (s *MessageService) SetTaskCardQueue(q *TaskCardQueue) {
+	s.taskCardQueue = q
+}
+
+// SetStreamingBuffer 注入流式状态 buffer。
+//
+// PR4: daemon task.progress 时 handler 把 events 喂给 buffer 累积；
+// createAgentReply 在 task.complete 时 GetState 拿到权威 blocks 落库，
+// 然后 Delete 释放内存。nil 时 fallback 到空 blocks_json（兼容旧路径）。
+func (s *MessageService) SetStreamingBuffer(b *StreamingBuffer) {
+	s.streamingBuffer = b
 }
 
 // checkMembership 校验用户是否为会话成员（优先查成员表）
@@ -278,14 +456,6 @@ func (s *MessageService) SendMessageWithReply(ctx context.Context, convID, userI
 	s.enrichMessageFileURLs(msg)
 
 	result := &SendMessageResult{UserMessage: msg}
-
-	// 聊天「部署」指令拦截：识别后直接部署对话里最新产物并回部署状态卡片，
-	// 不经过 Agent（agent 离线也可用），且不再走常规 Agent 派发。
-	if s.deploySvc != nil && isDeployCommand(content) {
-		go s.asyncDeploy(convID, userID)
-		go s.postPersist(convID, userID, msg)
-		return result, nil
-	}
 
 	// Agent dispatch routing based on conversation type
 	switch conv.Type {
@@ -403,7 +573,7 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	}
 
 	if limit <= 0 {
-		limit = 50
+		limit = 25
 	}
 	if limit > 200 {
 		limit = 200
@@ -413,9 +583,96 @@ func (s *MessageService) GetHistory(ctx context.Context, convID, userID string, 
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	// 过滤当前用户已隐藏的消息
+	messages = s.filterHidden(ctx, messages, convID, userID)
 	s.ensureParsedArtifacts(ctx, messages)
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
+}
+
+// filterHidden 从消息列表中移除当前用户已隐藏的消息。
+func (s *MessageService) filterHidden(ctx context.Context, messages []model.Message, convID, userID string) []model.Message {
+	if userID == "" || len(messages) == 0 {
+		return messages
+	}
+	hidden, err := s.msgRepo.GetHiddenMessageIDs(ctx, userID, convID)
+	if err != nil {
+		return messages // 查询失败不阻塞，返回完整列表
+	}
+	if len(hidden) == 0 {
+		return messages
+	}
+	filtered := messages[:0]
+	for _, m := range messages {
+		if !hidden[m.ID] {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
+}
+
+// HideMessage 对当前用户隐藏消息。
+func (s *MessageService) HideMessage(ctx context.Context, userID, messageID string) error {
+	return s.msgRepo.HideMessage(ctx, userID, messageID)
+}
+
+// UnhideMessage 取消隐藏。
+func (s *MessageService) UnhideMessage(ctx context.Context, userID, messageID string) error {
+	return s.msgRepo.UnhideMessage(ctx, userID, messageID)
+}
+
+// UpdateMessageCards 更新消息的卡片状态（用户交互后调用）。
+func (s *MessageService) UpdateMessageCards(ctx context.Context, messageID, userID, cardsJSON string) error {
+	return s.msgRepo.UpdateMessageCards(ctx, messageID, cardsJSON)
+}
+
+// UpdateMessageCardsAndBroadcast 更新卡片状态并向会话所有在线成员广播更新后的消息，
+// 使其他成员也能实时看到新状态（如用户提交 plan 选择后）。
+//
+// 与 UpdateMessageCards 的区别：后者只 UPDATE DB 列不广播，多成员场景下其他人看不到更新。
+// 本方法只走 PushToConversation（message.complete 事件），不触发离线队列/未读计数——
+// 卡片更新不是新消息，不应改变未读数。
+//
+// 校验：cardsJSON 反序列化后过 ValidateCards，过滤掉 type 未知 / 必填缺失的脏卡，
+// 避免前端 PATCH 错误格式破坏 DB 完整性 + 防止其他成员渲染时崩溃。
+func (s *MessageService) UpdateMessageCardsAndBroadcast(ctx context.Context, messageID, cardsJSON string) error {
+	// 反序列化 + 校验，再序列化回写——确保落库的 cards_json 始终是 validated 形态。
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(cardsJSON), &parsed); err != nil {
+		return fmt.Errorf("parse cards json: %w", err)
+	}
+	validated := ValidateCards(parsed)
+	validatedJSON, err := json.Marshal(validated)
+	if err != nil {
+		return fmt.Errorf("marshal validated cards: %w", err)
+	}
+	validatedStr := string(validatedJSON)
+
+	if err := s.msgRepo.UpdateMessageCards(ctx, messageID, validatedStr); err != nil {
+		return fmt.Errorf("update cards: %w", err)
+	}
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("reload message: %w", err)
+	}
+	if msg == nil {
+		return ErrMsgNotFound
+	}
+	if err := json.Unmarshal([]byte(validatedStr), &msg.Cards); err != nil {
+		slog.Warn("unmarshal cards after update", "message_id", messageID, "error", err)
+	}
+	msg.CardsJSON = validatedStr
+
+	// 直接通过 notifier 广播 message.complete，避免 postPersist 的未读计数/离线入队副作用。
+	if s.notifier != nil {
+		memberIDs, err := s.convRepo.ListMemberIDs(ctx, msg.ConversationID)
+		if err != nil {
+			slog.Warn("list members for cards broadcast failed", "conversation_id", msg.ConversationID, "error", err)
+		} else if len(memberIDs) > 0 {
+			s.notifier.PushToConversation(msg.ConversationID, memberIDs, msg)
+		}
+	}
+	return nil
 }
 
 // GetUnreadMessages 获取离线/未读消息
@@ -457,6 +714,7 @@ func (s *MessageService) GetUnreadMessages(ctx context.Context, convID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("get unread messages: %w", err)
 	}
+	messages = s.filterHidden(ctx, messages, convID, userID)
 	s.enrichMessagesFileURLs(messages)
 	return messages, nil
 }
@@ -509,6 +767,102 @@ func (s *MessageService) GetReplies(ctx context.Context, conversationID, message
 	}
 	s.enrichMessagesFileURLs(replies)
 	return replies, nil
+}
+
+// GetMessageByID 取单条消息，校验其属于指定对话且未删除。
+// 供需要 message-level 权限校验的 handler（如 UpdateCard）使用——
+// 避免 handler 直接访问 repo，权限逻辑收敛在 service 层。
+func (s *MessageService) GetMessageByID(ctx context.Context, conversationID, messageID string) (*model.Message, error) {
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMsgNotFound
+		}
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return nil, ErrMsgNotFound
+	}
+	// 消息不属于当前对话
+	if msg.ConversationID != conversationID {
+		return nil, ErrMsgReplyWrongConv
+	}
+	// 消息已被软删除
+	if msg.DeletedAt != nil {
+		return nil, ErrMsgNotFound
+	}
+	return msg, nil
+}
+
+// CancelStreamingMessage 向 daemon 发送 task.cancel 控制消息，异步中断流式生成。
+//
+// 设计：
+//   - 不等 daemon 响应——返回 202 Accepted，UI 立即 disable 按钮。
+//   - daemon 侧（未来实现）收到 task.cancel 后 SIGINT Claude 进程，触发 task.complete with error，
+//     后端 watchdog FinalizeStreaming 切到 canceled/error 并广播 message.complete。
+//   - 当前 PR3 只负责 backend → daemon 的下发链路；daemon 侧 SIGINT 在另一个 PR 补全。
+//
+// agent_id 从 artifacts_json 解析；task_id 优先从参数读取（前端从 message.streaming
+// payload 拿到 task_id 回传），缺省时只能告警——无 task_id daemon 无法定位流。
+func (s *MessageService) CancelStreamingMessage(ctx context.Context, conversationID, messageID, taskID string) error {
+	msg, err := s.msgRepo.GetByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrMsgNotFound
+		}
+		return fmt.Errorf("get message: %w", err)
+	}
+	if msg == nil {
+		return ErrMsgNotFound
+	}
+	if msg.ConversationID != conversationID {
+		return ErrMsgReplyWrongConv
+	}
+	if msg.Status != "" && msg.Status != model.MessageStatusStreaming {
+		// 非流式状态——幂等返回 nil，前端显示已是终态。
+		slog.Info("cancel streaming: message not in streaming state", "message_id", messageID, "status", msg.Status)
+		return nil
+	}
+
+	// 从 artifacts_json 解析 agent_id（预创建 streaming message 时写入）。
+	var meta struct {
+		AgentID string `json:"agent_id"`
+	}
+	if msg.ArtifactsJSON != "" {
+		_ = json.Unmarshal([]byte(msg.ArtifactsJSON), &meta) // 解析失败忽略——下面 agent_id 为空会返回错误
+	}
+	if meta.AgentID == "" {
+		return fmt.Errorf("cancel streaming: agent_id missing in artifacts_json for message %s", messageID)
+	}
+	agent, err := s.agentRepo.GetByID(ctx, meta.AgentID)
+	if err != nil {
+		return fmt.Errorf("get agent: %w", err)
+	}
+	if agent == nil {
+		return ErrAgentNotFound
+	}
+	if agent.MachineID == nil || *agent.MachineID == "" {
+		return ErrMsgAgentOffline
+	}
+	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		return ErrMsgAgentOffline
+	}
+	if taskID == "" {
+		return fmt.Errorf("cancel streaming: task_id required for message %s", messageID)
+	}
+	// 异步发送 task.cancel——不等 daemon 响应，UI 收到 202 立即 disable。
+	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
+		Type: "task.cancel",
+		Data: map[string]interface{}{
+			"task_id":         taskID,
+			"agent_id":        agent.ID,
+			"message_id":      messageID,
+			"conversation_id": conversationID,
+		},
+	}); err != nil {
+		return fmt.Errorf("send task.cancel: %w", err)
+	}
+	return nil
 }
 
 func (s *MessageService) enrichMessagesFileURLs(messages []model.Message) {
@@ -853,11 +1207,39 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 		return nil, fmt.Errorf("create daemon task: %w", err)
 	}
 
+	// D5 ADR：预创建 streaming 状态的 assistant message，让前端在流式期间就能看到
+	// message_id 并实时 append delta。task.complete 时 FinalizeStreaming 切到 complete。
+	// 失败路径：daemon 崩溃 / 超时 / 用户取消 → watchdog 或显式 UPDATE 切到 error/canceled。
+	//
+	// 实现细节抽到 streaming_pipeline.go 的 SetupStreamingPipeline / FinalizeStreamingPipeline，
+	// 单聊（createAgentReply）与群聊 worker（Dispatcher.dispatchPlanCore）共用同一管线。
+	pipelineDeps := StreamingPipelineDeps{
+		MsgRepo:         s.msgRepo,
+		DaemonHub:       s.daemonHub,
+		StreamingBuffer: s.streamingBuffer,
+		Notifier:        s.notifier,
+		ConvRepo:        s.convRepo,
+	}
+	var taskAgentIndex TaskAgentIndex
+	if dh, ok := s.daemonHub.(*ws.DaemonHub); ok {
+		taskAgentIndex = dh
+	}
+	handle, err := SetupStreamingPipeline(ctx, pipelineDeps, convID, agent.ID, agent.Name, agent.CLITool, task.ID, replyTo, taskAgentIndex)
+	if err != nil {
+		return nil, err
+	}
+
 	// Push via WS and wait for channel-based result
 	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
+		// daemon 未连接：直接把预创建 message 标 error，避免悬挂。
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+			Status: model.MessageStatusError,
+		}); ferr != nil {
+			slog.Warn("finalize streaming on daemon-disconnect failed", "message_id", handle.MessageID, "error", ferr)
+		}
 		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
 	}
-	s.daemonHub.RegisterTaskPromise(task.ID)
+	slog.Info("createAgentReply: BEFORE SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "message_id", handle.MessageID, "reply_to", stringValue(replyTo))
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
 		Data: map[string]interface{}{
@@ -868,16 +1250,36 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 			"agent_id":         agent.ID,
 			"conversation_id":  convID,
 			"user_id":          userID,
+			"message_id":       handle.MessageID,
 		},
 	}); err != nil {
+		// dispatch 失败也标 error
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+			Status: model.MessageStatusError,
+		}); ferr != nil {
+			slog.Warn("finalize streaming on dispatch-failure failed", "message_id", handle.MessageID, "error", ferr)
+		}
 		return nil, fmt.Errorf("dispatch to daemon: %w", err)
 	}
+	slog.Info("createAgentReply: AFTER SendToMachine", "conversation_id", convID, "agent_id", agent.ID, "daemon_task_id", task.ID, "message_id", handle.MessageID)
 
 	ch := s.daemonHub.AwaitTaskResult(task.ID)
 	if ch == nil {
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+			Status: model.MessageStatusError,
+		}); ferr != nil {
+			slog.Warn("finalize streaming on no-channel failed", "message_id", handle.MessageID, "error", ferr)
+		}
 		return nil, fmt.Errorf("daemon not connected for task %s", task.ID)
 	}
 	defer s.daemonHub.RemoveTaskPromise(task.ID)
+	if taskAgentIndex != nil {
+		defer taskAgentIndex.DeleteTaskAgent(task.ID)
+	}
+	defer s.daemonHub.DeleteTaskMessage(task.ID)
+	if s.streamingBuffer != nil {
+		defer s.streamingBuffer.Delete(task.ID)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
 	defer cancel()
@@ -886,100 +1288,67 @@ func (s *MessageService) createAgentReply(ctx context.Context, convID, userID, a
 	select {
 	case result = <-ch:
 	case <-ctx.Done():
+		// 超时：标记 error（保留已输出的流式 block）。
+		// 同步广播终态，让前端停止显示 streaming cursor / StopButton。
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+			Status: model.MessageStatusError,
+		}); ferr != nil {
+			slog.Warn("finalize streaming on timeout failed", "message_id", handle.MessageID, "error", ferr)
+		}
+		BroadcastStreamingTerminal(pipelineDeps, handle, model.MessageStatusError)
 		return nil, ErrMsgAgentTimeout
 	}
 
 	if result.Error != "" {
+		// daemon task 失败：标记 error，content 留空（前端可显示 error block + 错误原因）。
+		// 同步广播终态，让前端 addMessage 把 status 切到 error 并清理 streamingTaskIds。
+		if _, ferr := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+			Status: model.MessageStatusError,
+		}); ferr != nil {
+			slog.Warn("finalize streaming on task-error failed", "message_id", handle.MessageID, "error", ferr)
+		}
+		BroadcastStreamingTerminal(pipelineDeps, handle, model.MessageStatusError)
 		return nil, fmt.Errorf("daemon task failed: %s", result.Error)
 	}
 
-	artifacts, err := json.Marshal(map[string]string{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-		"cli_tool":   agent.CLITool,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal agent message artifacts: %w", err)
-	}
+	// 提取 agent 在正文 ```agenthub {"cards":[...]}``` block 里写的卡片，同时把 block 从
+	// 用户可见正文里剥离掉（替换为 [CARD:<id>] 占位符）。
+	agentCards, strippedContent, _ := extractCardsFromContent(result.Result)
 
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", result.Result, string(artifacts), nil, replyTo, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create agent reply: %w", err)
-	}
-
-	// 持久化 daemon 解析出的结构化产物到独立 artifacts 表（失败不影响消息本身）
-	if arts := artifactsFromTaskResultOrMarkdown(result.Artifacts, result.Result); len(arts) > 0 {
-		if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, arts); err != nil {
-			slog.Warn("save agent reply artifacts failed", "message_id", msg.ID, "error", err)
-		} else {
-			msg.Artifacts = arts
+	// 合并 daemon emitted cards：
+	//   1) result.Cards —— daemon 主进程通过 WS task.complete 上行的卡片
+	//   2) taskCardQueue 里 drain 出的 subprocess 卡片
+	//   3) agentCards —— agent 在回复正文写的 ```agenthub{"cards":[...]}``` block
+	allCards := append([]map[string]any{}, ValidateCards(result.Cards)...)
+	if s.taskCardQueue != nil {
+		if subprocessCards := s.taskCardQueue.Drain(task.ID); len(subprocessCards) > 0 {
+			allCards = append(allCards, ValidateCards(subprocessCards)...)
 		}
 	}
+	allCards = append(allCards, ValidateCards(agentCards)...)
+
+	// D5 ADR：预创建模式下用 FinalizeStreaming UPDATE 而非 Create INSERT。
+	// content = strippedContent（剥离 cards 后的可见文本）
+	// blocks_json = streamingBuffer 累积的权威 blocks
+	// status = complete
+	// 与 dispatcher.finalizeStreamingSuccess 共用同一包级函数 snapshotBlocksJSONFromBuffer。
+	blocksJSON := snapshotBlocksJSONFromBuffer(s.streamingBuffer, task.ID)
+	msg, err := FinalizeStreamingPipeline(ctx, pipelineDeps, handle, FinalizeStreamingPipelineOptions{
+		Status:        model.MessageStatusComplete,
+		Content:       strippedContent,
+		BlocksJSON:    blocksJSON,
+		ArtifactsJSON: handle.ArtifactsJSON,
+		Cards:         allCards,
+		Artifacts:     artifactsFromTaskResultOrMarkdown(result.Artifacts, strippedContent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finalize streaming message: %w", err)
+	}
+
 	return msg, nil
 }
 
 // broadcastAgentTyping 通过 WebSocket 广播 agent 正在处理任务的状态
-
-// isDeployCommand 判断一条消息是否为聊天「部署」指令（短消息 + 关键词开头，避免长句误触）。
-func isDeployCommand(content string) bool {
-	c := strings.TrimSpace(content)
-	if c == "" {
-		return false
-	}
-	lower := strings.ToLower(c)
-	if lower == "/deploy" || strings.HasPrefix(lower, "/deploy ") {
-		return true
-	}
-	if len([]rune(c)) > 12 {
-		return false
-	}
-	for _, kw := range []string{"一键部署", "部署", "发布", "deploy"} {
-		if c == kw || strings.HasPrefix(c, kw) || strings.HasPrefix(lower, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-// asyncDeploy 异步处理聊天「部署」指令：部署对话最新产物，并以「部署助手」身份回一条带
-// 部署状态卡片的 assistant 消息（部署信息塞进 artifacts_json 元数据，前端据此渲染卡片）。
-func (s *MessageService) asyncDeploy(convID, userID string) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Warn("asyncDeploy recovered", "panic", r)
-		}
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	var content, metaJSON string
-	dep, err := s.deploySvc.DeployLatestInConversation(ctx, convID, userID)
-	if err != nil {
-		if errors.Is(err, ErrDeployNoArtifact) {
-			content = "当前对话还没有可部署的产物，先让 Agent 生成一个网页/文档/代码产物，再发送「部署」。"
-		} else {
-			slog.Warn("chat deploy failed", "convID", convID, "error", err)
-			content = "部署失败了：" + err.Error()
-		}
-		meta, _ := json.Marshal(map[string]any{"agent_name": "部署助手"})
-		metaJSON = string(meta)
-	} else {
-		content = "✅ 已部署成功，预览地址：" + dep.URL
-		meta, _ := json.Marshal(map[string]any{
-			"agent_name": "部署助手",
-			"deployment": dep,
-		})
-		metaJSON = string(meta)
-	}
-
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", content, metaJSON, nil, nil, nil, nil)
-	if err != nil {
-		slog.Warn("create deploy reply failed", "convID", convID, "error", err)
-		return
-	}
-	s.postPersist(convID, userID, msg)
-}
 
 // asyncMentionDispatch 异步执行 @mention 路由，不阻塞 HTTP 响应。
 func (s *MessageService) asyncMentionDispatch(convID, userID, sourceMessageID, content string, attachments []model.MessageAttachment) {
@@ -1014,12 +1383,17 @@ func (s *MessageService) asyncMentionDispatch(convID, userID, sourceMessageID, c
 }
 
 // asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
+// asyncAgentReply 异步执行 agentID 路径回复，不阻塞 HTTP 响应。
 func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string, attachments []model.MessageAttachment, replyTo *string) {
+	slog.Info("asyncAgentReply ENTER", "conversation_id", convID, "agent_id", agentID, "reply_to", stringValue(replyTo), "goroutine", "started")
+
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("asyncAgentReply recovered", "panic", r)
 		}
 	}()
+
+	slog.Info("asyncAgentReply CALL createAgentReply", "conversation_id", convID, "agent_id", agentID)
 
 	s.broadcastAgentTyping(convID, true)
 	defer s.broadcastAgentTyping(convID, false)
@@ -1030,26 +1404,25 @@ func (s *MessageService) asyncAgentReply(convID, userID, agentID, content string
 	// 单聊 Agent 不需要群聊风格的 handoff 上下文：
 	// Claude Code 通过 --session-id/--resume 自行维护对话历史，
 	// 无需服务端额外发送历史摘要。
-	contextMessages := ""
-
-	// Include text extracted from this message's attachments before shared context.
-	if s.orchSvc != nil {
-		if attachCtx := s.orchSvc.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
-			contextMessages = attachCtx + contextMessages
-		}
-	}
-
-	// Align direct agent replies with orchestrated replies: blackboard, KB, then agent config.
+	//
+	// 通过 direct reply chain 构建上下文：[Attachment, Blackboard, KB, AgentConfig]
+	// 最终输出顺序：agentConfig + kb + blackboard + attach（与重构前完全一致）。
+	// 仅当 orchSvc 可用且 agent 解析成功时才走完整链；否则只走 attachment 段。
+	var contextMessages string
 	if s.orchSvc != nil {
 		agent, err := s.agentRepo.GetByID(ctx, agentID)
 		if err == nil && agent != nil {
-			if blackboardCtx := s.orchSvc.BuildConversationBlackboardContext(ctx, convID); blackboardCtx != "" {
-				contextMessages = blackboardCtx + contextMessages
-			}
-			if kbCtx := s.orchSvc.PreloadKBContext(ctx, content, userID); kbCtx != "" {
-				contextMessages = kbCtx + contextMessages
-			}
-			contextMessages = s.orchSvc.InjectAgentConfig(agent, contextMessages, userID, content)
+			contextMessages = s.orchSvc.DirectReplyChain().Build(ctx, ContextInput{
+				ConvID:      convID,
+				UserID:      userID,
+				Agent:       agent,
+				Content:     content,
+				Attachments: attachments,
+			})
+		} else {
+			// agent 解析失败时仅注入附件段（保持原降级行为，不注入 agent config / blackboard / kb）
+			// 直接调纯函数 BuildAttachmentText（与 AttachmentBuilder 共享同一实现）
+			contextMessages = BuildAttachmentText(ctx, attachments, s.orchSvc.uploadDir, attachmentTextMaxRunes)
 		}
 	}
 
@@ -1071,6 +1444,9 @@ func (s *MessageService) postAgentFailure(ctx context.Context, convID, userID, c
 	}
 	s.postPersist(convID, userID, msg)
 }
+
+// broadcastStreamingTerminal 已删除：streaming 失败终态广播统一走 streaming_pipeline.go
+// 的顶层 BroadcastStreamingTerminal 函数（单聊 createAgentReply 和群聊 Dispatcher 共用）。
 
 func shortAgentError(err error) string {
 	if err == nil {
@@ -1123,3 +1499,9 @@ func (s *MessageService) resolveAgentConversationAgentID(ctx context.Context, co
 	}
 	return strings.TrimSpace(agents[0].AgentID)
 }
+
+// snapshotBlocksJSON / deleteStreamingBuffer 已删除：
+//  - snapshotBlocksJSON 被 dispatcher.go 的包级 snapshotBlocksJSONFromBuffer 取代
+//    （createAgentReply 成功路径已改用该包级函数，与 dispatcher 共用）
+//  - deleteStreamingBuffer 无调用方：createAgentReply 用 inline s.streamingBuffer.Delete，
+//    dispatcher 用 buf.Delete 类型断言

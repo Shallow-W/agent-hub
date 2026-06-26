@@ -10,6 +10,7 @@ import (
 )
 
 // ArtifactRepoForSvc 产物服务依赖的数据访问能力。
+// Deprecated: migrate to repository.ArtifactStore for canonical interface.
 type ArtifactRepoForSvc interface {
 	ListVersions(ctx context.Context, rootID string) ([]model.Artifact, error)
 	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
@@ -17,6 +18,7 @@ type ArtifactRepoForSvc interface {
 }
 
 // ArtifactConvRepo 产物服务用于鉴权的对话仓库能力。
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type ArtifactConvRepo interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)

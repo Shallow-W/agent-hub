@@ -265,6 +265,45 @@ func (h *KnowledgeHandler) DeleteFile(c *gin.Context) {
 	middleware.SuccessResponse(c, nil)
 }
 
+// SmartRenameFile 调用在线智能体扫读文件并更新知识库文件名。
+func (h *KnowledgeHandler) SmartRenameFile(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	kbID := c.Param("id")
+	fileID := c.Param("fileId")
+	if kbID == "" || fileID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40077, "缺少知识库 ID 或文件 ID")
+		return
+	}
+
+	file, err := h.svc.SmartRenameFile(c.Request.Context(), userID, kbID, fileID)
+	if err != nil {
+		if err == service.ErrKBNotFound || err == service.ErrKBFileNotFound {
+			status := http.StatusNotFound
+			code := 40472
+			if err == service.ErrKBFileNotFound {
+				code = 40473
+			}
+			middleware.ErrorResponse(c, status, code, err.Error())
+			return
+		}
+		if err == service.ErrKBNoPermission {
+			middleware.ErrorResponse(c, http.StatusForbidden, 40368, err.Error())
+			return
+		}
+		if err == service.ErrKBRenameNoAgent {
+			middleware.ErrorResponse(c, http.StatusConflict, 40960, err.Error())
+			return
+		}
+		if err == service.ErrMsgAgentTimeout {
+			middleware.ErrorResponse(c, http.StatusGatewayTimeout, 50460, "智能体重命名超时")
+			return
+		}
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50072, "智能重命名失败")
+		return
+	}
+	middleware.SuccessResponse(c, file)
+}
+
 // GetFileContent 获取文件内容（用于预览）
 func (h *KnowledgeHandler) GetFileContent(c *gin.Context) {
 	userID := middleware.GetUserID(c)

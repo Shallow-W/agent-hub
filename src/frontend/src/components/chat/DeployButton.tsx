@@ -12,7 +12,11 @@ interface Props {
   artifact: Artifact;
   size?: 'small' | 'middle';
   text?: boolean;
+  /** 对话 ID（保留兼容，Docker 部署已改为 agent 工具驱动，不经前端按钮）。 */
+  conversationId?: string;
 }
+
+type DeployTarget = 'tunnel' | 'github';
 
 export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }) => {
   const rootId = artifact.root_id || artifact.id;
@@ -37,7 +41,7 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
 
   if (!rootId) return null;
 
-  const run = async (target: 'tunnel' | 'github') => {
+  const run = async (target: DeployTarget) => {
     setLoading(true);
     try {
       const dep = target === 'github' ? await publishToGitHub(rootId) : await deployArtifact(rootId);
@@ -61,6 +65,8 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
       icon: <GlobalOutlined />,
       label: '即时预览（内网穿透）',
     },
+    // Docker 部署已改为 agent 工具驱动（deploy_project MCP 工具），
+    // 用户在对话里说「部署」即可，agent 会自动调用工具。这里不再放按钮入口。
     ...(githubEnabled
       ? [
           {
@@ -74,7 +80,7 @@ export const DeployButton: React.FC<Props> = ({ artifact, size = 'small', text }
 
   const onClick: MenuProps['onClick'] = ({ key, domEvent }) => {
     domEvent.stopPropagation();
-    void run(key as 'tunnel' | 'github');
+    void run(key as DeployTarget);
   };
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();

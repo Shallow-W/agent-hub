@@ -127,6 +127,7 @@ export const TaskGroupList: React.FC = () => {
                   await convApi.archiveConversation(conv.id);
                   archiveConversationLocal(conv.id);
                   setArchivedCount((prev) => prev + 1);
+                  setArchivedConvs((prev) => [conv, ...prev]);
                 } catch {
                   antMessage.error('归档失败');
                 }

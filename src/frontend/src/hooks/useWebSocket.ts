@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { useWsStore, notifyTaskChanged } from '@/store/wsStore';
+import { useWsStore, dispatchWsEvent } from '@/store/wsStore';
 import { useMessageStore } from '@/store/messageStore';
 import { invalidateMessageCache } from '@/hooks/useMessages';
 import { useConversationStore } from '@/store/conversationStore';
@@ -48,7 +48,7 @@ export function useWebSocket() {
   const status = useWsStore((s) => s.status);
   const connect = useWsStore((s) => s.connect);
   const wsClient = useWsStore((s) => s.wsClient);
-  const updateStreaming = useMessageStore((s) => s.updateStreaming);
+  const appendDeltas = useMessageStore((s) => s.appendDeltas);
   const completeStreaming = useMessageStore((s) => s.completeStreaming);
   const incrementUnread = useMessageStore((s) => s.incrementUnread);
   const addMessage = useMessageStore((s) => s.addMessage);
@@ -61,31 +61,75 @@ export function useWebSocket() {
 
     const handleMessage = (msg: StreamMessage) => {
       if (!msg.data) return;
+
+      // 泛化事件分发——所有订阅者通过 onWsEvent / useWsEventHandler 接收。
+      dispatchWsEvent(msg.type, msg.data);
+
       const { conversationId, conversation_id, messageId, content } = msg.data;
       const convId = conversationId ?? conversation_id;
+
+      // error 事件不需要 convId，提前处理
+      if (msg.type === 'error') {
+        const errMsg = msg.data.message || '连接发生错误';
+        console.error('WebSocket error:', errMsg);
+        message.error(errMsg);
+        return;
+      }
 
       if (!convId) return;
 
       const activeId = useConversationStore.getState().activeConversationId;
 
       switch (msg.type) {
-        case 'message.streaming':
-          if (messageId && content) {
-            updateStreaming(convId, messageId, content);
+        case 'message.streaming': {
+          // PR3：daemon 透传 AgentEvent[]，前端 appendDeltas 累积到 messages 数组里的
+          // placeholder。meta.agent_name 来自后端 daemonHub.taskAgents 反查，让
+          // placeholder 在流式期间就能显示真实 agent name（消除"助手"fallback bug）。
+          const msgId = msg.data.message_id ?? msg.data.messageId ?? messageId;
+          if (msgId && msg.data.deltas && msg.data.deltas.length > 0) {
+            appendDeltas(convId, msgId, msg.data.deltas, {
+              taskId: msg.data.task_id,
+              agentId: msg.data.agent_id,
+              agentName: msg.data.agent_name,
+            });
+          } else if (messageId && content) {
+            // 旧路径兼容（非 block 流式）——直接 addMessage 占位。
+            // 这里保留兼容但不再写入 streamingContent（已删除）。
+            addMessage(convId, {
+              id: messageId,
+              conversation_id: convId,
+              role: 'assistant',
+              content,
+              artifacts_json: null,
+              created_at: new Date().toISOString(),
+              status: 'streaming',
+            });
           }
           break;
+        }
         case 'message.complete': {
           const msgId = msg.data.id ?? messageId;
           const msgContent = msg.data.content;
-          if (!msgId || !msgContent) break;
+          // PR5 fix：status=error/canceled 的终态广播 content 可能为空（task 失败/取消
+          // 时没有正文），不能因为 content 为空就 drop。只要 id + conversation_id 存在
+          // 且 status 是终态，就应当透传给 addMessage 切换占位符状态、清理 streamingTaskIds。
+          const status = (msg.data.status ?? 'complete') as import('@/types/message').MessageStatus;
+          const isTerminalWithoutContent = msg.data.id
+            && msg.data.conversation_id
+            && (status === 'error' || status === 'canceled')
+            && !msgContent;
+          if (!msgId || (!msgContent && !isTerminalWithoutContent)) break;
 
           // Full message push from Hub (has id + conversation_id)
           if (msg.data.id && msg.data.conversation_id) {
+            // 关键：透传服务端权威 status / blocks_json / blocks。
+            // 后端 postPersist → PushToConversation 推送整个 model.Message（含 status:'complete'）。
+            // 若漏传 status，addMessage merge 时占位符会保留 'streaming'，UI 永远停在"传输中"。
             addMessage(convId, {
               id: msg.data.id,
               conversation_id: msg.data.conversation_id,
               role: msg.data.role ?? 'assistant',
-              content: msgContent,
+              content: msgContent ?? '',
               artifacts_json: msg.data.artifacts_json ?? null,
               created_at: msg.data.created_at ?? new Date().toISOString(),
               attachments: msg.data.attachments,
@@ -94,6 +138,16 @@ export function useWebSocket() {
               username: msg.data.username,
               reply_to: msg.data.reply_to ?? null,
               reply_to_message: msg.data.reply_to_message ?? null,
+              // 交互式卡片——Agent 回复通过 render_card 渲染时随消息推送，
+              // 免去刷新页面即可在聊天中显示卡片。
+              cards_json: msg.data.cards_json,
+              cards: msg.data.cards,
+              // 流式 block：服务端落库的权威副本（PR4 起 FinalizeStreaming 写入 blocks_json）。
+              blocks_json: msg.data.blocks_json,
+              blocks: msg.data.blocks,
+              // 终态：服务端推送的 status 是真源（complete / error / canceled）。
+              // 缺省时按 'complete' 处理（message.complete 事件本身就是终态信号）。
+              status,
             });
           } else if (messageId && content) {
             // Streaming completion
@@ -156,19 +210,9 @@ export function useWebSocket() {
           }
           break;
         }
-        case 'task.changed': {
-          const taskConvId = msg.data.conversation_id ?? msg.data.conversationId;
-          if (taskConvId) {
-            notifyTaskChanged(taskConvId);
-          }
-          break;
-        }
-        case 'error': {
-          const errMsg = msg.data.message || '连接发生错误';
-          console.error('WebSocket error:', errMsg);
-          message.error(errMsg);
-          break;
-        }
+        // task.changed 和 conversation.role_changed 已由泛化 pubsub 处理
+        // （dispatchWsEvent 在函数顶部统一分发），无需在此 switch 中处理。
+        // error 事件已在 convId guard 之前处理。
       }
     };
 

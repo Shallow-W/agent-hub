@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/repository"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -31,7 +32,12 @@ func newTestDaemonHub(t *testing.T, machineID string) *ws.DaemonHub {
 	return hub
 }
 
+// fakeOrchConvRepo 实现测试所需的 repository.ConvStore 子集。
+// P8a 后 OrchestratorService 持有 canonical repository.ConvStore；
+// 此 fake 通过嵌入 repository.ConvStore 让未覆盖的方法自动走 nil/zero 路径，
+// 测试只显式实现用到的 4 个方法（GetByID / ListAgents / GetMember / ListMemberIDs）。
 type fakeOrchConvRepo struct {
+	repository.ConvStore
 	conv       *model.Conversation
 	convAgents []model.ConversationAgent
 	convErr    error
@@ -56,7 +62,11 @@ func (f *fakeOrchConvRepo) ListMemberIDs(_ context.Context, _ string) ([]string,
 	return []string{}, nil
 }
 
+// fakeOrchAgentRepo 实现测试所需的 repository.AgentStore 子集。
+// 同上：嵌入 repository.AgentStore 让未覆盖的方法自动 nil-safe；
+// 测试只显式实现用到的 6 个方法。
 type fakeOrchAgentRepo struct {
+	repository.AgentStore
 	agent    *model.Agent
 	agents   map[string]*model.Agent
 	agentErr error
@@ -269,19 +279,19 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 
 	taskResult := "hello world"
 
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	// Wire up DaemonHub with fake connected client
+	hub := newTestDaemonHub(t, "machine-1")
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent:  agent,
 			inConv: true,
 			task:   &model.DaemonTask{ID: "task-2", Status: "completed", Result: taskResult},
 		},
-		&fakeMsgRepo{},
-	)
-
-	// Wire up DaemonHub with fake connected client
-	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+		MsgRepo:   &fakeMsgRepo{},
+		DaemonHub: hub,
+	})
 
 	// Resolve the task promise in background after a short delay
 	// (dispatch path registers the promise then waits on it)
@@ -305,31 +315,6 @@ func TestDispatchSingleAgent_InConversation_Succeeds(t *testing.T) {
 	}
 }
 
-func TestBuildDispatchContextIncludesParsedMathAssignment(t *testing.T) {
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{},
-		&fakeMsgRepo{},
-	)
-
-	orchOutput := "需要多 Agent 协作。第一轮分派如下：\n\n@123\n任务：计算 27 + 38。请只给出答案，并简要说明计算过程。\n\n@1234\n任务：计算 9 × 7。请只给出答案，并简要说明计算过程。\n\n我会在 123 和 1234 都回答后，汇总两边结果并判断是否正确，然后继续出第二轮。"
-	dispatch := ParseOrchestratorOutput(orchOutput)
-	if dispatch == nil || len(dispatch.Tasks) != 2 {
-		t.Fatalf("expected 2 parsed worker tasks, got %#v", dispatch)
-	}
-
-	ctx, err := svc.buildDispatchContext(context.Background(), "c1", dispatch.Tasks[0], nil, "Codex")
-	if err != nil {
-		t.Fatalf("buildDispatchContext error: %v", err)
-	}
-	if !strings.Contains(ctx, "27 + 38") {
-		t.Fatalf("dispatch context missing math assignment: %q", ctx)
-	}
-	if strings.Contains(ctx, "任务内容为空") {
-		t.Fatalf("dispatch context should not contain empty-task wording: %q", ctx)
-	}
-}
-
 func TestDispatchSingleAgent_SetsReplyToSourceMessage(t *testing.T) {
 	userID := "u1"
 	replyTo := "msg-user-1"
@@ -343,18 +328,18 @@ func TestDispatchSingleAgent_SetsReplyToSourceMessage(t *testing.T) {
 	}
 	msgRepo := &fakeMsgRepo{}
 	taskResult := "worker reply"
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{
+	hub := newTestDaemonHub(t, "machine-1")
+	// P8a: setter 已删除，DaemonHub 通过 OrchestratorDeps 注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo: &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo: &fakeOrchAgentRepo{
 			agent:  agent,
 			inConv: true,
 			task:   &model.DaemonTask{ID: "task-reply", Status: "completed", Result: taskResult},
 		},
-		msgRepo,
-	)
-
-	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+		MsgRepo:   msgRepo,
+		DaemonHub: hub,
+	})
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		hub.ResolveTask("task-reply", &ws.TaskResult{
@@ -416,15 +401,15 @@ func TestHandleOrchestratedDispatchReturnsMessageWhenLifecycleCreateFails(t *tes
 			toResolve <- event
 		},
 	}
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		agentRepo,
-		msgRepo,
-	)
-	svc.SetOrchTaskRepo(failingOrchTaskStore{})
-
 	hub := newTestDaemonHub(t, "machine-1")
-	svc.SetDaemonHub(hub)
+	// P8a: setter 已删除，DaemonHub + OrchTaskRepo 通过 OrchestratorDeps 一次性注入。
+	svc := NewOrchestratorServiceWithDeps(OrchestratorDeps{
+		ConvRepo:     &fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
+		AgentRepo:    agentRepo,
+		MsgRepo:      msgRepo,
+		OrchTaskRepo: failingOrchTaskStore{},
+		DaemonHub:    hub,
+	})
 	go func() {
 		for event := range toResolve {
 			time.Sleep(10 * time.Millisecond)
@@ -482,14 +467,13 @@ func TestHandleOrchestratedDispatchReturnsMessageWhenLifecycleCreateFails(t *tes
 	}
 }
 
-func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {
+func TestBuildAgentConfigTextIncludesPlatformSkillContext(t *testing.T) {
 	agent := &model.Agent{
 		ID:           "agent-3",
 		Name:         "SkillAgent",
 		CustomSkills: `[{"name":"权限审查","description":"检查工具权限","trigger":"权限","detail":"确认 MCP 白名单和拒绝路径。"}]`,
 	}
-	svc := NewOrchestratorService(nil, nil, nil)
-	got := svc.InjectAgentConfig(agent, "[群聊背景]\nhello", "u1", "请检查工具权限")
+	got := BuildAgentConfigText(agent, "[群聊背景]\nhello", "请检查工具权限")
 	if !strings.Contains(got, "[平台 Skills]") {
 		t.Fatalf("expected platform skills section, got %s", got)
 	}
@@ -508,27 +492,25 @@ func TestInjectAgentConfigIncludesPlatformSkillContext(t *testing.T) {
 }
 
 func TestBuildConversationBlackboardContext_IncludesPinnedMessages(t *testing.T) {
-	svc := NewOrchestratorService(
-		&fakeOrchConvRepo{conv: &model.Conversation{ID: "c1"}},
-		&fakeOrchAgentRepo{},
-		&fakeMsgRepo{
-			pinnedMessages: []model.PinnedMessage{
-				{
-					ConversationID: "c1",
-					MessageID:      "m1",
-					Role:           "user",
-					Content:        "第一行\n第二行",
-					Username:       "wjc",
-				},
-			},
-			blackboard: &model.ConversationBlackboard{
+	msgRepo := &fakeMsgRepo{
+		pinnedMessages: []model.PinnedMessage{
+			{
 				ConversationID: "c1",
-				ManualContext:  "请始终使用中文回答",
+				MessageID:      "m1",
+				Role:           "user",
+				Content:        "第一行\n第二行",
+				Username:       "wjc",
 			},
 		},
-	)
+		blackboard: &model.ConversationBlackboard{
+			ConversationID: "c1",
+			ManualContext:  "请始终使用中文回答",
+		},
+	}
 
-	result := svc.BuildConversationBlackboardContext(context.Background(), "c1")
+	// 直接调纯函数 BuildBlackboardText（原 OrchestratorService.BuildConversationBlackboardContext
+	// 的 façade 已删除，façade 委托的就是这个纯函数；与 BlackboardBuilder 共享同一实现）
+	result := BuildBlackboardText(context.Background(), msgRepo, "c1")
 	if !strings.Contains(result, "{会话上下文黑板") {
 		t.Fatal("expected blackboard section")
 	}

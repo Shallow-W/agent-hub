@@ -1,49 +1,17 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 )
 
-var platformToolsets = map[string][]string{
-	"none":          {},
-	"basic":         {"list_group_agents", "get_messages", "get_agent_skill"},
-	"tasks":         {"list_group_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status"},
-	"orchestrator":  {"list_group_agents", "list_conversation_agents", "get_messages", "get_agent_skill", "list_tasks", "create_task", "update_task", "move_task_status", "list_conversations", "get_group_info", "list_group_members", "list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
-	"agent_builder": {"list_agents", "list_group_agents", "get_agent_skill", "list_agent_candidates", "list_machines", "get_agent_detail", "create_agent", "update_agent", "delete_agent", "list_toolsets"},
-	"agent_manager": {"list_agents", "get_agent_detail", "update_agent_prompt", "start_agent", "stop_agent", "get_agent_skill"},
-	"knowledge":     {"list_knowledge_bases", "list_knowledge_files", "search_knowledge", "read_knowledge_file"},
-}
-
-var platformToolCatalog = map[string]bool{
-	"list_conversations":       true,
-	"list_conversation_agents": true,
-	"get_messages":             true,
-	"create_group":             true,
-	"list_agents":              true,
-	"list_group_agents":        true,
-	"list_tasks":               true,
-	"create_task":              true,
-	"update_task":              true,
-	"move_task_status":         true,
-	"delete_task":              true,
-	"get_group_info":           true,
-	"list_group_members":       true,
-	"list_machines":            true,
-	"list_agent_candidates":    true,
-	"get_agent_skill":          true,
-	"get_agent_detail":         true,
-	"update_agent_prompt":      true,
-	"start_agent":              true,
-	"stop_agent":               true,
-	"list_knowledge_bases":     true,
-	"list_knowledge_files":     true,
-	"search_knowledge":         true,
-	"read_knowledge_file":      true,
-	"create_agent":             true,
-	"update_agent":             true,
-	"delete_agent":             true,
-	"list_toolsets":            true,
+// ToolsetStore 是 toolset 模板校验所需的最小接口。
+// 实现侧（如 *repository.ToolDefinitionRepo）通过查询 builtin_toolset_templates
+// 表来判断 toolset 名是否合法。
+type ToolsetStore interface {
+	// IsValidToolset 返回给定 toolset 名是否在 builtin_toolset_templates 中存在。
+	IsValidToolset(ctx context.Context, name string) (bool, error)
 }
 
 type agentToolsConfig struct {
@@ -51,7 +19,10 @@ type agentToolsConfig struct {
 	AllowedTools []string `json:"allowed_tools"`
 }
 
-func normalizeToolsConfig(raw string) (string, error) {
+// normalizeToolsConfig validates and normalizes a JSON tool config string.
+// registry 用于校验工具名；toolsetStore 用于校验 toolset 名是否在 DB 中存在；
+// 任一为 nil 时对应校验环节跳过。
+func normalizeToolsConfig(ctx context.Context, raw string, registry ToolRegistryReader, toolsetStore ToolsetStore) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return `{"toolset":"none","allowed_tools":[]}`, nil
@@ -64,10 +35,25 @@ func normalizeToolsConfig(raw string) (string, error) {
 		return raw, nil
 	}
 
-	if _, ok := platformToolsets[cfg.Toolset]; !ok {
-		cfg.Toolset = ""
+	// 校验 toolset 名：
+	//   - "none" 始终合法
+	//   - 有 ToolsetStore：交给 DB-backed 校验
+	//   - 无 ToolsetStore（测试场景）：放行任何非空 toolset，以保持 Agent 单测的
+	//     行为（"custom" 之类的自由文本会被上层模板系统进一步解析）。
+	if cfg.Toolset == "" {
+		// 保持空，下面会保留现状
+	} else if cfg.Toolset == "none" {
+		// "none" 始终合法
+	} else if toolsetStore != nil {
+		ok, err := toolsetStore.IsValidToolset(ctx, cfg.Toolset)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			cfg.Toolset = ""
+		}
 	}
-	cfg.AllowedTools = normalizeToolNames(cfg.AllowedTools)
+	cfg.AllowedTools = normalizeToolNames(cfg.AllowedTools, registry)
 
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -76,7 +62,9 @@ func normalizeToolsConfig(raw string) (string, error) {
 	return string(data), nil
 }
 
-func normalizeToolNames(names []string) []string {
+// normalizeToolNames filters and deduplicates tool names, keeping only those
+// recognized by the registry. When registry is nil, all names pass through.
+func normalizeToolNames(names []string, registry ToolRegistryReader) []string {
 	if names == nil {
 		return nil
 	}
@@ -84,8 +72,13 @@ func normalizeToolNames(names []string) []string {
 	result := make([]string, 0, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
-		if name == "" || !platformToolCatalog[name] || seen[name] {
+		if name == "" || seen[name] {
 			continue
+		}
+		if registry != nil {
+			if _, ok := registry.Lookup(name); !ok {
+				continue
+			}
 		}
 		seen[name] = true
 		result = append(result, name)

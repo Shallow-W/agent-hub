@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { KnowledgeBase } from '@/types/knowledge';
+import type { KnowledgeBase, KnowledgeFile } from '@/types/knowledge';
 import * as kbApi from '@/api/knowledge';
 
 interface KnowledgeState {
@@ -14,6 +14,7 @@ interface KnowledgeState {
   updateVisibility: (id: string, visibility: 'private' | 'public') => Promise<void>;
   addFile: (kbId: string, file: File) => Promise<void>;
   removeFile: (kbId: string, fileId: string) => Promise<void>;
+  smartRenameFile: (kbId: string, fileId: string) => Promise<KnowledgeFile>;
 }
 
 export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
@@ -65,4 +66,30 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     // 删除成功后重新拉取列表以同步远端数据
     await get().fetchKnowledgeBases(true);
   },
+
+  smartRenameFile: async (kbId, fileId) => {
+    const updatedFile = await kbApi.smartRenameKnowledgeFile(kbId, fileId);
+    set((s) => ({
+      knowledgeBases: s.knowledgeBases.map((kb) => (
+        kb.id === kbId
+          ? {
+              ...kb,
+              files: kb.files.map((file) => (
+                file.id === fileId ? updatedFile : file
+              )),
+            }
+          : kb
+      )),
+    }));
+    return updatedFile;
+  },
 }));
+
+export function resetKnowledgeStore(): void {
+  useKnowledgeStore.setState({
+    knowledgeBases: [],
+    loading: false,
+    error: null,
+    loaded: false,
+  });
+}

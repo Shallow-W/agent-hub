@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-
 	"github.com/agent-hub/backend/internal/middleware"
 	"github.com/agent-hub/backend/internal/model"
 	"github.com/agent-hub/backend/internal/service"
@@ -61,6 +60,12 @@ type AddCandidateAgentRequest struct {
 	EnableManagementTools bool   `json:"enable_management_tools"`
 }
 
+// UpdateToolsConfigRequest 更新 Agent 工具授权配置请求体。
+type UpdateToolsConfigRequest struct {
+	ToolsConfig           string `json:"tools_config"`
+	EnableManagementTools bool   `json:"enable_management_tools"`
+}
+
 // List 查询可用 Agent 列表
 func (h *AgentHandler) List(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -83,15 +88,17 @@ func (h *AgentHandler) MCPList(c *gin.Context) {
 	slim := make([]gin.H, len(list))
 	for i, a := range list {
 		slim[i] = gin.H{
-			"id":           a.ID,
-			"name":         a.Name,
-			"type":         a.Type,
-			"status":       a.Status,
-			"machine_id":   a.MachineID,
-			"machine_name": a.MachineName,
-			"version":      a.Version,
-			"cli_tool":     a.CLITool,
-			"tags":         a.Tags,
+			"id":                      a.ID,
+			"name":                    a.Name,
+			"type":                    a.Type,
+			"status":                  a.Status,
+			"machine_id":              a.MachineID,
+			"machine_name":            a.MachineName,
+			"version":                 a.Version,
+			"cli_tool":                a.CLITool,
+			"tools_config":            a.ToolsConfig,
+			"enable_management_tools": a.EnableManagementTools,
+			"tags":                    a.Tags,
 		}
 	}
 	middleware.SuccessResponse(c, slim)
@@ -153,6 +160,7 @@ func (h *AgentHandler) AddCandidateAgent(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "添加候选 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.CreatedResponse(c, agent)
 }
 
@@ -214,6 +222,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "创建 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
 	middleware.CreatedResponse(c, agent)
 }
 
@@ -244,6 +253,32 @@ func (h *AgentHandler) Update(c *gin.Context) {
 		middleware.HandleServiceError(c, err, "更新 Agent 失败")
 		return
 	}
+	agent.CapabilitiesJSON = ""
+	middleware.SuccessResponse(c, agent)
+}
+
+// UpdateToolsConfig 更新 Agent 工具授权配置。
+func (h *AgentHandler) UpdateToolsConfig(c *gin.Context) {
+	agentID := c.Param("id")
+	var req UpdateToolsConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40038, "参数错误: "+err.Error())
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	agent, err := h.svc.UpdateToolsConfig(
+		c.Request.Context(),
+		agentID,
+		userID,
+		req.ToolsConfig,
+		req.EnableManagementTools,
+	)
+	if err != nil {
+		middleware.HandleServiceError(c, err, "更新工具配置失败")
+		return
+	}
+	agent.CapabilitiesJSON = ""
 	middleware.SuccessResponse(c, agent)
 }
 

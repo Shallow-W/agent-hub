@@ -25,14 +25,17 @@ import {
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { getGroupMembers, removeGroupMember, leaveGroup, addGroupMember, changeMemberRole } from '@/api/group';
-import { getConversationAgents, addConversationAgent, removeConversationAgent, setConversationAgentRole } from '@/api/conversation';
+import { addConversationAgent, removeConversationAgent, setConversationAgentRole } from '@/api/conversation';
+import { interpretConvError } from '@/api/conversationErrors';
 import type { GroupMember } from '@/types/group';
-import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
 import { useFriendStore } from '@/store/friendStore';
 import { useAgentStore } from '@/store/agentStore';
+import { onConversationRoleChanged } from '@/store/wsStore';
 import { searchUsers as searchUsersApi } from '@/api/friend';
 import type { User } from '@/types/auth';
 import { Checkbox } from 'antd';
+import { useConversationAgents } from '@/hooks/useConversationAgents';
 
 interface GroupMemberPanelProps {
   open: boolean;
@@ -40,6 +43,7 @@ interface GroupMemberPanelProps {
   conversationId: string;
   currentUserId: string;
   onGroupLeft?: () => void;
+  onAgentsChanged?: () => void;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -60,6 +64,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   conversationId,
   currentUserId,
   onGroupLeft,
+  onAgentsChanged,
 }) => {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,18 +80,18 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
   const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const friends = useFriendStore((s) => s.friends);
   const agents = useAgentStore((s) => s.agents);
-  const [agentMembers, setAgentMembers] = useState<ConversationAgent[]>([]);
   const [addingAgent, setAddingAgent] = useState<string | null>(null);
+
+  // Agent 成员列表 + WS role_changed 自动刷新，由公共 hook 统一管理
+  const { agents: agentMembers, refetch: refetchAgents } = useConversationAgents(
+    open ? conversationId : undefined,
+  );
 
   const fetchMembers = useCallback(async () => {
     setLoading(true);
     try {
-      const [list, agentList] = await Promise.all([
-        getGroupMembers(conversationId),
-        getConversationAgents(conversationId),
-      ]);
+      const list = await getGroupMembers(conversationId);
       setMembers(list ?? []);
-      setAgentMembers(agentList ?? []);
     } catch {
       message.error('获取群成员失败');
     } finally {
@@ -99,6 +104,18 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
       fetchMembers();
     }
   }, [open, conversationId, fetchMembers]);
+
+  // 订阅 WS 角色变更事件：通知父组件 + 刷新人类成员列表。
+  // Agent 成员的自动刷新已由 useConversationAgents hook 内部处理。
+  useEffect(() => {
+    if (!open) return;
+    const unsubscribe = onConversationRoleChanged((payload) => {
+      if (payload.conversationId !== conversationId) return;
+      fetchMembers();
+      onAgentsChanged?.();
+    });
+    return unsubscribe;
+  }, [open, conversationId, fetchMembers, onAgentsChanged]);
 
   const currentUserRole = members.find((m) => m.user_id === currentUserId)?.role;
   const canManage = currentUserRole === 'owner' || currentUserRole === 'admin';
@@ -366,7 +383,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                           key="agent-actions"
                           menu={{
                             items: [
-                              ...(agent.role !== 'orchestrator'
+                              ...(agent.role !== ROLE_ORCHESTRATOR
                                 ? [{
                                     key: 'set-orch',
                                     icon: <TeamOutlined />,
@@ -374,11 +391,13 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                     onClick: async () => {
                                       setActionLoading(agent.agent_id);
                                       try {
-                                        await setConversationAgentRole(conversationId, agent.agent_id, 'orchestrator');
+                                        await setConversationAgentRole(conversationId, agent.agent_id, ROLE_ORCHESTRATOR);
                                         message.success('已设为 Orchestrator');
-                                        await fetchMembers();
-                                      } catch {
-                                        message.error('设置角色失败');
+                                        await refetchAgents();
+                                        onAgentsChanged?.();
+                                      } catch (err) {
+                                        const interp = interpretConvError(err);
+                                        message.error(interp.retryable ? `${interp.message}（请重试）` : interp.message);
                                       } finally {
                                         setActionLoading(null);
                                       }
@@ -391,11 +410,13 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                     onClick: async () => {
                                       setActionLoading(agent.agent_id);
                                       try {
-                                        await setConversationAgentRole(conversationId, agent.agent_id, 'worker');
+                                        await setConversationAgentRole(conversationId, agent.agent_id, ROLE_WORKER);
                                         message.success('已取消 Orchestrator');
-                                        await fetchMembers();
-                                      } catch {
-                                        message.error('设置角色失败');
+                                        await refetchAgents();
+                                        onAgentsChanged?.();
+                                      } catch (err) {
+                                        const interp = interpretConvError(err);
+                                        message.error(interp.retryable ? `${interp.message}（请重试）` : interp.message);
                                       } finally {
                                         setActionLoading(null);
                                       }
@@ -411,7 +432,8 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                                   try {
                                     await removeConversationAgent(conversationId, agent.agent_id);
                                     message.success('已移除智能体');
-                                    await fetchMembers();
+                                    await refetchAgents();
+                                    onAgentsChanged?.();
                                   } catch {
                                     message.error('移除智能体失败');
                                   } finally {
@@ -442,7 +464,7 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                     <span>
                       {agent.name}
                       <Tag color="purple" style={{ fontSize: 10, marginLeft: 4 }}>智能体</Tag>
-                      {agent.role === 'orchestrator' && (
+                      {agent.role === ROLE_ORCHESTRATOR && (
                         <Tag color="orange" style={{ fontSize: 10, marginLeft: 2 }}>Orch</Tag>
                       )}
                     </span>
@@ -613,7 +635,8 @@ const GroupMemberPanel: React.FC<GroupMemberPanelProps> = ({
                               try {
                                 await addConversationAgent(conversationId, agent.id);
                                 message.success('已添加智能体');
-                                await fetchMembers();
+                                await refetchAgents();
+                                onAgentsChanged?.();
                               } catch {
                                 message.error('添加智能体失败');
                               } finally {

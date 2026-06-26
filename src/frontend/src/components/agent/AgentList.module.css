@@ -1,19 +1,32 @@
 .container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px 1px;
+  margin: 0 -5px;
   overflow: auto;
   flex: 1;
 }
 
 .statusRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 0 3px;
+}
+
+.statusText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statLine {
+  font-size: 11px;
   color: var(--color-text-secondary);
+  line-height: 1.3;
+  white-space: nowrap;
 }
 
 .statusActions {
@@ -29,10 +42,11 @@
   background: var(--color-bg-white);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .machineCardActive {
-  border-color: rgba(47, 143, 107, 0.35);
+  border-color: rgba(47, 143, 107, 0.45);
   box-shadow: 0 10px 18px rgba(47, 143, 107, 0.16);
 }
 
@@ -40,13 +54,14 @@
   width: 100%;
   border: none;
   background: transparent;
-  padding: 10px 12px;
+  padding: 8px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 6px;
   cursor: pointer;
   text-align: left;
+  transition: background var(--transition-fast);
 }
 
 .machineHeader:hover {
@@ -56,45 +71,50 @@
 .machineLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .machineAvatar {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px;
-  min-height: 36px;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px;
+  min-height: 32px;
   border-radius: 50% !important;
   background: var(--color-primary-light) !important;
   color: var(--color-primary);
+  font-size: 15px !important;
 }
 
 .machineMeta {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .machineTitleRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
 .machineTitle {
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .machineSub {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -104,18 +124,18 @@
 .machineActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .machineCount {
-  min-width: 22px;
-  height: 22px;
+  min-width: 20px;
+  height: 18px;
   border-radius: 999px;
   padding: 0 6px;
   background: rgba(47, 143, 107, 0.12);
   color: var(--color-primary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -124,145 +144,112 @@
 
 .expandIcon {
   color: var(--color-text-tertiary);
-  font-size: 12px;
+  font-size: 9px;
+  transition: transform var(--transition-fast);
 }
 
 .machineBody {
   border-top: 1px solid var(--color-border-light);
-  padding: 8px 12px 12px;
+  padding: 6px 4px 6px;
   background: var(--color-bg-white);
 }
 
-
 .sectionLabel {
-  margin: 8px 0 6px;
-  font-size: 11px;
+  margin: 2px 0 4px;
+  padding: 0 2px;
+  font-size: 10px;
   font-weight: 600;
-  color: var(--color-text-secondary);
-  letter-spacing: 0.6px;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 
-.agentList,
-.candidateList {
+.agentList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
 .agentRow {
-  border: 1px solid rgba(31, 35, 40, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-light);
   border-radius: 10px;
-  padding: 8px 10px;
   background: var(--color-bg-white);
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .agentRow:hover {
-  border-color: rgba(31, 35, 40, 0.2);
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+  border-color: rgba(47, 143, 107, 0.28);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06);
 }
 
 .agentRowActive {
-  border-color: rgba(47, 143, 107, 0.4);
-  box-shadow: 0 8px 16px rgba(47, 143, 107, 0.16);
+  border-color: rgba(47, 143, 107, 0.45);
+  box-shadow: 0 6px 14px rgba(47, 143, 107, 0.14);
 }
 
-.agentHeader {
+.agentAvatar {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px;
+  border-radius: 50% !important;
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.agentInfo {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agentTitleRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  min-width: 0;
 }
 
-.agentMeta {
+.agentName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-width: 0;
   flex: 1;
 }
 
-.agentName {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .agentTool {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agentSummary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-  padding-left: 36px;
+  font-size: 10px;
   color: var(--color-text-tertiary);
-  font-size: 11px;
-}
-
-.agentSummary span:first-child {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  max-width: 84px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.agentSummary span:last-child {
+  font-family: 'SF Mono', Menlo, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
-.candidateRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px dashed var(--color-border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
+.agentMoreBtn {
+  flex-shrink: 0;
+  opacity: 0;
+  padding: 0 2px;
+  min-width: 18px;
+  width: 18px;
+  transition: opacity var(--transition-fast);
 }
 
-.candidateInfo {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.candidateName {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.candidateMeta {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.agentRow:hover .agentMoreBtn,
+.agentRowActive .agentMoreBtn {
+  opacity: 1;
 }
 
 .machineEmpty {
@@ -284,14 +271,10 @@
 }
 
 :global(html.dark) .agentRow {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-border);
 }
 
 :global(html.dark) .agentRow:hover {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(52, 211, 153, 0.35);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
-}
-
-:global(html.dark) .candidateRow {
-  background: var(--color-surface-muted);
 }

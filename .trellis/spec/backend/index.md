@@ -14,9 +14,12 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
+| [Directory Structure](./directory-structure.md) | Layered architecture: domain / port / service / infrastructure | Filled |
+| [Database Guidelines](./database-guidelines.md) | pgx, migrations, partial unique index pattern | Filled |
+| [Error Handling](./error-handling.md) | Sentinel errors, HTTP code matrix, unique violation pattern | Filled |
+| [Event Broadcaster](./event-broadcaster.md) | Domain events → online WS clients (e.g. `conversation.role_changed`) | Filled |
+| [Context Builder Chain](./context-builder.md) | Chain-of-responsibility pipeline for LLM context assembly (5 chains) | Filled |
+| [Dispatcher Module](./dispatcher.md) | Router / Dispatcher / AgentQueue split of dispatch responsibilities | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Context 传递、错误处理、依赖管理、接口设计 | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 

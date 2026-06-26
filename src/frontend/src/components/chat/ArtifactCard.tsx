@@ -15,6 +15,8 @@ interface Props {
   artifacts: Artifact[];
   /** 来源 Agent 名称，用于群聊多 Agent 时标识产物归属。 */
   agentName?: string | null;
+  /** 对话 ID，传给 DeployButton 供 docker 部署走统一 API。 */
+  conversationId?: string;
 }
 
 function artifactTitle(artifact: Artifact): string {
@@ -38,7 +40,7 @@ function documentSummary(artifact: Artifact): string {
   return artifact.content ? `${artifact.content.length} 字符` : '暂不可预览';
 }
 
-export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
+export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName, conversationId }) => {
   const [active, setActive] = useState<Artifact | null>(null);
 
   if (!artifacts || artifacts.length === 0) return null;
@@ -114,6 +116,7 @@ export const ArtifactCard: React.FC<Props> = ({ artifacts, agentName }) => {
         open={active !== null}
         onClose={() => setActive(null)}
         agentName={agentName}
+        conversationId={conversationId}
       />
     </div>
   );

@@ -55,6 +55,11 @@ export async function deleteKnowledgeFile(kbId: string, fileId: string): Promise
   await del(`${BASE}/${kbId}/files/${fileId}`);
 }
 
+/** 让在线智能体扫读文件并生成新的知识库文件名 */
+export async function smartRenameKnowledgeFile(kbId: string, fileId: string): Promise<KnowledgeFile> {
+  return await post<KnowledgeFile>(`${BASE}/${kbId}/files/${fileId}/smart-rename`);
+}
+
 /** 获取知识库文件预览/下载 URL */
 export function getKnowledgeFileUrl(kbId: string, file: Pick<KnowledgeFile, 'id' | 'url'> | string): string {
   if (typeof file !== 'string' && file.url) return file.url;

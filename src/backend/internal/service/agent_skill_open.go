@@ -44,7 +44,7 @@ func (s *AgentService) OpenDaemonSkillLocation(ctx context.Context, userID, agen
 	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
 		Type: "task.dispatch",
 		Data: map[string]interface{}{
-			"id":              taskID,
+			"task_id":         taskID,
 			"cli_tool":        daemonOpenPathTool,
 			"prompt":          string(payload),
 			"agent_id":        agentID,

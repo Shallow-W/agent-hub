@@ -3,9 +3,13 @@ import type { User } from '@/types/auth';
 import * as authApi from '@/api/auth';
 import * as userApi from '@/api/user';
 import { setToken, clearToken } from '@/api/client';
+import { STORAGE_KEYS } from '@/config/constants';
 import { resetConversationStore } from '@/store/conversationStore';
 import { resetMessageStore } from '@/store/messageStore';
 import { resetAgentStore } from '@/store/agentStore';
+import { resetFriendStore } from '@/store/friendStore';
+import { resetKnowledgeStore } from '@/store/knowledgeStore';
+import { resetCatalogStore } from '@/store/catalogStore';
 import { useWsStore } from '@/store/wsStore';
 
 interface AuthState {
@@ -22,8 +26,8 @@ interface AuthState {
   loadFromStorage: () => void;
 }
 
-const TOKEN_KEY = 'agenthub_token';
-const USER_KEY = 'agenthub_user';
+
+
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -36,9 +40,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.login(username, password);
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      localStorage.removeItem('agenthub_active_conv');
+      localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+      localStorage.removeItem(STORAGE_KEYS.ACTIVE_CONV);
       setToken(data.token);
       resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
@@ -55,9 +59,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const data = await authApi.register(username, password);
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      localStorage.removeItem('agenthub_active_conv');
+      localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+      localStorage.removeItem(STORAGE_KEYS.ACTIVE_CONV);
       setToken(data.token);
       resetAgentStore();
       set({ user: data.user, token: data.token, isAuthenticated: true });
@@ -75,7 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const current = get().user;
     // 合并：以服务端返回为准，兜底保留本地已有字段。
     const next: User = { ...(current ?? {} as User), ...updated };
-    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(next));
     set({ user: next });
   },
 
@@ -83,25 +87,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updated = await userApi.updateUsername(username);
     const current = get().user;
     const next: User = { ...(current ?? {} as User), ...updated };
-    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(next));
     set({ user: next });
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem('agenthub_active_conv');
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.USER);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_CONV);
     clearToken();
     resetConversationStore();
     resetMessageStore();
     resetAgentStore();
+    resetFriendStore();
+    resetKnowledgeStore();
+    resetCatalogStore();
     useWsStore.getState().disconnect();
     set({ user: null, token: null, isAuthenticated: false });
   },
 
   loadFromStorage: () => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const userJson = localStorage.getItem(USER_KEY);
+    const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+    const userJson = localStorage.getItem(STORAGE_KEYS.USER);
     if (token && userJson) {
       try {
         const user: User = JSON.parse(userJson);
@@ -109,8 +116,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ user, token, isAuthenticated: true });
       } catch {
         // 数据损坏则清除
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
+        localStorage.removeItem(STORAGE_KEYS.TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.USER);
       }
     }
   },

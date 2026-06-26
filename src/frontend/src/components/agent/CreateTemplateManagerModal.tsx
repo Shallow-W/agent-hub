@@ -11,11 +11,12 @@ import {
   type UserTemplate,
 } from '@/api/userTemplate';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
   getTemplateTools,
-  toolCatalog,
-  toolsetOptions,
+  getToolCatalogSync,
+  getToolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
 import styles from './CreateTemplateManagerModal.module.css';
 
@@ -68,21 +69,24 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   const [toolFilter, setToolFilter] = useState('all');
   const [skillFilter, setSkillFilter] = useState('all');
   const [saving, setSaving] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const builtInTemplates: BuiltInTemplate[] = useMemo(() => {
     if (mode === 'tools') {
-      return toolsetOptions
+      return getToolsetOptions()
         .filter((opt) => opt.value !== 'custom')
         .map((opt) => {
           const tools = getTemplateTools(opt.value);
           return { key: `tpl-tools-${opt.value}`, name: opt.label, category: '内置', description: `${tools.length} 个工具`, tools, skillCategories: [] };
         });
     }
-    return [
-      { key: 'tpl-skills-pm', name: '产品经理', category: '快速', description: '产品经理分类 Skills', tools: [], skillCategories: ['产品经理'] },
-      { key: 'tpl-skills-dev', name: '开发人员', category: '快速', description: '开发人员分类 Skills', tools: [], skillCategories: ['开发人员'] },
-      { key: 'tpl-skills-none', name: '无 Skills', category: '快速', description: '不分配任何 Skill', tools: [], skillCategories: [] },
-    ];
+    // Skills mode: no built-in quick templates here — the parent components
+    // (AgentSkillsPanel / AgentCreateModal) own the skill template dropdown
+    // and source shortcuts from the API-backed builtin skill templates.
+    return [];
   }, [mode]);
 
   const templates: TemplateItem[] = useMemo(() => [
@@ -93,9 +97,8 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
       return { id: t.key, name: t.name, category: t.category, description: t.description, tools: t.tools, skillIds, builtin: true };
     }),
     ...dbTemplates.map((t) => {
-      const content = t.content ?? {};
-      const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
-      const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+      const tools = mode === 'tools' && 'tools' in t.content ? t.content.tools : [];
+      const skillIds = mode === 'skills' && 'skill_ids' in t.content ? t.content.skill_ids : [];
       const desc = mode === 'tools' ? `${tools.length} 个工具` : `${skillIds.length} 个 Skill`;
       return { id: `db-${t.id}`, dbId: t.id, name: t.name, category: '自定义', description: desc, tools, skillIds, builtin: false };
     }),
@@ -128,10 +131,11 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
     setSkillSearch('');
     setToolFilter('all');
     setSkillFilter('all');
-    listUserTemplates(mode)
+    fetchToolCatalog()
+      .then(() => setCatalogReady(true))
+      .then(() => listUserTemplates(mode))
       .then((list) => {
         setDbTemplates(list);
-        // Build first selection from builtins + freshly fetched db templates
         const all = [
           ...builtInTemplates.map((t) => {
             const skillIds = t.skillCategories.length > 0
@@ -140,9 +144,8 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             return { id: t.key, name: t.name, tools: t.tools, skillIds } as TemplateItem;
           }),
           ...list.map((t) => {
-            const content = t.content ?? {};
-            const tools = mode === 'tools' ? (Array.isArray(content.tools) ? content.tools as string[] : []) : [];
-            const skillIds = mode === 'skills' ? (Array.isArray(content.skill_ids) ? content.skill_ids as string[] : []) : [];
+            const tools = mode === 'tools' && 'tools' in t.content ? t.content.tools : [];
+            const skillIds = mode === 'skills' && 'skill_ids' in t.content ? t.content.skill_ids : [];
             return { id: `db-${t.id}`, dbId: t.id, name: t.name, tools, skillIds } as TemplateItem;
           }),
         ];
@@ -151,7 +154,6 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
         else handleNew();
       })
       .catch(() => {
-        // Fallback: just select first builtin or handle new
         const first = builtInTemplates[0];
         if (first) {
           const skillIds = first.skillCategories.length > 0
@@ -159,7 +161,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             : [];
           applyTemplateToDraft({ id: first.key, name: first.name, tools: first.tools, skillIds } as TemplateItem);
         } else handleNew();
-      });
+      })
   }, [open, mode]);
 
   const applyTemplateToDraft = (tpl: TemplateItem) => {
@@ -236,11 +238,11 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
   };
 
   const filteredEditorTools = useMemo(() => {
-    let list = toolCatalog;
+    let list = getToolCatalogSync();
     if (toolFilter !== 'all') list = list.filter((t) => t.category === toolFilter);
     if (toolSearch) list = list.filter((t) => t.label.includes(toolSearch) || t.name.includes(toolSearch) || t.description.includes(toolSearch));
     return list;
-  }, [toolFilter, toolSearch]);
+  }, [toolFilter, toolSearch, catalogReady]);
 
   const filteredEditorSkills = useMemo(() => {
     let list = librarySkills;
@@ -304,7 +306,7 @@ export const CreateTemplateManagerModal: React.FC<CreateTemplateManagerModalProp
             <div className={styles.selectionSection}>
               <div className={styles.sectionHeader}>
                 工具集
-                <span className={styles.sectionCount}>{draftTools.length}/{toolCatalog.length}</span>
+                <span className={styles.sectionCount}>{draftTools.length}/{getToolCatalogSync().length}</span>
               </div>
               <div className={styles.searchRow}>
                 <Input

@@ -48,6 +48,7 @@ const ACCEPTED_TYPES =
   '.jpg,.jpeg,.png,.gif,.webp,.pdf,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const EMPTY_TYPING: { userId: string; username?: string }[] = [];
+const EMPTY_MESSAGES: Message[] = [];
 const BLACKBOARD_MAX_LEN = 8000;
 const { Text } = Typography;
 
@@ -97,10 +98,9 @@ export const ChatWindow: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(activeId ?? null);
   const wsClient = useWsStore((s) => s.wsClient);
-  const streamingContent = useMessageStore(
-    (s) => (activeId ? s.streamingContent[activeId] : undefined),
+  const isStreaming = useMessageStore(
+    (s) => (activeId ? (s.messages[activeId] ?? EMPTY_MESSAGES).some((msg) => msg.status === 'streaming') : false),
   );
-  const isStreaming = (streamingContent ?? '').length > 0;
 
   const { send: sendMessage } = useMessages(activeId ?? null);
 
@@ -108,28 +108,28 @@ export const ChatWindow: React.FC = () => {
     activeIdRef.current = activeId ?? null;
   }, [activeId]);
 
-  useEffect(() => {
-    if (!activeId || activeConv?.type !== 'group') {
+  const fetchConversationAgents = useCallback((conversationId?: string) => {
+    const targetId = conversationId ?? activeId;
+    if (!targetId || activeConv?.type !== 'group') {
       setConversationAgents([]);
       return;
     }
-    const conversationId = activeId;
-    let cancelled = false;
-    getConversationAgents(conversationId)
+    getConversationAgents(targetId)
       .then((items) => {
-        if (!cancelled && activeIdRef.current === conversationId) {
+        if (activeIdRef.current === targetId) {
           setConversationAgents(items);
         }
       })
       .catch(() => {
-        if (!cancelled && activeIdRef.current === conversationId) {
+        if (activeIdRef.current === targetId) {
           setConversationAgents([]);
         }
       });
-    return () => {
-      cancelled = true;
-    };
   }, [activeId, activeConv?.type]);
+
+  useEffect(() => {
+    fetchConversationAgents();
+  }, [fetchConversationAgents]);
 
   const refreshBlackboardPinned = useCallback(async (conversationId: string) => {
     const pinned = await getPinnedContext(conversationId);
@@ -291,11 +291,10 @@ export const ChatWindow: React.FC = () => {
       type: 'user.stop_stream',
       data: { conversation_id: activeId },
     }));
-    useMessageStore.setState((s) => {
-      const next = { ...s.streamingContent };
-      delete next[activeId];
-      return { streamingContent: next };
-    });
+    const store = useMessageStore.getState();
+    for (const msg of store.messages[activeId] ?? []) {
+      if (msg.status === 'streaming') store.cancelStreaming(activeId, msg.id);
+    }
     antMessage.info('已停止生成');
   }, [wsClient, activeId]);
 
@@ -586,11 +585,13 @@ export const ChatWindow: React.FC = () => {
         />
       )}
       <MessageList
+        key={activeConv.id}
         conversationId={activeConv.id}
         onReply={setReplyTo}
         onForward={setForwardMessage}
         onPinChanged={handlePinnedMessageChange}
         onOpenThread={setThreadMessage}
+        onDelete={(messageId) => useMessageStore.getState().deleteMessage(activeConv.id, messageId)}
         conversationAgents={conversationAgents}
       />
       {otherTyping.length > 0 && (
@@ -620,6 +621,7 @@ export const ChatWindow: React.FC = () => {
           conversationId={activeId}
           currentUserId={user?.id ?? ''}
           onGroupLeft={() => fetchConversations()}
+          onAgentsChanged={fetchConversationAgents}
         />
       )}
       {isGroup && activeId && (

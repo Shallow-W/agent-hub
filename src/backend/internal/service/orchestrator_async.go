@@ -17,6 +17,9 @@ type OrchSender struct {
 	Avatar string
 }
 
+// fanoutDedup 防止同一 orchTaskID 的 startWorkersAndWait 被并发调用两次。
+var fanoutDedup sync.Map
+
 // dispatchOrchWorker dispatches a single worker task using the unified dispatchAndWait path.
 // Runs in a goroutine: synchronously waits for the WS result, creates message, pushes to user,
 // then updates OrchTask worker state and triggers summary if all workers are done.
@@ -88,49 +91,74 @@ func (s *OrchestratorService) dispatchOrchWorker(convID, userID string, task Dis
 		}
 	}
 
-	// 构建 dispatch 上下文
-	dispatchCtx := fmt.Sprintf("[群聊背景]\n- Orchestrator: %s\n\n[调度指令]\nOrch @你，分配了以下任务：\n%s\n\n请完成这个任务并在回复末尾 @%s 表示完成。",
-		orchestratorName, truncateString(task.Task, 2000), orchestratorName)
+	// 通过 fanout chain 构建上下文：[Frame, KB, AgentConfig]
+	// 最终输出顺序：agentConfig + kbPreload + frame（与重构前内联拼装完全一致）。
+	// frame 由 FanoutFrameBuilder 从 ContextInput.FanoutFrame 读取。
+	dispatchCtx := s.FanoutChain().Build(ctx, ContextInput{
+		ConvID:    convID,
+		UserID:    userID,
+		Agent:     agent,
+		Content:   task.Task,
+		KBPreload: kbPreload,
+		FanoutFrame: &FanoutFrameInput{
+			OrchestratorName: orchestratorName,
+			Task:             task.Task,
+		},
+	})
 
-	if kbPreload != "" {
-		dispatchCtx = kbPreload + dispatchCtx
+	// 走 Dispatcher.Dispatch，把 worker 的「派发后业务包装」拆成 hook：
+	//   - OnMessagePersisted：postPersistAsync + OrchTask worker 完成 + OrchTaskCard done
+	//   - OnFailed：markWorkerFailed（OrchTask worker 失败 + OrchTaskCard failed）
+	//
+	// hooks 零值时 Dispatch 等价于 dispatchAndWait；这里装载 worker 业务包装。
+	// taskHash / orchTaskID / convID 等通过闭包捕获。
+	hooks := DispatchHooks{
+		OnMessagePersisted: func(hctx context.Context, msg *model.Message) {
+			slog.Info(orchFlowLog, "stage", "worker.dispatch_completed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "worker_id", agentID, "message_id", msg.ID, "content_len", len(msg.Content))
+
+			// 推送 worker 消息到用户 WS
+			slog.Info(orchFlowLog, "stage", "worker.message_push_scheduled", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "message_id", msg.ID)
+			s.postPersistAsync(convID, userID, msg)
+
+			// 更新 OrchTask worker 状态 + OrchTaskCard done
+			if s.orchTaskRepo != nil && orchTaskID != "" {
+				if _, err := s.orchTaskRepo.UpdateWorkerResult(hctx, orchTaskID, task.AgentName, "completed", truncateString(msg.Content, 2000)); err != nil {
+					slog.Warn(orchFlowLog, "stage", "worker.result_update_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "error", err)
+					return
+				}
+				slog.Info(orchFlowLog, "stage", "worker.result_updated", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName)
+
+				if s.taskSvc != nil {
+					if err := s.taskSvc.UpdateOrchWorkerStatus(hctx, taskHash, "done", truncateString(msg.Content, 4000)); err != nil {
+						slog.Warn(orchFlowLog, "stage", "worker.task_card_done_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "error", err)
+					} else {
+						s.pushTaskChanged(hctx, convID, userID)
+					}
+				}
+			}
+		},
+		OnFailed: func(_ context.Context, _ DispatchInput, ferr error) {
+			slog.Warn(orchFlowLog, "stage", "worker.dispatch_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "worker_id", agentID, "error", ferr)
+			s.markWorkerFailed(orchTaskID, task.AgentName, task.Task, ferr.Error())
+		},
 	}
-	dispatchCtx = s.InjectAgentConfig(agent, dispatchCtx, userID, task.Task)
 
 	// 统一路径：创建 daemon task → WS dispatch → channel wait → 创建消息
-	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, task.Task, dispatchCtx, replyTo)
+	// （业务包装已挂在 hooks 上）。
+	res, err := s.Dispatcher().Dispatch(ctx, DispatchInput{
+		ConvID:          convID,
+		UserID:          userID,
+		Agent:           agent,
+		Prompt:          task.Task,
+		ContextMessages: dispatchCtx,
+		ReplyTo:         replyTo,
+	}, hooks)
+	// Dispatch 失败时 hook 已处理 markWorkerFailed；这里只需要早退避免后续逻辑。
 	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "worker.dispatch_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "worker_id", agentID, "error", err)
-		s.markWorkerFailed(orchTaskID, task.AgentName, task.Task, err.Error())
 		return
 	}
-
-	slog.Info(orchFlowLog, "stage", "worker.dispatch_completed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "worker_id", agentID, "message_id", msg.ID, "content_len", len(msg.Content))
-
-	// 推送 worker 消息到用户 WS
-	if msg != nil {
-		slog.Info(orchFlowLog, "stage", "worker.message_push_scheduled", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "message_id", msg.ID)
-		s.postPersistAsync(convID, userID, msg)
-	}
-
-	// 更新 OrchTask worker 状态
-	if s.orchTaskRepo != nil && orchTaskID != "" {
-		_, err := s.orchTaskRepo.UpdateWorkerResult(ctx, orchTaskID, task.AgentName, "completed", truncateString(msg.Content, 2000))
-		if err != nil {
-			slog.Warn(orchFlowLog, "stage", "worker.result_update_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "error", err)
-			return
-		}
-		slog.Info(orchFlowLog, "stage", "worker.result_updated", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName)
-
-		// 同步 OrchTaskCard 状态为 done
-		if s.taskSvc != nil {
-			if err := s.taskSvc.UpdateOrchWorkerStatus(ctx, taskHash, "done", truncateString(msg.Content, 4000)); err != nil {
-				slog.Warn(orchFlowLog, "stage", "worker.task_card_done_failed", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_name", task.AgentName, "error", err)
-			} else {
-				s.pushTaskChanged(ctx, convID, userID)
-			}
-		}
-	}
+	// msg 仅供未来扩展使用（已通过 OnMessagePersisted 完成所有副作用）。
+	_ = res
 }
 
 // markWorkerFailed 标记 worker 失败并检查是否全部完成。
@@ -177,6 +205,14 @@ func (s *OrchestratorService) startWorkersAndWait(ctx context.Context, convID, u
 			}
 		}
 	}()
+
+	// Dedup guard：防止同一 orchTaskID 的 worker fanout 被重复触发
+	dedupKey := "fanout:" + orchTaskID
+	if _, loaded := fanoutDedup.LoadOrStore(dedupKey, true); loaded {
+		slog.Warn(orchFlowLog, "stage", "worker_fanout.dedup_skip", "orch_task_id", orchTaskID, "reason", "already running")
+		return
+	}
+	defer fanoutDedup.Delete(dedupKey)
 
 	slog.Info(orchFlowLog, "stage", "worker_fanout.start", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_count", len(plan.Tasks), "unknown_count", len(plan.UnknownTasks), "workers", resolvedDispatchLogNames(plan.Tasks), "summary_enabled", orchTaskID != "")
 	for _, unknown := range plan.UnknownTasks {
@@ -285,33 +321,60 @@ func (s *OrchestratorService) startOrchSummary(orchTaskID string, replyTo *strin
 
 	// 构建汇总+决策 prompt（支持多轮上下文）
 	summaryPrompt := BuildSummaryPrompt(orchTask)
-	summaryCtx := s.InjectAgentConfig(orchAgent, "", orchTask.UserID, summaryPrompt)
+	// 通过 summary chain 构建 contextMessages：仅 [AgentConfig]。
+	// 输出 = agentConfig + ""（summary prompt 已自带 OrchestratorSummarySystemPrompt，不叠加 OrchestratorSystemPrompt）。
+	summaryCtx := s.SummaryChain().Build(ctx, ContextInput{
+		ConvID:  orchTask.ConversationID,
+		UserID:  orchTask.UserID,
+		Agent:   orchAgent,
+		Content: summaryPrompt,
+	})
 
 	if replyTo == nil {
 		replyTo = optionalStringPtr(orchTask.DispatchMessageID)
 	}
-	msg, err := s.dispatchAndWait(ctx, orchTask.ConversationID, orchTask.UserID, orchAgent, summaryPrompt, summaryCtx, replyTo)
+
+	// 走 Dispatcher.Dispatch，把 summary 的「派发后业务包装」拆成 hook：
+	//   - OnMessagePersisted：SetSummaryAndEvaluate + UpdateDispatchMessageID + postPersistAsync
+	//   - OnFailed：UpdateStatus(failed)
+	//
+	// evaluateOrchResponse 需要拿到 summary message（Content / ID），通过 capturedMsg
+	// 闭包变量从 OnMessagePersisted 传出，Dispatch 返回后再调用。
+	var capturedMsg *model.Message
+	hooks := DispatchHooks{
+		OnMessagePersisted: func(hctx context.Context, msg *model.Message) {
+			capturedMsg = msg
+
+			// 保存 summary 并过渡到 evaluating 状态（决策点）
+			_ = s.orchTaskRepo.SetSummaryAndEvaluate(hctx, orchTaskID, msg.Content)
+			_ = s.orchTaskRepo.UpdateDispatchMessageID(hctx, orchTaskID, msg.ID)
+			orchTask.DispatchMessageID = msg.ID
+			slog.Info(orchFlowLog, "stage", "summary.message_created", "conversation_id", orchTask.ConversationID, "orch_task_id", orchTaskID, "message_id", msg.ID, "content_len", len(msg.Content), "result_preview", orchPreview(msg.Content))
+
+			// 推送汇总/决策消息
+			s.postPersistAsync(orchTask.ConversationID, orchTask.UserID, msg)
+		},
+		OnFailed: func(_ context.Context, _ DispatchInput, ferr error) {
+			slog.Warn(orchFlowLog, "stage", "summary.dispatch_failed", "conversation_id", orchTask.ConversationID, "orch_task_id", orchTaskID, "error", ferr)
+			_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+		},
+	}
+
+	_, err = s.Dispatcher().Dispatch(ctx, DispatchInput{
+		ConvID:          orchTask.ConversationID,
+		UserID:          orchTask.UserID,
+		Agent:           orchAgent,
+		Prompt:          summaryPrompt,
+		ContextMessages: summaryCtx,
+		ReplyTo:         replyTo,
+	}, hooks)
 	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "summary.dispatch_failed", "conversation_id", orchTask.ConversationID, "orch_task_id", orchTaskID, "error", err)
-		_ = s.orchTaskRepo.UpdateStatus(ctx, orchTaskID, model.OrchTaskFailed)
+		// OnFailed 已处理状态回退；早退避免 evaluateOrchResponse 在无 msg 时执行。
 		return
 	}
 
-	// 保存 summary 并过渡到 evaluating 状态（决策点）
-	_ = s.orchTaskRepo.SetSummaryAndEvaluate(ctx, orchTaskID, msg.Content)
-	if msg != nil {
-		_ = s.orchTaskRepo.UpdateDispatchMessageID(ctx, orchTaskID, msg.ID)
-		orchTask.DispatchMessageID = msg.ID
-	}
-	slog.Info(orchFlowLog, "stage", "summary.message_created", "conversation_id", orchTask.ConversationID, "orch_task_id", orchTaskID, "message_id", msg.ID, "content_len", len(msg.Content), "result_preview", orchPreview(msg.Content))
-
-	// 推送汇总/决策消息
-	if msg != nil {
-		s.postPersistAsync(orchTask.ConversationID, orchTask.UserID, msg)
-	}
-
 	// 评估 Orch 回复，决定继续派发还是完成
-	s.evaluateOrchResponse(orchTaskID, orchTask, orchAgent.Name, msg.Content, msg.ID)
+	s.evaluateOrchResponse(orchTaskID, orchTask, orchAgent.Name, capturedMsg.Content, capturedMsg.ID)
 }
 
 // evaluateOrchResponse parses the orchestrator's summary response for @mention dispatches.

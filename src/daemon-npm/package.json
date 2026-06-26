@@ -1,16 +1,25 @@
 {
-  "name": "@agenthub/daemon",
-  "version": "0.1.0",
+  "name": "@hust-agenthub/daemon",
+  "version": "0.3.0",
+  "description": "AgentHub daemon — connects to an AgentHub backend over HTTP/WebSocket and spawns local agent CLIs (Claude Code, Codex, OpenCode, OpenClaw).",
   "bin": {
     "agenthub-daemon": "./bin/agenthub-daemon.js"
   },
   "files": [
-    "bin"
+    "bin/agenthub-daemon.js",
+    "cli/*.js",
+    "README.md"
   ],
   "engines": {
     "node": ">=18"
   },
+  "scripts": {
+    "test": "node --test test cli/__tests__/*.test.js"
+  },
   "dependencies": {
     "ws": "^8.21.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -612,6 +612,34 @@ null
 - `400 Bad Request` — 参数校验失败
 - `404 Not Found` — 候选底座不存在、无权限，或 `cli_tool` 与候选底座不匹配
 
+### PUT /api/agents/:id/tools-config
+
+更新 Agent 的平台 MCP 工具授权配置。该接口只持久化 `tools_config` 和 `enable_management_tools`，用于前端工具分配页保存当前选择；不同于 `PUT /api/agents/:id`，它不要求 Agent 是自建 Agent，当前用户可见的 daemon/system/custom Agent 均可更新。
+
+**请求体**
+```json
+{
+  "tools_config": "{\"toolset\":\"custom\",\"allowed_tools\":[\"list_tasks\",\"get_agent_skill\"]}",
+  "enable_management_tools": false
+}
+```
+
+**成功响应** `200 OK`
+```json
+{
+  "id": "uuid",
+  "name": "代码助手",
+  "type": "custom",
+  "cli_tool": "codex",
+  "tools_config": "{\"allowed_tools\":[\"list_tasks\",\"get_agent_skill\"]}",
+  "enable_management_tools": false
+}
+```
+
+**错误响应**
+- `400 Bad Request` — 参数校验失败或工具配置格式非法
+- `404 Not Found` — Agent 不存在或当前用户不可见
+
 ### PUT /api/agents/:id/custom-skills
 
 更新 Agent 的平台 Skills。该字段用于用户配置的 Agent 能力索引和渐进式加载内容，不会被 daemon 底座扫描覆盖。

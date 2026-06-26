@@ -18,6 +18,7 @@ import type {
   DaemonMachine,
 } from '@/types/agent';
 import { AgentCreateModal } from './AgentCreateModal';
+import { buildCommands, DAEMON_VERSION } from '@/utils/connectCommand';
 import styles from './ConnectComputerModal.module.css';
 
 interface ConnectComputerModalProps {
@@ -45,29 +46,6 @@ function getStatusTag(machine: DaemonMachine): React.ReactNode {
     return <Tag color="success">Connected</Tag>;
   }
   return <Tag color="warning">Waiting</Tag>;
-}
-
-function quoteArg(value: string): string {
-  return `"${value.replace(/"/g, '\\"')}"`;
-}
-
-function readCommandArg(command: string, name: string): string {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = command.match(new RegExp(`--${escaped}\\s+(?:"([^"]+)"|(\\S+))`));
-  return match?.[1] ?? match?.[2] ?? '';
-}
-
-function buildCommand(
-  backendCommand: string,
-  daemonNPMPath: string,
-  machineName: string,
-): string {
-  const serverURL = readCommandArg(backendCommand, 'server-url');
-  const apiKey = readCommandArg(backendCommand, 'api-key');
-  const packageSpec = daemonNPMPath
-    ? `@agenthub/daemon@file:${daemonNPMPath}`
-    : '@agenthub/daemon@latest';
-  return `npx ${quoteArg(packageSpec)} --server-url ${quoteArg(serverURL)} --api-key ${quoteArg(apiKey)} # ${machineName}`;
 }
 
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -98,9 +76,9 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
   const machinePanelTitle = hasConnectedMachine
     ? 'Connected computers'
     : 'Waiting for computer to connect...';
-  const connectCommand = useMemo(() => {
+  const commands = useMemo(() => {
     if (!created) return null;
-    return buildCommand(
+    return buildCommands(
       created.command,
       created.daemon_npm_path,
       created.machine.name,
@@ -151,10 +129,10 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
     }
   };
 
-  const handleCopy = async () => {
-    if (!connectCommand) return;
-    await navigator.clipboard.writeText(connectCommand);
-    message.success('启动命令已复制');
+  const copyCommand = async (command: string | null, label: string) => {
+    if (!command) return;
+    await navigator.clipboard.writeText(command);
+    message.success(`${label} 命令已复制`);
   };
 
   const handleCreateAgent = async (candidateId: string, displayName: string, systemPrompt: string, toolsConfig: string, customSkills: string) => {
@@ -225,13 +203,36 @@ export const ConnectComputerModal: React.FC<ConnectComputerModalProps> = ({
         <div className={styles.commandPanel}>
           <div className={styles.commandHeader}>
             <span>CONNECT COMMAND</span>
-            {created && <Button icon={<CopyOutlined />} onClick={handleCopy} />}
+            <Tag color="blue" className={styles.versionTag}>Daemon v{DAEMON_VERSION}</Tag>
           </div>
-          {created ? (
-            <pre className={styles.command}>{connectCommand}</pre>
+          {commands ? (
+            <div className={styles.commandList}>
+              <div className={styles.commandRow}>
+                <div className={styles.commandLabel}>
+                  <Tag>NPX</Tag>
+                  <span className={styles.commandHint}>在线（npm 安装）</span>
+                </div>
+                <pre className={styles.command}>{commands.npx}</pre>
+                <Button
+                  icon={<CopyOutlined />}
+                  onClick={() => copyCommand(commands.npx, 'NPX')}
+                />
+              </div>
+              <div className={styles.commandRow}>
+                <div className={styles.commandLabel}>
+                  <Tag>Node</Tag>
+                  <span className={styles.commandHint}>本地（开发用，跳过 npm）</span>
+                </div>
+                <pre className={styles.command}>{commands.node}</pre>
+                <Button
+                  icon={<CopyOutlined />}
+                  onClick={() => copyCommand(commands.node, 'Node')}
+                />
+              </div>
+            </div>
           ) : (
             <div className={styles.commandEmpty}>
-              点击“创建连接”生成一条新的 npx 启动命令。出于安全考虑，已创建连接的 machine key 不会再次显示。
+              点击“创建连接”生成启动命令。支持 NPX 或 Node 本地启动两种方式，已创建连接的 machine key 不会再次显示。
             </div>
           )}
         </div>

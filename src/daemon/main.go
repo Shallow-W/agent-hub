@@ -27,6 +27,9 @@ func main() {
 	mcpFlag := flag.Bool("mcp", false, "启动 MCP Server 模式（stdio）")
 	flag.Parse()
 
+	// 全局 slog 初始化——两条路径（MCP / daemon）共享同一结构化 JSON 日志。
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	if *mcpFlag {
 		runMCP(*agentIDFlag)
 		return
@@ -37,7 +40,7 @@ func main() {
 
 // runMCP 启动 MCP Server，通过 stdio 对外提供 tool 能力
 func runMCP(agentID string) {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.Default()
 
 	serverURL := os.Getenv("AGENTHUB_SERVER_URL")
 	if serverURL == "" {
@@ -55,9 +58,9 @@ func runMCP(agentID string) {
 	api := mcp.NewAPIClient(serverURL, token)
 
 	currentAgentID := firstNonEmpty(agentID, mcp.AgentIDFromEnv())
-	handler := mcp.HandleAllTools(api, currentAgentID)
+	registry := mcp.BuildRegistry(api, currentAgentID)
 	allowed := api.AllowedToolsForAgent(currentAgentID)
-	server := mcp.NewServer("agenthub", "0.1.0", mcp.AllTools(), handler, logger).WithAllowedTools(allowed)
+	server := mcp.NewServerFromRegistry("agenthub", "0.1.0", registry, logger).WithAllowedTools(allowed)
 
 	ctx := context.Background()
 
@@ -75,13 +78,13 @@ func runDaemon(wsURLFlag, serverURLFlag, machineKeyFlag, apiKeyFlag *string) {
 
 	agents, err := scanner.New(nil).Scan(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "scan agents: %v\n", err)
+		slog.Error("scan agents failed", "error", err)
 		os.Exit(1)
 	}
 
 	data, err := json.MarshalIndent(agents, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "encode agents: %v\n", err)
+		slog.Error("encode agents failed", "error", err)
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
@@ -108,14 +111,14 @@ func runDaemon(wsURLFlag, serverURLFlag, machineKeyFlag, apiKeyFlag *string) {
 	}
 	machineID, err := os.Hostname()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "read hostname: %v\n", err)
+		slog.Error("read hostname failed", "error", err)
 		os.Exit(1)
 	}
 
 	registerCtx, registerCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer registerCancel()
 	if err := client.New(wsURL, token).Register(registerCtx, machineID, agents); err != nil {
-		fmt.Fprintf(os.Stderr, "register agents: %v\n", err)
+		slog.Error("register agents failed", "error", err, "machine_id", machineID)
 		os.Exit(1)
 	}
 }

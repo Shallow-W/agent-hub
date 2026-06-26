@@ -304,6 +304,27 @@ func (r *AgentRepo) UpdateCustom(ctx context.Context, id, userID, name, cliTool,
 	return &a, nil
 }
 
+// UpdateToolsConfig 只更新当前用户可见 Agent 的工具授权字段。
+func (r *AgentRepo) UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error) {
+	var a model.Agent
+	err := r.db.QueryRowxContext(ctx,
+		`UPDATE agents
+		 SET tools_config = $3, enable_management_tools = $4, updated_at = NOW()
+		 WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)
+		 RETURNING id, user_id, name, type, cli_tool, system_prompt, tools_config, avatar,
+		           capabilities_json, custom_skills, tags, source, status, version, machine_id, machine_name, enable_management_tools,
+		           last_seen_at, created_at, updated_at`,
+		id, userID, toolsConfig, enableManagementTools,
+	).StructScan(&a)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update agent tools_config: %w", err)
+	}
+	return &a, nil
+}
+
 // UpdateAgentStatus 更新 Agent 状态
 func (r *AgentRepo) UpdateAgentStatus(ctx context.Context, id, status string) error {
 	_, err := r.db.ExecContext(ctx,

@@ -14,6 +14,8 @@ export interface CreateArtifactVersionPayload {
 export interface AIEditArtifactPayload {
   instruction: string;
   selection?: string;
+  /** 编辑基准版本号（>0 时用该版本内容作为 base；0/缺省用最新）。 */
+  version?: number;
 }
 
 /** 列出某血缘根的全部版本（按 version 升序）。 */

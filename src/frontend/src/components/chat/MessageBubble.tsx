@@ -1,10 +1,16 @@
-import React, { useState, useMemo, type ReactNode } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react';
 import { Avatar, Typography, Spin, Button, Tooltip, Dropdown } from 'antd';
 import { message as antMessage } from '@/utils/message';
 import type { MenuProps } from 'antd';
+import { renderCards, getCardSpec } from './cards/CardRegistry';
+import type { InteractiveCard } from '@/types/card';
+import { updateMessageCards as updateMessageCardsAPI } from '@/api/message';
+import { useMessageStore } from '@/store/messageStore';
 import {
   CloseOutlined,
   CopyOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
   DownOutlined,
   ForwardOutlined,
   MessageOutlined,
@@ -18,16 +24,27 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
-import type { Message, OptimisticStatus, Artifact, MessageArtifacts } from '@/types/message';
+import type { Message, OptimisticStatus, Artifact, MessageArtifacts, MessageBlock } from '@/types/message';
 import type { MessageAttachment } from '@/types/attachment';
 import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR, ROLE_WORKER } from '@/types/role';
 import { truncateGraphemes } from '@/utils/truncateText';
 import { MessageAttachmentView } from './MessageAttachmentView';
 import { CodeBlock, extractText } from './CodeBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { DeployStatusCard } from './DeployStatusCard';
+import { StopButton } from './StopButton';
+// blocks/index.ts 触发各 block 组件的 registerBlock 自注册副作用，
+// MessageBubble 只依赖 renderBlock 抽象，不直接 import 具体组件。
+import { renderBlock, type BlockRenderContext } from './blocks';
 import { escapeHtml } from './highlight';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import {
+  simplifyKnowledgeContextText,
+  splitKnowledgeRefText,
+  type KnowledgeContextSummary,
+  type KnowledgeReference,
+} from '@/components/knowledge/knowledgeReferenceState';
 import styles from './MessageBubble.module.css';
 
 const { Text } = Typography;
@@ -35,12 +52,89 @@ const COLLAPSE_CHAR_LIMIT = 500;
 const COLLAPSE_LINE_LIMIT = 12;
 const REPLY_PREVIEW_LIMIT = 50;
 
+// 卡片占位符：agent 在 markdown 正文里写独立一行 [CARD:<id>]，
+// MessageBubble 渲染时把 content 按占位符拆段，卡片渲染在占位符位置。
+// 占位符格式：单独一行，[CARD:] 后跟卡片 id（字母数字下划线短横）。
+const CARD_PLACEHOLDER_REGEX = /^[ \t]*\[CARD:([a-zA-Z0-9_-]+)\][ \t]*$/gm;
+
+type ContentSegment =
+  | { type: 'markdown'; content: string }
+  | { type: 'card'; card: InteractiveCard };
+
+/**
+ * 把 content 按卡片占位符拆成段。
+ * - markdown 段：不含占位符的文本，走 MarkdownRenderer
+ * - card 段：占位符匹配到的卡片
+ *
+ * 返回 segments + unmatchedCards（没有占位符对应的卡片，走末尾兜底渲染）。
+ * 向后兼容：content 无占位符时，segments 只有一段全部 content，unmatchedCards 是全部卡片。
+ */
+export function splitByCardPlaceholder(
+  content: string,
+  cards: InteractiveCard[],
+): { segments: ContentSegment[]; unmatchedCards: InteractiveCard[] } {
+  if (!content || cards.length === 0) {
+    // 无卡片：整段 markdown；或无内容：空段
+    return { segments: content ? [{ type: 'markdown', content }] : [], unmatchedCards: cards };
+  }
+  const matchedIds = new Set<string>();
+  const segments: ContentSegment[] = [];
+  let lastIndex = 0;
+  // 重置正则 lastIndex（全局正则复用安全）
+  CARD_PLACEHOLDER_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CARD_PLACEHOLDER_REGEX.exec(content)) !== null) {
+    const cardId = match[1]!;
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) continue; // 占位符无对应卡片，保留为普通文本（不拆段）
+    // 占位符前的 markdown 段
+    const before = content.slice(lastIndex, match.index);
+    if (before) segments.push({ type: 'markdown', content: before });
+    // 卡片段
+    segments.push({ type: 'card', card });
+    matchedIds.add(cardId);
+    lastIndex = match.index + match[0].length;
+  }
+  // 最后一段 markdown
+  const tail = content.slice(lastIndex);
+  if (tail) segments.push({ type: 'markdown', content: tail });
+
+  // 如果没拆出任何段（无占位符匹配），整段是一个 markdown 段
+  if (segments.length === 0) {
+    segments.push({ type: 'markdown', content });
+  }
+  const unmatchedCards = cards.filter((c) => !matchedIds.has(c.id));
+  return { segments, unmatchedCards };
+}
+
 // ── ReactMarkdown custom components ──
 
 const MENTION_RE = /(^|\s)@([\p{L}\p{N}_\-.]{2,20})(?=\s|$)/gu;
 
+function renderKnowledgeReference(ref: KnowledgeReference, key: string): ReactNode {
+  return (
+    <span key={key} className={styles.knowledgeRef} title={`知识库：${ref.key}`}>
+      <DatabaseOutlined className={styles.knowledgeRefIcon} />
+      <span className={styles.knowledgeRefName}>{ref.key}</span>
+    </span>
+  );
+}
+
+function KnowledgeContextCompact({ summary }: { summary: KnowledgeContextSummary }): ReactNode {
+  return (
+    <div className={styles.knowledgeContextCompact} title="完整知识库内容已提供给智能体">
+      <DatabaseOutlined className={styles.knowledgeContextIcon} />
+      <span className={styles.knowledgeContextTitle}>知识库上下文</span>
+      <span className={styles.knowledgeContextMeta}>
+        {summary.knowledgeBaseCount} 个知识库 · {summary.fileCount} 个文件
+        {summary.collapsedChars > 0 ? ` · 已折叠 ${summary.collapsedChars} 字` : ''}
+      </span>
+    </div>
+  );
+}
+
 /** Split text nodes so @mentions get highlighted spans. */
-function renderTextWithMentions(text: string): ReactNode[] {
+function renderTextWithMentions(text: string, keyPrefix = 'm'): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIndex = 0;
   MENTION_RE.lastIndex = 0;
@@ -52,7 +146,7 @@ function renderTextWithMentions(text: string): ReactNode[] {
     }
     if (match[1]) parts.push(match[1]);
     parts.push(
-      <span key={`m${key++}`} className={styles.mention}>
+      <span key={`${keyPrefix}${key++}`} className={styles.mention}>
         @{match[2]}
       </span>,
     );
@@ -62,16 +156,32 @@ function renderTextWithMentions(text: string): ReactNode[] {
   return parts;
 }
 
-/** Process top-level string leaves for @mention highlighting — does NOT recurse into React elements. */
+/** Split text nodes so knowledge references and @mentions render as first-class inline tokens. */
+function renderTextWithInlineReferences(text: string): ReactNode[] {
+  const tokens = splitKnowledgeRefText(text);
+  if (tokens.length === 0) return [text];
+
+  const parts: ReactNode[] = [];
+  tokens.forEach((token, index) => {
+    if (token.type === 'knowledge_ref') {
+      parts.push(renderKnowledgeReference(token.ref, `kb${index}`));
+      return;
+    }
+    parts.push(...renderTextWithMentions(token.text, `t${index}-m`));
+  });
+  return parts;
+}
+
+/** Process top-level string leaves for inline token highlighting — does NOT recurse into React elements. */
 function renderChildrenWithMentions(children: ReactNode): ReactNode {
   if (typeof children === 'string') {
-    const parts = renderTextWithMentions(children);
+    const parts = renderTextWithInlineReferences(children);
     return parts.length === 1 ? parts[0] : <>{parts}</>;
   }
   if (Array.isArray(children)) {
     return <>{children.map((c, i) => {
       if (typeof c === 'string') {
-        const parts = renderTextWithMentions(c);
+        const parts = renderTextWithInlineReferences(c);
         return <React.Fragment key={i}>{parts.length === 1 ? parts[0] : <>{parts}</>}</React.Fragment>;
       }
       return <React.Fragment key={i}>{c}</React.Fragment>;
@@ -246,20 +356,31 @@ const embeddedDocumentComponents: Components = {
   },
 };
 
-/** Renders markdown content with full GFM support. */
+/** Renders markdown content with full GFM support. Memoized to prevent
+ *  re-render storms during streaming (only re-renders when content changes). */
 const REMARK_PLUGINS = [remarkGfm];
-const MarkdownRenderer: React.FC<{ content: string; codeArtifacts: Artifact[] }> = ({
-  content,
-  codeArtifacts,
-}) => {
-  // 每次渲染重新构建 components（含查找表），纯计算，无 mutation，StrictMode 安全。
-  const components = buildMarkdownComponents(codeArtifacts);
-  return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
-      {content}
-    </ReactMarkdown>
-  );
-};
+const MarkdownRenderer = React.memo<{ content: string; codeArtifacts: Artifact[] }>(
+  ({ content, codeArtifacts }) => {
+    // codeArtifacts 改变时才重建 components，避免每次 re-render 都重建。
+    const components = React.useMemo(
+      () => buildMarkdownComponents(codeArtifacts),
+      [codeArtifacts],
+    );
+    const knowledgeContext = React.useMemo(
+      () => simplifyKnowledgeContextText(content),
+      [content],
+    );
+    return (
+      <>
+        {knowledgeContext.summary && <KnowledgeContextCompact summary={knowledgeContext.summary} />}
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+          {knowledgeContext.text}
+        </ReactMarkdown>
+      </>
+    );
+  },
+);
+MarkdownRenderer.displayName = 'MarkdownRenderer';
 
 interface MessageBubbleProps {
   message: Message;
@@ -272,6 +393,7 @@ interface MessageBubbleProps {
   isOwn?: boolean;
   onReply?: (message: Message) => void;
   onRecall?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   onForward?: (message: Message) => void;
   onTogglePin?: (message: Message) => void;
   conversationAgents?: ConversationAgent[];
@@ -315,6 +437,7 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   isOwn = false,
   onReply,
   onRecall,
+  onDelete,
   onForward,
   onTogglePin,
   conversationAgents = [],
@@ -336,9 +459,9 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
     if (!agentMeta.agent_id) return null;
     return conversationAgents.find((agent) => agent.agent_id === agentMeta.agent_id)?.role ?? null;
   }, [agentMeta.agent_id, conversationAgents]);
-  const agentBadgeLabel = conversationAgentRole === 'orchestrator'
+  const agentBadgeLabel = conversationAgentRole === ROLE_ORCHESTRATOR
     ? 'Orchestrator agent'
-    : conversationAgentRole === 'worker'
+    : conversationAgentRole === ROLE_WORKER
       ? 'Worker agent'
       : 'Agent';
 
@@ -407,6 +530,73 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
   const collapsed = shouldCollapse && !expanded;
   const canRecall = isOwn && onRecall && (Date.now() - new Date(message.created_at).getTime()) < 3 * 60 * 1000;
 
+  // 解析交互式卡片
+  const parsedCards = useMemo<InteractiveCard[]>(() => {
+    if (!message.cards_json) return [];
+    try {
+      const parsed = JSON.parse(message.cards_json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      // 尝试从 message.cards 解析（后端返回结构化数据时）
+      if (message.cards && Array.isArray(message.cards)) return message.cards;
+      return [];
+    }
+  }, [message.cards_json, message.cards]);
+
+  // 流式 block——存在时优先于 content 渲染。
+  // PR3：直接从 message.blocks 取（store appendDeltas 累积在 messages 数组里的 placeholder，
+  // 与 completeStreaming 落库的权威副本走同一字段）；刷新页面后从 message.blocks_json 还原。
+  const parsedBlocks = useMemo<MessageBlock[]>(() => {
+    if (message.blocks && message.blocks.length > 0) return message.blocks;
+    if (!message.blocks_json) return [];
+    try {
+      const parsed = JSON.parse(message.blocks_json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [message.blocks, message.blocks_json]);
+  const hasBlocks = parsedBlocks.length > 0;
+  const isStreaming = message.status === 'streaming' || streaming;
+
+  // 本地卡片状态：用户交互后的乐观覆盖层。
+  // 采用 override 模式而非直接镜像 parsedCards——外部推送（其他用户解决卡片、
+  // Agent 更新进度）刷新 parsedCards 时，通过 useEffect 丢弃过期覆盖，自动回流。
+  const [cardsOverride, setCardsOverride] = useState<InteractiveCard[] | null>(null);
+  const displayCards = cardsOverride ?? parsedCards;
+  useEffect(() => {
+    // parsedCards 变化（props/WS 推送）→ 丢弃本地覆盖，采用最新服务端状态
+    setCardsOverride(null);
+  }, [parsedCards]);
+
+  // 占位符分段：把 content 按 [CARD:id] 独立行拆成 markdown 段 + 卡片段。
+  // agent 在回答里写占位符 → 卡片渲染在该位置；不写占位符的卡片走兜底末尾渲染。
+  const { segments, unmatchedCards } = useMemo(() => {
+    return splitByCardPlaceholder(displayContent, displayCards);
+  }, [displayContent, displayCards]);
+
+  // 卡片交互回调——委托给 CardSpec 的 reduceAction / actionToMessage。
+  // MessageBubble 不感知任何具体 action（select_plan/confirm/...），
+  // 新增交互卡片类型只需在组件文件里注册 reducer，此处零改动。
+  const handleCardAction = useCallback((cardId: string, action: string, data?: Record<string, unknown>) => {
+    const card = parsedCards.find((c) => c.id === cardId);
+    if (!card) return;
+    const spec = getCardSpec(card.type);
+
+    // 1. 持久化——只有声明了 reduceAction 的卡片才更新状态（只读卡片跳过）
+    if (spec?.reduceAction) {
+      const updatedCards = parsedCards.map((c) =>
+        c.id === cardId ? spec.reduceAction!(c, action, data) : c,
+      );
+      setCardsOverride(updatedCards); // 局部乐观更新
+      void updateMessageCardsAPI(message.conversation_id, message.id, JSON.stringify(updatedCards));
+    }
+
+    // 2. 发消息给 Agent——用 spec 翻译，无翻译器则用兜底文案
+    const content = spec?.actionToMessage?.(card, action, data) ?? `[卡片交互: ${action}]`;
+    void useMessageStore.getState().sendMessage(message.conversation_id, content);
+  }, [parsedCards, message.conversation_id, message.id]);
+
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content ?? '').then(() => {
       antMessage.success('已复制');
@@ -452,6 +642,14 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
           icon: <RollbackOutlined />,
           label: '撤回',
           onClick: () => onRecall(message.id),
+        }]
+      : []),
+    ...(onDelete
+      ? [{
+          key: 'delete' as const,
+          icon: <DeleteOutlined />,
+          label: '删除',
+          onClick: () => onDelete(message.id),
         }]
       : []),
   ];
@@ -551,6 +749,17 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             />
           </Tooltip>
         )}
+        {!isSystem && onDelete && (
+          <Tooltip title="删除">
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              className={`${styles.replyBtn} ${styles.deleteBtn}`}
+              onClick={() => onDelete(message.id)}
+            />
+          </Tooltip>
+        )}
         <div className={styles.content}>
           {showAvatar && (
             <div className={styles.meta}>
@@ -602,11 +811,47 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
             {displayAttachments.length > 0 && (
               <MessageAttachmentView attachments={displayAttachments} />
             )}
-            {displayContent && (
+            {hasBlocks ? (
               <div className={styles.markdownBody}>
-                <MarkdownRenderer content={displayContent} codeArtifacts={codeArtifacts} />
+                {parsedBlocks.map((block, i) => {
+                  // 最后一个 block（且属于可累积 kind）在 streaming 时显示光标。
+                  // renderBlock 内部把 streaming prop 传给组件（tool_result / error 忽略之）。
+                  const isLast = i === parsedBlocks.length - 1;
+                  const showCursor = isStreaming && isLast;
+                  // 构造 blockCtx：CardBlock 需要 conversationId / messageId / agentId /
+                  // artifacts / onAction 调 renderCards。其它 block 组件忽略 ctx。
+                  const blockCtx: BlockRenderContext = {
+                    conversationId: message.conversation_id,
+                    messageId: message.id,
+                    agentId: agentMeta.agent_id,
+                    artifacts: message.artifacts,
+                    onAction: handleCardAction,
+                  };
+                  return (
+                    <React.Fragment key={block.index ?? i}>
+                      {renderBlock(block, showCursor, blockCtx)}
+                    </React.Fragment>
+                  );
+                })}
               </div>
-            )}
+            ) : displayContent ? (
+              <div className={styles.markdownBody}>
+                {/* 按 [CARD:id] 占位符分段渲染：markdown 段走 MarkdownRenderer，卡片段走 renderCards。
+                    没有占位符时 segments 只有一段（全部 content），行为等同改之前。 */}
+                {segments.map((seg, i) => {
+                  if (seg.type === 'markdown') {
+                    if (!seg.content) return null;
+                    return <MarkdownRenderer key={i} content={seg.content} codeArtifacts={codeArtifacts} />;
+                  }
+                  // 卡片段：渲染匹配到的单张卡片
+                  return (
+                    <div key={i} className={styles.cardsContainer}>
+                      {renderCards([seg.card], message.conversation_id, message.id, handleCardAction, message.artifacts, agentMeta.agent_id)}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
             {cardArtifacts.length > 0 && (
               <ArtifactCard artifacts={cardArtifacts} agentName={resolvedAgentName} />
             )}
@@ -615,12 +860,25 @@ const MessageBubbleInner: React.FC<MessageBubbleProps> = ({
                 <DeployStatusCard deployment={deployment} />
               </div>
             )}
+            {/* 兜底：没有占位符匹配的卡片在末尾渲染（向后兼容 agent 没写占位符的情况） */}
+            {unmatchedCards.length > 0 && (
+              <div className={styles.cardsContainer}>
+                {renderCards(unmatchedCards, message.conversation_id, message.id, handleCardAction, message.artifacts, agentMeta.agent_id)}
+              </div>
+            )}
             {collapsed && <div className={styles.fadeMask} />}
-            {streaming && <span className={styles.streamingCursor} />}
+            {(streaming || (hasBlocks && isStreaming)) && <span className={styles.streamingCursor} aria-hidden />}
             {isOptimisticSending && (
               <Spin size="small" className={styles.sendingSpin} />
             )}
           </div>
+          {isStreaming && !isOptimisticSending && !isOptimisticFailed && (
+            <StopButton
+              conversationId={message.conversation_id}
+              messageId={message.id}
+              taskId={message.task_id}
+            />
+          )}
           {replyCount > 0 && onOpenThread && (
             <button
               className={styles.threadBtn}

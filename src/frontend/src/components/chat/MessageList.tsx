@@ -15,6 +15,7 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
   onPinChanged?: () => void;
   onOpenThread?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
   conversationAgents?: ConversationAgent[];
 }
 
@@ -72,17 +73,17 @@ function formatDividerTime(dateStr: string): string {
   return `${d.getFullYear()}年${month}月${day}日 ${hh}:${mm}`;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
+export const MessageList: React.FC<MessageListProps> = React.memo(({
   conversationId,
   onReply,
   onForward,
   onPinChanged,
   onOpenThread,
+  onDelete,
   conversationAgents = [],
 }) => {
   const {
     messages,
-    streamingContent,
     loading,
     loadMore,
     hasMore,
@@ -95,6 +96,20 @@ export const MessageList: React.FC<MessageListProps> = ({
   const currentUserId = useAuthStore((s) => s.user?.id);
   const recall = useMessageStore((s) => s.recall);
   const toggleMessagePin = useMessageStore((s) => s.toggleMessagePin);
+
+  // Stable callbacks to preserve React.memo on MessageBubble.
+  // Inline arrow functions bust memo on every parent re-render.
+  const handleTogglePin = useCallback(
+    (message: Message) => {
+      void toggleMessagePin(conversationId, message.id, !!message.pinned)
+        .finally(() => onPinChanged?.());
+    },
+    [conversationId, toggleMessagePin, onPinChanged],
+  );
+  const handleRecall = useCallback(
+    (messageId: string) => recall(conversationId, messageId),
+    [conversationId, recall],
+  );
 
   const replyCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -159,7 +174,7 @@ export const MessageList: React.FC<MessageListProps> = ({
       setShowNewMsgBtn(true);
       setUnreadSinceScroll((n) => n + 1);
     }
-  }, [messages, streamingContent, optimisticMessages]);
+  }, [messages, optimisticMessages]);
 
   // Skeleton loading state
   if (loading && messages.length === 0) {
@@ -184,7 +199,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     );
   }
 
-  const isEmpty = messages.length === 0 && !streamingContent && optimisticMessages.length === 0;
+  const isEmpty = messages.length === 0 && optimisticMessages.length === 0;
 
   return (
     <div className={styles.container} ref={containerRef} onScroll={handleScroll}>
@@ -231,11 +246,9 @@ export const MessageList: React.FC<MessageListProps> = ({
                   isOwn={isOwn}
                   onReply={onReply}
                   onForward={onForward}
-                  onTogglePin={(message) => {
-                    void toggleMessagePin(conversationId, message.id, !!message.pinned)
-                      .finally(() => onPinChanged?.());
-                  }}
-                  onRecall={isOwn ? (messageId) => recall(conversationId, messageId) : undefined}
+                  onTogglePin={handleTogglePin}
+                  onRecall={isOwn ? handleRecall : undefined}
+                  onDelete={onDelete}
                   conversationAgents={conversationAgents}
                   replyCount={replyCounts[msg.id]}
                   onOpenThread={onOpenThread}
@@ -255,20 +268,6 @@ export const MessageList: React.FC<MessageListProps> = ({
               onRemove={optMsg.optimisticStatus === 'failed' ? () => removeOpt(optMsg.id) : undefined}
             />
           ))}
-          {streamingContent && (
-            <MessageBubble
-              message={{
-                id: `__streaming_${conversationId}`,
-                conversation_id: conversationId,
-                role: 'assistant',
-                content: streamingContent,
-                artifacts_json: null,
-                created_at: new Date().toISOString(),
-              }}
-              streaming
-              isOwn={false}
-            />
-          )}
         </>
       )}
       {showNewMsgBtn && unreadSinceScroll > 0 && (
@@ -282,4 +281,4 @@ export const MessageList: React.FC<MessageListProps> = ({
       <div ref={bottomRef} />
     </div>
   );
-};
+});

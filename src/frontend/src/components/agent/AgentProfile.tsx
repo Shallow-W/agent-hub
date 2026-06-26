@@ -1,41 +1,48 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Avatar, Button, Checkbox, Input, Popconfirm, Select, Tag } from 'antd';
+import { Avatar, Button, Checkbox, Dropdown, Input, Popconfirm, Select, Tag } from 'antd';
+import type { MenuProps } from 'antd';
 import { message } from '@/utils/message';
 import {
+  EditOutlined,
   MessageOutlined,
+  MoreOutlined,
   RobotOutlined,
   SettingOutlined,
-  ToolOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
+  ArrowUpOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
-import type { Agent, PlatformSkill } from '@/types/agent';
+import type { Agent } from '@/types/agent';
 import { useAgentStore } from '@/store/agentStore';
-import { getPlatformSkills } from '@/api/platformSkill';
+import { itemToSkill } from '@/api/platformSkill';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import { listUserTemplates, type UserTemplate } from '@/api/userTemplate';
 import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import {
   formatDateTime,
   getAgentDescription,
-  getRuntimeLabel,
   parseSkills,
   resolveAgentAvatar,
 } from './agentPresentation';
 import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
+  getManagementTools,
   getTemplateTools,
   parseToolsConfig,
-  toolCatalog,
-  toolsetTemplates,
+  getToolCatalogSync,
+  getToolsetTemplatesSync,
   toolsConfigToJSON,
-  toolsetOptions,
+  getToolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
+import { StatusBadge, type StatusBadgeStatus } from '@/components/common/StatusBadge';
 import styles from './AgentProfile.module.css';
 
 interface AgentProfileProps {
@@ -44,28 +51,105 @@ interface AgentProfileProps {
   onMessage?: (agent: Agent) => void;
 }
 
-const tabItems = [
-  { key: 'profile', label: '资料' },
-  { key: 'system_prompt', label: '系统提示词', icon: <SettingOutlined /> },
-  { key: 'skills', label: '技能' },
-  { key: 'tools_config', label: '工具', icon: <ToolOutlined /> },
+interface OverviewMetric {
+  key: string;
+  label: string;
+  value: string;
+  trend: string;
+}
+
+interface ConversationItem {
+  id: string;
+  content: string;
+  user: string;
+  time: string;
+  status: 'completed' | 'running' | 'failed';
+}
+
+const MOCK_METRICS: OverviewMetric[] = [
+  { key: 'chats', label: '对话次数', value: '128', trend: '↑ 12 本周' },
+  { key: 'active', label: '活跃时长', value: '4.2h', trend: '↑ 0.8h 本周' },
+  { key: 'tool_calls', label: '工具调用', value: '1,042', trend: '↑ 8 本周' },
+  { key: 'tasks', label: '执行任务', value: '36', trend: '↑ 4 本周' },
 ];
 
-const managementTools = new Set(['create_agent', 'update_agent', 'delete_agent']);
+const MOCK_CONVERSATIONS: ConversationItem[] = [
+  {
+    id: 'mock-1',
+    content: '帮我梳理下这个需求的 PRD，按用户故事拆分里程碑',
+    user: '王小明',
+    time: '06-19 20:11',
+    status: 'completed',
+  },
+  {
+    id: 'mock-2',
+    content: '对比一下 Claude Code 和 Cursor 在多文件重构上的差异',
+    user: '王小明',
+    time: '06-18 16:45',
+    status: 'completed',
+  },
+  {
+    id: 'mock-3',
+    content: '把这个功能的回归测试用例补齐',
+    user: '王小明',
+    time: '06-17 10:22',
+    status: 'running',
+  },
+];
 
-function hasManagementTools(tools: string[]): boolean {
-  return tools.some((tool) => managementTools.has(tool));
+function agentStatusBadge(status: Agent['status']): StatusBadgeStatus {
+  switch (status) {
+    case 'online':
+      return 'running';
+    case 'busy':
+      return 'running';
+    case 'error':
+      return 'error';
+    case 'stopped':
+      return 'idle';
+    case 'offline':
+    default:
+      return 'inactive';
+  }
 }
 
-function getStatusText(agent: Agent): string {
-  return agent.status === 'online' ? 'Online' : agent.status;
+function agentStatusBadgeLabel(status: Agent['status']): string {
+  switch (status) {
+    case 'online':
+      return '在线';
+    case 'busy':
+      return '忙碌';
+    case 'error':
+      return '异常';
+    case 'stopped':
+      return '已停止';
+    case 'offline':
+      return '离线';
+    default:
+      return status;
+  }
 }
 
-export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'profile', onMessage }) => {
+function conversationStatusMeta(status: ConversationItem['status']): { label: string; className: string } {
+  switch (status) {
+    case 'completed':
+      return { label: '已完成', className: 'completed' };
+    case 'running':
+      return { label: '进行中', className: 'running' };
+    case 'failed':
+    default:
+      return { label: '失败', className: 'failed' };
+  }
+}
+
+export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 'overview', onMessage }) => {
   const updateAgent = useAgentStore((s) => s.updateAgent);
+  const updateAgentToolsConfig = useAgentStore((s) => s.updateAgentToolsConfig);
   const updateAgentTags = useAgentStore((s) => s.updateAgentTags);
   const deleteAgent = useAgentStore((s) => s.deleteAgent);
   const [activeTab, setActiveTab] = useState(defaultTab);
+  const [editing, setEditing] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState('');
   const [tagsValue, setTagsValue] = useState('');
@@ -77,13 +161,19 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [toolManageOpen, setToolManageOpen] = useState(false);
-  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [dbToolTemplates, setDbToolTemplates] = useState<UserTemplate[]>([]);
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  const { items: rawSkills } = useCatalogDomain('platform_skill');
+  const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
 
   const filteredTools = useMemo(() => {
-    if (toolFilter === 'all') return toolCatalog;
-    return toolCatalog.filter((t) => t.category === toolFilter);
-  }, [toolFilter]);
+    if (toolFilter === 'all') return getToolCatalogSync();
+    return getToolCatalogSync().filter((t) => t.category === toolFilter);
+  }, [toolFilter, catalogReady]);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const parseTagsFromJSON = (raw: string): string => {
     if (!raw || raw === '[]') return '';
@@ -103,7 +193,14 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   useEffect(() => {
     if (!agent) return;
     setActiveTab(defaultTab);
+    setEditing(false);
   }, [agent?.id, defaultTab]);
+
+  useEffect(() => {
+    fetchToolCatalog()
+      .then(() => setCatalogReady(true))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!agent) return;
@@ -112,9 +209,6 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
     setCustomSkillCount(parseSkills(agent.custom_skills).length);
     setSystemPromptValue(agent.system_prompt ?? '');
-    const parsedTools = parseToolsConfig(agent.tools_config);
-    setSelectedToolset(parsedTools.toolset);
-    setSelectedTools(parsedTools.allowedTools);
   }, [
     agent?.id,
     agent?.name,
@@ -122,12 +216,14 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     agent?.tags,
     agent?.custom_skills,
     agent?.system_prompt,
-    agent?.tools_config,
   ]);
 
   useEffect(() => {
-    getPlatformSkills().then(setLibrarySkills).catch(() => {});
-  }, []);
+    if (!agent) return;
+    const parsedTools = parseToolsConfig(agent.tools_config);
+    setSelectedToolset(parsedTools.toolset);
+    setSelectedTools(parsedTools.allowedTools);
+  }, [agent?.id, agent?.tools_config, catalogReady]);
 
   useEffect(() => {
     listUserTemplates('tools').then(setDbToolTemplates).catch(() => {});
@@ -144,10 +240,9 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   }
 
   const allToolsetOptions = useMemo<ToolsetOption[]>(() => [
-    ...toolsetOptions.filter((o) => o.value !== 'custom'),
+    ...getToolsetOptions().filter((o) => o.value !== 'custom'),
     ...dbToolTemplates.map((t) => {
-      const tools = Array.isArray((t.content as Record<string, unknown>)?.tools)
-        ? (t.content as Record<string, unknown>).tools as string[] : [];
+      const tools = 'tools' in t.content ? t.content.tools : [];
       return { value: `db-${t.id}`, label: `★ ${t.name}`, tools };
     }),
   ], [dbToolTemplates]);
@@ -161,14 +256,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   }
 
   const description = getAgentDescription(agent);
-  const runtimeLabel = getRuntimeLabel(agent);
   const isOnline = agent.status === 'online';
   const computerName = agent.machine_name || 'local-computer';
   const editableTags = tagsValue.split(',').map((item) => item.trim()).filter(Boolean);
   const isBuiltinSystemAgent = agent.type === 'system' && !agent.user_id;
 
   const selectedToolCount = selectedTools.length;
-  const statusLabel = getStatusText(agent);
   const sourceLabel = agent.source === 'daemon' ? 'Daemon' : agent.source;
   const descriptionBlocks = description
     .split(/\n+/)
@@ -181,6 +274,42 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
   const descriptionNotes = descriptionBlocks
     .filter((line) => !line.startsWith('-'))
     .slice(1);
+
+  const avatarSrc = avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent);
+  const subtitleText = `@${agent.cli_tool}${agent.version ? ` · v${agent.version}` : ''}`;
+  const roleTagText = agent.cli_tool || 'agent';
+  const skillsList = parseSkills(agent.custom_skills).slice(0, 3);
+
+  const tabItems = [
+    { key: 'overview', label: '概览' },
+    { key: 'system_prompt', label: '系统提示词' },
+    { key: 'skills', label: `技能 ${customSkillCount}` },
+    { key: 'tools_config', label: `工具 ${selectedToolCount}` },
+    { key: 'activity', label: '运行记录' },
+  ];
+
+  const moreMenuItems: MenuProps['items'] = [
+    {
+      key: 'edit',
+      icon: <EditOutlined />,
+      label: '编辑资料',
+      onClick: () => {
+        setActiveTab('overview');
+        setEditing(true);
+      },
+    },
+    { type: 'divider' },
+    ...(isBuiltinSystemAgent
+      ? []
+      : [
+          {
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            danger: true,
+            label: '删除 Agent',
+          },
+        ]),
+  ];
 
   const handleSaveProfile = async () => {
     const nextName = name.trim();
@@ -199,15 +328,24 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
           system_prompt: agent.system_prompt ?? '',
           tools_config: agent.tools_config ?? '',
           capabilities_json: agent.capabilities_json ?? '',
+          custom_skills: agent.custom_skills ?? '',
           enable_management_tools: agent.enable_management_tools ?? false,
         });
       }
       message.success('Agent Profile 已保存');
+      setEditing(false);
     } catch {
       message.error('保存 Agent 失败');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCancelEdit = () => {
+    setName(agent.name);
+    setAvatar(agent.avatar ?? '');
+    setTagsValue(parseTagsFromJSON(agent.tags ?? ''));
+    setEditing(false);
   };
 
   const handleStartAgent = async () => {
@@ -259,6 +397,8 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         system_prompt: systemPromptValue.trim() || undefined,
         tools_config: agent.tools_config ?? '',
         capabilities_json: agent.capabilities_json ?? '',
+        custom_skills: agent.custom_skills ?? '',
+        enable_management_tools: agent.enable_management_tools ?? false,
       });
       message.success('系统提示词已保存');
     } catch {
@@ -270,7 +410,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
 
   const handleToolsetChange = (value: string) => {
     setSelectedToolset(value);
-    if (value in toolsetTemplates) {
+    if (value in getToolsetTemplatesSync()) {
       setSelectedTools(getTemplateTools(value));
     } else if (value.startsWith('db-')) {
       const opt = allToolsetOptions.find((o) => o.value === value);
@@ -293,15 +433,12 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
     setSaving(true);
     try {
       const nextToolsConfig = toolsConfigToJSON(selectedToolset, selectedTools);
-      await updateAgent(agent.id, {
-        name: agent.name,
-        cli_tool: agent.cli_tool,
-        avatar: agent.avatar || undefined,
-        system_prompt: agent.system_prompt ?? '',
-        tools_config: nextToolsConfig,
-        capabilities_json: agent.capabilities_json ?? '',
-        enable_management_tools: (agent.enable_management_tools ?? false) || hasManagementTools(selectedTools),
-      });
+      const mgmt = getManagementTools();
+      const hasMgmt = selectedTools.some((t) => mgmt.has(t));
+      const savedAgent = await updateAgentToolsConfig(agent.id, nextToolsConfig, hasMgmt);
+      const parsedTools = parseToolsConfig(savedAgent.tools_config);
+      setSelectedToolset(parsedTools.toolset);
+      setSelectedTools(parsedTools.allowedTools);
       message.success('工具配置已保存');
     } catch {
       message.error('保存工具配置失败');
@@ -316,19 +453,50 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
         <div className={styles.identity}>
           <Avatar
             className={styles.clickableAvatar}
-            size={40}
-            src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
+            size={48}
+            src={avatarSrc}
             icon={<RobotOutlined />}
             onClick={() => setAvatarPickerOpen(true)}
           />
           <div className={styles.titleBlock}>
-            <span className={styles.title}>{agent.name}</span>
-            <span className={styles.subtitle}>{description}</span>
+            <div className={styles.titleRow}>
+              <span className={styles.title}>{agent.name}</span>
+              <StatusBadge
+                status={agentStatusBadge(agent.status)}
+                label={agentStatusBadgeLabel(agent.status)}
+                size="sm"
+              />
+            </div>
+            <span className={styles.subtitle}>{subtitleText}</span>
+            <span className={styles.roleTag}>{roleTagText}</span>
           </div>
         </div>
         <div className={styles.actions}>
-          <Button icon={<MessageOutlined />} onClick={() => onMessage?.(agent)}>Message</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>保存</Button>
+          {editing ? (
+            <>
+              <Button onClick={handleCancelEdit}>取消</Button>
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSaveProfile}>
+                保存
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button icon={<MessageOutlined />} onClick={() => onMessage?.(agent)}>Message</Button>
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setActiveTab('overview');
+                  setEditing(true);
+                }}
+              >
+                编辑
+              </Button>
+              <Dropdown menu={{ items: moreMenuItems, onClick: ({ key }) => { if (key === 'delete') handleDelete(); } }} trigger={['click']}>
+                <Button type="text" icon={<MoreOutlined />} />
+              </Dropdown>
+            </>
+          )}
         </div>
       </div>
 
@@ -340,66 +508,140 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             type="button"
             onClick={() => setActiveTab(item.key)}
           >
-            {item.icon} {item.key === 'skills' ? `${item.label} ${customSkillCount}` : item.label}
+            {item.label}
           </button>
         ))}
       </div>
 
       <div className={styles.body}>
-        {activeTab === 'profile' && (
+        {activeTab === 'overview' && !editing && (
           <>
-            <div className={styles.profileHero}>
-              <Avatar
-                className={`${styles.clickableAvatar} ${styles.profileAvatar}`}
-                size={74}
-                src={avatar.trim() ? resolveAgentAvatar({ ...agent, avatar }) : resolveAgentAvatar(agent)}
-                icon={<RobotOutlined />}
-                onClick={() => setAvatarPickerOpen(true)}
-              />
-              <div className={styles.profileHeroMain}>
-                <div className={styles.profileTitleRow}>
-                  <span className={styles.profileNameText}>{agent.name}</span>
-                  <span className={`${styles.statusChip} ${isOnline ? '' : styles.statusChipOffline}`}>
-                    <span className={styles.statusChipDot} />
-                    {statusLabel}
-                  </span>
-                </div>
-                <div className={styles.profileMetaLine}>@{agent.cli_tool} · {computerName}</div>
-                <div className={styles.profileDescriptionPreview}>{descriptionSummary}</div>
-                <div className={styles.heroBadges}>
-                  <span className={styles.runtimeBadge}>{runtimeLabel}</span>
-                  <span className={styles.runtimeBadge}>{agent.type === 'custom' ? '自建 Agent' : '系统 Agent'}</span>
-                  <span className={styles.runtimeBadge}>{sourceLabel}</span>
-                </div>
+            <section className={styles.overviewCard}>
+              <div className={styles.overviewCardHeader}>
+                <span className={styles.overviewCardTitle}>智能体简介</span>
               </div>
-            </div>
+              <div className={`${styles.overviewDescriptionText} ${descriptionExpanded ? styles.expanded : ''}`}>
+                {description
+                  ? description.split(/\n+/).map((line, idx) => <p key={idx}>{line}</p>)
+                  : '暂无简介'}
+              </div>
+              {description && description.length > 80 && (
+                <button
+                  type="button"
+                  className={styles.expandToggle}
+                  onClick={() => setDescriptionExpanded((v) => !v)}
+                >
+                  {descriptionExpanded ? '收起' : '显示更多'}
+                </button>
+              )}
+            </section>
 
-            <div className={styles.metricStrip}>
-              <div className={styles.metricItem}>
-                <span className={styles.metricLabel}>状态</span>
-                <span className={styles.metricValue}>{statusLabel}</span>
+            <section className={styles.overviewCard}>
+              <div className={styles.overviewCardHeader}>
+                <span className={styles.overviewCardTitle}>运行概览</span>
+                <span className={styles.overviewCardHint}>近 7 天</span>
               </div>
-              <div className={styles.metricItem}>
-                <span className={styles.metricLabel}>平台</span>
-                <span className={styles.metricValue}>{runtimeLabel}</span>
+              <div className={styles.metricGrid}>
+                {MOCK_METRICS.map((metric) => (
+                  <div className={styles.metricCard} key={metric.key}>
+                    <span className={styles.metricCardLabel}>{metric.label}</span>
+                    <span className={styles.metricCardValue}>{metric.value}</span>
+                    <span className={styles.metricCardTrend}>
+                      <ArrowUpOutlined /> {metric.trend.replace('↑ ', '')}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className={styles.metricItem}>
-                <span className={styles.metricLabel}>平台 Skills</span>
-                <span className={styles.metricValue}>{customSkillCount}</span>
-              </div>
-              <div className={styles.metricItem}>
-                <span className={styles.metricLabel}>工具</span>
-                <span className={styles.metricValue}>{selectedToolCount}</span>
-              </div>
-            </div>
+            </section>
 
+            <section className={styles.overviewCard}>
+              <div className={styles.overviewCardHeader}>
+                <span className={styles.overviewCardTitle}>技能</span>
+                <button
+                  type="button"
+                  className={styles.viewAllLink}
+                  onClick={() => setActiveTab('skills')}
+                >
+                  查看全部
+                </button>
+              </div>
+              {skillsList.length === 0 ? (
+                <div className={styles.skillsEmpty}>暂无自定义技能</div>
+              ) : (
+                <div className={styles.skillRow}>
+                  {skillsList.map((skill, idx) => (
+                    <div className={styles.skillMiniCard} key={skill.name + idx}>
+                      <span className={styles.skillMiniIcon}>⚡</span>
+                      <div className={styles.skillMiniMeta}>
+                        <span className={styles.skillMiniName}>{skill.name}</span>
+                        <span className={styles.skillMiniTag}>{roleTagText}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className={styles.overviewCard}>
+              <div className={styles.overviewCardHeader}>
+                <span className={styles.overviewCardTitle}>最近对话</span>
+                <span className={styles.overviewCardHint}>来自当前 Agent</span>
+              </div>
+              <div className={styles.conversationList}>
+                {MOCK_CONVERSATIONS.map((conv) => {
+                  const status = conversationStatusMeta(conv.status);
+                  return (
+                    <div className={styles.conversationItem} key={conv.id}>
+                      <span className={styles.conversationIcon}>
+                        <MessageOutlined />
+                      </span>
+                      <div className={styles.conversationMeta}>
+                        <span className={styles.conversationContent}>{conv.content}</span>
+                        <span className={styles.conversationSub}>{conv.user} · {conv.time}</span>
+                      </div>
+                      <span className={`${styles.conversationStatus} ${styles[`conversationStatus_${status.className}`]}`}>
+                        {status.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className={styles.overviewCard}>
+              <div className={styles.overviewCardHeader}>
+                <span className={styles.overviewCardTitle}>操作</span>
+                <span className={styles.overviewCardHint}>控制当前 Agent 的运行状态</span>
+              </div>
+              <div className={styles.overviewActions}>
+                {isOnline ? (
+                  <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
+                    停止 Agent
+                  </Button>
+                ) : (
+                  <Button icon={<PlayCircleOutlined />} onClick={handleStartAgent}>
+                    启动 Agent
+                  </Button>
+                )}
+                <Button icon={<ReloadOutlined />} onClick={handleRestartAgent}>
+                  重启 Agent
+                </Button>
+                {!isBuiltinSystemAgent && (
+                  <Popconfirm title="确定删除这个 Agent？" okText="删除" cancelText="取消" onConfirm={handleDelete}>
+                    <Button danger icon={<DeleteOutlined />}>
+                      删除 Agent
+                    </Button>
+                  </Popconfirm>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === 'overview' && editing && (
+          <>
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>基本资料</div>
-                  <div className={styles.sectionHint}>名称、标签和对外展示信息</div>
-                </div>
-              </div>
+              <div className={styles.sectionTitle}>基本资料</div>
               <div className={styles.formGrid}>
                 <div className={styles.field}>
                   <span className={styles.label}>显示名称</span>
@@ -418,12 +660,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>能力说明</div>
-                  <div className={styles.sectionHint}>从系统提示词中提炼出的角色和可执行操作</div>
-                </div>
-              </div>
+              <div className={styles.sectionTitle}>能力说明</div>
               <div className={styles.descriptionCard}>
                 <div className={styles.descriptionHeadline}>{descriptionSummary}</div>
                 {operationLines.length > 0 && (
@@ -443,12 +680,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>运行信息</div>
-                  <div className={styles.sectionHint}>设备、来源、版本和创建时间</div>
-                </div>
-              </div>
+              <div className={styles.sectionTitle}>运行信息</div>
               <div className={styles.infoGrid}>
                 <div>
                   <span className={styles.label}>电脑</span>
@@ -472,12 +704,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
             </section>
 
             <section className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <div className={styles.sectionTitle}>操作</div>
-                  <div className={styles.sectionHint}>控制当前 Agent 的运行状态</div>
-                </div>
-              </div>
+              <div className={styles.sectionTitle}>操作</div>
               <div className={styles.actionPanel}>
                 {isOnline ? (
                   <Button icon={<PlayCircleOutlined />} danger onClick={handleStopAgent}>
@@ -536,7 +763,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
               <Button icon={<SettingOutlined />} onClick={() => setToolManageOpen(true)}>管理</Button>
               <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveToolsConfig}>保存</Button>
               <span className={styles.toolCountLabel}>
-                已选 {selectedToolCount}/{toolCatalog.length}
+                已选 {selectedToolCount}/{getToolCatalogSync().length}
               </span>
             </div>
             <div className={styles.toolFilterBar}>
@@ -545,13 +772,13 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 type="button"
                 onClick={() => setToolFilter('all')}
               >
-                全部 {toolCatalog.length}
+                全部 {getToolCatalogSync().length}
               </button>
               {categoryOrder.map((cat) => {
                 const meta = categoryMeta[cat];
                 if (!meta) return null;
-                const count = toolCatalog.filter((t) => t.category === cat).length;
-                const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+                const count = getToolCatalogSync().filter((t) => t.category === cat).length;
+                const selected = selectedTools.filter((n) => getToolCatalogSync().find((t) => t.name === n && t.category === cat)).length;
                 return (
                   <button
                     className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}
@@ -592,6 +819,18 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ agent, defaultTab = 
                 })}
               </div>
             </Checkbox.Group>
+          </section>
+        )}
+
+        {activeTab === 'activity' && (
+          <section className={styles.section}>
+            <div className={styles.activityPlaceholder}>
+              <HistoryOutlined className={styles.activityPlaceholderIcon} />
+              <div className={styles.activityPlaceholderTitle}>运行记录即将上线</div>
+              <div className={styles.activityPlaceholderDesc}>
+                将在此处展示 Agent 的启动记录、工具调用日志和任务执行历史。
+              </div>
+            </div>
           </section>
         )}
       </div>

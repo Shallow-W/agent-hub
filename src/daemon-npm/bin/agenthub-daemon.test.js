@@ -4,13 +4,16 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const {
   commandForTask,
   conversationSessions,
+  daemonConn,
+  ensureAgentHubCodexMcpConfig,
+  ensureGitRepoForTask,
   executeTaskOnce,
   ensureOpenCodeMcpConfig,
   onWebSocket,
-  parseOpenCodeOutput,
 } = require('./agenthub-daemon.js');
 
 test('onWebSocket supports ws EventEmitter clients', () => {
@@ -82,6 +85,7 @@ test('commandForTask runs opencode with conversation session when available', ()
   assert.deepEqual(spec.env, {
     AGENTHUB_CONVERSATION_ID: 'conv-1',
     AGENTHUB_AGENT_ID: 'agent-1',
+    AGENTHUB_TASK_ID: 'task-1',
   });
   assert.deepEqual(spec.args.slice(0, 7), [
     'run',
@@ -113,56 +117,79 @@ test('commandForTask starts opencode without session on first conversation turn'
 });
 
 test('commandForTask runs codex with non-interactive MCP-capable execution', () => {
-  const spec = commandForTask({
-    id: 'codex-task-1',
-    cli_tool: 'codex',
-    agent_id: 'agent-1',
-    conversation_id: 'conv-1',
-    user_id: 'user-1',
-    prompt: 'create an agent',
-  });
+  const tempCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agenthub-codex-home-'));
+  const originalCodexHome = process.env.AGENTHUB_CODEX_HOME;
+  process.env.AGENTHUB_CODEX_HOME = tempCodexHome;
+  try {
+    const spec = commandForTask({
+      id: 'codex-task-1',
+      cli_tool: 'codex',
+      agent_id: 'agent-1',
+      conversation_id: 'conv-1',
+      user_id: 'user-1',
+      prompt: 'create an agent',
+    });
 
-  assert.equal(spec.args[0], 'exec');
-  assert.equal(spec.args.includes('--dangerously-bypass-approvals-and-sandbox'), true);
-  assert.equal(spec.args.includes('--ephemeral'), true);
-  assert.equal(spec.args.includes('--sandbox'), false);
-  assert.equal(spec.args.includes('read-only'), false);
-  assert.deepEqual(spec.env, {
-    CODEX_HOME: path.join(os.homedir(), '.agenthub', 'codex'),
-    AGENTHUB_CONVERSATION_ID: 'conv-1',
-    AGENTHUB_USER_ID: 'user-1',
-    AGENTHUB_AGENT_ID: 'agent-1',
-  });
+    assert.equal(spec.args[0], 'exec');
+    assert.equal(spec.args.includes('--dangerously-bypass-approvals-and-sandbox'), true);
+    assert.equal(spec.args.includes('--ephemeral'), true);
+    assert.equal(spec.args.includes('--sandbox'), false);
+    assert.equal(spec.args.includes('read-only'), false);
+    assert.deepEqual(spec.env, {
+      CODEX_HOME: tempCodexHome,
+      AGENTHUB_CONVERSATION_ID: 'conv-1',
+      AGENTHUB_USER_ID: 'user-1',
+      AGENTHUB_AGENT_ID: 'agent-1',
+      AGENTHUB_TASK_ID: 'codex-task-1',
+    });
+  } finally {
+    if (originalCodexHome === undefined) {
+      delete process.env.AGENTHUB_CODEX_HOME;
+    } else {
+      process.env.AGENTHUB_CODEX_HOME = originalCodexHome;
+    }
+    fs.rmSync(tempCodexHome, { recursive: true, force: true });
+  }
 });
 
-test('parseOpenCodeOutput extracts assistant text and session id from message events', () => {
-  const stdout = [
-    JSON.stringify({ type: 'session.created', sessionID: 'session-1' }),
-    JSON.stringify({
-      type: 'message',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'hello' }, { type: 'text', text: ' world' }],
-      },
-    }),
-  ].join('\n');
-
-  assert.deepEqual(parseOpenCodeOutput(stdout), {
-    text: 'hello world',
-    sessionId: 'session-1',
-  });
+test('ensureAgentHubCodexMcpConfig writes task context and auto-approved platform tools', () => {
+  const tempCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agenthub-codex-home-'));
+  const original = {
+    serverURL: daemonConn.serverURL,
+    apiKey: daemonConn.apiKey,
+    daemonToken: daemonConn.daemonToken,
+  };
+  daemonConn.serverURL = 'http://agenthub.test';
+  daemonConn.apiKey = 'api-key';
+  daemonConn.daemonToken = 'daemon-token';
+  try {
+    const configFile = ensureAgentHubCodexMcpConfig(
+      tempCodexHome,
+      'conv-1',
+      'user-1',
+      'agent-1',
+      'task-1',
+    );
+    const config = fs.readFileSync(configFile, 'utf8');
+    assert.match(config, /\[mcp_servers\.agenthub-platform\]/);
+    assert.match(config, /--conversation-id", "conv-1"/);
+    assert.match(config, /--user-id", "user-1"/);
+    assert.match(config, /--agent-id", "agent-1"/);
+    assert.match(config, /--task-id", "task-1"/);
+    assert.match(config, /default_tools_approval_mode = "approve"/);
+  } finally {
+    daemonConn.serverURL = original.serverURL;
+    daemonConn.apiKey = original.apiKey;
+    daemonConn.daemonToken = original.daemonToken;
+    fs.rmSync(tempCodexHome, { recursive: true, force: true });
+  }
 });
 
-test('parseOpenCodeOutput prefers latest updated text parts', () => {
-  const stdout = [
-    JSON.stringify({ type: 'part.updated', session: { id: 'session-2' }, part: { id: 'p1', type: 'text', text: 'hel' } }),
-    JSON.stringify({ type: 'part.updated', part: { id: 'p1', type: 'text', text: 'hello' } }),
-  ].join('\n');
-
-  assert.deepEqual(parseOpenCodeOutput(stdout), {
-    text: 'hello',
-    sessionId: 'session-2',
-  });
+test('parseOpenCodeOutput tests removed — superseded by cli/__tests__/opencode.test.js (Switch 7)', () => {
+  // parseOpenCodeOutput was deleted from daemon.js; its logic lives in
+  // OpenCodeCliSpec.parseResult, fully covered by cli/__tests__/opencode.test.js
+  // (text extraction, sessionId extraction, part.updated handling, multi-line stream).
+  assert.ok(true);
 });
 
 test('ensureOpenCodeMcpConfig preserves existing config and writes AgentHub server', () => {
@@ -207,4 +234,45 @@ test('executeTaskOnce ignores duplicate completed task ids', async () => {
 
   assert.equal(typeof await executeTaskOnce(task), 'string');
   assert.equal(await executeTaskOnce(task), null);
+});
+
+test('ensureGitRepoForTask auto-inits non-git workdir with baseline commit', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agenthub-git-init-'));
+  try {
+    // 写一个文件，模拟 agent 修改前的 workdir 内容
+    fs.writeFileSync(path.join(tempDir, 'hello.txt'), 'hello\n');
+    // 确认还不是 git 仓库
+    assert.throws(() => execFileSync('git', ['-C', tempDir, 'rev-parse', '--git-dir'], { encoding: 'utf8' }));
+
+    ensureGitRepoForTask(tempDir, { task_id: 't-init', cli_tool: 'claude' });
+
+    // 现在应该是 git 仓库，且有 baseline commit
+    const gitDir = execFileSync('git', ['-C', tempDir, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).trim();
+    assert.ok(gitDir, 'git rev-parse --git-dir should succeed after init');
+    const log = execFileSync('git', ['-C', tempDir, 'log', '--oneline'], { encoding: 'utf8' }).trim();
+    assert.match(log, /baseline \(auto\)/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureGitRepoForTask is no-op on existing git repo', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agenthub-git-skip-'));
+  try {
+    execFileSync('git', ['-C', tempDir, 'init'], { encoding: 'utf8' });
+    execFileSync('git', ['-C', tempDir, 'config', 'user.email', 'test@example.com'], { encoding: 'utf8' });
+    execFileSync('git', ['-C', tempDir, 'config', 'user.name', 'Test'], { encoding: 'utf8' });
+    fs.writeFileSync(path.join(tempDir, 'a.txt'), 'a\n');
+    execFileSync('git', ['-C', tempDir, 'add', '-A'], { encoding: 'utf8' });
+    execFileSync('git', ['-C', tempDir, 'commit', '-m', 'manual'], { encoding: 'utf8' });
+
+    ensureGitRepoForTask(tempDir, { task_id: 't-skip' });
+
+    const log = execFileSync('git', ['-C', tempDir, 'log', '--oneline'], { encoding: 'utf8' }).trim();
+    // 不应有 baseline (auto) 提交
+    assert.doesNotMatch(log, /baseline \(auto\)/);
+    assert.match(log, /manual/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

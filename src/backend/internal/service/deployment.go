@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/agent-hub/backend/internal/ghpages"
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/internal/repository"
 	"github.com/google/uuid"
 	"github.com/yuin/goldmark"
@@ -24,28 +27,34 @@ import (
 var markdownRenderer = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
 var (
-	ErrDeployArtifactNotFound = errors.New("产物不存在")
-	ErrDeployNoPerm           = errors.New("无权部署此产物")
-	ErrDeployNotFound         = errors.New("部署记录不存在")
-	ErrDeployEmpty            = errors.New("产物内容为空，无法部署")
-	ErrDeployNoArtifact       = errors.New("当前对话还没有可部署的产物")
-	ErrGitHubNotConfigured    = errors.New("未配置 GitHub 发布（需在 config.yaml 的 github 段或环境变量填入 token/owner/pages_repo）")
+	ErrDeployArtifactNotFound  = errors.New("产物不存在")
+	ErrDeployNoPerm            = errors.New("无权部署此产物")
+	ErrDeployNotFound          = errors.New("部署记录不存在")
+	ErrDeployEmpty             = errors.New("产物内容为空，无法部署")
+	ErrDeployNoArtifact        = errors.New("当前对话还没有可部署的产物")
+	ErrGitHubNotConfigured     = errors.New("未配置 GitHub 发布（需在 config.yaml 的 github 段或环境变量填入 token/owner/pages_repo）")
+	ErrDeployUnknownMode       = errors.New("未知的部署模式")
+	ErrDeployModeNotConfigured = errors.New("该部署模式未启用（缺少配置）")
 )
 
 // DeployArtifactRepo 部署服务依赖的产物访问能力。
+// Deprecated: migrate to repository.ArtifactStore for canonical interface.
 type DeployArtifactRepo interface {
 	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
 	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
 	GetLatestRootByConversation(ctx context.Context, convID string) (string, error)
+	GetLatestByConversationAndName(ctx context.Context, convID, name string) (*model.Artifact, error)
 }
 
 // DeployConvRepo 部署服务用于鉴权的对话仓库能力。
+// Deprecated: migrate to repository.ConvStore for canonical interface.
 type DeployConvRepo interface {
 	GetByID(ctx context.Context, id string) (*model.Conversation, error)
 	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
 }
 
 // DeployRepo 部署记录持久化能力。
+// Deprecated: migrate to repository.DeploymentStore for canonical interface.
 type DeployRepo interface {
 	Create(ctx context.Context, d model.Deployment) (*model.Deployment, error)
 	UpdateStatus(ctx context.Context, id, status, url, errMsg string) (*model.Deployment, error)
@@ -61,6 +70,7 @@ type DeploymentService struct {
 	mu            sync.RWMutex
 	publicBaseURL string             // 配置了内网穿透/公网入口时的基址（如 https://xxx.trycloudflare.com）
 	pages         *ghpages.Publisher // 配置了 GitHub Pages 发布时非 nil
+	strategies    map[string]port.DeploymentStrategy
 }
 
 // NewDeploymentService 创建部署服务。baseDir 为站点落盘根目录（空则默认 ./data/sites）；
@@ -69,19 +79,49 @@ func NewDeploymentService(repo DeployRepo, artRepo DeployArtifactRepo, convRepo 
 	if baseDir == "" {
 		baseDir = "./data/sites"
 	}
-	return &DeploymentService{
+	s := &DeploymentService{
 		repo:          repo,
 		artRepo:       artRepo,
 		convRepo:      convRepo,
 		baseDir:       baseDir,
 		publicBaseURL: strings.TrimRight(publicBaseURL, "/"),
+		strategies:    map[string]port.DeploymentStrategy{},
 	}
+	// 注册内置策略：preview 永远可用，github 仅在 publisher 注入后 Enabled()。
+	// docker 部署走 MCP 工具（deploy_project），不经后端编排，故不在此注册。
+	s.RegisterStrategy(&previewDeploymentStrategy{svc: s})
+	s.RegisterStrategy(&gitHubDeploymentStrategy{svc: s})
+	return s
+}
+
+// RegisterStrategy 注册一种部署策略。重复注册同 Mode 会覆盖。
+// 新增部署模式（如 cloudflare_pages）只需实现 port.DeploymentStrategy 并调用此方法，
+// 不需要改 handler 的派发逻辑。
+func (s *DeploymentService) RegisterStrategy(p port.DeploymentStrategy) {
+	if p == nil {
+		return
+	}
+	s.mu.Lock()
+	s.strategies[p.Mode()] = p
+	s.mu.Unlock()
+}
+
+// Strategies 返回所有已注册策略的快照（用于 Capabilities 派生）。
+func (s *DeploymentService) Strategies() []port.DeploymentStrategy {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]port.DeploymentStrategy, 0, len(s.strategies))
+	for _, p := range s.strategies {
+		out = append(out, p)
+	}
+	return out
 }
 
 // BaseDir 暴露站点根目录，供静态服务定位文件。
 func (s *DeploymentService) BaseDir() string { return s.baseDir }
 
 // SetGitHubPublisher 注入 GitHub Pages 发布器（nil 表示未配置，PublishGitHub 将返回 ErrGitHubNotConfigured）。
+// 同时驱动 gitHubDeploymentStrategy 的 Enabled() 判定。
 func (s *DeploymentService) SetGitHubPublisher(p *ghpages.Publisher) {
 	s.mu.Lock()
 	s.pages = p
@@ -89,6 +129,7 @@ func (s *DeploymentService) SetGitHubPublisher(p *ghpages.Publisher) {
 }
 
 // GitHubEnabled 返回是否已配置 GitHub Pages 发布（供前端决定是否展示该入口）。
+// 等价于查询 "github" 策略的 Enabled()，保留是为了向后兼容（handler 仍可用）。
 func (s *DeploymentService) GitHubEnabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -191,16 +232,56 @@ func (s *DeploymentService) Deploy(ctx context.Context, rootID, userID string) (
 	return s.decorate(updated), nil
 }
 
-// DeployLatestInConversation 部署某对话中最新的产物（聊天「部署」指令用）。
-func (s *DeploymentService) DeployLatestInConversation(ctx context.Context, convID, userID string) (*model.Deployment, error) {
-	rootID, err := s.artRepo.GetLatestRootByConversation(ctx, convID)
+// DeployByConversation 按对话 ID 和可选名称查找产物并部署预览。
+func (s *DeploymentService) DeployByConversation(ctx context.Context, convID, userID, artifactName string) (*model.Deployment, error) {
+	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)
 	if err != nil {
-		if errors.Is(err, repository.ErrArtifactRootNotFound) {
-			return nil, ErrDeployNoArtifact
-		}
-		return nil, fmt.Errorf("latest artifact in conversation: %w", err)
+		return nil, fmt.Errorf("find artifact by conversation: %w", err)
 	}
-	return s.Deploy(ctx, rootID, userID)
+	if art == nil {
+		return nil, ErrDeployNoArtifact
+	}
+	return s.Deploy(ctx, art.RootID, userID)
+}
+
+// PublishGitHubByConversation 按对话 ID 和可选名称查找产物并发布到 GitHub Pages。
+func (s *DeploymentService) PublishGitHubByConversation(ctx context.Context, convID, userID, artifactName string) (*model.Deployment, error) {
+	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)
+	if err != nil {
+		return nil, fmt.Errorf("find artifact by conversation: %w", err)
+	}
+	if art == nil {
+		return nil, ErrDeployNoArtifact
+	}
+	return s.PublishGitHub(ctx, art.RootID, userID)
+}
+
+// DeployByMode 是 handler 的统一部署入口：按 conversation+name 查找产物，
+// 再按 mode 派发到对应 DeploymentStrategy。handler 不再需要 switch mode。
+//
+// 错误：
+//   - ErrDeployNoArtifact:        对话下找不到产物
+//   - ErrDeployUnknownMode:       mode 没有对应策略
+//   - ErrDeployModeNotConfigured: 策略存在但 Enabled()=false
+//   - 其余由具体策略返回（鉴权 / 落盘 / 发布失败等）
+func (s *DeploymentService) DeployByMode(ctx context.Context, mode, convID, userID, artifactName string) (*model.Deployment, error) {
+	art, err := s.artRepo.GetLatestByConversationAndName(ctx, convID, artifactName)
+	if err != nil {
+		return nil, fmt.Errorf("find artifact by conversation: %w", err)
+	}
+	if art == nil {
+		return nil, ErrDeployNoArtifact
+	}
+	s.mu.RLock()
+	strategy, ok := s.strategies[mode]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, ErrDeployUnknownMode
+	}
+	if !strategy.Enabled() {
+		return nil, ErrDeployModeNotConfigured
+	}
+	return strategy.Deploy(ctx, art, userID)
 }
 
 // Get 查询部署状态。
@@ -312,8 +393,149 @@ func (s *DeploymentService) PublishGitHub(ctx context.Context, rootID, userID st
 	return s.decorate(updated), nil
 }
 
+// previewDeploymentStrategy 把某 artifact 落盘为可访问站点（mode=preview）。
+// 永远 Enabled()=true，是默认部署模式。
+type previewDeploymentStrategy struct {
+	svc *DeploymentService
+}
+
+func (s *previewDeploymentStrategy) Mode() string { return "preview" }
+
+// Enabled 永远返回 true：preview 模式不需要外部凭据，本地落盘即可。
+func (s *previewDeploymentStrategy) Enabled() bool { return true }
+
+// Deploy 落盘产物为站点。artifact 已由 DeployByMode 查找好，策略只负责鉴权 + 落盘。
+// 逻辑等价于原 DeploymentService.DeployByConversation + Deploy 的组合（去掉冗余 artifact 查找）。
+func (s *previewDeploymentStrategy) Deploy(ctx context.Context, art *model.Artifact, userID string) (*model.Deployment, error) {
+	svc := s.svc
+	convID, err := svc.checkAccess(ctx, art.RootID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if art.Content == "" && art.URL == "" {
+		return nil, ErrDeployEmpty
+	}
+
+	id := uuid.NewString()
+	if _, err := svc.repo.Create(ctx, model.Deployment{
+		ID:             id,
+		ArtifactRootID: art.RootID,
+		ConversationID: convID,
+		Mode:           "preview",
+		Status:         "pending",
+	}); err != nil {
+		return nil, err
+	}
+
+	if werr := svc.writeSite(id, art); werr != nil {
+		updated, uerr := svc.repo.UpdateStatus(ctx, id, "failed", "", werr.Error())
+		if uerr != nil {
+			return nil, fmt.Errorf("write site failed: %v; update status: %w", werr, uerr)
+		}
+		return updated, nil
+	}
+
+	url := "/api/sites/" + id + "/index.html"
+	updated, err := svc.repo.UpdateStatus(ctx, id, "success", url, "")
+	if err != nil {
+		return nil, err
+	}
+	return svc.decorate(updated), nil
+}
+
+// gitHubDeploymentStrategy 把某 artifact 发布到 GitHub Pages（mode=github）。
+// Enabled() 等价于 svc.GitHubEnabled()——publisher 未注入时拒绝派发。
+type gitHubDeploymentStrategy struct {
+	svc *DeploymentService
+}
+
+func (s *gitHubDeploymentStrategy) Mode() string { return "github" }
+
+// Enabled 返回 publisher 是否已注入（与 svc.GitHubEnabled() 等价）。
+func (s *gitHubDeploymentStrategy) Enabled() bool { return s.svc.GitHubEnabled() }
+
+// Deploy 发布到 GitHub Pages，同时在本地落盘一份供「源码 zip 下载」。
+// 逻辑等价于原 DeploymentService.PublishGitHubByConversation + PublishGitHub 的组合。
+func (s *gitHubDeploymentStrategy) Deploy(ctx context.Context, art *model.Artifact, userID string) (*model.Deployment, error) {
+	svc := s.svc
+	svc.mu.RLock()
+	pub := svc.pages
+	svc.mu.RUnlock()
+	if pub == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+
+	convID, err := svc.checkAccess(ctx, art.RootID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if art.Content == "" && art.URL == "" {
+		return nil, ErrDeployEmpty
+	}
+
+	id := uuid.NewString()
+	if _, err := svc.repo.Create(ctx, model.Deployment{
+		ID:             id,
+		ArtifactRootID: art.RootID,
+		ConversationID: convID,
+		Mode:           "github",
+		Status:         "pending",
+	}); err != nil {
+		return nil, err
+	}
+
+	fail := func(reason string) (*model.Deployment, error) {
+		updated, uerr := svc.repo.UpdateStatus(ctx, id, "failed", "", reason)
+		if uerr != nil {
+			return nil, fmt.Errorf("%s; update status: %w", reason, uerr)
+		}
+		return svc.decorate(updated), nil
+	}
+
+	// 本地落盘一份，供「源码 zip 下载」复用既有 /api/deployments/:id/download 端点。
+	if werr := svc.writeSite(id, art); werr != nil {
+		return fail(werr.Error())
+	}
+
+	pagesURL, perr := pub.Publish(ctx, "deploy-"+id, renderSiteFiles(art))
+	if perr != nil {
+		return fail(perr.Error())
+	}
+
+	updated, err := svc.repo.UpdateStatus(ctx, id, "success", pagesURL, "")
+	if err != nil {
+		return nil, err
+	}
+	return svc.decorate(updated), nil
+}
+
+// 编译期断言：两个内置策略实现 port.DeploymentStrategy 接口。
+// 方法签名漂移时构建在此处直接报错，而非落到调用点。
+// 注意：docker 部署走 MCP 工具（deploy_project），不经 DeploymentStrategy 注册表。
+var (
+	_ port.DeploymentStrategy = (*previewDeploymentStrategy)(nil)
+	_ port.DeploymentStrategy = (*gitHubDeploymentStrategy)(nil)
+)
+
+// isLocalhostURL 判断 URL 是否指向 localhost 或私有/回环地址。
+func isLocalhostURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return true
+	}
+	return false
+}
+
 // renderIndexHTML 生成站点首页：
-//   - webpage：内容本身即 HTML，直接作为站点首页（或外链跳转）
+//   - webpage：内容本身即 HTML，直接作为站点首页（或从 URL 拉取内容）
 //   - document / markdown：服务端用 goldmark 渲染成干净的浅色文档页（自包含，离线可看）
 //   - code：深色等宽代码页
 //   - 其它 file：浅色纯文本页
@@ -323,6 +545,9 @@ func renderIndexHTML(art *model.Artifact) string {
 			return art.Content
 		}
 		if art.URL != "" {
+			if isLocalhostURL(art.URL) {
+				return unavailablePreviewPage(art.URL)
+			}
 			return `<!DOCTYPE html><meta charset="utf-8"><title>preview</title>` +
 				`<meta http-equiv="refresh" content="0;url=` + html.EscapeString(art.URL) + `">`
 		}
@@ -624,6 +849,24 @@ const docCSS = `body{margin:0;background:#f6f8fa;color:#1f2328;` +
 const codeCSS = `body{margin:0;background:#1e1e1e;color:#d4d4d4;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace}` +
 	`.bar{position:sticky;top:0;background:#252526;color:#9da5b4;padding:10px 16px;border-bottom:1px solid #333;font-size:13px}` +
 	`.code{margin:0;padding:16px;white-space:pre;overflow:auto}`
+
+// unavailablePreviewPage 生成一个友好的错误页面，告知用户预览内容不可用。
+func unavailablePreviewPage(url string) string {
+	return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width, initial-scale=1">` +
+		`<title>预览不可用</title><style>` +
+		`body{margin:0;background:#f6f8fa;color:#1f2328;display:flex;align-items:center;justify-content:center;min-height:100vh;` +
+		`font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}` +
+		`.card{max-width:520px;padding:32px;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1)}` +
+		`h1{margin:0 0 .5em;font-size:1.4em;color:#cf222e}` +
+		`p{margin:.4em 0;color:#656d76}` +
+		`code{background:#eff1f3;padding:.15em .4em;border-radius:4px;font-size:14px}` +
+		`</style></head><body><div class="card">` +
+		`<h1>预览内容不可用</h1>` +
+		`<p>该 artifact 仅包含一个本地 URL（<code>` + html.EscapeString(url) + `</code>），无法通过公网访问。</p>` +
+		`<p>请确保 artifact 包含完整的 HTML 内容（content 字段），而非仅引用本地服务地址。</p>` +
+		`</div></body></html>`
+}
 
 // checkAccess 校验 rootId 对应产物所属对话，且当前用户为成员（或对话创建者），返回 convID。
 func (s *DeploymentService) checkAccess(ctx context.Context, rootID, userID string) (string, error) {

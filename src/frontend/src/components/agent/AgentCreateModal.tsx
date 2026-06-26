@@ -2,16 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, Modal, Select } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
 import { message } from '@/utils/message';
-import type { AgentCandidate, PlatformSkill } from '@/types/agent';
+import type { AgentCandidate } from '@/types/agent';
 import { getDefaultAgentName } from './agentPresentation';
-import { getPlatformSkills } from '@/api/platformSkill';
+import { itemToSkill } from '@/api/platformSkill';
+import { useCatalogDomain } from '@/hooks/useCatalogDomain';
 import {
-  categoryMeta,
-  categoryOrder,
+  getCategoryMeta,
+  getCategoryOrder,
   getTemplateTools,
-  toolCatalog,
+  getToolCatalogSync,
+  getToolsetOptions,
   toolsConfigToJSON,
-  toolsetOptions,
+  fetchToolCatalog,
 } from './toolAssignments';
 import { AgentPromptTemplateField } from './AgentPromptTemplateField';
 import { CreateTemplateManagerModal } from './CreateTemplateManagerModal';
@@ -25,13 +27,6 @@ interface AgentCreateModalProps {
   onCreate: (candidateId: string, name: string, systemPrompt: string, toolsConfig: string, customSkills: string) => Promise<void>;
 }
 
-const quickTemplates = [
-  { key: 'pm', label: '产品经理', toolset: 'tasks', skillCategories: ['产品经理'] },
-  { key: 'dev', label: '开发人员', toolset: 'full', skillCategories: ['开发人员'] },
-  { key: 'manager', label: '管理助手', toolset: 'full', skillCategories: [] },
-  { key: 'empty', label: '空白', toolset: 'none', skillCategories: [] },
-];
-
 export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   open,
   machineName,
@@ -43,15 +38,21 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [toolset, setToolset] = useState('tasks');
-  const [selectedTools, setSelectedTools] = useState<string[]>(getTemplateTools('tasks'));
+  const [selectedTools, setSelectedTools] = useState<string[]>([...getTemplateTools('tasks'), 'render_card']);
   const [toolFilter, setToolFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
-  const [librarySkills, setLibrarySkills] = useState<PlatformSkill[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const [skillFilter, setSkillFilter] = useState<string>('all');
   const [skillTemplate, setSkillTemplate] = useState('none');
   const [toolManageOpen, setToolManageOpen] = useState(false);
   const [skillManageOpen, setSkillManageOpen] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  const { items: rawSkills } = useCatalogDomain('platform_skill');
+  const librarySkills = useMemo(() => rawSkills.map(itemToSkill), [rawSkills]);
+
+  const categoryMeta = useMemo(() => getCategoryMeta(), [catalogReady]);
+  const categoryOrder = useMemo(() => getCategoryOrder(), [catalogReady]);
 
   const options = useMemo(
     () => candidates.map((candidate) => ({
@@ -67,21 +68,26 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     setCandidateId(first?.id ?? '');
     setName(first ? getDefaultAgentName(first.name, first.cli_tool) : '');
     setSystemPrompt('');
-    setToolset('tasks');
-    setSelectedTools(getTemplateTools('tasks'));
     setToolFilter('all');
     setSelectedSkillIds(new Set());
     setSkillFilter('all');
     setSkillTemplate('none');
     setToolManageOpen(false);
     setSkillManageOpen(false);
-    getPlatformSkills().then(setLibrarySkills).catch(() => {});
+    fetchToolCatalog()
+      .then(() => {
+        setCatalogReady(true);
+        setToolset('tasks');
+        setSelectedTools([...getTemplateTools('tasks'), 'render_card']);
+      })
+      .catch(() => {});
   }, [open, candidates]);
 
   const filteredTools = useMemo(() => {
-    if (toolFilter === 'all') return toolCatalog;
-    return toolCatalog.filter((t) => t.category === toolFilter);
-  }, [toolFilter]);
+    const catalog = getToolCatalogSync();
+    if (toolFilter === 'all') return catalog;
+    return catalog.filter((t) => t.category === toolFilter);
+  }, [toolFilter, catalogReady]);
 
   const skillCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -114,13 +120,16 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
   const handleToolsetChange = (value: string) => {
     setToolset(value);
     if (value !== 'custom') {
-      setSelectedTools(getTemplateTools(value));
+      // 平台内置工具始终包含
+      setSelectedTools([...getTemplateTools(value), 'render_card']);
     }
   };
 
   const handleToolsChange = (values: string[]) => {
+    // 确保 render_card 始终被选中（平台内置不可取消）
+    const tools = values.includes('render_card') ? values : [...values, 'render_card'];
     setToolset('custom');
-    setSelectedTools(values);
+    setSelectedTools(tools);
   };
 
   const handleSkillTemplateChange = (value: string) => {
@@ -144,25 +153,6 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
       return next;
     });
     setSkillTemplate('custom');
-  };
-
-  const handleApplyQuickTemplate = (key: string) => {
-    const tpl = quickTemplates.find((t) => t.key === key);
-    if (!tpl) return;
-    setToolset(tpl.toolset);
-    if (tpl.toolset !== 'custom') {
-      setSelectedTools(getTemplateTools(tpl.toolset));
-    }
-    if (tpl.skillCategories.length > 0) {
-      const matched = librarySkills
-        .filter((s) => tpl.skillCategories.includes(s.category?.trim() || '未分类'))
-        .map((s) => s.id);
-      setSelectedSkillIds(new Set(matched));
-      setSkillTemplate(`cat:${tpl.skillCategories[0]}`);
-    } else {
-      setSelectedSkillIds(new Set());
-      setSkillTemplate('none');
-    }
   };
 
   const handleApplyFromManager = (mode: 'tools' | 'skills', tools: string[], skillIds: string[]) => {
@@ -223,22 +213,6 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
     >
       <div className={styles.content}>
         <div className={styles.field}>
-          <span className={styles.label}>快速模板</span>
-          <div className={styles.templateRow}>
-            {quickTemplates.map((tpl) => (
-              <button
-                key={tpl.key}
-                className={styles.templatePill}
-                type="button"
-                onClick={() => handleApplyQuickTemplate(tpl.key)}
-              >
-                {tpl.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={styles.field}>
           <span className={styles.label}>底座</span>
           <Select
             className={styles.select}
@@ -272,13 +246,13 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
         <div className={styles.field}>
           <div className={styles.fieldHeader}>
             <span className={styles.label}>工具集</span>
-            <span className={styles.countLabel}>已选 {selectedToolCount}/{toolCatalog.length}</span>
+            <span className={styles.countLabel}>已选 {selectedToolCount}/{getToolCatalogSync().length}</span>
           </div>
           <div className={styles.toolbar}>
             <Select
               className={styles.toolbarSelect}
               value={toolset}
-              options={toolsetOptions}
+              options={getToolsetOptions()}
               onChange={handleToolsetChange}
             />
             <Button
@@ -294,13 +268,13 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
               type="button"
               onClick={() => setToolFilter('all')}
             >
-              全部 {toolCatalog.length}
+              全部 {getToolCatalogSync().length}
             </button>
             {categoryOrder.map((cat) => {
               const meta = categoryMeta[cat];
               if (!meta) return null;
-              const count = toolCatalog.filter((t) => t.category === cat).length;
-              const selected = selectedTools.filter((n) => toolCatalog.find((t) => t.name === n && t.category === cat)).length;
+              const count = getToolCatalogSync().filter((t) => t.category === cat).length;
+              const selected = selectedTools.filter((n) => getToolCatalogSync().find((t) => t.name === n && t.category === cat)).length;
               return (
                 <button
                   className={`${styles.filterPill} ${toolFilter === cat ? styles.filterPillActive : ''}`}
@@ -318,9 +292,10 @@ export const AgentCreateModal: React.FC<AgentCreateModalProps> = ({
               {filteredTools.map((tool) => {
                 const isSelected = selectedTools.includes(tool.name);
                 const meta = categoryMeta[tool.category];
+                const isPlatform = tool.category === 'platform';
                 return (
-                  <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''}`} key={tool.name}>
-                    <Checkbox value={tool.name} />
+                  <label className={`${styles.toolCard} ${isSelected ? styles.toolCardSelected : ''} ${isPlatform ? styles.toolCardPlatform : ''}`} key={tool.name}>
+                    <Checkbox value={tool.name} disabled={isPlatform} />
                     <div className={styles.toolCardContent}>
                       <span className={styles.toolCardName}>{tool.label}</span>
                       <span className={styles.toolCardDesc}>{tool.description}</span>

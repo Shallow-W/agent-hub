@@ -29,6 +29,7 @@ interface AgentState {
   addAgentCandidate: (id: string, body: AddCandidateAgentRequest) => Promise<Agent>;
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<Agent>;
+  updateAgentToolsConfig: (id: string, toolsConfig: string, enableManagementTools: boolean) => Promise<Agent>;
   updateAgentAvatar: (id: string, avatar: string) => Promise<Agent>;
   openSkillLocation: (id: string, sourcePath: string) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
@@ -49,6 +50,7 @@ function sortAgents(list: Agent[]): Agent[] {
 }
 
 let agentsFetchPromise: Promise<void> | null = null;
+let agentMutationVersion = 0;
 
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
@@ -68,10 +70,14 @@ export const useAgentStore = create<AgentState>((set) => ({
     if (agentsFetchPromise) return agentsFetchPromise;
 
     agentsFetchPromise = (async () => {
+      const fetchVersion = agentMutationVersion;
       set({ loading: true, agentsFetching: true, error: null });
       try {
         const agents = await agentApi.getAgents();
-        set({ agents: sortAgents(agents), agentsLoaded: true });
+        // 保存工具配置等 mutation 可能与旧列表请求并发；旧响应不能覆盖新状态。
+        if (fetchVersion === agentMutationVersion) {
+          set({ agents: sortAgents(agents), agentsLoaded: true });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : '查询 Agent 失败';
         set({ error: message });
@@ -156,6 +162,36 @@ export const useAgentStore = create<AgentState>((set) => ({
     return agent;
   },
 
+  updateAgentToolsConfig: async (id, toolsConfig, enableManagementTools) => {
+    agentMutationVersion += 1;
+    const agent = await agentApi.updateAgentToolsConfig(id, {
+      tools_config: toolsConfig,
+      enable_management_tools: enableManagementTools,
+    });
+    let updatedAgent = agent;
+    try {
+      const agents = await agentApi.getAgents();
+      updatedAgent = agents.find((item) => item.id === id) ?? agent;
+      set((state) => {
+        const nextAgents = agents.some((item) => item.id === id)
+          ? agents
+          : [...state.agents.filter((item) => item.id !== id), updatedAgent];
+        return { agents: sortAgents(nextAgents), agentsLoaded: true };
+      });
+      return updatedAgent;
+    } catch {
+      // 工具配置已保存成功；刷新失败时仍用保存接口返回值更新本地状态。
+    }
+    set((state) => ({
+      agents: sortAgents(
+        state.agents.some((item) => item.id === id)
+          ? state.agents.map((item) => (item.id === id ? agent : item))
+          : [...state.agents, agent],
+      ),
+    }));
+    return updatedAgent;
+  },
+
   updateAgentAvatar: async (id, avatar) => {
     const agent = await agentApi.updateAgentAvatar(id, avatar);
     set((state) => ({
@@ -223,6 +259,7 @@ export const useAgentStore = create<AgentState>((set) => ({
 }));
 
 export function resetAgentStore(): void {
+  agentMutationVersion = 0;
   useAgentStore.setState({
     agents: [],
     machines: [],

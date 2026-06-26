@@ -61,19 +61,21 @@ func (r *fakePlatformSkillRepo) Delete(ctx context.Context, id, userID string) (
 }
 
 func TestPlatformSkillCreateNormalizesFields(t *testing.T) {
-	repo := &fakePlatformSkillRepo{}
-	svc := NewPlatformSkillService(repo)
+	cat := &fakePlatformSkillCatalogStore{}
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(cat)
 	skill, err := svc.Create(context.Background(), "user-1", "  审查  ", " 开发人员 ", " desc ", " trigger ", " detail ")
 	if err != nil {
 		t.Fatalf("create platform skill failed: %v", err)
 	}
-	if repo.createdName != "审查" || skill.Category != "开发人员" || skill.Description != "desc" || skill.Trigger != "trigger" || skill.Detail != "detail" {
-		t.Fatalf("unexpected normalized skill: %#v repoName=%q", skill, repo.createdName)
+	if cat.createdName != "审查" || skill.Category != "开发人员" || skill.Description != "desc" || skill.Trigger != "trigger" || skill.Detail != "detail" {
+		t.Fatalf("unexpected normalized skill: %#v catName=%q", skill, cat.createdName)
 	}
 }
 
 func TestPlatformSkillCreateRejectsEmptyName(t *testing.T) {
-	svc := NewPlatformSkillService(&fakePlatformSkillRepo{})
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(&fakePlatformSkillCatalogStore{})
 	_, err := svc.Create(context.Background(), "user-1", " ", "", "", "", "")
 	if !errors.Is(err, ErrPlatformSkillInvalid) {
 		t.Fatalf("expected ErrPlatformSkillInvalid, got %v", err)
@@ -81,7 +83,8 @@ func TestPlatformSkillCreateRejectsEmptyName(t *testing.T) {
 }
 
 func TestPlatformSkillUpdateReturnsNotFound(t *testing.T) {
-	svc := NewPlatformSkillService(&fakePlatformSkillRepo{updateNil: true})
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(&fakePlatformSkillCatalogStore{updateNil: true})
 	_, err := svc.Update(context.Background(), "skill-1", "user-1", "审查", "开发人员", "", "", "")
 	if !errors.Is(err, ErrPlatformSkillNotFound) {
 		t.Fatalf("expected ErrPlatformSkillNotFound, got %v", err)
@@ -89,7 +92,8 @@ func TestPlatformSkillUpdateReturnsNotFound(t *testing.T) {
 }
 
 func TestPlatformSkillDeleteReturnsNotFound(t *testing.T) {
-	svc := NewPlatformSkillService(&fakePlatformSkillRepo{deleted: false})
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(&fakePlatformSkillCatalogStore{deleted: false})
 	err := svc.Delete(context.Background(), "skill-1", "user-1")
 	if !errors.Is(err, ErrPlatformSkillNotFound) {
 		t.Fatalf("expected ErrPlatformSkillNotFound, got %v", err)
@@ -97,8 +101,9 @@ func TestPlatformSkillDeleteReturnsNotFound(t *testing.T) {
 }
 
 func TestPlatformSkillImportDefaultsCreatesTemplates(t *testing.T) {
-	repo := &fakePlatformSkillRepo{}
-	svc := NewPlatformSkillService(repo)
+	cat := &fakePlatformSkillCatalogStore{}
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(cat)
 	skills, err := svc.ImportDefaults(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("import defaults failed: %v", err)
@@ -106,8 +111,8 @@ func TestPlatformSkillImportDefaultsCreatesTemplates(t *testing.T) {
 	if len(skills) != len(DefaultPlatformSkillTemplates()) {
 		t.Fatalf("imported %d skills, want %d", len(skills), len(DefaultPlatformSkillTemplates()))
 	}
-	if repo.created[0] != "产品需求澄清" {
-		t.Fatalf("first default skill = %q", repo.created[0])
+	if cat.created[0] != "产品需求澄清" {
+		t.Fatalf("first default skill = %q", cat.created[0])
 	}
 	if skills[0].Category != "产品经理" {
 		t.Fatalf("first default category = %q", skills[0].Category)
@@ -115,23 +120,25 @@ func TestPlatformSkillImportDefaultsCreatesTemplates(t *testing.T) {
 }
 
 func TestPlatformSkillImportDefaultsSkipsDuplicates(t *testing.T) {
-	repo := &fakePlatformSkillRepo{duplicates: map[string]bool{"产品需求澄清": true}}
-	svc := NewPlatformSkillService(repo)
+	cat := &fakePlatformSkillCatalogStore{duplicates: map[string]bool{"产品需求澄清": true}}
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(cat)
 	skills, err := svc.ImportDefaults(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("import defaults failed: %v", err)
 	}
-	if len(skills) != len(DefaultPlatformSkillTemplates()) {
-		t.Fatalf("imported %d skills, want %d", len(skills), len(DefaultPlatformSkillTemplates()))
+	if len(skills) != len(DefaultPlatformSkillTemplates())-1 {
+		t.Fatalf("imported %d skills, want %d", len(skills), len(DefaultPlatformSkillTemplates())-1)
 	}
-	if len(repo.createdData) != len(DefaultPlatformSkillTemplates())-1 {
-		t.Fatalf("created %d skills, want %d", len(repo.createdData), len(DefaultPlatformSkillTemplates())-1)
+	if len(cat.createdData) != len(DefaultPlatformSkillTemplates())-1 {
+		t.Fatalf("created %d skills, want %d", len(cat.createdData), len(DefaultPlatformSkillTemplates())-1)
 	}
 }
 
 func TestPlatformSkillCreateDefaultsEmptyCategory(t *testing.T) {
-	repo := &fakePlatformSkillRepo{}
-	svc := NewPlatformSkillService(repo)
+	cat := &fakePlatformSkillCatalogStore{}
+	svc := NewPlatformSkillService(nil)
+	svc.SetCatalogStore(cat)
 	skill, err := svc.Create(context.Background(), "user-1", "审查", " ", "", "", "")
 	if err != nil {
 		t.Fatalf("create platform skill failed: %v", err)

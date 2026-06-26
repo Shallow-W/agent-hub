@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentCandidate,
   AgentRequest,
+  AgentToolsConfigRequest,
   AddCandidateAgentRequest,
   CreateDaemonMachineRequest,
   CreateDaemonMachineResponse,
@@ -21,6 +22,10 @@ export async function createAgent(body: AgentRequest): Promise<Agent> {
 
 export async function updateAgent(id: string, body: AgentRequest): Promise<Agent> {
   return put<Agent>(`/api/agents/${id}`, body);
+}
+
+export async function updateAgentToolsConfig(id: string, body: AgentToolsConfigRequest): Promise<Agent> {
+  return put<Agent>(`/api/agents/${id}/tools-config`, body);
 }
 
 export async function updateAgentAvatar(id: string, avatar: string): Promise<Agent> {
