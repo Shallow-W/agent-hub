@@ -1,6 +1,14 @@
 import React, { useState, type ReactNode } from 'react';
-import { Modal, Tabs, Button } from 'antd';
-import { CodeOutlined, EditOutlined, EyeOutlined, InfoCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button, Modal, Tabs, Tooltip } from 'antd';
+import {
+  CodeOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  InfoCircleOutlined,
+  RobotOutlined,
+} from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -244,6 +252,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
   const [activeKey, setActiveKey] = useState(defaultTab);
   // webpage/document 的编辑器浮层：从只读预览进入全功能编辑（版本/编辑/Diff/AI）
   const [editorArtifact, setEditorArtifact] = useState<Artifact | null>(null);
+  const [webpageExpanded, setWebpageExpanded] = useState(false);
 
   React.useEffect(() => {
     setActiveKey(
@@ -251,24 +260,27 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
         ? 'preview'
         : 'code',
     );
+    setWebpageExpanded(false);
   }, [artifact?.id, artifact?.type, artifact?.language, artifact?.filename]);
 
   if (!artifact) return null;
 
   // webpage：预览 + 编辑入口（编辑入口打开 ArtifactEditor，享版本/Diff/AI 编辑）
   if (artifact.type === 'webpage') {
+    const bodySizeClass = webpageExpanded ? styles.webpageModalBodyExpanded : styles.webpageModalBodyCompact;
+
     return (
       <>
         <Modal
           open={open}
           onCancel={onClose}
           footer={null}
-          width="94vw"
-          style={{ top: 16, maxWidth: 'none' }}
+          width={webpageExpanded ? '94vw' : 'min(76vw, 980px)'}
+          style={{ top: webpageExpanded ? 16 : 48, maxWidth: 'none' }}
           className={`${styles.workspaceModal} ${styles.webpageModal}`}
           destroyOnHidden
         >
-          <div className={`${styles.modalBody} ${styles.webpageModalBody}`}>
+          <div className={`${styles.modalBody} ${styles.webpageModalBody} ${bodySizeClass}`}>
             <div className={styles.toolbar}>
               <span className={styles.source}>
                 {agentName && (
@@ -278,13 +290,25 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
                   </>
                 )}
               </span>
-              <Button
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => setEditorArtifact(artifact)}
-              >
-                编辑 / 版本
-              </Button>
+              <div className={styles.webpageToolbarActions}>
+                <Tooltip title={webpageExpanded ? '还原' : '全屏'}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={webpageExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                    aria-label={webpageExpanded ? '还原预览大小' : '全屏预览'}
+                    className={styles.webpageControlButton}
+                    onClick={() => setWebpageExpanded((value) => !value)}
+                  />
+                </Tooltip>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => setEditorArtifact(artifact)}
+                >
+                  编辑 / 版本
+                </Button>
+              </div>
             </div>
             <PreviewView artifact={artifact} />
           </div>

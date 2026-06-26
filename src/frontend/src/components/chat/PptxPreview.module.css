@@ -2,6 +2,8 @@
 .measure {
   position: relative;
   width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 /* host：大、深色、铺满的预览背景。
@@ -10,7 +12,7 @@
    - 多页时纵向堆叠由 list 模式的 slide margin 负责，整体在深色背景中居中浏览。 */
 .host {
   width: 100%;
-  height: calc(100vh - 120px);
+  height: 100%;
   overflow: auto;
   background-color: #1f1f1f;
   border-radius: 8px;
@@ -24,7 +26,7 @@
 
 .pdfFrame {
   width: 100%;
-  height: calc(100vh - 120px);
+  height: 100%;
   border: 0;
   border-radius: 8px;
   background: #fff;
