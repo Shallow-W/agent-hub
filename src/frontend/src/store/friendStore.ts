@@ -144,3 +144,18 @@ export const useFriendStore = create<FriendState>((set) => ({
     }
   },
 }));
+
+export function resetFriendStore(): void {
+  useFriendStore.setState({
+    friends: [],
+    pendingRequests: [],
+    loading: false,
+    sending: false,
+    error: null,
+    searchResults: [],
+    isSearching: false,
+    friendsLoaded: false,
+    pendingLoaded: false,
+    actionLoading: null,
+  });
+}

@@ -1,0 +1,249 @@
+.blocksContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.textBlock {
+  max-width: 100%;
+  /* word-break: break-word 防止流式期间长字符串（URL / code）溢出导致 layout shift，
+     layout shift 会放大"停顿"的视觉感受。 */
+  word-break: break-word;
+}
+
+.thinkingBlock {
+  position: relative;
+  border-left: 3px solid var(--color-primary, #1677ff);
+  background: var(--color-thinking-bg, rgba(22, 119, 255, 0.06));
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+/* streaming 时背景微微变深 + 强调色边框 */
+.thinkingStreaming {
+  background: var(--color-thinking-bg-active, rgba(22, 119, 255, 0.1));
+  border-left-color: var(--color-primary, #1677ff);
+}
+
+.thinkingHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 12.5px;
+  line-height: 20px;
+  transition: color 150ms ease;
+}
+
+.thinkingHeader:hover {
+  color: var(--color-primary, #1677ff);
+}
+
+.thinkingIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary, #1677ff);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.thinkingLabel {
+  font-style: italic;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.thinkingPreview {
+  flex: 1;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+  font-style: italic;
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+.thinkingChevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.35));
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+
+/* 折叠态 body——max-height: 0 + opacity 0 实现平滑收起 */
+.thinkingBodyWrap {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 240ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 180ms ease,
+              margin-top 240ms ease;
+  margin-top: 0;
+}
+
+.thinkingBodyExpanded {
+  max-height: 1200px;  /* 给足够空间，超出后由 .thinkingBody 自然扩展 */
+  opacity: 1;
+  margin-top: 6px;
+}
+
+.thinkingBody {
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.6));
+}
+
+/* streaming 时底部不确定进度条 */
+.thinkingProgress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  background: rgba(22, 119, 255, 0.08);
+  overflow: hidden;
+}
+
+.thinkingProgressBar {
+  width: 30%;
+  height: 100%;
+  background: var(--color-primary, #1677ff);
+  animation: thinkingProgressLoop 1.4s ease-in-out infinite;
+}
+
+@keyframes thinkingProgressLoop {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(250%); }
+  100% { transform: translateX(-100%); }
+}
+
+.toolCallBlock {
+  background: var(--color-tool-bg, rgba(0, 0, 0, 0.04));
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.toolCallHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+
+.toolChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-primary, #1677ff);
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.toolInput {
+  margin-top: 6px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.toolResultBlock {
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 4px 0;
+  font-size: 13px;
+  background: var(--color-result-bg, rgba(0, 0, 0, 0.03));
+  border-left: 3px solid var(--color-text-tertiary, rgba(0, 0, 0, 0.25));
+}
+
+.toolResultBlock.error {
+  background: var(--color-error-bg, rgba(255, 77, 79, 0.08));
+  border-left-color: var(--color-error, #ff4d4f);
+}
+
+.toolResultHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+  margin-bottom: 4px;
+}
+
+.toolResultBody {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.errorBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--color-error-bg, rgba(255, 77, 79, 0.1));
+  border: 1px solid var(--color-error, #ff4d4f);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  color: var(--color-error-text, #cf1322);
+  font-size: 13px;
+}
+
+.errorHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.errorBody {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streamingCursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  background: currentColor;
+  /* 与 MessageBubble.module.css 的 cursorPulse 对齐——smooth pulse 而非 steps(2) 硬闪。
+     硬闪会给人"卡顿/跳"的感觉，smooth pulse 视觉上更像"正在输入"。 */
+  animation: cursorPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes cursorPulse {
+  50% { opacity: 0.2; }
+}

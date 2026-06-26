@@ -24,16 +24,19 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { createTask, deleteTask, getOrchTaskCards, getTasks, moveTaskStatus, updateTask } from '@/api/task';
-import { getConversationAgents } from '@/api/conversation';
 import { onTaskChanged } from '@/store/wsStore';
 import { useConversationStore } from '@/store/conversationStore';
 import { useAuthStore } from '@/store/authStore';
 import { useAgentStore } from '@/store/agentStore';
 import { resolveAgentAvatar, resolveUserAvatar } from '@/components/agent/agentPresentation';
+import { TaskGroupList } from '@/components/sidebar/TaskGroupList';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { CreateTaskPayload, OrchTaskCard, TaskPriority, TaskStatus, WorkspaceTask } from '@/types/task';
-import type { ConversationAgent } from '@/types/conversation';
+import { ROLE_ORCHESTRATOR } from '@/types/role';
+import { useConversationAgents } from '@/hooks/useConversationAgents';
+import layoutStyles from '@/layout/AppLayout.module.css';
+import { resolveActiveGroupConversationId } from './taskBoardSelection';
 import styles from './TaskBoardView.module.css';
 
 interface TaskFormValues {
@@ -167,27 +170,18 @@ const TaskBoardView: React.FC = () => {
   const allConversations = useConversationStore((s) => s.conversations);
   const conversations = useMemo(() => allConversations.filter((c) => c.type === 'group'), [allConversations]);
   const setActiveConversation = useConversationStore((s) => s.setActive);
-  const activeConversation = conversations.find((item) => item.id === activeConversationId);
+  const fetchConversations = useConversationStore((s) => s.fetchConversations);
+  const taskConversationId = useMemo(
+    () => resolveActiveGroupConversationId(conversations, activeConversationId),
+    [activeConversationId, conversations],
+  );
+  const activeConversation = conversations.find((item) => item.id === taskConversationId);
   const currentUser = useAuthStore((s) => s.user);
   const agents = useAgentStore((s) => s.agents);
-  const [orchAgent, setOrchAgent] = useState<ConversationAgent | null>(null);
 
-  // Resolve the orchestrator agent for the active conversation (used for card creator display)
-  useEffect(() => {
-    if (!activeConversationId) {
-      setOrchAgent(null);
-      return;
-    }
-    let cancelled = false;
-    getConversationAgents(activeConversationId)
-      .then((list) => {
-        if (cancelled) return;
-        const orch = (list ?? []).find((a) => a.role === 'orchestrator');
-        setOrchAgent(orch ?? null);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [activeConversationId]);
+  // 获取会话 Agent 列表 + WS role_changed 自动刷新（由公共 hook 统一管理）
+  const { agents: convAgents } = useConversationAgents(taskConversationId ?? undefined);
+  const orchAgent = convAgents.find((a) => a.role === ROLE_ORCHESTRATOR) ?? null;
 
   const grouped = useMemo(() => {
     const map = new Map<TaskStatus, Array<WorkspaceTask | OrchTaskCard>>();
@@ -207,7 +201,7 @@ const TaskBoardView: React.FC = () => {
   }, [tasks, orchCards]);
 
   const fetchTasks = useCallback(async () => {
-    if (!activeConversationId) {
+    if (!taskConversationId) {
       setTasks([]);
       setOrchCards([]);
       return;
@@ -215,8 +209,8 @@ const TaskBoardView: React.FC = () => {
     setLoading(true);
     try {
       const [taskList, cardList] = await Promise.all([
-        getTasks({ conversation_id: activeConversationId }),
-        getOrchTaskCards(activeConversationId),
+        getTasks({ conversation_id: taskConversationId }),
+        getOrchTaskCards(taskConversationId),
       ]);
       setTasks(taskList);
       setOrchCards(cardList);
@@ -225,7 +219,7 @@ const TaskBoardView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeConversationId]);
+  }, [taskConversationId]);
 
   useEffect(() => {
     fetchTasks();
@@ -234,19 +228,18 @@ const TaskBoardView: React.FC = () => {
   // Subscribe to task.changed WS events for auto-refresh
   useEffect(() => {
     const unsubscribe = onTaskChanged((convId) => {
-      if (convId === activeConversationId) {
+      if (convId === taskConversationId) {
         fetchTasks();
       }
     });
     return unsubscribe;
-  }, [activeConversationId, fetchTasks]);
+  }, [fetchTasks, taskConversationId]);
 
   useEffect(() => {
-    const firstConversation = conversations[0];
-    if (!activeConversationId && firstConversation) {
-      setActiveConversation(firstConversation.id);
+    if (taskConversationId && activeConversationId !== taskConversationId) {
+      setActiveConversation(taskConversationId);
     }
-  }, [activeConversationId, conversations, setActiveConversation]);
+  }, [activeConversationId, setActiveConversation, taskConversationId]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -268,8 +261,8 @@ const TaskBoardView: React.FC = () => {
   }, [editingTask, form, modalOpen]);
 
   const openCreate = () => {
-    if (!activeConversationId) {
-      antMessage.warning('请先在左侧选择一个对话');
+    if (!taskConversationId) {
+      antMessage.warning('请先在左侧选择一个群聊');
       return;
     }
     setEditingTask(null);
@@ -293,12 +286,16 @@ const TaskBoardView: React.FC = () => {
         setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
         antMessage.success('任务已更新');
       } else {
+        if (!taskConversationId) {
+          antMessage.warning('请先在左侧选择一个群聊');
+          return;
+        }
         const payload: CreateTaskPayload = {
           title: values.title,
           description: values.description ?? '',
           priority: values.priority,
           status: values.status,
-          conversation_id: activeConversationId ?? undefined,
+          conversation_id: taskConversationId,
         };
         const created = await createTask(payload);
         setTasks((prev) => [created, ...prev]);
@@ -492,102 +489,121 @@ const TaskBoardView: React.FC = () => {
     );
   };
 
-  const emptyDescription = activeConversationId ? '当前对话暂无任务' : '请先在左侧选择一个对话';
+  const emptyDescription = taskConversationId ? '当前群聊暂无任务' : '请先在左侧选择一个群聊';
 
   return (
-    <section className={styles.page}>
-      <header className={styles.workspaceHeader}>
-        <div className={styles.workspaceIcon}><TeamOutlined /></div>
-        <div className={styles.workspaceMeta}>
-          <h1 className={styles.workspaceTitle}>{activeConversation?.title ?? '当前对话任务'}</h1>
-          <div className={styles.workspaceSub}>对话任务 · 后续可集成到群聊任务入口</div>
+    <div className={layoutStyles.chatPanel}>
+      <div className={layoutStyles.convPanel}>
+        <div className={layoutStyles.convPanelHeader}>
+          <span className={layoutStyles.convPanelTitle}>群聊</span>
+          <div className={layoutStyles.convPanelTools}>
+            <Button
+              type="text"
+              icon={<ReloadOutlined />}
+              aria-label="刷新群聊"
+              onClick={() => fetchConversations()}
+            />
+          </div>
         </div>
-        <Space className={styles.headerActions}>
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={fetchTasks}>
-            刷新
-          </Button>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            添加任务
-          </Button>
-        </Space>
-      </header>
-
-      <nav className={styles.tabs} aria-label="对话任务">
-        <button className={`${styles.tab} ${styles.tabActive}`} type="button">
-          <FolderOutlined /> 任务看板
-        </button>
-      </nav>
-
-      <div className={styles.board}>
-        {columns.map((column) => {
-          const columnTasks = grouped.get(column.key) ?? [];
-          return (
-            <section className={styles.column} key={column.key}>
-              <div className={styles.columnHeader}>
-                <span className={styles.columnTitle}>{column.icon}{column.title}</span>
-                <span className={styles.count}>{columnTasks.length}</span>
-              </div>
-              <div className={styles.taskList}>
-                {columnTasks.length > 0 ? columnTasks.map(renderTaskCard) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyDescription} />
-                )}
-              </div>
-            </section>
-          );
-        })}
+        <TaskGroupList />
       </div>
 
-      <Modal
-        title={editingTask ? '编辑任务' : '添加任务'}
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        onOk={handleSubmit}
-        destroyOnHidden
-        forceRender
-      >
-        <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item
-            label="任务标题"
-            name="title"
-            rules={[{ required: true, message: '请输入任务标题' }, { max: 120, message: '最多 120 个字符' }]}
-          >
-            <Input placeholder="例如：整理本轮对话中的实现任务" />
-          </Form.Item>
-          <Form.Item label="任务描述" name="description">
-            <Input.TextArea rows={4} placeholder="补充目标、上下文或验收标准" />
-          </Form.Item>
-          <div className={styles.formGrid}>
-            <Form.Item label="优先级" name="priority" rules={[{ required: true }]}>
-              <Select
-                options={[
-                  { value: 'low', label: '低' },
-                  { value: 'medium', label: '中' },
-                  { value: 'high', label: '高' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item label="初始状态" name="status" rules={[{ required: true }]}>
-              <Select
-                disabled={Boolean(editingTask)}
-                options={[
-                  { value: 'todo', label: '已派发' },
-                  { value: 'in_progress', label: '正在执行' },
+      <div className={layoutStyles.rightPanel}>
+        <div className={styles.page}>
+          <header className={styles.workspaceHeader}>
+            <div className={styles.workspaceIcon}><TeamOutlined /></div>
+            <div className={styles.workspaceMeta}>
+              <h1 className={styles.workspaceTitle}>{activeConversation?.title ?? '当前群聊任务'}</h1>
+              <div className={styles.workspaceSub}>群聊任务看板</div>
+            </div>
+            <Space className={styles.headerActions}>
+              <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={fetchTasks}>
+                刷新
+              </Button>
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                添加任务
+              </Button>
+            </Space>
+          </header>
 
-                  { value: 'done', label: '完成/已验收' },
-                  { value: 'cancelled', label: '已取消' },
-                ]}
-              />
-            </Form.Item>
+          <nav className={styles.tabs} aria-label="群聊任务">
+            <button className={`${styles.tab} ${styles.tabActive}`} type="button">
+              <FolderOutlined /> 任务看板
+            </button>
+          </nav>
+
+          <div className={styles.board}>
+            {columns.map((column) => {
+              const columnTasks = grouped.get(column.key) ?? [];
+              return (
+                <section className={styles.column} key={column.key}>
+                  <div className={styles.columnHeader}>
+                    <span className={styles.columnTitle}>{column.icon}{column.title}</span>
+                    <span className={styles.count}>{columnTasks.length}</span>
+                  </div>
+                  <div className={styles.taskList}>
+                    {columnTasks.length > 0 ? columnTasks.map(renderTaskCard) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyDescription} />
+                    )}
+                  </div>
+                </section>
+              );
+            })}
           </div>
-        </Form>
-      </Modal>
 
-      <TaskDetailModal
-        task={detailTask}
-        visible={detailTask !== null}
-        onClose={() => setDetailTask(null)}
-      />
-    </section>
+          <Modal
+            title={editingTask ? '编辑任务' : '添加任务'}
+            open={modalOpen}
+            onCancel={() => setModalOpen(false)}
+            onOk={handleSubmit}
+            destroyOnHidden
+            forceRender
+          >
+            <Form form={form} layout="vertical" preserve={false}>
+              <Form.Item
+                label="任务标题"
+                name="title"
+                rules={[{ required: true, message: '请输入任务标题' }, { max: 120, message: '最多 120 个字符' }]}
+              >
+                <Input placeholder="例如：整理本轮对话中的实现任务" />
+              </Form.Item>
+              <Form.Item label="任务描述" name="description">
+                <Input.TextArea rows={4} placeholder="补充目标、上下文或验收标准" />
+              </Form.Item>
+              <div className={styles.formGrid}>
+                <Form.Item label="优先级" name="priority" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { value: 'low', label: '低' },
+                      { value: 'medium', label: '中' },
+                      { value: 'high', label: '高' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="初始状态" name="status" rules={[{ required: true }]}>
+                  <Select
+                    disabled={Boolean(editingTask)}
+                    options={[
+                      { value: 'todo', label: '已派发' },
+                      { value: 'in_progress', label: '正在执行' },
+
+                      { value: 'done', label: '完成/已验收' },
+                      { value: 'cancelled', label: '已取消' },
+                    ]}
+                  />
+                </Form.Item>
+              </div>
+            </Form>
+          </Modal>
+
+          <TaskDetailModal
+            task={detailTask}
+            visible={detailTask !== null}
+            onClose={() => setDetailTask(null)}
+          />
+        </div>
+      </div>
+    </div>
   );
 };
 

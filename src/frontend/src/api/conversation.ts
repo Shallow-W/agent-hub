@@ -1,5 +1,6 @@
 import { get, post, put, del } from './client';
 import type { Conversation, ConversationAgent, ConversationType } from '@/types/conversation';
+import type { ConversationAgentRole } from '@/types/role';
 
 export async function getConversations(): Promise<Conversation[]> {
   return get<Conversation[]>('/api/conversations?limit=100');
@@ -75,7 +76,7 @@ export async function removeConversationAgent(
 export async function setConversationAgentRole(
   id: string,
   agentId: string,
-  role: 'orchestrator' | 'worker',
+  role: ConversationAgentRole,
 ): Promise<void> {
   return put<void>(`/api/conversations/${id}/agents/${agentId}/role`, { role });
 }

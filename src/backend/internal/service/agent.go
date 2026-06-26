@@ -10,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/agent-hub/backend/internal/model"
+	"github.com/agent-hub/backend/internal/port"
 	"github.com/agent-hub/backend/pkg/ws"
 )
 
@@ -33,11 +36,14 @@ type AgentRepo interface {
 	GetDaemonMachineByID(ctx context.Context, id string) (*model.DaemonMachine, error)
 	GetAgentsByMachine(ctx context.Context, machineID string) ([]model.Agent, error)
 	MarkDaemonMachineConnected(ctx context.Context, id, machineID string) error
+	UpdateMachineCapabilities(ctx context.Context, id string, capabilities []string) error
+	FindMachineWithCapability(ctx context.Context, userID, capability string) (*model.DaemonMachine, error)
 	UpsertMachineAgentCandidate(ctx context.Context, machineID, name, cliTool, version, capabilitiesJSON string) error
 	ListAgentCandidates(ctx context.Context, userID string) ([]model.AgentCandidate, error)
 	AddCandidateAgent(ctx context.Context, userID, candidateID, displayName, expectedCLITool, systemPrompt, toolsConfig, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	CreateCustom(ctx context.Context, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
 	UpdateCustom(ctx context.Context, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills string, enableManagementTools bool) (*model.Agent, error)
+	UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error)
 	UpdateAvatar(ctx context.Context, id, userID, avatar string) (*model.Agent, error)
 	UpdateTags(ctx context.Context, id, tags string) (*model.Agent, error)
 	UpdateCustomSkills(ctx context.Context, id, userID, customSkills string) (*model.Agent, error)
@@ -85,11 +91,13 @@ const machineAPIKeyPrefix = "sk_machine_"
 
 // AgentService Agent 管理业务逻辑
 type AgentService struct {
-	repo        AgentRepo
-	tracker     *MachineTracker
-	tokenIssuer *TokenIssuer
-	serverURL   string
-	daemonHub   *ws.DaemonHub
+	repo         AgentRepo
+	tracker      *MachineTracker
+	tokenIssuer  port.TokenIssuerPort
+	serverURL    string
+	daemonHub    port.DaemonDispatcher
+	toolRegistry ToolRegistryReader
+	toolsetStore ToolsetStore
 }
 
 // DiscoveredAgent 是 daemon 上报的本机 Agent 摘要
@@ -105,19 +113,33 @@ func NewAgentService(repo AgentRepo, tracker *MachineTracker) *AgentService {
 	return &AgentService{repo: repo, tracker: tracker}
 }
 
-// SetDaemonHub 注入 DaemonHub（用于通过 WS 向 daemon 发送控制命令）
-func (s *AgentService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
+// SetDaemonHub 注入 DaemonDispatcher（用于通过 WS 向 daemon 发送控制命令）。
+//
+// P8b: 字段类型由 *ws.DaemonHub 改为 port.DaemonDispatcher，service 层不再
+// 直接依赖 pkg/ws 具体实现。*ws.DaemonHub 通过 Go 结构化类型自动满足该接口，
+// 调用方（main.go）依然传 *ws.DaemonHub 指针，无需改动。
+func (s *AgentService) SetDaemonHub(dh port.DaemonDispatcher) {
+	s.daemonHub = dh
 }
 
 // SetTokenIssuer 注入 TokenIssuer（用于生成 Agent Token）
-func (s *AgentService) SetTokenIssuer(ti *TokenIssuer) {
+func (s *AgentService) SetTokenIssuer(ti port.TokenIssuerPort) {
 	s.tokenIssuer = ti
 }
 
 // SetServerURL 设置服务端 URL（用于生成 daemon 连接命令）
 func (s *AgentService) SetServerURL(url string) {
 	s.serverURL = url
+}
+
+// SetToolRegistry 注入 ToolRegistryReader（用于校验 tools_config 中的工具名）。
+func (s *AgentService) SetToolRegistry(tr ToolRegistryReader) {
+	s.toolRegistry = tr
+}
+
+// SetToolsetStore 注入 ToolsetStore（用于校验 tools_config 中的 toolset 名）。
+func (s *AgentService) SetToolsetStore(ts ToolsetStore) {
+	s.toolsetStore = ts
 }
 
 // ListAvailable 查询当前用户可用 Agent
@@ -161,6 +183,18 @@ func (s *AgentService) MarkMachineOnline(machineID string) {
 	}
 }
 
+// UpdateMachineCapabilities 更新机器能力清单（docker 等）。daemon register 时上报。
+func (s *AgentService) UpdateMachineCapabilities(machineID string, capabilities []string) {
+	if machineID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.repo.UpdateMachineCapabilities(ctx, machineID, capabilities); err != nil {
+		slog.Warn("update machine capabilities failed", "machine_id", machineID, "error", err)
+	}
+}
+
 // MarkMachineOffline 标记机器离线（daemon WS 断开时调用）。
 func (s *AgentService) MarkMachineOffline(machineID string) {
 	if s.tracker != nil {
@@ -197,6 +231,12 @@ func (s *AgentService) RegisterSystemAgents(ctx context.Context, machineID strin
 		cliTool := strings.TrimSpace(agent.CLITool)
 		if name == "" || cliTool == "" {
 			continue
+		}
+		// Truncate skill details to keep capabilities_json small.
+		for i := range agent.Capabilities {
+			if len(agent.Capabilities[i].Detail) > 500 {
+				agent.Capabilities[i].Detail = agent.Capabilities[i].Detail[:500] + "..."
+			}
 		}
 		capabilities, err := json.Marshal(agent.Capabilities)
 		if err != nil {
@@ -286,6 +326,14 @@ func (s *AgentService) RegisterMachineAgents(ctx context.Context, machine *model
 		if name == "" || cliTool == "" {
 			continue
 		}
+		// Truncate skill details to keep capabilities_json small.
+		// Full content is available on-demand via get_agent_skill.
+		const maxDetailLen = 500
+		for i := range agent.Capabilities {
+			if len(agent.Capabilities[i].Detail) > maxDetailLen {
+				agent.Capabilities[i].Detail = agent.Capabilities[i].Detail[:maxDetailLen] + "..."
+			}
+		}
 		capabilities, err := json.Marshal(agent.Capabilities)
 		if err != nil {
 			return fmt.Errorf("marshal capabilities: %w", err)
@@ -321,7 +369,7 @@ func (s *AgentService) AddCandidateAgent(ctx context.Context, userID, candidateI
 	if userID == "" || candidateID == "" || displayName == "" || expectedCLITool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -346,7 +394,7 @@ func (s *AgentService) CreateCustom(ctx context.Context, userID, name, cliTool, 
 	if name == "" || cliTool == "" {
 		return nil, ErrAgentInvalidInput
 	}
-	toolsConfig, err := normalizeToolsConfig(toolsConfig)
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -378,7 +426,7 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	if userID != "" && (current.UserID == nil || *current.UserID != userID) {
 		return nil, ErrAgentNotFound
 	}
-	toolsConfig, err = normalizeToolsConfig(toolsConfig)
+	toolsConfig, err = normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
 	if err != nil {
 		return nil, ErrAgentInvalidInput
 	}
@@ -389,6 +437,26 @@ func (s *AgentService) UpdateCustom(ctx context.Context, id, userID, name, cliTo
 	agent, err := s.repo.UpdateCustom(ctx, id, userID, name, cliTool, systemPrompt, toolsConfig, avatar, capabilitiesJSON, customSkills, enableManagementTools)
 	if err != nil {
 		return nil, fmt.Errorf("update custom agent: %w", err)
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	return agent, nil
+}
+
+// UpdateToolsConfig 更新 Agent 的工具授权配置。它只触碰 tools_config，允许用户为
+// 自己可见的 daemon/system/custom Agent 分配 MCP 工具，不放开完整资料编辑。
+func (s *AgentService) UpdateToolsConfig(ctx context.Context, id, userID, toolsConfig string, enableManagementTools bool) (*model.Agent, error) {
+	if id == "" || userID == "" {
+		return nil, ErrAgentInvalidInput
+	}
+	toolsConfig, err := normalizeToolsConfig(ctx, toolsConfig, s.toolRegistry, s.toolsetStore)
+	if err != nil {
+		return nil, ErrAgentInvalidInput
+	}
+	agent, err := s.repo.UpdateToolsConfig(ctx, id, userID, toolsConfig, enableManagementTools)
+	if err != nil {
+		return nil, fmt.Errorf("update agent tools_config: %w", err)
 	}
 	if agent == nil {
 		return nil, ErrAgentNotFound
@@ -607,7 +675,9 @@ func (s *AgentService) GetMachineConnectCommand(ctx context.Context, machineID, 
 	if serverURL == "" {
 		serverURL = "http://localhost:8080" // fallback when not configured
 	}
-	command := fmt.Sprintf("npx @agenthub/daemon --server-url %s --api-key %s", serverURL, apiKey)
+	// daemon 已发布到 npm（@hust-agenthub/daemon），固定到 0.3.0 以保证行为可重现。
+	npxCommand := fmt.Sprintf("npx @hust-agenthub/daemon@0.3.0 --server-url %s --api-key %s", serverURL, apiKey)
+	command := npxCommand
 	return command, machine, apiKey, nil
 }
 
@@ -628,4 +698,27 @@ func generateMachineAPIKey() (string, error) {
 func hashMachineAPIKey(apiKey string) string {
 	sum := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(sum[:])
+}
+
+// resolveDaemonNPMPath 查找本地 daemon-npm 目录的绝对路径。
+// @agenthub/daemon 未发布到 npm，必须用 file: 协议指向本地包。
+func resolveDaemonNPMPath() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "./src/daemon-npm"
+	}
+	candidates := []string{
+		filepath.Join(wd, "..", "daemon-npm"),
+		filepath.Join(wd, "src", "daemon-npm"),
+		filepath.Join(wd, "..", "..", "src", "daemon-npm"),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+			if abs, err := filepath.Abs(candidate); err == nil {
+				return abs
+			}
+			return candidate
+		}
+	}
+	return "./src/daemon-npm"
 }

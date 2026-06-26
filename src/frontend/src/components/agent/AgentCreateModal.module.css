@@ -162,6 +162,14 @@
   background: rgba(47, 143, 107, 0.03);
 }
 
+.toolCardPlatform {
+  opacity: 0.85;
+  cursor: default;
+}
+.toolCardPlatform :global(.ant-checkbox-wrapper) {
+  cursor: default;
+}
+
 .toolCardContent {
   display: flex;
   flex-direction: column;

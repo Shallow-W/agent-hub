@@ -18,12 +18,42 @@
 .commandHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid #111;
   font-size: 13px;
   font-weight: 600;
+}
+
+.versionTag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.commandList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.commandRow {
+  display: flex;
+  flex-direction: column;
+}
+
+.commandLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.commandHint {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
 }
 
 .command {

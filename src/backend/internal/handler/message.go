@@ -135,7 +135,7 @@ func (h *MessageHandler) History(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "25"))
 	var before time.Time
 	if beforeStr := c.Query("before"); beforeStr != "" {
 		t, err := time.Parse(time.RFC3339, beforeStr)
@@ -296,6 +296,108 @@ func (h *MessageHandler) Unpin(c *gin.Context) {
 		return
 	}
 
+	middleware.SuccessResponse(c, nil)
+}
+
+// UpdateCard 更新消息中的交互式卡片状态（用户选择方案/确认操作/进度更新）。
+func (h *MessageHandler) UpdateCard(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40052, "缺少消息 ID")
+		return
+	}
+	var req struct {
+		CardsJSON string `json:"cards_json"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40053, "参数错误")
+		return
+	}
+	// 权限校验：消息必须属于路径中的对话，避免跨对话篡改卡片状态。
+	if _, err := h.svc.GetMessageByID(c.Request.Context(), convID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusForbidden, 40301, "消息不存在或不属于该对话")
+		return
+	}
+	if err := h.svc.UpdateMessageCardsAndBroadcast(c.Request.Context(), messageID, req.CardsJSON); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50037, "更新卡片失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}
+
+// CancelStreaming 取消正在流式生成的 assistant 消息。
+//
+// 流程：解析 task_id（前端从 message.streaming payload 回传）→ 调 service 层
+// CancelStreamingMessage → 向 daemon 发 task.cancel WS 控制消息。
+//
+// 返回 202 Accepted——不等 daemon 响应（daemon 收到后 SIGINT Claude 进程，
+// 触发 task.complete with error，后端 watchdog FinalizeStreaming 切到 canceled）。
+func (h *MessageHandler) CancelStreaming(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40060, "缺少对话 ID 或消息 ID")
+		return
+	}
+	// body 可选——允许空 body 时从 query 兜底
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.TaskID == "" {
+		req.TaskID = c.Query("task_id")
+	}
+	if err := h.svc.CancelStreamingMessage(c.Request.Context(), convID, messageID, req.TaskID); err != nil {
+		if errors.Is(err, service.ErrMsgNotFound) {
+			middleware.ErrorResponse(c, http.StatusNotFound, 40440, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrMsgReplyWrongConv) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40061, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotFound) || errors.Is(err, service.ErrMsgAgentOffline) {
+			middleware.ErrorResponse(c, http.StatusBadRequest, 40062, err.Error())
+			return
+		}
+		slog.Error("cancel streaming failed", "error", err, "convID", convID, "messageID", messageID)
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50040, "取消流式生成失败")
+		return
+	}
+	// 202 Accepted——UI 立即 disable 按钮，等流式 watchdog 广播 message.complete。
+	c.JSON(http.StatusAccepted, gin.H{"ok": true})
+}
+
+// HideMessage 当前用户隐藏消息（仅对自己不可见，其他用户仍可见）。
+func (h *MessageHandler) HideMessage(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40050, "缺少对话 ID 或消息 ID")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if err := h.svc.HideMessage(c.Request.Context(), userID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50035, "隐藏消息失败")
+		return
+	}
+	middleware.SuccessResponse(c, nil)
+}
+
+// UnhideMessage 取消隐藏消息。
+func (h *MessageHandler) UnhideMessage(c *gin.Context) {
+	convID := c.Param("id")
+	messageID := c.Param("messageId")
+	if convID == "" || messageID == "" {
+		middleware.ErrorResponse(c, http.StatusBadRequest, 40051, "缺少对话 ID 或消息 ID")
+		return
+	}
+	userID := middleware.GetUserID(c)
+	if err := h.svc.UnhideMessage(c.Request.Context(), userID, messageID); err != nil {
+		middleware.ErrorResponse(c, http.StatusInternalServerError, 50036, "取消隐藏失败")
+		return
+	}
 	middleware.SuccessResponse(c, nil)
 }
 

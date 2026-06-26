@@ -61,45 +61,90 @@
   gap: 8px;
 }
 
-.overviewStrip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid rgba(31, 35, 40, 0.06);
-  border-radius: 10px;
-  background: rgba(31, 35, 40, 0.06);
-}
+/* ── Panel header ── */
 
-.overviewItem {
+.panelActions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-start;
   min-width: 0;
-  padding: 12px 14px;
+}
+
+.panelActionsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+/* ── Mini metrics (card-style with colored icon + label + value) ── */
+
+.miniMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+.miniMetric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: var(--color-bg-white);
-  transition: background 0.15s;
+  border: 1px solid var(--color-border-light);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  min-width: 0;
 }
 
-.overviewItem:hover {
-  background: rgba(47, 143, 107, 0.02);
+.miniMetricIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 12px;
 }
 
-.overviewLabel {
-  display: block;
+.miniMetricMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.miniMetricLabel {
   color: var(--color-text-tertiary);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-
-.overviewValue {
-  display: block;
-  margin-top: 4px;
-  color: var(--color-text);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.3;
+  font-weight: 500;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.miniMetricValue {
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.templateSelect {
+  min-width: 160px;
+  max-width: 200px;
+}
+
+:global(html.dark) .miniMetric {
+  background: var(--color-surface-strong);
+  border-color: var(--color-border);
 }
 
 .sectionTitle {
@@ -110,82 +155,54 @@
   color: var(--color-text-secondary);
 }
 
-/* ── Template toolbar (matches tools tab) ── */
-
-.templateToolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.templateLabel {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.templateSelect {
-  min-width: 180px;
-}
-
-.templateCount {
-  margin-left: auto;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-/* ── Sub-tabs row ── */
-
-.subTabsRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* ── Sub-tabs (matches tools tab filter pills) ── */
+/* ── Sub-tabs (underline style, matches AgentProfile.module.css .tab) ── */
 
 .subTabs {
   display: flex;
   gap: 4px;
+  border-bottom: 1px solid var(--color-border-light);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.subTabs::-webkit-scrollbar {
+  height: 0;
 }
 
 .subTab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 14px;
-  border: 1px solid rgba(31, 35, 40, 0.08);
-  border-radius: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .subTab:hover {
-  border-color: rgba(47, 143, 107, 0.25);
-  color: var(--color-primary);
-  background: rgba(47, 143, 107, 0.03);
+  color: var(--color-text);
 }
 
 .subTabActive {
-  background: var(--color-primary);
-  color: #fff;
-  border-color: var(--color-primary);
-  font-weight: 600;
+  color: var(--color-primary);
 }
 
-.subTabActive:hover {
+.subTabActive::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
   background: var(--color-primary);
-  color: #fff;
-  opacity: 0.9;
+  border-radius: 2px;
 }
 
 .subTabCount {
@@ -203,24 +220,24 @@
 }
 
 .subTabActive .subTabCount {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: rgba(47, 143, 107, 0.18);
+  color: var(--color-primary);
 }
 
-:global(html.dark) .subTab {
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-/* ── Library toolbar ── */
+/* ── Library toolbar (search + category pills inline) ── */
 
 .libraryToolbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .searchInput {
-  max-width: 320px;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 400px;
+  flex: 1 1 280px;
   border-radius: 8px !important;
 }
 
@@ -272,7 +289,7 @@
 
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -590,8 +607,11 @@
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 560px) {
   .cardGrid {
     grid-template-columns: 1fr;
+  }
+  .miniMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

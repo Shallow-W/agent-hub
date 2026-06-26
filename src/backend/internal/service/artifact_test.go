@@ -68,6 +68,11 @@ func (f *fakeArtifactRepo) GetLatestRootByConversation(_ context.Context, convID
 	return "", repository.ErrArtifactRootNotFound
 }
 
+// GetLatestByConversationAndName 实现 DeployArtifactRepo（MCP 按名称查找产物）。
+func (f *fakeArtifactRepo) GetLatestByConversationAndName(_ context.Context, convID, name string) (*model.Artifact, error) {
+	return f.latest, f.latestErr
+}
+
 // fakeArtifactConvRepo 实现 ArtifactConvRepo。
 type fakeArtifactConvRepo struct {
 	conv   *model.Conversation

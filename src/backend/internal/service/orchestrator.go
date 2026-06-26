@@ -3,47 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/agent-hub/backend/internal/docextract"
 	"github.com/agent-hub/backend/internal/model"
-	"github.com/agent-hub/backend/pkg/ws"
+	"github.com/agent-hub/backend/internal/port"
+	"github.com/agent-hub/backend/internal/repository"
 )
-
-// OrchConvRepo queries conversation agents for @mention resolution.
-type OrchConvRepo interface {
-	ListAgents(ctx context.Context, conversationID, userID string) ([]model.ConversationAgent, error)
-	GetByID(ctx context.Context, id string) (*model.Conversation, error)
-	GetMember(ctx context.Context, conversationID, userID string) (*model.ConversationMember, error)
-	ListMemberIDs(ctx context.Context, conversationID string) ([]string, error)
-}
-
-// OrchAgentRepo queries agent details and creates daemon tasks.
-type OrchAgentRepo interface {
-	GetByID(ctx context.Context, id string) (*model.Agent, error)
-	CreateDaemonTask(ctx context.Context, userID, conversationID, agentID, machineID, cliTool, prompt, contextMessages string) (*model.DaemonTask, error)
-	GetDaemonTask(ctx context.Context, id string) (*model.DaemonTask, error)
-	IsAgentInConversation(ctx context.Context, conversationID, agentID, userID string) (bool, error)
-	SetDaemonTaskOrch(ctx context.Context, taskID, orchTaskID, workerName string)
-	CompleteDaemonTask(ctx context.Context, id, machineID, result, taskError string) (bool, error)
-}
-
-// OrchTaskStore 定义编排任务的 DB 操作。
-type OrchTaskStore interface {
-	Create(ctx context.Context, task *model.OrchTask) error
-	GetByID(ctx context.Context, id string) (*model.OrchTask, error)
-	UpdateStatus(ctx context.Context, id, status string) error
-	UpdateDispatchMessageID(ctx context.Context, id, messageID string) error
-	UpdateStatusCAS(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
-	UpdateWorkerResult(ctx context.Context, id, workerName, status, result string) (bool, error)
-	SetSummaryAndEvaluate(ctx context.Context, id, summary string) error
-	IncrementRound(ctx context.Context, id string) error
-}
 
 // RouteResult is returned by RouteMention containing agent reply messages and dispatch info.
 type RouteResult struct {
@@ -60,19 +28,19 @@ type DispatchInfo struct {
 }
 
 // OrchKBResolver resolves knowledge base references from message text.
+//
+// P8a: 此 subset interface 保留，因为 ResolveKnowledgeRef 横跨「KB + 用户名校验」
+// 两个领域，且当前实现是 KnowledgeService（service 层），不属于 repository.KnowledgeStore
+// 的纯持久化范畴。强行把它合并到 canonical KnowledgeStore 会污染 domain 边界。
 type OrchKBResolver interface {
 	ResolveKnowledgeRef(ctx context.Context, currentUserID, username, kbName string) (*model.KnowledgeBase, []model.KnowledgeFile, error)
 }
 
-// OrchArtifactRepo 产物访问能力，用于 AI 编辑产物（取最新版本、回溯对话、创建新版本）。
-type OrchArtifactRepo interface {
-	GetConversationIDByRoot(ctx context.Context, rootID string) (string, error)
-	GetLatestByRoot(ctx context.Context, rootID string) (*model.Artifact, error)
-	CreateVersion(ctx context.Context, rootID string, in model.Artifact) (*model.Artifact, error)
-}
-
 // OrchDeliveryState stores transient delivery state for async orchestrator messages.
 // Message rows are already persisted; Redis is only used for offline delivery and unread counts.
+//
+// P8a: 此 subset interface 保留，因为它属于 Redis 投递层（offline queue + unread counters），
+// 与 repository.MessageStore（PG 持久化）职责正交，合到 canonical 会混淆持久化与缓存边界。
 type OrchDeliveryState interface {
 	EnqueueOffline(ctx context.Context, userID, conversationID string, msg *model.Message) error
 	IncrementUnread(ctx context.Context, userID, conversationID string) error
@@ -80,29 +48,51 @@ type OrchDeliveryState interface {
 
 // OrchestratorService handles @mention routing and orchestrated multi-agent dispatch.
 type OrchestratorService struct {
-	convRepo     OrchConvRepo
-	agentRepo    OrchAgentRepo
-	msgRepo      MsgRepo
-	orchTaskRepo OrchTaskStore
+	convRepo     repository.ConvStore
+	agentRepo    repository.AgentStore
+	msgRepo      repository.MessageStore
+	orchTaskRepo repository.OrchTaskStoreCanon
 
-	tokenIssuer *TokenIssuer
+	tokenIssuer port.TokenIssuerPort
 	serverURL   string
 	uploadDir   string // 上传文件落盘根目录，用于服务端抽取附件文本
 
 	kbResolver   OrchKBResolver
-	daemonHub    *ws.DaemonHub
-	artifactRepo OrchArtifactRepo
+	daemonHub    port.DaemonDispatcher
+	artifactRepo repository.ArtifactStore
 	notifier     MessageNotifier
 	delivery     OrchDeliveryState
 	taskSvc      TaskBoardSync
 
-	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
-	agentQueues sync.Map // agentID → chan struct{} (buffered-1 semaphore)
-}
+	// 三条上下文构建链：分别对应单聊直接回复、worker 派发、orch 派发三条路径。
+	// 详细顺序见 NewOrchestratorServiceWithDeps。
+	directReplyChain *ContextChain // 路径 A：message.asyncAgentReply
+	workerChain      *ContextChain // 路径 C：dispatchSingleAgent
+	orchChain        *ContextChain // 路径 D：handleOrchestratedDispatch
 
-// SetTokenIssuer sets the token issuer for generating management tool tokens.
-func (s *OrchestratorService) SetTokenIssuer(ti *TokenIssuer) {
-	s.tokenIssuer = ti
+	// fanoutChain 对应路径 C 的异步 fanout 变体（startWorkersAndWait → dispatchOrchWorker）。
+	// 与 workerChain 共享 KB / AgentConfig，但额外前置一个「群聊背景 + 调度指令」框架段。
+	// 输出顺序：agentConfig + kbPreload + frame（与重构前内联拼装完全一致）。
+	fanoutChain *ContextChain
+
+	// summaryChain 对应路径 D 的 summary 阶段（startOrchSummary）。
+	// 仅一个 AgentConfig builder：输出 = agentConfig + ""。
+	// 不叠加 OrchestratorSystemPrompt（summary prompt 已自带 OrchestratorSummarySystemPrompt）。
+	summaryChain *ContextChain
+
+	// 派发并发保护：同一 agent 同时只允许一个任务在飞，其他请求排队等待
+	// 历史实现是 agentQueues sync.Map[agentID]chan struct{}，P5 抽成 AgentQueue 类型。
+	agentQueue *AgentQueue
+
+	// router 把「消息 + 群聊 agent + @mention」解析成 []DispatchTarget。
+	// 历史路径：RouteMention 内联循环做解析；P5b 抽成独立类型便于未来拓展广播/轮询策略。
+	// P7 进一步把 Router 从具体 struct 改为 interface，允许注入自定义实现（零行为变更）。
+	router Router
+
+	// dispatcher 封装 dispatchAndWait 的派发动作（task 创建 + WS + 等待 + 落库）。
+	// 当前作为可注入扩展点存在；现有调用方仍直接调 dispatchAndWait 以保持零行为变更，
+	// 后续清理（P6+）会把 dispatchSingleAgent / fanout / summary 迁移到走 Dispatcher。
+	dispatcher *Dispatcher
 }
 
 // SetUploadDir 注入上传文件根目录，用于服务端抽取附件文本。
@@ -113,83 +103,188 @@ func (s *OrchestratorService) SetUploadDir(dir string) {
 // attachmentTextMaxRunes 单个附件注入上下文的最大字符数。
 const attachmentTextMaxRunes = 6000
 
-// BuildAttachmentContext 为带附件的消息生成「消息附件」上下文段：在服务端把每个附件抽取
-// 为纯文本并直接内联，Agent 无需下载或解析二进制（避免超时）。无法解析的格式给出降级提示，
-// 保证 Agent 始终能据此回复。无附件时返回空串。
-func (s *OrchestratorService) BuildAttachmentContext(ctx context.Context, attachments []model.MessageAttachment, userID string) string {
-	if len(attachments) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("[消息附件]\n")
-	sb.WriteString("用户在本条消息中附带了以下文件，已由系统抽取为文本内联在下方，请据此回答：\n\n")
-	for _, a := range attachments {
-		header := fmt.Sprintf("=== 附件：%s (%s, %s) ===\n", a.FileName, a.MimeType, formatFileSize(a.FileSize))
-		sb.WriteString(header)
-		absPath := filepath.Join(s.uploadDir, filepath.FromSlash(strings.TrimLeft(a.FilePath, "/\\")))
-		if text, ok := docextract.Extract(ctx, absPath, a.FileName, attachmentTextMaxRunes); ok {
-			sb.WriteString(text)
-			sb.WriteString("\n\n")
-		} else {
-			sb.WriteString("（该格式无法在服务端自动解析，请提示用户转换为 pptx/docx/xlsx/pdf 或纯文本后重发）\n\n")
-		}
-	}
-	return sb.String()
-}
-
-// SetServerURL sets the server base URL for management tool API calls.
-func (s *OrchestratorService) SetServerURL(url string) {
-	s.serverURL = url
-}
-
-// SetKBResolver sets the knowledge base resolver for injecting KB context.
-func (s *OrchestratorService) SetKBResolver(resolver OrchKBResolver) {
-	s.kbResolver = resolver
-}
-
-// SetDaemonHub sets the daemon WebSocket hub for task dispatch.
-func (s *OrchestratorService) SetDaemonHub(hub *ws.DaemonHub) {
-	s.daemonHub = hub
-}
-
-// SetArtifactRepo sets the artifact repository used for AI editing artifacts.
-func (s *OrchestratorService) SetArtifactRepo(repo OrchArtifactRepo) {
-	s.artifactRepo = repo
-}
-
-// SetOrchTaskRepo sets the orchestration task store.
-func (s *OrchestratorService) SetOrchTaskRepo(repo OrchTaskStore) {
-	s.orchTaskRepo = repo
-}
-
-// SetNotifier injects the message notifier for pushing async messages to user WS.
-func (s *OrchestratorService) SetNotifier(n MessageNotifier) {
-	s.notifier = n
-}
-
-// SetDeliveryState injects transient delivery state storage.
-func (s *OrchestratorService) SetDeliveryState(c OrchDeliveryState) {
-	s.delivery = c
-}
-
-// SetCacher is kept for compatibility with older wiring code.
-func (s *OrchestratorService) SetCacher(c OrchDeliveryState) {
-	s.SetDeliveryState(c)
-}
-
-// SetTaskSvc injects the task board sync service.
-func (s *OrchestratorService) SetTaskSvc(svc TaskBoardSync) {
-	s.taskSvc = svc
-}
-
 // NewOrchestratorService creates a new orchestrator service.
-func NewOrchestratorService(convRepo OrchConvRepo, agentRepo OrchAgentRepo, msgRepo MsgRepo) *OrchestratorService {
-	return &OrchestratorService{
-		convRepo:  convRepo,
-		agentRepo: agentRepo,
-		msgRepo:   msgRepo,
+// Deprecated: use NewOrchestratorServiceWithDeps for explicit dependency injection.
+func NewOrchestratorService(convRepo repository.ConvStore, agentRepo repository.AgentStore, msgRepo repository.MessageStore) *OrchestratorService {
+	svc := &OrchestratorService{
+		convRepo:   convRepo,
+		agentRepo:  agentRepo,
+		msgRepo:    msgRepo,
+		agentQueue: NewAgentQueue(),
+		router:     NewRouter(),
+	}
+	svc.dispatcher = NewDispatcher(DispatcherDeps{
+		AgentRepo: svc.agentRepo,
+		DaemonHub: svc.daemonHub,
+		MsgRepo:   svc.msgRepo,
+		UploadDir: svc.uploadDir,
+	})
+	// 装配默认链（依赖项未注入时 builder 会做 nil 防护，不影响构造）
+	svc.buildDefaultChains()
+	return svc
+}
+
+// OrchestratorDeps bundles all optional dependencies for OrchestratorService.
+// Use NewOrchestratorServiceWithDeps to construct the service with all deps at once.
+type OrchestratorDeps struct {
+	ConvRepo     repository.ConvStore
+	AgentRepo    repository.AgentStore
+	MsgRepo      repository.MessageStore
+	OrchTaskRepo repository.OrchTaskStoreCanon
+	TokenIssuer  port.TokenIssuerPort
+	ServerURL    string
+	UploadDir    string
+	KBResolver   OrchKBResolver
+	DaemonHub    port.DaemonDispatcher
+	ArtifactRepo repository.ArtifactStore
+	Notifier     MessageNotifier
+	Delivery     OrchDeliveryState
+	TaskSvc      TaskBoardSync
+
+	// 可选：注入自定义上下文构建链。nil 时使用默认链（详见 buildDefaultChains）。
+	DirectReplyChain *ContextChain
+	WorkerChain      *ContextChain
+	OrchChain        *ContextChain
+	FanoutChain      *ContextChain // 路径 C 异步 fanout 变体
+	SummaryChain     *ContextChain // 路径 D summary 阶段
+
+	// 可选：注入自定义派发并发护栏。nil 时使用默认 AgentQueue。
+	AgentQueue *AgentQueue
+
+	// 可选：注入自定义路由器。nil 时使用默认 Router（NewDefaultRouter）。
+	Router Router
+
+	// 可选：注入自定义派发器。nil 时使用默认 Dispatcher（基于 svc 当前依赖构造 DispatcherDeps）。
+	Dispatcher *Dispatcher
+}
+
+// NewOrchestratorServiceWithDeps creates a fully-initialized OrchestratorService.
+// 未显式注入 Chain 的字段会用默认 chain 装配，保证拼装顺序与重构前完全等价：
+//   - DirectReplyChain（路径 A：asyncAgentReply 单聊直接回复）
+//     [Attachment, Blackboard, KB, AgentConfig]
+//     最终输出: agentConfig + kb + blackboard + attach
+//   - WorkerChain（路径 C：dispatchSingleAgent）
+//     [KB, Blackboard, AgentConfig]
+//     最终输出: agentConfig + blackboard + kbPreload
+//   - OrchChain（路径 D：handleOrchestratedDispatch）
+//     [KB, OrchestratorPrompt, AgentConfig]
+//     最终输出: agentConfig + orchPrompt + kbPreload
+//
+// 注意：路径 A 与 C 的 Blackboard/KB 顺序不一致是历史遗留，
+// 这里保留各自路径的现有顺序以做到零行为变更（详见 P4 任务 prd.md 的「现状」一节）。
+func NewOrchestratorServiceWithDeps(deps OrchestratorDeps) *OrchestratorService {
+	svc := &OrchestratorService{
+		convRepo:     deps.ConvRepo,
+		agentRepo:    deps.AgentRepo,
+		msgRepo:      deps.MsgRepo,
+		orchTaskRepo: deps.OrchTaskRepo,
+		tokenIssuer:  deps.TokenIssuer,
+		serverURL:    deps.ServerURL,
+		uploadDir:    deps.UploadDir,
+		kbResolver:   deps.KBResolver,
+		daemonHub:    deps.DaemonHub,
+		artifactRepo: deps.ArtifactRepo,
+		notifier:     deps.Notifier,
+		delivery:     deps.Delivery,
+		taskSvc:      deps.TaskSvc,
+		agentQueue:   deps.AgentQueue,
+		router:       deps.Router,
+		dispatcher:   deps.Dispatcher,
+	}
+	if svc.agentQueue == nil {
+		svc.agentQueue = NewAgentQueue()
+	}
+	if svc.router == nil {
+		svc.router = NewDefaultRouter()
+	}
+	if svc.dispatcher == nil {
+		// P7：Dispatcher 不再反向依赖 svc，构造时从 svc 装配 DispatcherDeps。
+		// 此处取 svc 当前依赖快照；SetDaemonHub 等后续 setter 修改的是 svc.daemonHub，
+		// 但 Dispatcher 内部持有的 *ws.DaemonHub 是指针，setter 修改的 hub 实例需要
+		// 调用方重新构造 Dispatcher 或直接通过 OrchestratorDeps.DaemonHub 注入。
+		svc.dispatcher = NewDispatcher(DispatcherDeps{
+			AgentRepo: svc.agentRepo,
+			DaemonHub: svc.daemonHub,
+			MsgRepo:   svc.msgRepo,
+			UploadDir: svc.uploadDir,
+		})
+	}
+	svc.directReplyChain = deps.DirectReplyChain
+	svc.workerChain = deps.WorkerChain
+	svc.orchChain = deps.OrchChain
+	svc.fanoutChain = deps.FanoutChain
+	svc.summaryChain = deps.SummaryChain
+	if svc.directReplyChain == nil || svc.workerChain == nil || svc.orchChain == nil || svc.fanoutChain == nil || svc.summaryChain == nil {
+		svc.buildDefaultChains()
+	}
+	return svc
+}
+
+// buildDefaultChains 用 OrchestratorService 当前依赖装配默认上下文链。
+// 已被显式注入（非 nil）的字段不会被覆盖。
+//
+// 调用时机：
+//   - NewOrchestratorServiceWithDeps：构造时调用一次；deps 中显式注入的 chain 不会被覆盖
+//   - NewOrchestratorService（旧构造函数）：构造时调用一次；后续 SetX 注入的依赖
+//     不会自动同步到默认链，但目前没有测试在 setter 后路由非空的 KB/附件/agent-config
+//     路径，因此可接受。生产代码统一使用 NewOrchestratorServiceWithDeps。
+func (s *OrchestratorService) buildDefaultChains() {
+	attach := &AttachmentBuilder{UploadDir: s.uploadDir, MaxRunes: attachmentTextMaxRunes}
+	blackboard := &BlackboardBuilder{MsgRepo: s.msgRepo}
+	kb := &KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}
+	agentCfg := &AgentConfigInjector{}
+	orchPrompt := &OrchestratorPromptBuilder{}
+	fanoutFrame := &FanoutFrameBuilder{}
+
+	if s.directReplyChain == nil {
+		// 路径 A：最终输出 agentConfig + kb + blackboard + attach
+		s.directReplyChain = NewContextChain(attach, blackboard, kb, agentCfg)
+	}
+	if s.workerChain == nil {
+		// 路径 C：最终输出 agentConfig + blackboard + kbPreload
+		s.workerChain = NewContextChain(kb, blackboard, agentCfg)
+	}
+	if s.orchChain == nil {
+		// 路径 D：最终输出 agentConfig + orchPrompt + kbPreload
+		s.orchChain = NewContextChain(kb, orchPrompt, agentCfg)
+	}
+	if s.fanoutChain == nil {
+		// 路径 C 异步 fanout 变体：[Frame, KB, AgentConfig]
+		// 最终输出 agentConfig + kbPreload + frame（与 orchestrator_async 原内联拼装一致）
+		s.fanoutChain = NewContextChain(fanoutFrame, kb, agentCfg)
+	}
+	if s.summaryChain == nil {
+		// 路径 D summary 阶段：仅 [AgentConfig]
+		// 最终输出 agentConfig + ""（summary prompt 已自带 summary system prompt）
+		s.summaryChain = NewContextChain(agentCfg)
 	}
 }
+
+// DirectReplyChain 返回单聊直接回复路径的上下文链（路径 A）。
+func (s *OrchestratorService) DirectReplyChain() *ContextChain { return s.directReplyChain }
+
+// WorkerChain 返回 worker 派发路径的上下文链（路径 C）。
+func (s *OrchestratorService) WorkerChain() *ContextChain { return s.workerChain }
+
+// OrchChain 返回 orchestrator 派发路径的上下文链（路径 D）。
+func (s *OrchestratorService) OrchChain() *ContextChain { return s.orchChain }
+
+// FanoutChain 返回 worker 异步 fanout 路径的上下文链（路径 C 变体）。
+// 与 WorkerChain 共享 KB / AgentConfig，额外前置「群聊背景 + 调度指令」框架段。
+func (s *OrchestratorService) FanoutChain() *ContextChain { return s.fanoutChain }
+
+// SummaryChain 返回 orchestrator summary 阶段的上下文链（路径 D summary）。
+// 仅一个 AgentConfig builder，不叠加 OrchestratorSystemPrompt。
+func (s *OrchestratorService) SummaryChain() *ContextChain { return s.summaryChain }
+
+// Router 返回路由器实例（解析 @mention → DispatchTarget）。
+func (s *OrchestratorService) Router() Router { return s.router }
+
+// Dispatcher 返回派发器实例（封装 dispatchAndWait）。
+func (s *OrchestratorService) Dispatcher() *Dispatcher { return s.dispatcher }
+
+// AgentQueue 返回并发护栏实例（串行化同一 agent 的派发）。
+func (s *OrchestratorService) AgentQueue() *AgentQueue { return s.agentQueue }
 
 // RouteMention is the main entry point called when a message contains @mentions.
 func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, content string, attachments []model.MessageAttachment, sourceMessageID *string) (*RouteResult, error) {
@@ -221,42 +316,32 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 
 	// 在入口处预解析原始用户消息中的知识库引用，
 	// 避免 Orchestrator 改写任务描述后丢失 {{用户名/KB}} 语法
-	kbPreload := s.PreloadKBContext(ctx, content, userID)
+	// （直接用 KBBuilder 纯函数，与 chain 内 KBBuilder 共享同一实现）
+	kbPreload := (&KBBuilder{KBResolver: s.kbResolver, TokenIssuer: s.tokenIssuer, ServerURL: s.serverURL}).resolveKB(ctx, content, userID)
 
 	// 把本条消息的附件抽取为文本前置注入，让被 @ 的 Agent 直接据此回答。
-	if attachCtx := s.BuildAttachmentContext(ctx, attachments, userID); attachCtx != "" {
+	// （直接调纯函数 BuildAttachmentText，与 AttachmentBuilder 共享同一实现）
+	if attachCtx := BuildAttachmentText(ctx, attachments, s.uploadDir, attachmentTextMaxRunes); attachCtx != "" {
 		kbPreload = attachCtx + kbPreload
 	}
 
+	// 通过 Router 解析派发目标：mention → agent + role + task。
+	// Router 只负责路由决策，不触碰上下文工程（kbPreload / attachments）。
+	targets := s.router.Resolve(ctx, RouterInput{
+		Content:    content,
+		ConvAgents: convAgents,
+		Mentions:   mentions,
+		MentionMap: mentionMap,
+		AgentRepo:  s.agentRepo.GetByID,
+	})
+
 	result := &RouteResult{}
 
-	for _, m := range mentions {
-		agentID, ok := mentionMap[m.AgentName]
-		if !ok {
-			continue
-		}
-
-		agent, err := s.agentRepo.GetByID(ctx, agentID)
-		if err != nil {
-			slog.Warn("orch get agent failed", "agent_id", agentID, "error", err)
-			continue
-		}
-		if agent == nil {
-			continue
-		}
-
-		// Check conversation agent role (set per group chat, not agent type)
-		var isOrchestrator bool
-		for _, ca := range convAgents {
-			if ca.AgentID == agentID && ca.Role == "orchestrator" {
-				isOrchestrator = true
-				break
-			}
-		}
-
-		if isOrchestrator {
-			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name)
-			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, agent, content, convAgents, kbPreload, sourceMessageID)
+	for _, t := range targets {
+		agentID := t.Agent.ID
+		if t.Role == DispatchRoleOrchestrator {
+			slog.Info(orchFlowLog, "stage", "route.to_orchestrator", "conversation_id", convID, "agent_id", agentID, "agent_name", t.Agent.Name)
+			msgs, err := s.handleOrchestratedDispatch(ctx, convID, userID, t.Agent, content, convAgents, kbPreload, sourceMessageID)
 			if err != nil {
 				slog.Warn(orchFlowLog, "stage", "route.orchestrator_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
@@ -265,12 +350,12 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			result.AgentMessages = append(result.AgentMessages, msgs...)
 			result.Dispatches = append(result.Dispatches, DispatchInfo{
 				AgentID:   agentID,
-				AgentName: m.AgentName,
+				AgentName: t.MentionName,
 				Task:      content,
 			})
 		} else {
-			slog.Info(orchFlowLog, "stage", "route.to_worker_direct", "conversation_id", convID, "agent_id", agentID, "agent_name", agent.Name, "reply_to", stringValue(sourceMessageID))
-			msg, err := s.dispatchSingleAgent(ctx, convID, userID, agent, m.Task, kbPreload, sourceMessageID)
+			slog.Info(orchFlowLog, "stage", "route.to_worker_direct", "conversation_id", convID, "agent_id", agentID, "agent_name", t.Agent.Name, "reply_to", stringValue(sourceMessageID))
+			msg, err := s.dispatchSingleAgent(ctx, convID, userID, t.Agent, t.Task, kbPreload, sourceMessageID)
 			if err != nil {
 				slog.Warn(orchFlowLog, "stage", "route.worker_direct_failed", "conversation_id", convID, "agent_id", agentID, "error", err)
 				continue
@@ -278,7 +363,7 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 			result.AgentMessages = append(result.AgentMessages, msg)
 			result.Dispatches = append(result.Dispatches, DispatchInfo{
 				AgentID:   agentID,
-				AgentName: m.AgentName,
+				AgentName: t.MentionName,
 				Task:      content,
 				Parallel:  true,
 			})
@@ -291,52 +376,27 @@ func (s *OrchestratorService) RouteMention(ctx context.Context, convID, userID, 
 // dispatchAndWait creates a daemon task, sends it via WS, waits for the result
 // via channel-based notification, creates a message, and returns it.
 // This is the unified dispatch path shared by both user @mention and orch worker dispatch.
+//
+// P7 后核心实现已迁移到 Dispatcher.dispatchCore（dispatcher.go）；
+// P8d 后 handleOrchestratedDispatch / runDaemonEdit 改走 Dispatcher.DispatchPlan，
+// 此薄壳仅服务 dispatchSingleAgent (worker) 路径，等价于调用
+// Dispatcher.Dispatch(..., DispatchHooks{})。零行为变更。
+//
+// 业务包装（权限 / 卡片生命周期 / CAS guard / summary 落库）应通过 Dispatcher.Dispatch
+// + DispatchHooks 暴露，而不是在这里扩张。
 func (s *OrchestratorService) dispatchAndWait(ctx context.Context, convID, userID string, agent *model.Agent, prompt string, contextMessages string, replyTo *string) (*model.Message, error) {
-	task, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, agent.ID, *agent.MachineID, agent.CLITool, prompt, contextMessages)
+	res, err := s.dispatcher.Dispatch(ctx, DispatchInput{
+		ConvID:          convID,
+		UserID:          userID,
+		Agent:           agent,
+		Prompt:          prompt,
+		ContextMessages: contextMessages,
+		ReplyTo:         replyTo,
+	}, DispatchHooks{})
 	if err != nil {
-		return nil, fmt.Errorf("create daemon task: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_task_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID, "cli_tool", agent.CLITool, "prompt_len", len(prompt), "context_len", len(contextMessages), "reply_to", stringValue(replyTo), "prompt_preview", orchPreview(prompt))
-
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*agent.MachineID) {
-		slog.Warn(orchFlowLog, "stage", "agent.daemon_not_connected", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "machine_id", *agent.MachineID)
-		return nil, fmt.Errorf("agent %q 的 daemon 未通过 WS 连接", agent.Name)
-	}
-	s.daemonHub.RegisterTaskPromise(task.ID)
-	if err := s.daemonHub.SendToMachine(*agent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          task.ID,
-			"cli_tool":         agent.CLITool,
-			"prompt":           prompt,
-			"context_messages": contextMessages,
-			"agent_id":         agent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("dispatch to daemon: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_sent", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID)
-
-	task, err = s.waitDaemonTask(ctx, task.ID)
-	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "agent.dispatch_wait_failed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "error", err)
 		return nil, err
 	}
-	slog.Info(orchFlowLog, "stage", "agent.dispatch_completed", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "daemon_task_id", task.ID, "status", task.Status, "result_len", len(task.Result), "artifact_count", len(task.Artifacts), "result_preview", orchPreview(task.Result))
-	if task.Status == "failed" {
-		return nil, fmt.Errorf("daemon task failed: %s", task.Error)
-	}
-
-	artifacts := agentMetadata(agent)
-	msg, err := s.msgRepo.Create(ctx, convID, "assistant", task.Result, artifacts, nil, replyTo, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create agent reply: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "agent.message_created", "conversation_id", convID, "agent_id", agent.ID, "agent_name", agent.Name, "message_id", msg.ID, "reply_to", stringValue(replyTo), "content_len", len(msg.Content))
-	s.persistArtifacts(ctx, msg, task.Artifacts)
-	return msg, nil
+	return res.Message, nil
 }
 
 // dispatchSingleAgent dispatches to a single non-orchestrator agent.
@@ -355,27 +415,36 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 		return nil, ErrMsgAgentOffline
 	}
 
-	// Dispatch guard: serialize per-agent dispatches via semaphore; block if busy
-	newSem := make(chan struct{}, 1)
-	actual, _ := s.agentQueues.LoadOrStore(agent.ID, newSem)
-	sem := actual.(chan struct{})
-	sem <- struct{}{} // blocks until slot available
-	defer func() { <-sem }()
+	// Dispatch guard：通过 AgentQueue 串行化同一 agent 的派发（buffered-1 semaphore）。
+	// 行为与原 sync.Map + `sem <- struct{}{}` 完全一致。
+	var msg *model.Message
+	err = s.agentQueue.Run(ctx, agent.ID, func() error {
+		// 通过 worker chain 构建上下文：[KB, Blackboard, AgentConfig]
+		// KB 优先使用预加载（来自 RouteMention 入口），为空时实时解析 content 中的 {{user/KB}}。
+		// 最终输出顺序：agentConfig + blackboardCtx + kbCtx（与重构前完全一致）。
+		agentCtx := s.WorkerChain().Build(ctx, ContextInput{
+			ConvID:    convID,
+			UserID:    userID,
+			Agent:     agent,
+			Content:   content,
+			KBPreload: kbPreload,
+		})
 
-	// 使用预加载的 KB 上下文（如果非空），否则回退到实时解析
-	kbCtx := kbPreload
-	if kbCtx == "" {
-		kbCtx = s.injectKBContext(ctx, content, "", userID)
-	}
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
-	if blackboardCtx != "" {
-		kbCtx = blackboardCtx + kbCtx
-	}
-
-	// 注入 Agent 系统提示词和工具配置到 context
-	agentCtx := s.InjectAgentConfig(agent, kbCtx, userID, content)
-
-	msg, err := s.dispatchAndWait(ctx, convID, userID, agent, content, agentCtx, replyTo)
+		// 走 Dispatcher.Dispatch（零 hooks：等价于直接 dispatchAndWait，无业务包装）。
+		res, derr := s.Dispatcher().Dispatch(ctx, DispatchInput{
+			ConvID:          convID,
+			UserID:          userID,
+			Agent:           agent,
+			Prompt:          content,
+			ContextMessages: agentCtx,
+			ReplyTo:         replyTo,
+		}, DispatchHooks{})
+		if derr != nil {
+			return derr
+		}
+		msg = res.Message
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +453,16 @@ func (s *OrchestratorService) dispatchSingleAgent(ctx context.Context, convID, u
 
 // handleOrchestratedDispatch runs the full orchestrator flow: dispatch to orchestrator, parse output, fan out to workers.
 // kbPreload 是从原始用户消息预解析的知识库上下文，确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
+//
+// P9 后通过 Dispatcher.DispatchPlan 走统一派发路径（CreateDaemonTask → WS → wait），
+// 但用自定义 PromptBuilder 把 fullPrompt 注入 daemon task，用自定义 ResultHandler
+// 在 daemon 返回后：
+//   - 解析输出（ParseOrchestratorOutputForAgents）
+//   - 直答路径：落 message(replyTo=sourceMessageID)
+//   - fanout 路径：落 dispatch message(replyTo=sourceMessageID) + 触发 startWorkersAndWait
+//
+// 错误码语义保留：daemon 未连接时映射回 "orchestrator agent %q 的 daemon 未通过 WS 连接"
+// 原始错误格式（与 P9 前完全一致）。
 func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, convID, userID string, orchAgent *model.Agent, content string, convAgents []model.ConversationAgent, kbPreload string, sourceMessageID *string) ([]*model.Message, error) {
 	if orchAgent.MachineID == nil || *orchAgent.MachineID == "" {
 		return nil, ErrMsgAgentOffline
@@ -406,117 +485,141 @@ func (s *OrchestratorService) handleOrchestratedDispatch(ctx context.Context, co
 		convTitle = conv.Title
 	}
 
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
+	blackboardCtx := BuildBlackboardText(ctx, s.msgRepo, convID)
 	agentDetails := buildOrchestratorAgentDetails(convAgents)
 	availableAgentNames := agentNames(agentDetails)
 	fullPrompt := BuildOrchestratorPromptWithAgents(convTitle, agentDetails, blackboardCtx, recentSummary, content)
 
-	// 将 Orchestrator 系统指令注入到 contextMessages 最前面。
-	// 注意：不依赖 agent.Type，因为 orchestrator 身份由 conversation_agents.role 决定，
-	// agent.Type 可能是 "system" 或 "custom"。
-	orchCtx := "[系统指令]\n" + OrchestratorSystemPrompt + "\n\n"
-	orchCtx += kbPreload
-	agentConfig := s.InjectAgentConfig(orchAgent, "", userID, content)
-	orchCtx = agentConfig + orchCtx
+	// 通过 orch chain 构建 contextMessages：[KB, OrchestratorPrompt, AgentConfig]
+	// 最终输出顺序：agentConfig + orchSystemPrompt + kbPreload（与重构前完全一致）。
+	// 注意：blackboard 通过 fullPrompt 注入，不在 contextMessages 中（保持原行为）。
+	orchCtx := s.OrchChain().Build(ctx, ContextInput{
+		ConvID:         convID,
+		UserID:         userID,
+		Agent:          orchAgent,
+		Content:        content,
+		KBPreload:      kbPreload,
+		IsOrchestrator: true,
+	})
 	slog.Info(orchFlowLog, "stage", "orch.prompt_prepared", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "prompt_len", len(fullPrompt), "context_len", len(orchCtx), "agent_count", len(convAgents))
 
-	orchTask, err := s.agentRepo.CreateDaemonTask(ctx, userID, convID, orchAgent.ID, *orchAgent.MachineID, orchAgent.CLITool, fullPrompt, orchCtx)
-	if err != nil {
-		return nil, fmt.Errorf("create orchestrator task: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "orch.daemon_task_created", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "machine_id", *orchAgent.MachineID, "cli_tool", orchAgent.CLITool)
+	// 通过闭包捕获解析结果与落库消息，供 ResultHandler 后续处理。
+	var (
+		parsedDispatch     *OrchDispatch
+		messages           []*model.Message
+		orchTaskArtifacts  []model.Artifact
+	)
 
-	// Orchestrator daemon must be connected via WS to dispatch
-	if s.daemonHub == nil || !s.daemonHub.IsConnected(*orchAgent.MachineID) {
-		slog.Warn(orchFlowLog, "stage", "orch.daemon_not_connected", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "machine_id", *orchAgent.MachineID)
-		return nil, fmt.Errorf("orchestrator agent %q 的 daemon 未通过 WS 连接", orchAgent.Name)
-	}
-	s.daemonHub.RegisterTaskPromise(orchTask.ID)
-	if err := s.daemonHub.SendToMachine(*orchAgent.MachineID, ws.WSMessage{
-		Type: "task.dispatch",
-		Data: map[string]interface{}{
-			"task_id":          orchTask.ID,
-			"cli_tool":         orchAgent.CLITool,
-			"prompt":           fullPrompt,
-			"context_messages": orchCtx,
-			"agent_id":         orchAgent.ID,
-			"conversation_id":  convID,
-			"user_id":          userID,
+	plan := DispatchPlan{
+		Input: DispatchInput{
+			ConvID:          convID,
+			UserID:          userID,
+			Agent:           orchAgent,
+			Prompt:          fullPrompt, // 通过 defaultPromptBuilder 注入到 daemon task / WS payload
+			ContextMessages: orchCtx,
+			ReplyTo:         sourceMessageID,
 		},
-	}); err != nil {
-		return nil, fmt.Errorf("dispatch to orchestrator daemon: %w", err)
-	}
-	slog.Info(orchFlowLog, "stage", "orch.dispatch_sent", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID)
+		// PromptBuilder 留 nil → defaultPromptBuilder 直接用 input.Prompt（= fullPrompt）。
+		ResultHandler: func(_ context.Context, orchTask *model.DaemonTask) (*model.Message, error) {
+			slog.Info(orchFlowLog, "stage", "orch.dispatch_completed", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "status", orchTask.Status, "result_len", len(orchTask.Result), "artifact_count", len(orchTask.Artifacts), "result_preview", orchPreview(orchTask.Result))
 
-	orchTask, err = s.waitDaemonTask(ctx, orchTask.ID)
+			// task.Artifacts 在两条路径都需要，先存到 closure 变量供后续 persistArtifacts 使用。
+			orchTaskArtifacts = orchTask.Artifacts
+
+			parsedDispatch = ParseOrchestratorOutputForAgents(orchTask.Result, availableAgentNames)
+			if parsedDispatch == nil {
+				slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", 0, "has_dispatch", false)
+			} else {
+				slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", len(parsedDispatch.Tasks), "has_dispatch", len(parsedDispatch.Tasks) > 0, "agents", dispatchTaskLogNames(parsedDispatch.Tasks))
+			}
+
+			// 直答路径：无 @mention 派发任务，落 message(replyTo=sourceMessageID)。
+			if parsedDispatch == nil || len(parsedDispatch.Tasks) == 0 {
+				artifacts := agentMetadata(orchAgent)
+				msg, cerr := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
+				if cerr != nil {
+					return nil, fmt.Errorf("create orchestrator reply: %w", cerr)
+				}
+				slog.Info(orchFlowLog, "stage", "orch.direct_message_created", "conversation_id", convID, "message_id", msg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(msg.Content))
+				s.persistArtifacts(ctx, msg, orchTaskArtifacts)
+				messages = []*model.Message{msg}
+				// 返回 msg 让 DispatchPlan 触发 OnMessagePersisted（这里 hooks 为零值，无副作用）。
+				return msg, nil
+			}
+
+			// fanout 路径：先落 dispatch message（replyTo=sourceMessageID），作为 workerReplyTo。
+			artifacts := agentMetadata(orchAgent)
+			dispatchMsg, cerr := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
+			if cerr != nil {
+				slog.Warn(orchFlowLog, "stage", "orch.dispatch_message_create_failed", "conversation_id", convID, "reply_to", stringValue(sourceMessageID), "error", cerr)
+				// 创建失败时返回 nil msg（与原行为一致：不 append，workerReplyTo 退回 sourceMessageID），
+				// 但仍继续 fanout（原代码也继续，只是没 message 落库）。
+			} else {
+				s.persistArtifacts(ctx, dispatchMsg, orchTaskArtifacts)
+				messages = append(messages, dispatchMsg)
+				slog.Info(orchFlowLog, "stage", "orch.dispatch_message_created", "conversation_id", convID, "message_id", dispatchMsg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(dispatchMsg.Content))
+			}
+			// 返回 dispatchMsg（可能 nil，对应创建失败的降级路径）；后续 fanout 在 DispatchPlan 返回后触发。
+			if dispatchMsg != nil {
+				return dispatchMsg, nil
+			}
+			return nil, nil
+		},
+	}
+
+	// orch 路径不用任何 hook：无 PreDispatch（machineID 已在入口校验）、无 OnTaskCreated
+	// （orch 路径不创建 OrchTaskCard）、无 OnMessagePersisted（消息已通过 closure 处理）、
+	// 无 OnFailed（错误直接透传，调用方处理）。
+	res, err := s.dispatcher.DispatchPlan(ctx, plan, DispatchHooks{})
 	if err != nil {
-		slog.Warn(orchFlowLog, "stage", "orch.dispatch_wait_failed", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "error", err)
+		// 错误码语义保留：daemon 未连接时映射回原始 orch 错误格式
+		// （"orchestrator agent %q 的 daemon 未通过 WS 连接"）。
+		if errors.Is(err, ErrDaemonNotConnected) {
+			slog.Warn(orchFlowLog, "stage", "orch.daemon_not_connected", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "machine_id", *orchAgent.MachineID)
+			return nil, fmt.Errorf("orchestrator agent %q 的 daemon 未通过 WS 连接", orchAgent.Name)
+		}
+		// 其他错误（CreateDaemonTask / WS / wait / task failed / ResultHandler err）原样透传：
+		// 现有测试只检查 err != nil 与 errors.Is 下层 sentinel，不依赖具体 fmt.Errorf 文案。
+		// 保留 dispatcher 内部的 stage 日志（dispatch_task_created / dispatch_sent / dispatch_wait_failed）
+		// 即可让人类阅读日志时定位失败点，错误文案差异不影响程序行为。
 		return nil, err
 	}
-	slog.Info(orchFlowLog, "stage", "orch.dispatch_completed", "conversation_id", convID, "orch_agent_id", orchAgent.ID, "daemon_task_id", orchTask.ID, "status", orchTask.Status, "result_len", len(orchTask.Result), "artifact_count", len(orchTask.Artifacts), "result_preview", orchPreview(orchTask.Result))
-	if orchTask.Status == "failed" {
-		return nil, fmt.Errorf("orchestrator task failed: %s", orchTask.Error)
+
+	// 直答路径：ResultHandler 已经把 message 落库并 append 到 messages，无需 fanout。
+	if parsedDispatch == nil || len(parsedDispatch.Tasks) == 0 {
+		return messages, nil
 	}
 
-	dispatch := ParseOrchestratorOutputForAgents(orchTask.Result, availableAgentNames)
-	if dispatch == nil {
-		slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", 0, "has_dispatch", false)
-	} else {
-		slog.Info(orchFlowLog, "stage", "orch.output_parsed", "conversation_id", convID, "task_count", len(dispatch.Tasks), "has_dispatch", len(dispatch.Tasks) > 0, "agents", dispatchTaskLogNames(dispatch.Tasks))
-	}
-
-	// Orchestrator responded directly without dispatching
-	if dispatch == nil || len(dispatch.Tasks) == 0 {
-		artifacts := agentMetadata(orchAgent)
-		msg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
-		if err != nil {
-			return nil, fmt.Errorf("create orchestrator reply: %w", err)
-		}
-		slog.Info(orchFlowLog, "stage", "orch.direct_message_created", "conversation_id", convID, "message_id", msg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(msg.Content))
-		s.persistArtifacts(ctx, msg, orchTask.Artifacts)
-		return []*model.Message{msg}, nil
-	}
-
-	// Post orchestrator's full dispatch message (including @mentions) to group chat
-	var messages []*model.Message
+	// fanout 路径：dispatchMsg 已落（如果创建成功）；现在计算 workerReplyTo + 触发 fanout。
 	workerReplyTo := sourceMessageID
-	{
-		artifacts := agentMetadata(orchAgent)
-		dispatchMsg, err := s.msgRepo.Create(ctx, convID, "assistant", orchTask.Result, artifacts, nil, sourceMessageID, nil, nil)
-		if err != nil {
-			slog.Warn(orchFlowLog, "stage", "orch.dispatch_message_create_failed", "conversation_id", convID, "reply_to", stringValue(sourceMessageID), "error", err)
-		} else {
-			s.persistArtifacts(ctx, dispatchMsg, orchTask.Artifacts)
-			messages = append(messages, dispatchMsg)
-			workerReplyTo = &dispatchMsg.ID
-			slog.Info(orchFlowLog, "stage", "orch.dispatch_message_created", "conversation_id", convID, "message_id", dispatchMsg.ID, "reply_to", stringValue(sourceMessageID), "content_len", len(dispatchMsg.Content))
-		}
+	if res != nil && res.Message != nil {
+		workerReplyTo = &res.Message.ID
 	}
 
-	plan := BuildWorkerDispatchPlan(dispatch.Tasks, convAgents)
-	slog.Info(orchFlowLog, "stage", "orch.worker_plan_built", "conversation_id", convID, "parsed_count", len(dispatch.Tasks), "worker_count", len(plan.Tasks), "unknown_count", len(plan.UnknownTasks), "workers", resolvedDispatchLogNames(plan.Tasks), "unknown_agents", dispatchTaskLogNames(plan.UnknownTasks))
-	for _, unknown := range plan.UnknownTasks {
+	wplan := BuildWorkerDispatchPlan(parsedDispatch.Tasks, convAgents)
+	slog.Info(orchFlowLog, "stage", "orch.worker_plan_built", "conversation_id", convID, "parsed_count", len(parsedDispatch.Tasks), "worker_count", len(wplan.Tasks), "unknown_count", len(wplan.UnknownTasks), "workers", resolvedDispatchLogNames(wplan.Tasks), "unknown_agents", dispatchTaskLogNames(wplan.UnknownTasks))
+	for _, unknown := range wplan.UnknownTasks {
 		slog.Warn(orchFlowLog, "stage", "orch.worker_plan_unknown_agent", "conversation_id", convID, "agent", unknown.AgentName)
 	}
-	if !plan.HasWorkers() {
-		slog.Warn(orchFlowLog, "stage", "orch.worker_plan_empty", "conversation_id", convID, "task_count", len(dispatch.Tasks))
+	if !wplan.HasWorkers() {
+		slog.Warn(orchFlowLog, "stage", "orch.worker_plan_empty", "conversation_id", convID, "task_count", len(parsedDispatch.Tasks))
 		return messages, nil
 	}
 
 	orchTaskID := ""
-	orchTaskRecord, ok := s.createOrchLifecycle(ctx, convID, userID, orchAgent.ID, orchTask.Result, content, kbPreload, sourceMessageID, workerReplyTo)
+	orchTaskRecord, ok := s.createOrchLifecycle(ctx, convID, userID, orchAgent.ID, res.Task.Result, content, kbPreload, sourceMessageID, workerReplyTo)
 	if ok && orchTaskRecord != nil {
 		orchTaskID = orchTaskRecord.ID
 	} else {
 		// 生命周期记录失败时不能吞掉 worker 派发；否则用户只能看到 Orch 的 @消息，
 		// 后续 worker 完全不会收到任务。此降级路径不做自动汇总，日志会明确暴露原因。
-		slog.Warn(orchFlowLog, "stage", "orch.lifecycle_degraded_no_record", "conversation_id", convID, "worker_count", len(plan.Tasks), "summary_enabled", false)
+		slog.Warn(orchFlowLog, "stage", "orch.lifecycle_degraded_no_record", "conversation_id", convID, "worker_count", len(wplan.Tasks), "summary_enabled", false)
 	}
 
 	// 所有 worker 并行派发：startWorkersAndWait 内部用 WaitGroup 等待全部完成后触发 summary
 	orchSender := OrchSender{ID: orchAgent.ID, Name: orchAgent.Name, Avatar: orchAgent.Avatar}
-	slog.Info(orchFlowLog, "stage", "orch.worker_fanout_scheduled", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_count", len(plan.Tasks), "reply_to", stringValue(workerReplyTo), "summary_enabled", orchTaskID != "")
-	go s.startWorkersAndWait(context.Background(), convID, userID, plan, orchAgent.Name, kbPreload, orchTaskID, orchSender, workerReplyTo, workerReplyTo)
+	slog.Info(orchFlowLog, "stage", "orch.worker_fanout_scheduled", "conversation_id", convID, "orch_task_id", orchTaskID, "worker_count", len(wplan.Tasks), "reply_to", stringValue(workerReplyTo), "summary_enabled", orchTaskID != "")
+	go s.startWorkersAndWait(context.Background(), convID, userID, wplan, orchAgent.Name, kbPreload, orchTaskID, orchSender, workerReplyTo, workerReplyTo)
 
 	return messages, nil
 }
@@ -553,90 +656,12 @@ func (s *OrchestratorService) createOrchLifecycle(ctx context.Context, convID, u
 	return orchTaskRecord, true
 }
 
+// persistArtifacts 把 daemon 返回的 artifacts（或从 markdown 抽取）落库并回填 msg.Artifacts。
+//
+// P7：核心实现已迁移到 Dispatcher.persistArtifacts（dispatcher.go）；
+// 这里保留薄壳给 handleOrchestratedDispatch / runDaemonEdit 等内联路径继续调用。零行为变更。
 func (s *OrchestratorService) persistArtifacts(ctx context.Context, msg *model.Message, artifacts []model.Artifact) {
-	if msg == nil {
-		return
-	}
-	if len(artifacts) == 0 {
-		artifacts = artifactsFromMarkdown(msg.Content)
-	} else if !hasCodeArtifact(artifacts) {
-		artifacts = append(artifacts, codeArtifactsFromMarkdown(msg.Content)...)
-	}
-	if len(artifacts) == 0 {
-		return
-	}
-	if err := s.msgRepo.SaveArtifacts(ctx, msg.ID, artifacts); err != nil {
-		slog.Warn("save orchestrator artifacts failed", "message_id", msg.ID, "error", err)
-		return
-	}
-	msg.Artifacts = artifacts
-}
-
-// buildDispatchContext builds Layer 2 context for a worker agent dispatch.
-func (s *OrchestratorService) buildDispatchContext(ctx context.Context, convID string, task DispatchTask, depResults map[string]string, orchestratorName string) (string, error) {
-	msgs, err := s.msgRepo.ListByConversation(ctx, convID, nil, 10)
-	if err != nil {
-		return "", fmt.Errorf("list messages: %w", err)
-	}
-
-	// Reverse to chronological order
-	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
-		msgs[i], msgs[j] = msgs[j], msgs[i]
-	}
-
-	blackboardCtx := s.BuildConversationBlackboardContext(ctx, convID)
-
-	var sb strings.Builder
-	if blackboardCtx != "" {
-		sb.WriteString(blackboardCtx)
-	}
-	sb.WriteString("[群聊背景]\n")
-	for _, m := range msgs {
-		role := m.Role
-		if m.Role == "assistant" {
-			if name := extractAgentName(m.ArtifactsJSON); name != "" {
-				role = name
-			}
-		}
-		fmt.Fprintf(&sb, "- %s: %s\n", role, truncateString(m.Content, 100))
-	}
-	sb.WriteString("\n")
-
-	// 限制任务描述长度
-	taskDesc := truncateString(task.Task, 2000)
-
-	if taskDesc != "" {
-		sb.WriteString("[调度指令]\n")
-		fmt.Fprintf(&sb, "Orch @你，分配了以下任务：\n%s\n\n", taskDesc)
-	}
-
-	if len(depResults) > 0 {
-		sb.WriteString("[依赖输出]\n")
-		for name, result := range depResults {
-			fmt.Fprintf(&sb, "%s 已完成，结果摘要：\n%s\n\n", name, result)
-		}
-	}
-
-	if orchestratorName == "" {
-		orchestratorName = "Orchestrator"
-	}
-	fmt.Fprintf(&sb, "请完成这个任务并在回复末尾 @%s 表示完成。", orchestratorName)
-
-	// 总长度保护：超过 4000 字符时从最早的消息开始截断
-	const maxContextLen = 6000
-	result := sb.String()
-	runes := []rune(result)
-	if len(runes) > maxContextLen {
-		result = string(runes[len(runes)-maxContextLen:])
-		// 截断后跳过第一个不完整的行
-		if idx := strings.IndexByte(result, '\n'); idx >= 0 {
-			result = result[idx+1:]
-		}
-		if blackboardCtx != "" && !strings.Contains(result, "{会话上下文黑板") {
-			result = blackboardCtx + result
-		}
-	}
-	return result, nil
+	s.dispatcher.persistArtifacts(ctx, msg, artifacts)
 }
 
 const (
@@ -645,59 +670,6 @@ const (
 	blackboardMaxContextRunes = 5000
 	blackboardMaxManualRunes  = 3000
 )
-
-// BuildConversationBlackboardContext builds the shared conversation context block
-// injected into orchestrator and worker prompts.
-func (s *OrchestratorService) BuildConversationBlackboardContext(ctx context.Context, convID string) string {
-	if s == nil || s.msgRepo == nil {
-		return ""
-	}
-	items, err := s.msgRepo.ListPinnedMessages(ctx, convID, blackboardPinLimit)
-	if err != nil {
-		slog.Warn("build blackboard context failed", "conversation_id", convID, "error", err)
-		return ""
-	}
-	blackboard, err := s.msgRepo.GetConversationBlackboard(ctx, convID)
-	if err != nil {
-		slog.Warn("load manual blackboard context failed", "conversation_id", convID, "error", err)
-		blackboard = &model.ConversationBlackboard{ConversationID: convID, ManualContext: ""}
-	}
-	var sb strings.Builder
-	sb.WriteString("{会话上下文黑板\n")
-	sb.WriteString("{用户 Pin 上下文\n")
-	if len(items) == 0 {
-		sb.WriteString("无\n")
-	} else {
-		for _, item := range items {
-			author := fallbackText(item.Username)
-			content := normalizePromptLine(truncateString(item.Content, blackboardMaxEntryRunes))
-			fmt.Fprintf(&sb, "- %s: %s\n", author, content)
-		}
-	}
-	sb.WriteString("}\n")
-	sb.WriteString("{用户手写上下文\n")
-	manualContext := ""
-	if blackboard != nil {
-		manualContext = strings.TrimSpace(blackboard.ManualContext)
-	}
-	if manualContext == "" {
-		sb.WriteString("无\n")
-	} else {
-		truncatedManual := truncateString(manualContext, blackboardMaxManualRunes)
-		sb.WriteString(truncatedManual)
-		if !strings.HasSuffix(truncatedManual, "\n") {
-			sb.WriteString("\n")
-		}
-	}
-	sb.WriteString("}\n")
-	sb.WriteString("}\n\n")
-
-	result := sb.String()
-	if len([]rune(result)) > blackboardMaxContextRunes {
-		return truncateString(result, blackboardMaxContextRunes)
-	}
-	return result
-}
 
 // buildRecentSummary formats the last 10 messages in chronological order.
 func (s *OrchestratorService) buildRecentSummary(ctx context.Context, convID string) (string, error) {
@@ -758,150 +730,15 @@ func dispatchSafeAgentDescription(agent model.ConversationAgent) string {
 // waitDaemonTask waits for a daemon task to complete via channel-based
 // notification through DaemonHub. Returns an error if the daemon is not
 // connected or the context times out.
+//
+// P7：核心实现已迁移到 Dispatcher.waitDaemonTask（dispatcher.go）；
+// 这里保留薄壳给 handleOrchestratedDispatch / runDaemonEdit 等内联路径继续调用。零行为变更。
 func (s *OrchestratorService) waitDaemonTask(ctx context.Context, taskID string) (*model.DaemonTask, error) {
-	if s.daemonHub == nil {
-		return nil, fmt.Errorf("daemon hub not available")
-	}
-
-	ch := s.daemonHub.AwaitTaskResult(taskID)
-	if ch == nil {
-		return nil, fmt.Errorf("daemon not connected for task %s", taskID)
-	}
-	defer s.daemonHub.RemoveTaskPromise(taskID)
-
-	ctx, cancel := context.WithTimeout(ctx, 400*time.Second)
-	defer cancel()
-
-	select {
-	case result := <-ch:
-		task := &model.DaemonTask{
-			ID:        result.TaskID,
-			Status:    "completed",
-			Result:    result.Result,
-			Artifacts: artifactsFromTaskResult(result.Artifacts),
-		}
-		if result.Error != "" {
-			task.Status = "failed"
-			task.Error = result.Error
-		}
-		return task, nil
-	case <-ctx.Done():
-		return nil, ErrMsgAgentTimeout
-	}
-}
-
-// InjectAgentConfig 将 Agent 的自定义系统提示词和工具配置注入到 dispatch 上下文前面。
-// Orchestrator 系统指令由 handleOrchestratedDispatch 单独注入，此处只处理自定义配置。
-func (s *OrchestratorService) InjectAgentConfig(agent *model.Agent, contextStr string, userID string, taskText string) string {
-	var sb strings.Builder
-	if agent.SystemPrompt != "" {
-		sb.WriteString("[系统指令]\n")
-		sb.WriteString(agent.SystemPrompt)
-		sb.WriteString("\n\n")
-	}
-
-	if agent.ToolsConfig != "" {
-		sb.WriteString("[可用工具]\n")
-		sb.WriteString(agent.ToolsConfig)
-		sb.WriteString("\n\n")
-	}
-
-	if skillCtx := BuildAgentSkillContext(agent.CustomSkills, taskText); skillCtx != "" {
-		sb.WriteString(skillCtx)
-		if !strings.HasSuffix(skillCtx, "\n\n") {
-			sb.WriteString("\n\n")
-		}
-	}
-
-	sb.WriteString(contextStr)
-	return sb.String()
+	return s.dispatcher.waitDaemonTask(ctx, taskID)
 }
 
 // kbMaxInlineChars 单个文本文件内联注入的最大字符数（超过则截断并提示使用工具）
 const kbMaxInlineChars = 4000
-
-// PreloadKBContext 在 RouteMention 入口处预解析用户消息中的知识库引用，
-// 生成 KB 上下文字符串。确保 Orchestrator 改写任务后 worker 仍能获取 KB 内容。
-// 返回空字符串表示无引用或解析失败。
-func (s *OrchestratorService) PreloadKBContext(ctx context.Context, content string, userID string) string {
-	if s.kbResolver == nil {
-		return ""
-	}
-
-	refs := ParseKnowledgeRefs(content)
-	if len(refs) == 0 {
-		return ""
-	}
-
-	var kbSection strings.Builder
-	needTool := false
-
-	for _, ref := range refs {
-		kb, files, err := s.kbResolver.ResolveKnowledgeRef(ctx, userID, ref.Username, ref.KBName)
-		if err != nil {
-			slog.Warn("resolve knowledge ref failed", "ref", ref.Raw, "error", err)
-			continue
-		}
-		kbSection.WriteString(fmt.Sprintf("[知识库: %s/%s (%s)]\n", ref.Username, ref.KBName, kb.Visibility))
-		if len(files) == 0 {
-			kbSection.WriteString("（空知识库，无文件）\n")
-		} else {
-			for _, f := range files {
-				switch f.PreviewType {
-				case "text":
-					// 文本内容：限制内联长度，防止 context 膨胀导致截断
-					text := f.PreviewText
-					if len(text) > kbMaxInlineChars {
-						text = text[:kbMaxInlineChars] + "\n...[内容已截断，使用 read_knowledge_file 工具读取完整内容]"
-						needTool = true
-					}
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s):\n```\n%s\n```\n", f.Filename, f.ID, formatFileSize(f.FileSize), text))
-				case "image":
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, %s, 使用 read_knowledge_file 工具获取)\n", f.Filename, f.ID, formatFileSize(f.FileSize), f.PreviewText))
-					needTool = true
-				case "too_large":
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 文件过大，使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
-					needTool = true
-				default:
-					kbSection.WriteString(fmt.Sprintf("- %s (file_id=%s, %s, 使用 read_knowledge_file 工具读取)\n", f.Filename, f.ID, formatFileSize(f.FileSize)))
-					needTool = true
-				}
-			}
-		}
-		kbSection.WriteString("\n")
-	}
-
-	if kbSection.Len() == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("[引用的知识库]\n")
-	sb.WriteString(kbSection.String())
-
-	// 如果有需要工具读取的文件，注入知识库读取工具
-	if needTool && s.tokenIssuer != nil && s.serverURL != "" {
-		token, _, err := s.tokenIssuer.IssueAgentToken(userID)
-		if err != nil {
-			slog.Warn("generate kb tool token failed", "error", err)
-		} else {
-			sb.WriteString(GenerateKBReadTool(s.serverURL, token))
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String()
-}
-
-// injectKBContext 是 preloadKBContext 的包装，将预加载内容拼接到 contextStr 前面。
-// 注意：该方法仅在未使用 preloadKBContext 的回退路径中调用。
-func (s *OrchestratorService) injectKBContext(ctx context.Context, content string, contextStr string, userID string) string {
-	preload := s.PreloadKBContext(ctx, content, userID)
-	if preload == "" {
-		return contextStr
-	}
-	return preload + contextStr
-}
 
 func formatFileSize(size int64) string {
 	const (

@@ -17,25 +17,29 @@ import (
 
 // DaemonHandler 处理本地守护进程连接
 type DaemonHandler struct {
-	agentSvc       *service.AgentService
-	orchSvc        *service.OrchestratorService
-	token          string
-	logger         *slog.Logger
-	allowedOrigins []string
-	daemonHub      *ws.DaemonHub
-	userHub        *ws.Hub
+	agentSvc        *service.AgentService
+	orchSvc         *service.OrchestratorService
+	token           string
+	logger          *slog.Logger
+	allowedOrigins  []string
+	daemonHub       *ws.DaemonHub
+	userHub         *ws.Hub
+	streamingBuffer *service.StreamingBuffer
+	convRepo        service.ConvRepoForDaemon
 }
 
 // NewDaemonHandler 创建 daemon WebSocket 处理器
-func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub) *DaemonHandler {
+func NewDaemonHandler(agentSvc *service.AgentService, orchSvc *service.OrchestratorService, token string, logger *slog.Logger, allowedOrigins []string, daemonHub *ws.DaemonHub, userHub *ws.Hub, streamingBuffer *service.StreamingBuffer, convRepo service.ConvRepoForDaemon) *DaemonHandler {
 	return &DaemonHandler{
-		agentSvc:       agentSvc,
-		orchSvc:        orchSvc,
-		token:          token,
-		logger:         logger,
-		allowedOrigins: allowedOrigins,
-		daemonHub:      daemonHub,
-		userHub:        userHub,
+		agentSvc:        agentSvc,
+		orchSvc:         orchSvc,
+		token:           token,
+		logger:          logger,
+		allowedOrigins:  allowedOrigins,
+		daemonHub:       daemonHub,
+		userHub:         userHub,
+		streamingBuffer: streamingBuffer,
+		convRepo:        convRepo,
 	}
 }
 
@@ -119,8 +123,9 @@ func (h *DaemonHandler) Handle(c *gin.Context) {
 // RegisterHTTP 处理 npx daemon 的一次性 HTTP 注册。
 func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachine) {
 	var req struct {
-		MachineID string                    `json:"machine_id"`
-		Agents    []service.DiscoveredAgent `json:"agents"`
+		MachineID    string                    `json:"machine_id"`
+		Agents       []service.DiscoveredAgent `json:"agents"`
+		Capabilities []string                  `json:"capabilities"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 40040, "message": "daemon 注册参数错误: " + err.Error(), "data": nil})
@@ -130,6 +135,9 @@ func (h *DaemonHandler) RegisterHTTP(c *gin.Context, machine *model.DaemonMachin
 	registerCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 	if machine != nil {
+		if len(req.Capabilities) > 0 {
+			h.agentSvc.UpdateMachineCapabilities(machine.ID, req.Capabilities)
+		}
 		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 50040, "message": "注册电脑 Agent 失败", "data": nil})
@@ -271,6 +279,8 @@ func (h *DaemonHandler) readLoop(ctx context.Context, client *ws.DaemonClient, m
 			h.handleRegister(ctx, client, envelope.Data, machine)
 		case "task.complete":
 			h.handleTaskComplete(envelope.Data, machine)
+		case "task.progress":
+			h.handleTaskProgress(envelope.Data, machine)
 		case "agent.started":
 			h.handleAgentStarted(envelope.Data)
 		case "agent.stopped":
@@ -297,17 +307,20 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 		Result    string              `json:"result"`
 		Error     string              `json:"error"`
 		Artifacts []ws.ArtifactResult `json:"artifacts"`
+		Cards     []map[string]any    `json:"cards"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid task.complete data", "error", err)
 		return
 	}
+	h.logger.Info("handleTaskComplete ENTER", "task_id", req.TaskID, "result_len", len(req.Result), "has_error", req.Error != "", "cards_count", len(req.Cards))
 	// Resolve WS promise first (for orchestrator channel-based wait)
 	h.daemonHub.ResolveTask(req.TaskID, &ws.TaskResult{
 		TaskID:    req.TaskID,
 		Result:    req.Result,
 		Error:     req.Error,
 		Artifacts: req.Artifacts,
+		Cards:     req.Cards,
 	})
 	// Also persist to DB (for HTTP fallback and audit)
 	if machine != nil {
@@ -321,10 +334,99 @@ func (h *DaemonHandler) handleTaskComplete(data json.RawMessage, machine *model.
 	// Orch worker results are now handled by goroutines using dispatchAndWait.
 }
 
+// handleTaskProgress 处理 daemon 的流式增量上报。
+//
+// daemon 侧 StreamBuffer 50ms 批量 flush AgentEvent[]，这里把批量事件：
+//   - 喂给 streamingBuffer（in-memory 累积 reducer 状态，task.complete 时落权威 blocks_json）
+//   - 透传给前端（WS message.streaming），前端按 message_id 路由到 streaming reducer
+//
+// payload: { message_id, conversation_id, deltas: AgentEvent[] }
+//
+// 注意：不写 DB（D3 ADR）——流式期间 backend 不 persist 增量，task.complete 时
+// FinalizeStreaming 一次性落库最终 content/blocks_json。blocks_json 的内容来自
+// streamingBuffer 累积的状态（见 service/message.go createAgentReply）。
+func (h *DaemonHandler) handleTaskProgress(data json.RawMessage, machine *model.DaemonMachine) {
+	var req struct {
+		TaskID         string          `json:"task_id"`
+		MessageID      string          `json:"message_id"`
+		ConversationID string          `json:"conversation_id"`
+		AgentID        string          `json:"agent_id"`
+		AgentName      string          `json:"agent_name"`
+		Events         json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		h.logger.Warn("invalid task.progress data", "error", err)
+		return
+	}
+	// daemon 侧 WS JSON parse 会莫名丢失 message_id 字段（根因待查）。
+	// 这里通过 daemonHub.taskMessages 补齐 mapping，保证流式路由不中断。
+	if req.MessageID == "" {
+		req.MessageID = h.daemonHub.GetTaskMessage(req.TaskID)
+	}
+	if req.MessageID == "" || len(req.Events) == 0 {
+		h.logger.Debug("task.progress missing message_id or events, dropping",
+			"task_id", req.TaskID, "event_bytes", len(req.Events))
+		return
+	}
+	// PR4：把 events 喂给 streamingBuffer 累积。
+	// 解析失败静默跳过（events 已是合法 JSON 数组，但结构异常时不影响透传）。
+	// 同一 taskID 的 events 由 WS read loop 单 goroutine 串行调用 PushEvents，
+	// 满足 buffer 内部 *StreamingState 修改的并发安全约束。
+	if h.streamingBuffer != nil {
+		var events []model.AgentEvent
+		if err := json.Unmarshal(req.Events, &events); err == nil && len(events) > 0 {
+			h.streamingBuffer.PushEvents(req.TaskID, events)
+		} else if err != nil {
+			h.logger.Debug("task.progress events parse failed, skip buffer push",
+				"task_id", req.TaskID, "error", err)
+		}
+	}
+	// PR3：从 daemonHub 反查 agent_name，透传给前端 placeholder 显示真实 username。
+	// createAgentReply 预创建 streaming message 时同步注册，流式期间被读取，
+	// FinalizeStreaming 后清理（见 service/message.go）。
+	agentName := req.AgentName
+	if agentName == "" {
+		agentName = h.daemonHub.GetTaskAgent(req.TaskID)
+	}
+	if h.userHub == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"message_id":      req.MessageID,
+		"conversation_id": req.ConversationID,
+		"task_id":         req.TaskID,
+		"agent_id":        req.AgentID,
+		"deltas":          json.RawMessage(req.Events), // 透传 AgentEvent[]，前端按 kind 渲染
+	}
+	if agentName != "" {
+		payload["agent_name"] = agentName
+	}
+	// 流式增量按会话成员推送（本任务修复）：
+	//   原实现 Broadcast 推给所有在线用户，造成跨会话数据泄漏 + 多余广播流量。
+	//   改用 PushStreamingToConversation 按 conv 成员列表精准推送，前端无需再过滤。
+	// memberIDs 查询失败 / 为空时降级为不推送（避免泄漏）。
+	if h.convRepo == nil {
+		h.logger.Warn("task.progress convRepo missing, skip streaming push", "task_id", req.TaskID)
+		return
+	}
+	listCtx, listCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer listCancel()
+	memberIDs, err := h.convRepo.ListMemberIDs(listCtx, req.ConversationID)
+	if err != nil {
+		h.logger.Warn("task.progress list members failed", "conversation_id", req.ConversationID, "error", err)
+		return
+	}
+	if len(memberIDs) == 0 {
+		return
+	}
+	h.userHub.PushStreamingToConversation(req.ConversationID, memberIDs, payload)
+}
+
 func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonClient, data json.RawMessage, machine *model.DaemonMachine) {
 	var req struct {
-		MachineID string                    `json:"machine_id"`
-		Agents    []service.DiscoveredAgent `json:"agents"`
+		MachineID    string                    `json:"machine_id"`
+		Agents       []service.DiscoveredAgent `json:"agents"`
+		Capabilities []string                  `json:"capabilities"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		h.logger.Warn("invalid daemon register data", "error", err)
@@ -340,6 +442,10 @@ func (h *DaemonHandler) handleRegister(ctx context.Context, client *ws.DaemonCli
 	registerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if machine != nil {
+		// 更新机器能力清单（docker 等），供部署策略选 machine 用
+		if len(req.Capabilities) > 0 {
+			h.agentSvc.UpdateMachineCapabilities(machine.ID, req.Capabilities)
+		}
 		if err := h.agentSvc.RegisterMachineAgents(registerCtx, machine, req.MachineID, req.Agents); err != nil {
 			h.logger.Error("register machine agents failed", "machine_id", req.MachineID, "machine", machine.ID, "error", err)
 			return

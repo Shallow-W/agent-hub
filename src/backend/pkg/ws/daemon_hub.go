@@ -20,6 +20,7 @@ type TaskResult struct {
 	Result    string           `json:"result"`
 	Error     string           `json:"error"`
 	Artifacts []ArtifactResult `json:"artifacts,omitempty"`
+	Cards     []map[string]any `json:"cards,omitempty"` // render_card 工具渲染的交互式卡片
 }
 
 // ArtifactResult daemon 解析出的结构化产物（随 task.complete 上行）。
@@ -121,6 +122,8 @@ type daemonBusMsg struct {
 type DaemonHub struct {
 	clients      sync.Map // machineID -> *DaemonClient
 	resultChans  sync.Map // taskID -> chan *TaskResult
+	taskMessages sync.Map // taskID -> messageID（daemon 丢字段时的兜底映射）
+	taskAgents   sync.Map // taskID -> agentName（PR3：message.streaming 广播时携带 agent_name）
 	bus          chan daemonBusMsg
 	logger       *slog.Logger
 	wg           sync.WaitGroup
@@ -134,6 +137,57 @@ func NewDaemonHub(logger *slog.Logger) *DaemonHub {
 		bus:    make(chan daemonBusMsg, 256),
 		logger: logger,
 	}
+}
+
+// RegisterTaskMessage 存储 task_id → message_id 映射，供 handleTaskProgress 补齐。
+func (dh *DaemonHub) RegisterTaskMessage(taskID, messageID string) {
+	if taskID != "" && messageID != "" {
+		dh.taskMessages.Store(taskID, messageID)
+	}
+}
+
+// GetTaskMessage 查询 task_id 对应的 message_id，不存在返回空。
+func (dh *DaemonHub) GetTaskMessage(taskID string) string {
+	v, ok := dh.taskMessages.Load(taskID)
+	if ok {
+		return v.(string)
+	}
+	return ""
+}
+
+// RegisterTaskAgent 存储 task_id → agent_name 映射，供 handleTaskProgress 在
+// 广播 message.streaming 时携带 agent_name（前端 placeholder 用作 username）。
+// PR3 引入——消除"流式期间 username 为空 → fallback 助手"的视觉 bug。
+func (dh *DaemonHub) RegisterTaskAgent(taskID, agentName string) {
+	if taskID != "" && agentName != "" {
+		dh.taskAgents.Store(taskID, agentName)
+	}
+}
+
+// GetTaskAgent 查询 task_id 对应的 agent_name，不存在返回空。
+func (dh *DaemonHub) GetTaskAgent(taskID string) string {
+	v, ok := dh.taskAgents.Load(taskID)
+	if ok {
+		return v.(string)
+	}
+	return ""
+}
+
+// DeleteTaskAgent 清理 task_id → agent_name 映射（FinalizeStreaming 后调用）。
+// 防止 sync.Map 无限增长——与 DeleteTaskMessage 同构，PR5 引入清理时机。
+func (dh *DaemonHub) DeleteTaskAgent(taskID string) {
+	dh.taskAgents.Delete(taskID)
+}
+
+// DeleteTaskMessage 清理 task_id → message_id 映射（FinalizeStreaming 后调用）。
+// PR5：修复历史内存泄漏——RegisterTaskMessage 只 Store 不 Delete，长跑后端会
+// 累积所有 taskID。与 DeleteTaskAgent 同构，createAgentReply 在所有终态路径
+// 统一调 defer daemonHub.DeleteTaskMessage(task.ID) 清理。
+func (dh *DaemonHub) DeleteTaskMessage(taskID string) {
+	if taskID == "" {
+		return
+	}
+	dh.taskMessages.Delete(taskID)
 }
 
 // Run 启动 DaemonHub 消息总线事件循环，应在独立 goroutine 中调用

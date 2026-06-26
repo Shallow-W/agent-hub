@@ -13,6 +13,7 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { resolveUserAvatar } from '@/components/agent/agentPresentation';
 import styles from './SettingsPanel.module.css';
@@ -23,8 +24,6 @@ interface SettingsPanelProps {
   username: string;
   onLogout: () => void;
   wsStatus: WsStatus;
-  onNavChange: (key: string) => void;
-  activeKey: string;
   onCreate: () => void;
   collapsed: boolean;
 }
@@ -41,6 +40,17 @@ const wsDotColor: Record<WsStatus, string> = {
   disconnected: styles.disconnected ?? '',
 };
 
+/** key → route path 映射 */
+const navRoutes: Record<string, string> = {
+  chat: '/',
+  contacts: '/contacts',
+  models: '/agents',
+  skills: '/skills',
+  workspace: '/tasks',
+  knowledge: '/knowledge',
+  settings: '/settings',
+};
+
 const navItems = [
   { key: 'chat', label: '消息', icon: <MessageOutlined /> },
   { key: 'contacts', label: '联系人', icon: <TeamOutlined /> },
@@ -54,17 +64,27 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   username,
   onLogout,
   wsStatus,
-  onNavChange,
-  activeKey,
   onCreate,
   collapsed,
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const initial = username ? username.charAt(0).toUpperCase() : '?';
   const user = useAuthStore((s) => s.user);
   const avatarSrc = user ? resolveUserAvatar(user) : undefined;
 
+  // Derive active nav key from current pathname
+  const activeKey = React.useMemo(() => {
+    const entries = Object.entries(navRoutes);
+    for (const [key, path] of entries) {
+      if (key === 'chat' && location.pathname === '/') return 'chat';
+      if (path !== '/' && location.pathname.startsWith(path)) return key;
+    }
+    return 'chat';
+  }, [location.pathname]);
+
   const handleNavClick = (key: string) => {
-    onNavChange(key);
+    navigate(navRoutes[key] ?? '/');
   };
 
   useEffect(() => {

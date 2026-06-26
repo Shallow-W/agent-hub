@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/agent-hub/backend/internal/domain"
+)
 
 // Conversation 对话模型
 type Conversation struct {
@@ -47,4 +51,51 @@ type ConversationAgent struct {
 	SystemPrompt     string     `json:"system_prompt,omitempty" db:"system_prompt"`
 	Description      string     `json:"description,omitempty" db:"description"`
 	Tags             string     `json:"tags,omitempty" db:"tags"`
+}
+
+// ConversationAgents 是会话 Agent 列表的领域别名，
+// 便于在 service / orchestrator 层使用 FindByAgentID / Orchestrator / Workers 等方法。
+type ConversationAgents []ConversationAgent
+
+// IsOrchestrator 判断该会话 Agent 是否为 Orchestrator 角色。
+func (ca ConversationAgent) IsOrchestrator() bool {
+	return domain.Role(ca.Role) == domain.RoleOrchestrator
+}
+
+// IsWorker 判断该会话 Agent 是否为 Worker 角色。
+func (ca ConversationAgent) IsWorker() bool {
+	return domain.Role(ca.Role) == domain.RoleWorker
+}
+
+// FindByAgentID 在列表中按 Agent ID 查找会话 Agent。
+// 找不到时返回 (nil, false)。
+func (cas ConversationAgents) FindByAgentID(agentID string) (*ConversationAgent, bool) {
+	for i := range cas {
+		if cas[i].AgentID == agentID {
+			return &cas[i], true
+		}
+	}
+	return nil, false
+}
+
+// Orchestrator 返回列表中的 Orchestrator 角色 Agent。
+// 一个会话同一时刻至多存在一个 Orchestrator，找不到时返回 (nil, false)。
+func (cas ConversationAgents) Orchestrator() (*ConversationAgent, bool) {
+	for i := range cas {
+		if cas[i].IsOrchestrator() {
+			return &cas[i], true
+		}
+	}
+	return nil, false
+}
+
+// Workers 返回列表中所有 Worker 角色 Agent。
+func (cas ConversationAgents) Workers() []ConversationAgent {
+	out := make([]ConversationAgent, 0, len(cas))
+	for i := range cas {
+		if cas[i].IsWorker() {
+			out = append(out, cas[i])
+		}
+	}
+	return out
 }

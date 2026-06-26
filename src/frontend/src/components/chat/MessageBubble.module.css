@@ -73,6 +73,7 @@
   font-size: 13.5px;
   line-height: 1.7;
   word-break: break-word;
+  overflow-wrap: anywhere;
   box-shadow: var(--shadow-bubble-assistant);
 }
 
@@ -119,6 +120,20 @@
 .markdownBody { max-width: 100%; }
 .markdownBody > :first-child { margin-top: 0; }
 .markdownBody > :last-child { margin-bottom: 0; }
+
+/* 代码块（markdown fenced code 渲染成 <pre>）默认 white-space: pre 不换行，
+   长行会溢出气泡。强制换行让长 JSON / 长代码行在容器边界处 wrap。 */
+.markdownBody :global(pre) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.markdownBody :global(pre) :global(code) {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
 
 .innerAssistant .markdownBody :global(strong),
 .innerUser .markdownBody :global(strong) { font-weight: 700; }
@@ -354,12 +369,22 @@
 .bubbleAssistant .replyBtn { order: 3; }
 .bubbleAssistant .pinBtn { order: 4; }
 .bubbleAssistant .recallBtn { order: 5; }
+.bubbleAssistant .deleteBtn { order: 6; }
 
 .bubbleUser .chatAvatar { order: 0; }
 .bubbleUser .content { order: 1; }
 .bubbleUser .replyBtn { order: 2; }
 .bubbleUser .pinBtn { order: 3; }
 .bubbleUser .recallBtn { order: 4; }
+.bubbleUser .deleteBtn { order: 5; }
+
+.deleteBtn {
+  color: var(--color-text-secondary);
+}
+
+.deleteBtn:hover {
+  color: #e5484d !important;
+}
 
 .pinBtn {
   color: var(--color-text-secondary);
@@ -450,6 +475,70 @@
   border-radius: 3px;
 }
 
+.knowledgeRef {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(280px, 100%);
+  margin: 0 2px;
+  padding: 1px 7px;
+  border: 1px solid rgba(47, 143, 107, 0.18);
+  border-radius: 999px;
+  color: var(--color-primary);
+  background: rgba(47, 143, 107, 0.08);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.7;
+  vertical-align: baseline;
+}
+
+.knowledgeRefIcon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.knowledgeRefName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeContextCompact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  margin: 0 0 7px;
+  padding: 4px 8px;
+  border: 1px solid rgba(47, 143, 107, 0.18);
+  border-radius: 8px;
+  background: rgba(47, 143, 107, 0.07);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.knowledgeContextIcon {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.knowledgeContextTitle {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.knowledgeContextMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 助手气泡里的 @mention 用蓝色背景高亮，区别于普通文本 */
 .innerAssistant .mention {
   color: #1a73e8;
@@ -459,6 +548,23 @@
 /* 用户气泡（绿色背景）里的 @mention 改为白色，保持可读性 */
 .innerUser .mention {
   color: rgba(255, 255, 255, 0.92);
+}
+
+.innerUser .knowledgeRef {
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.innerUser .knowledgeContextCompact {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.innerUser .knowledgeContextIcon,
+.innerUser .knowledgeContextTitle {
+  color: #ffffff;
 }
 
 /* Agent 回复的 badge 标识 */
@@ -491,6 +597,16 @@
   background: rgba(138, 180, 248, 0.15);
 }
 
+:global(html.dark) .innerAssistant .knowledgeRef {
+  border-color: rgba(47, 143, 107, 0.32);
+  background: rgba(47, 143, 107, 0.14);
+}
+
+:global(html.dark) .innerAssistant .knowledgeContextCompact {
+  border-color: rgba(47, 143, 107, 0.32);
+  background: rgba(47, 143, 107, 0.13);
+}
+
 :global(html.dark) .markdownBody :global(blockquote) {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -503,6 +619,10 @@
 .deployCard {
   margin-top: 8px;
   max-width: 460px;
+}
+
+.cardsContainer {
+  margin-top: 8px;
 }
 
 .threadBtn {

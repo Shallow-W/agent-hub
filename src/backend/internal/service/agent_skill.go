@@ -93,7 +93,7 @@ func normalizeCustomSkills(raw string) (string, error) {
 	return string(data), nil
 }
 
-func BuildAgentSkillContext(raw string, _ string) string {
+func BuildAgentSkillContext(raw string) string {
 	skills := parseDiscoveredSkills(raw)
 	if len(skills) == 0 {
 		return ""

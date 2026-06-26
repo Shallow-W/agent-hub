@@ -2,6 +2,7 @@ import React, { useState, type ReactNode } from 'react';
 import { Button, Modal, Tabs, Tooltip } from 'antd';
 import {
   CodeOutlined,
+  EditOutlined,
   EyeOutlined,
   FullscreenExitOutlined,
   FullscreenOutlined,
@@ -15,6 +16,7 @@ import type { Artifact } from '@/types/message';
 import { CodeBlock } from './CodeBlock';
 import { WebpageFrame } from './WebpageFrame';
 import { DeployButton } from './DeployButton';
+import { ArtifactEditor } from './ArtifactEditor';
 import styles from './ArtifactWorkspace.module.css';
 
 interface Props {
@@ -23,6 +25,8 @@ interface Props {
   onClose: () => void;
   /** 来源 Agent 名称，用于群聊多 Agent 时标识产物归属。 */
   agentName?: string | null;
+  /** 对话 ID，传给 DeployButton 供 docker 部署走统一 API。 */
+  conversationId?: string;
 }
 
 function artifactTitle(artifact: Artifact): string {
@@ -241,11 +245,13 @@ const MetaView: React.FC<{ artifact: Artifact; agentName?: string | null }> = ({
   );
 };
 
-export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName }) => {
+export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, agentName, conversationId }) => {
   const defaultTab = artifact?.type === 'webpage' || isPreviewableDocument(artifact)
     ? 'preview'
     : 'code';
   const [activeKey, setActiveKey] = useState(defaultTab);
+  // webpage/document 的编辑器浮层：从只读预览进入全功能编辑（版本/编辑/Diff/AI）
+  const [editorArtifact, setEditorArtifact] = useState<Artifact | null>(null);
   const [webpageExpanded, setWebpageExpanded] = useState(false);
 
   React.useEffect(() => {
@@ -259,58 +265,112 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
 
   if (!artifact) return null;
 
+  // webpage：预览 + 编辑入口（编辑入口打开 ArtifactEditor，享版本/Diff/AI 编辑）
   if (artifact.type === 'webpage') {
     const bodySizeClass = webpageExpanded ? styles.webpageModalBodyExpanded : styles.webpageModalBodyCompact;
 
     return (
-      <Modal
-        open={open}
-        onCancel={onClose}
-        footer={null}
-        width={webpageExpanded ? '94vw' : 'min(76vw, 980px)'}
-        style={{ top: webpageExpanded ? 16 : 48, maxWidth: 'none' }}
-        className={`${styles.workspaceModal} ${styles.webpageModal}`}
-        destroyOnHidden
-      >
-        <div className={`${styles.modalBody} ${styles.webpageModalBody} ${bodySizeClass}`}>
-          <div className={styles.webpageControls}>
-            <Tooltip title={webpageExpanded ? '还原' : '全屏'}>
-              <Button
-                type="text"
-                size="small"
-                icon={webpageExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-                aria-label={webpageExpanded ? '还原预览大小' : '全屏预览'}
-                className={styles.webpageControlButton}
-                onClick={() => setWebpageExpanded((value) => !value)}
-              />
-            </Tooltip>
+      <>
+        <Modal
+          open={open}
+          onCancel={onClose}
+          footer={null}
+          width={webpageExpanded ? '94vw' : 'min(76vw, 980px)'}
+          style={{ top: webpageExpanded ? 16 : 48, maxWidth: 'none' }}
+          className={`${styles.workspaceModal} ${styles.webpageModal}`}
+          destroyOnHidden
+        >
+          <div className={`${styles.modalBody} ${styles.webpageModalBody} ${bodySizeClass}`}>
+            <div className={styles.toolbar}>
+              <span className={styles.source}>
+                {agentName && (
+                  <>
+                    <RobotOutlined />
+                    <span className={styles.sourceAgent}>{agentName}</span>
+                  </>
+                )}
+              </span>
+              <div className={styles.webpageToolbarActions}>
+                <Tooltip title={webpageExpanded ? '还原' : '全屏'}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={webpageExpanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                    aria-label={webpageExpanded ? '还原预览大小' : '全屏预览'}
+                    className={styles.webpageControlButton}
+                    onClick={() => setWebpageExpanded((value) => !value)}
+                  />
+                </Tooltip>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => setEditorArtifact(artifact)}
+                >
+                  编辑 / 版本
+                </Button>
+              </div>
+            </div>
+            <PreviewView artifact={artifact} />
           </div>
-          <PreviewView artifact={artifact} />
-        </div>
-      </Modal>
+        </Modal>
+        {editorArtifact && (
+          <ArtifactEditor
+            artifact={editorArtifact}
+            open={Boolean(editorArtifact)}
+            onClose={() => setEditorArtifact(null)}
+          />
+        )}
+      </>
     );
   }
 
   const isDocument = isPreviewableDocument(artifact);
 
+  // document/file：预览 + 编辑入口
   if (isDocument) {
     return (
-      <Modal
-        open={open}
-        onCancel={onClose}
-        footer={null}
-        width="94vw"
-        style={{ top: 16, maxWidth: 'none' }}
-        title={artifactTitle(artifact)}
-        className={`${styles.workspaceModal} ${styles.documentModal}`}
-        destroyOnHidden
-      >
-        <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
-          <div className={styles.documentViewArea}>
-            <PreviewView artifact={artifact} />
+      <>
+        <Modal
+          open={open}
+          onCancel={onClose}
+          footer={null}
+          width="94vw"
+          style={{ top: 16, maxWidth: 'none' }}
+          title={artifactTitle(artifact)}
+          className={`${styles.workspaceModal} ${styles.documentModal}`}
+          destroyOnHidden
+        >
+          <div className={`${styles.modalBody} ${styles.documentModalBody}`}>
+            <div className={styles.toolbar}>
+              <span className={styles.source}>
+                {agentName && (
+                  <>
+                    <RobotOutlined />
+                    <span className={styles.sourceAgent}>{agentName}</span>
+                  </>
+                )}
+              </span>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setEditorArtifact(artifact)}
+              >
+                编辑 / 版本
+              </Button>
+            </div>
+            <div className={styles.documentViewArea}>
+              <PreviewView artifact={artifact} />
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+        {editorArtifact && (
+          <ArtifactEditor
+            artifact={editorArtifact}
+            open={Boolean(editorArtifact)}
+            onClose={() => setEditorArtifact(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -335,7 +395,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, open, onClose, ag
               </>
             )}
           </span>
-          <DeployButton artifact={artifact} />
+          <DeployButton artifact={artifact} conversationId={conversationId} />
         </div>
         <Tabs
           activeKey={activeKey}

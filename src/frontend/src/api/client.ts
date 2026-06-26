@@ -1,10 +1,9 @@
 import { message } from '@/utils/message';
 import type { ApiResponse } from '@/types/api';
-
-const TOKEN_KEY = 'agenthub_token';
+import { STORAGE_KEYS, API_MAX_RETRY, API_RETRY_DELAY_MS } from '@/config/constants';
 
 function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return localStorage.getItem(STORAGE_KEYS.TOKEN);
 }
 
 /** Build auth headers (used by both JSON client and FormData upload). */
@@ -14,12 +13,12 @@ export function getAuthHeaders(): Record<string, string> {
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(STORAGE_KEYS.TOKEN, token);
   handling401 = false;
 }
 
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(STORAGE_KEYS.TOKEN);
 }
 
 export class ApiError extends Error {
@@ -33,8 +32,6 @@ export class ApiError extends Error {
   }
 }
 
-const MAX_RETRY = 1;
-const RETRY_DELAY_MS = 1000;
 let handling401 = false;
 
 async function request<T>(
@@ -80,8 +77,8 @@ async function request<T>(
       throw new ApiError(res.status, json.code, json.message);
     }
     // Retry once on 5xx errors
-    if (res.status >= 500 && retryCount < MAX_RETRY) {
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    if (res.status >= 500 && retryCount < API_MAX_RETRY) {
+      await new Promise((resolve) => setTimeout(resolve, API_RETRY_DELAY_MS));
       return request<T>(method, path, body, retryCount + 1);
     }
     throw new ApiError(res.status, json.code, json.message);
@@ -100,6 +97,10 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
 
 export function put<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('PUT', path, body);
+}
+
+export function patch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>('PATCH', path, body);
 }
 
 export function del<T>(path: string): Promise<T> {

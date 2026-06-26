@@ -52,6 +52,18 @@
   color: #1f2937;
 }
 
+.webpageToolbarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.webpageModalBody .previewArea {
+  flex: 1;
+  height: auto;
+}
+
 .documentModalBody {
   height: calc(100vh - 96px);
 }
